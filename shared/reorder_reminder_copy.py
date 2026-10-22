@@ -157,10 +157,16 @@ def telegram_text(
     return f"{body}\n\n{tap}"
 
 
+def order_label(render: Render) -> str:
+    """The "🛒 Order again" label: the reminder's Order button, and the same button under the
+    delivered-order summary and on the open-order notice (telegram_bot/keyboards.py)."""
+    return render("telegram.reorder_reminder.btn_order")
+
+
 def button_labels(render: Render, language: str, *, snooze_days: int) -> Dict[str, str]:
     """Labels for the three reminder buttons (§7.3); the keyboard decides which it shows."""
     return {
-        "order": render("telegram.reorder_reminder.btn_order"),
+        "order": order_label(render),
         "later": render(
             "telegram.reorder_reminder.btn_later",
             snooze_phrase=days_phrase(render, language, snooze_days),

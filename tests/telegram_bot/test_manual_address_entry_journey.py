@@ -76,7 +76,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 # Copy the customer actually sees.
 #
 # Supplied rather than left to the harness's `humanised_missing_key` fallback
-# for one load-bearing reason: `bot.py::_resolve_tapped_label` looks the
+# for one load-bearing reason: `menu_tap.py::resolve_tapped_label` looks the
 # manual-entry / re-enter / cancel REPLY-keyboard labels up when the tap
 # arrives, from the same `i18n.get` the keyboard rendered them with. The table
 # a test supplies is therefore also the table the router matches against — the

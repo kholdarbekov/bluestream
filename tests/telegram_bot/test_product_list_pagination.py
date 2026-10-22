@@ -176,7 +176,7 @@ async def test_the_previous_button_walks_back_to_the_first_page(bot, user):
 
 @pytest.mark.parametrize(
     "single_category, expected_back",
-    [(False, "back_to_categories"), (True, "back_to_main")],
+    [(False, "back_to_categories"), (True, None)],
 )
 async def test_a_page_button_that_outlived_a_restart_still_pages(
     bot, user, single_category, expected_back
@@ -199,10 +199,13 @@ async def test_a_page_button_that_outlived_a_restart_still_pages(
     )
     screen = bot.telegram.last_shown()
     assert "Suv 13" in screen.text, "the last page never reached the customer"
-    assert expected_back in screen.callback_data(), (
-        "the Back target changed when the customer paged; "
-        f"expected {expected_back!r} in {screen.callback_data()}"
-    )
+    if expected_back:
+        assert expected_back in screen.callback_data(), (
+            "the Back target changed when the customer paged; "
+            f"expected {expected_back!r} in {screen.callback_data()}"
+        )
+    else:
+        assert not {"back_to_main", "back_to_categories"} & set(screen.callback_data())
     assert bot.telegram.of("answerCallbackQuery"), "the tap was never acked"
 
 

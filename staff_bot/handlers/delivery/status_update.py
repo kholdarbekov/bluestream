@@ -473,6 +473,7 @@ class StatusUpdateHandler(BaseHandler):
                     reply_markup=keyboard,
                     parse_mode='HTML'
                 )
+                await self._note_status_screen(update, delivery_id, query.message)
                 return
 
             if new_status == 'delivered':
@@ -500,6 +501,7 @@ class StatusUpdateHandler(BaseHandler):
                         delivery_info=delivery_info,
                         language=language,
                     )
+                    await self._note_status_screen(update, delivery_id, query.message)
                     return
 
             # Standard confirmation for other statuses
@@ -516,10 +518,32 @@ class StatusUpdateHandler(BaseHandler):
             )
 
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await self._note_status_screen(update, delivery_id, query.message)
 
         except Exception as e:
             logger.error(f"Error initiating status change: {e}", exc_info=True)
             await self._handle_error(update, context)
+
+    @staticmethod
+    async def _note_status_screen(update: Update, delivery_id: int, message) -> None:
+        """This stop's status or at-door prompt is now on `message`: note it (`SCREEN_STATUS`).
+
+        Called after every prompt the status tap and its at-door flow draw: the failure
+        reasons, the cash step, the plain confirm, the amount and reason prompts, the note
+        prompt and the bottle prompt. Some of those are edits of the tapped message and some
+        are NEW messages (the note prompt after a typed amount, the bottle prompt after a
+        typed note), so each re-notes the message it is on, and an order cancel's route push
+        takes back the screen the driver is actually looking at. The "Address changed"
+        redraw leaves these alone (`address_change._REDRAWN_SCREENS`). Honoured only while
+        the card is borrowed (`note_borrowed_screen`).
+        """
+        if message is None:
+            return
+        await route_card_state.note_borrowed_screen(
+            update.effective_user.id, delivery_id=delivery_id,
+            screen=route_card_state.SCREEN_STATUS,
+            chat_id=message.chat_id, message_id=message.message_id,
+        )
 
     @require_auth
     @require_delivery_driver
@@ -562,6 +586,7 @@ class StatusUpdateHandler(BaseHandler):
                         f"{self._order_brief(context, language)}{message}",
                         reply_markup=keyboard, parse_mode='HTML'
                     )
+                    await self._note_status_screen(update, delivery_id, query.message)
                     return
 
             metadata = context.user_data.pop('status_metadata', {})
@@ -741,6 +766,7 @@ class StatusUpdateHandler(BaseHandler):
                 context.user_data.pop('pending_delivery_cash_flow', None)
                 await flow_state.clear_active(update.effective_user.id)
                 raise
+            await self._note_status_screen(update, delivery_id, query.message)
 
             return CASH_INPUT
 
@@ -781,6 +807,7 @@ class StatusUpdateHandler(BaseHandler):
                 context.user_data.pop('pending_delivery_cash_flow', None)
                 await flow_state.clear_active(update.effective_user.id)
                 raise
+            await self._note_status_screen(update, delivery_id, query.message)
             return CASH_NOTE_INPUT
 
         except Exception as e:
@@ -817,11 +844,12 @@ class StatusUpdateHandler(BaseHandler):
 
             flow['cash_amount'] = cash_amount
             context.user_data['pending_delivery_cash_flow'] = flow
-            await update.message.reply_text(
+            sent = await update.message.reply_text(
                 i18n.get('staff.delivery.enter_partial_cash_reason', language),
                 reply_markup=CommonKeyboards.flow_cancel(language),
                 parse_mode='HTML',
             )
+            await self._note_status_screen(update, flow.get('delivery_id'), sent)
             return CASH_NOTE_INPUT
 
         except Exception as e:
@@ -1182,10 +1210,12 @@ class StatusUpdateHandler(BaseHandler):
                 await update.callback_query.edit_message_text(
                     message, reply_markup=keyboard, parse_mode='HTML'
                 )
+                shown_on = update.callback_query.message
             else:
-                await update.message.reply_text(
+                shown_on = await update.message.reply_text(
                     message, reply_markup=keyboard, parse_mode='HTML'
                 )
+            await self._note_status_screen(update, delivery_id, shown_on)
             return
         else:
             # No returnable bottles — submit directly
@@ -1250,6 +1280,7 @@ class StatusUpdateHandler(BaseHandler):
             reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML'
         )
+        await self._note_status_screen(update, delivery_id, query.message)
         return BOTTLE_RETURN_INPUT
 
     @require_auth

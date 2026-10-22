@@ -5,7 +5,6 @@ Comprehensive water business bot with full feature integration
 import asyncio
 import functools
 import logging
-import re
 import signal
 import sys
 import os
@@ -73,135 +72,21 @@ from handlers.profile import (
     ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
     ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
-    WEB_LINK_CONFIRM, WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY,
+    WEB_LINK_CONFIRM, WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY, PHONE_OTP_ARMED_AT,
 )
-from eligibility import main_menu_for
-from utils import error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale
+from utils import (
+    error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale,
+    otp_code_in, OtpShapedFilter,
+)
 from keyboards import MenuKeyboards, PRODUCT_PAGE_PATTERN
+from menu_keyboard import MENU_INSTALLER_GROUP, ensure_menu_keyboard_middleware, send_menu_keyboard
+from menu_tap import MenuTapFilter
+from flow_exit import (
+    FLOW_EXIT_GROUP, FREE_TEXT_FILTER, ITEM_MANAGEMENT_KEYS, PHONE_FLOW_KEYS, SUBSCRIPTION_CREATION_KEYS,
+    UPDATE_ITEM_KEYS, FlowExitHandler, pending_menu_tap,
+)
 
 logger = logging.getLogger('bot')
-
-
-# ---------------------------------------------------------------------------
-# "Is this text a reply-keyboard tap?" -- ONE rule, one place
-# ---------------------------------------------------------------------------
-# The address flow arms REPLY keyboards (`ProfileKeyboards.location_request`
-# with `extra_rows=`), so Enter-manually / Re-enter / Cancel arrive as ordinary
-# text. Unlike the staff bot, the KEYBOARD adds no decoration of its own here:
-# the row is rendered verbatim from `i18n.get`, and any emoji is part of the
-# seeded copy ("❌ Bekor qilish"). The decoration therefore sits on EITHER side
-# of the comparison -- a keyboard still on the customer's phone was rendered
-# from the row as it read then, which may carry an emoji the row has since lost
-# (or vice versa) -- so the strip is symmetric.
-#
-# It is an EMOJI strip, and this regex is the only place that says so. What it
-# replaces was `(?:\S+\s+)?`, "any single leading token", which is the shape
-# wave 3 deleted from the staff bot: there it let a five-character first word
-# ("Sardor Profil") satisfy the FILTER while the matcher resolved nothing, and
-# the conversation was torn down with no output at all. Here the same shape
-# meant "word Bekor qilish" cancelled the address flow. Ranges rather than a
-# library: `re` has no \p{Emoji}, and "strip any leading non-alphanumeric run"
-# would quietly re-admit "+998...".
-_EMOJI_PREFIX_RE = re.compile(
-    r"^(?:"
-    r"[\U0001F000-\U0001FAFF]"       # pictographs, transport, flags, extended-A
-    r"|[\u2190-\u21FF]"              # arrows
-    r"|[\u2300-\u23FF]"              # misc technical (watch, hourglass)
-    r"|[\u2460-\u27BF]"              # enclosed alphanumerics .. dingbats (gear, check)
-    r"|[\u2B00-\u2BFF]"              # misc symbols and arrows (left arrow, star)
-    r"|[\u3030\u303D\u3297\u3299]"   # wavy dash, part alternation mark, congrat/secret
-    r"|[\uFE00-\uFE0F\u200D\u20E3]"  # variation selectors, ZWJ, combining keycap
-    r")+"
-)
-
-
-def _bare_label(text: Optional[str]) -> str:
-    """`text` stripped of surrounding space and of a leading emoji decoration."""
-    return _EMOJI_PREFIX_RE.sub("", (text or "").strip()).strip()
-
-
-def _is_tap_on_label(text: Optional[str], label: Optional[str]) -> bool:
-    """Is `text` a tap on a reply-keyboard button reading `label`?
-
-    Whole-string, never a substring: the pattern this replaces once matched any
-    message CONTAINING the copy, so "I don't want to cancel" cancelled the
-    address flow -- the bot agreeing with the customer by ending their work.
-    Text that merely contains a label is not a tap and is left to the state's
-    own handler, which is what a customer typing a sentence is owed.
-
-    Equal after the emoji strip, so the decoration may differ between the
-    keyboard on the phone and the row as it reads now -- but only the
-    decoration. A pure-emoji label strips to nothing and is compared raw, so
-    two different emoji buttons can never collapse into each other.
-    """
-    text = (text or "").strip()
-    label = (label or "").strip()
-    if not text or not label:
-        return False
-    if text == label:
-        return True
-    bare_text, bare_label = _bare_label(text), _bare_label(label)
-    return bool(bare_text) and bare_text == bare_label
-
-
-def _resolve_tapped_label(text: Optional[str], translation_keys) -> Optional[str]:
-    """Which of `translation_keys` is this text a tap on? The key, or None.
-
-    THE decider, and the only copy of the rule. `MenuTapFilter` -- the only
-    thing that asks -- calls this and nothing else, so "the filter claimed it"
-    and "the matcher resolved it" cannot become different answers.
-
-    Resolved WHEN THE TAP ARRIVES: `i18n.get` is called here, exactly as the
-    keyboard builder calls it when it renders. Nothing is memoised across
-    updates, and that is the feature -- an admin retitling a label in the admin
-    UI (or any `i18n.reload_translations()`) changes what the button says AND
-    what answers it in the same instant, with no restart, and the retired copy
-    stops matching at the same instant so it cannot linger as a hotword that
-    hijacks typed text. A matcher frozen at handler-build time left the button
-    the customer could SEE dead, and an unmatched tap in ADDRESS_LOCATION
-    escapes to the group-0 catch-all, where Cancel becomes a support ticket
-    with no reply.
-
-    Swept across EVERY supported language, not just the customer's: a reply
-    keyboard is client-side and survives a language switch until Telegram
-    redraws it, so a tap can arrive in the language the customer just left.
-    Key order breaks a tie if two keys ever render the same copy.
-
-    Cost per text update: one `i18n.get` -- an in-memory dict lookup plus
-    `render_translation` on a placeholder-free label -- per key per language,
-    abandoned on the first hit. The wiring registers at most three keys against
-    one update (Enter-manually + Re-enter, then Cancel) over three languages,
-    so under 10 lookups, a few microseconds. The one cost that is not free is
-    an UNSEEDED label key: `i18n.get` logs a missing-key warning per language
-    per update instead of once at startup. It still resolves -- both sides
-    derive the same `humanised_missing_key` -- it is just loud, which is the
-    correct volume for a reply-keyboard row that was never seeded.
-    """
-    for translation_key in translation_keys:
-        for lang_code in i18n.supported_languages:
-            if _is_tap_on_label(text, i18n.get(translation_key, lang_code)):
-                return translation_key
-    return None
-
-
-class MenuTapFilter(filters.MessageFilter):
-    """``True`` for text that IS a tap on one of `translation_keys`.
-
-    A `filters.MessageFilter` rather than a `filters.Regex` because a regex can
-    only be built from copy that is already known, i.e. at handler-build time;
-    this asks `_resolve_tapped_label` per update instead. Registered in place
-    of the build-time label regexes that guarded the customer's way OUT of the
-    address flow.
-    """
-
-    __slots__ = ("_translation_keys",)
-
-    def __init__(self, *translation_keys: str):
-        super().__init__(name="telegram_menu_tap:%s" % ",".join(translation_keys))
-        self._translation_keys = translation_keys
-
-    def filter(self, message) -> bool:
-        return _resolve_tapped_label(message.text, self._translation_keys) is not None
 
 
 class WaterBusinessBot:
@@ -264,7 +149,7 @@ class WaterBusinessBot:
         * `awaiting_location` in `context.user_data` — the bot just asked for
           this pin (`utils.arm_location_request`, called at every site that
           sends `ProfileKeyboards.location_request(...)`, and cleared at every
-          teardown site by `ProfileHandlers._clear_address_flow_keys` so it
+          teardown site by `ProfileHandlers.clear_address_flow_keys` so it
           never outlives the flow that armed it). Consume the marker and hand
           off to `location_received` — UNLESS the arming has gone stale (see
           below), in which case treat it as though it were never armed.
@@ -287,7 +172,7 @@ class WaterBusinessBot:
         `awaiting_location`, and the zero-address-checkout call site never
         starts a `ConversationHandler` — it just shows a keyboard and waits.
         If the customer neither pins nor cancels, no timeout ever fires and
-        `_clear_address_flow_keys` is never reached, so the flag would
+        `clear_address_flow_keys` is never reached, so the flag would
         otherwise survive for the life of the process. Treat an arming older
         than `utils.AWAITING_LOCATION_STALE_MINUTES` as not armed at all —
         same pattern `handlers/support.py::_is_stale` uses for the concern
@@ -400,25 +285,25 @@ class WaterBusinessBot:
                 )
 
                 text = i18n.get(message_key, language)
-                # A half-registered customer has no menu to go back to, and the
-                # step they abandoned left a request_contact REPLY keyboard on
-                # their screen; clearing it is the only honest thing to show.
-                keyboard = (
-                    await main_menu_for(user_id, language) if offer_menu
-                    else ReplyKeyboardRemove()
-                )
-
                 # The timeout update is synthetic — it carries whatever the
                 # customer's last real one was — so the reply target is
                 # derived rather than assumed.
                 query = update.callback_query
-                if query is not None and query.message is not None:
-                    await query.message.reply_text(text, reply_markup=keyboard)
+                if offer_menu:
+                    chat = update.effective_chat
+                    await send_menu_keyboard(
+                        context.bot, chat.id if chat is not None else user_id, user_id, text, language
+                    )
+                # A half-registered customer has no menu to go back to, and the
+                # step they abandoned left a request_contact REPLY keyboard on
+                # their screen; clearing it is the only honest thing to show.
+                elif query is not None and query.message is not None:
+                    await query.message.reply_text(text, reply_markup=ReplyKeyboardRemove())
                 elif update.message is not None:
-                    await update.message.reply_text(text, reply_markup=keyboard)
+                    await update.message.reply_text(text, reply_markup=ReplyKeyboardRemove())
                 else:
                     await context.bot.send_message(
-                        chat_id=user_id, text=text, reply_markup=keyboard
+                        chat_id=user_id, text=text, reply_markup=ReplyKeyboardRemove()
                     )
 
             except Exception as e:
@@ -651,6 +536,26 @@ class WaterBusinessBot:
         )
         logger.info("Quantity-screen middleware installed!")
 
+        # Lazy menu-keyboard installer (spec 2026-10-21 §1, "Existing customers, no
+        # broadcast"): an inline tap from a registered customer whose screen lacks the
+        # current bottom keyboard sends it, silently, through send_menu_keyboard. BEFORE
+        # dispatch, so a phone or location keyboard the handler sends afterwards still
+        # wins. Never stops dispatch; never answers typed text. See menu_keyboard.py.
+        self.application.add_handler(
+            TypeHandler(Update, ensure_menu_keyboard_middleware), group=MENU_INSTALLER_GROUP
+        )
+        logger.info("Menu-keyboard installer installed!")
+
+        # Flow exit (spec 2026-10-21 §2): a bottom-keyboard label (as it reads now, or
+        # as the customer still has it installed), /start, /menu, /help, /language or a
+        # legacy menu callback ends every open flow but
+        # signup and disarms the saved prompts. After the quantity-screen
+        # middleware and BEFORE every conversation (group -2), so no step can
+        # take a label as its answer. Never stops dispatch: group 0 then draws
+        # the destination once. See flow_exit.py.
+        self.application.add_handler(FlowExitHandler(), group=FLOW_EXIT_GROUP)
+        logger.info("Flow exit installed!")
+
         # Telegram reachability (spec 2026-10-09 §7.2 a, b). Telegram announces a block or a
         # return as a `my_chat_member` update; its handler reports it from a group of its own (1),
         # where no group-0 handler can shadow it and it sits behind no text catch-all. The
@@ -669,7 +574,7 @@ class WaterBusinessBot:
 
         # Command handlers
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
-        self.application.add_handler(CommandHandler("help", support_handlers.help_handler))
+        self.application.add_handler(CommandHandler("help", support_handlers.support_menu))
         self.application.add_handler(CommandHandler("language", language_handler.language_menu))
 
         # Admin commands (restricted - access control handled in handler)
@@ -709,6 +614,9 @@ class WaterBusinessBot:
             CallbackQueryHandler(quick_order_handlers.handle_repeat_last, pattern="^quick_repeat_last$"),
             CallbackQueryHandler(quick_order_handlers.handle_usual, pattern="^quick_usual$"),
             CallbackQueryHandler(quick_order_handlers.handle_reorder_from_history, pattern="^reorder_\\d+$"),
+            # The open-order notice's "continue" buttons. Before `^order_` below, which would claim order_water_go.
+            CallbackQueryHandler(quick_order_handlers.order_water_continue, pattern="^order_water_go$"),
+            CallbackQueryHandler(quick_order_handlers.reorder_continue, pattern=r"^reorder_go_\d+$"),
 
             # Order callbacks
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^menu_orders$"),
@@ -775,6 +683,7 @@ class WaterBusinessBot:
             ),
             # add_phone_number is now handled by phone_verification_handler ConversationHandler
             CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
+            CallbackQueryHandler(profile_handlers.cancel_phone_otp, pattern="^phone_otp_cancel$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),
             # Profile field-edit sub-menu (Deliverable C)
             CallbackQueryHandler(profile_handlers.edit_profile_name_prompt, pattern="^edit_profile_name$"),
@@ -868,8 +777,7 @@ class WaterBusinessBot:
         # Conversation handlers for complex flows
         registration_timeout = self._flow_timeout(
             'telegram.registration.flow_timed_out',
-            'pending_phone', 'pending_phone_verification', 'pending_link_phone',
-            'awaiting_otp', 'otp_prompted_update_id', WEB_LINK_GREETING_KEY,
+            *PHONE_FLOW_KEYS, 'pending_link_phone', WEB_LINK_GREETING_KEY,
             offer_menu=False,
         )
 
@@ -968,6 +876,95 @@ class WaterBusinessBot:
         )
         self.application.add_handler(registration_handler, group=-2)
 
+        # The address form's own reply-keyboard labels: "Enter manually" on its
+        # location keyboard, "Re-enter address" on the geocode-retry one, and the
+        # Cancel row both carry. One filter object each, shared by the address
+        # conversation, which answers them, and the phone conversation below,
+        # which must leave them alone.
+        address_manual_entry_tap = MenuTapFilter(
+            'telegram.address.enter_manually_button',
+            'telegram.address.reenter_manually_button',
+        )
+        cancel_tap = MenuTapFilter('telegram.cancel')
+        address_keyboard_tap = address_manual_entry_tap | cancel_tap
+
+        # Phone verification conversation - for adding/updating phone number and name
+        # Registered BEFORE the address conversation, in the same group: PTB runs
+        # one handler per group, and the address conversation's Cancel entry point
+        # would otherwise claim the Cancel row of the share-contact keyboard while
+        # this flow is on its phone step.
+        #
+        # The other way round, both forms can be open at once: an older inline
+        # "Add address" button (subscriptions, checkout) opens the address form
+        # over this one. So no text handler here takes the address keyboard's
+        # labels (`address_keyboard_tap`) as its answer: they fall through to the
+        # address conversation. Taken here, "Enter manually" was saved as the
+        # customer's NAME, and Cancel ended the code step instead of the form.
+        # The phone step keeps Cancel: its own keyboard has that row.
+        phone_verification_timeout = self._flow_timeout(
+            'telegram.phone.verification_flow_timed_out',
+            *PHONE_FLOW_KEYS,
+        )
+        phone_verification_handler = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
+            ],
+            states={
+                profile_handlers.PHONE_VERIFY_PHONE: [
+                    # The share-contact keyboard's own Cancel row. First, so the
+                    # typed-number handler below never reads it as a number.
+                    MessageHandler(
+                        filters.TEXT & cancel_tap,
+                        self._consumes(profile_handlers.cancel_phone_verification),
+                    ),
+                    MessageHandler(
+                        filters.CONTACT,
+                        self._consumes(profile_handlers.phone_verify_contact_received),
+                    ),
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & ~address_manual_entry_tap,
+                        self._consumes(profile_handlers.phone_verify_text_received),
+                    ),
+                ],
+                # A typed number is saved only once its SMS code is verified.
+                # Only a code answers this step (spec 2026-10-21 §2): any other
+                # text ends it and, NOT wrapped in `_consumes`, walks on to the
+                # group-0 catch-all like any other message. A wrong code still
+                # re-prompts here. The address keyboard's labels are neither: they
+                # leave the step as it is and go to the address conversation.
+                profile_handlers.PHONE_VERIFY_OTP: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & OtpShapedFilter() & ~address_keyboard_tap,
+                        self._consumes(profile_handlers.phone_verify_otp_received),
+                    ),
+                    MessageHandler(
+                        FREE_TEXT_FILTER & ~address_keyboard_tap, profile_handlers.end_phone_code_step,
+                    ),
+                ],
+                profile_handlers.PHONE_VERIFY_NAME: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & ~address_keyboard_tap,
+                        self._consumes(profile_handlers.phone_verify_name_received),
+                    ),
+                ],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(filters.ALL, phone_verification_timeout),
+                    CallbackQueryHandler(phone_verification_timeout),
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", profile_handlers.cancel_phone_verification),
+                CallbackQueryHandler(profile_handlers.cancel_phone_verification, pattern="^cancel_phone_verification$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="phone_verification",
+            conversation_timeout=300,  # 5 minutes timeout
+            allow_reentry=True
+        )
+        self.application.add_handler(phone_verification_handler, group=-2)
+        logger.info(f"Phone verification conversation handler registered")
+
         # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
             entry_points=[
@@ -1003,7 +1000,7 @@ class WaterBusinessBot:
                     self._consumes(profile_handlers.skip_location_sharing),
                 ),
                 MessageHandler(
-                    filters.TEXT & MenuTapFilter('telegram.cancel'),
+                    filters.TEXT & cancel_tap,
                     self._consumes(profile_handlers.cancel_address_text),
                 ),
             ],
@@ -1024,15 +1021,12 @@ class WaterBusinessBot:
                     # destination. They were two identical registrations, which
                     # is one more place for the pair to drift apart.
                     MessageHandler(
-                        filters.TEXT & MenuTapFilter(
-                            'telegram.address.enter_manually_button',
-                            'telegram.address.reenter_manually_button',
-                        ),
+                        filters.TEXT & address_manual_entry_tap,
                         self._consumes(profile_handlers.skip_location_sharing),
                     ),
                     # Handle "Cancel" text button from retry keyboard
                     MessageHandler(
-                        filters.TEXT & MenuTapFilter('telegram.cancel'),
+                        filters.TEXT & cancel_tap,
                         self._consumes(profile_handlers.cancel_address_text),
                     ),
                 ],
@@ -1173,7 +1167,8 @@ class WaterBusinessBot:
             # * While this flow is open every text the customer types is eaten
             #   by the step that asked for it (`_consumes` stops dispatch before
             #   the group-0 support catch-all), so it never reaches the Support
-            #   Inbox. `/cancel` and the inline Cancel are the escapes.
+            #   Inbox. `/cancel`, the inline Cancel and every exit gesture
+            #   (flow_exit.py) are the escapes.
             # * The Application has no `persistence`, so the state AND the
             #   APScheduler timeout job are in memory: a restart ends the flow
             #   silently, without this timeout's message. In practice the
@@ -1194,61 +1189,10 @@ class WaterBusinessBot:
         self.application.add_handler(address_handler, group=-2)
         logger.info(f"Address conversation handler registered with states: {list(address_handler.states.keys())}")
 
-        # Phone verification conversation - for adding/updating phone number and name
-        phone_verification_timeout = self._flow_timeout(
-            'telegram.phone.verification_flow_timed_out',
-            'pending_phone', 'pending_phone_verification',
-        )
-        phone_verification_handler = ConversationHandler(
-            entry_points=[
-                CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
-            ],
-            states={
-                profile_handlers.PHONE_VERIFY_PHONE: [
-                    MessageHandler(
-                        filters.CONTACT,
-                        self._consumes(profile_handlers.phone_verify_contact_received),
-                    ),
-                    MessageHandler(
-                        filters.TEXT & ~filters.COMMAND,
-                        self._consumes(profile_handlers.phone_verify_text_received),
-                    ),
-                ],
-                # A typed number is saved only once its SMS code is verified.
-                profile_handlers.PHONE_VERIFY_OTP: [
-                    MessageHandler(
-                        filters.TEXT & ~filters.COMMAND,
-                        self._consumes(profile_handlers.phone_verify_otp_received),
-                    ),
-                ],
-                profile_handlers.PHONE_VERIFY_NAME: [
-                    MessageHandler(
-                        filters.TEXT & ~filters.COMMAND,
-                        self._consumes(profile_handlers.phone_verify_name_received),
-                    ),
-                ],
-                ConversationHandler.TIMEOUT: [
-                    MessageHandler(filters.ALL, phone_verification_timeout),
-                    CallbackQueryHandler(phone_verification_timeout),
-                ],
-            },
-            fallbacks=[
-                CommandHandler("cancel", profile_handlers.cancel_phone_verification),
-                CallbackQueryHandler(profile_handlers.cancel_phone_verification, pattern="^cancel_phone_verification$"),
-            ],
-            per_chat=True,
-            per_user=True,
-            name="phone_verification",
-            conversation_timeout=300,  # 5 minutes timeout
-            allow_reentry=True
-        )
-        self.application.add_handler(phone_verification_handler, group=-2)
-        logger.info(f"Phone verification conversation handler registered")
-
         # Subscription creation conversation
         subscription_creation_timeout = self._flow_timeout(
             'telegram.subscription.flow_timed_out',
-            'subscription_creation', 'current_product_id',
+            *SUBSCRIPTION_CREATION_KEYS,
         )
         subscription_creation_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.create_subscription_start, pattern="^create_subscription$")],
@@ -1313,7 +1257,7 @@ class WaterBusinessBot:
         # Subscription item management conversation
         item_management_timeout = self._flow_timeout(
             'telegram.subscription.flow_timed_out',
-            'editing_subscription_id', 'adding_product_id',
+            *ITEM_MANAGEMENT_KEYS,
         )
         item_management_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.add_item_start, pattern="^add_item_")],
@@ -1380,7 +1324,7 @@ class WaterBusinessBot:
         # Item quantity update conversation
         update_item_timeout = self._flow_timeout(
             'telegram.subscription.flow_timed_out',
-            'editing_subscription_id', 'editing_item_id',
+            *UPDATE_ITEM_KEYS,
         )
         update_item_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.update_item_quantity, pattern="^update_item_")],
@@ -1421,11 +1365,12 @@ class WaterBusinessBot:
         # this catch-all over one would file a second Support Inbox row for a
         # message already captured, and re-consume an OTP already spent.
         # tests/telegram_bot/test_edited_message_router.py
+        #
+        # The filter is `flow_exit.FREE_TEXT_FILTER`, the SAME object the flow
+        # exit matches labels with: this router no longer resolves labels
+        # itself, so a text this handler gets must be one the exit could see.
         self.application.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE,
-                self._handle_text_message,
-            )
+            MessageHandler(FREE_TEXT_FILTER, self._handle_text_message)
         )
 
         # Contact messages are handled by ConversationHandlers in higher priority groups
@@ -1566,6 +1511,15 @@ class WaterBusinessBot:
 
             language = await i18n.get_user_language(user_id)
 
+            # A bottom-keyboard label is navigation, whatever else is armed:
+            # it must never reach typed quantity, OTP, awaiting_input, the
+            # address draft or the Support Inbox capture below. The flow exit
+            # (group -3) already resolved it and left the open flows.
+            menu_key = pending_menu_tap(update, context)
+            if menu_key is not None:
+                await self._dispatch_menu_tap(menu_key, update, context)
+                return
+
             # The durable half is read FIRST, because the in-memory half does
             # not survive the deploy this branch exists to survive.
             user_state = await self.user_repository.get_user_state(user_id)
@@ -1589,6 +1543,14 @@ class WaterBusinessBot:
             # silently became, unredacted, whenever a deploy landed while the SMS
             # was in flight.
             # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+            #
+            # Spec 2026-10-21 §2, "Phone-code steps": a code typed within
+            # PHONE_OTP_EXPIRY of its SMS verifies, even after the customer
+            # tapped elsewhere or typed something else first (an exit never
+            # disarms `phone_otp`, and neither does other text). Text that is
+            # not a code is routed below like any other message; once the
+            # lifetime is over, the prompt is disarmed.
+            # tests/telegram_bot/test_phone_code_steps.py
             if context.user_data.get('awaiting_otp') or user_state.get('awaiting_input') == 'phone_otp':
                 prompted_update_id = context.user_data.get('otp_prompted_update_id')
                 if prompted_update_id == update.update_id:
@@ -1596,17 +1558,43 @@ class WaterBusinessBot:
                     # Skip immediate re-processing of the same text as OTP.
                     context.user_data.pop('otp_prompted_update_id', None)
                     return
-                # Rehydrate what the dead process was holding, so the verifier
-                # knows which number this code belongs to.
-                if not context.user_data.get('pending_phone_verification'):
-                    pending = user_state.get('pending_phone_verification')
-                    if pending:
-                        context.user_data['pending_phone_verification'] = pending
-                context.user_data['awaiting_otp'] = True
-                await self._handle_otp_verification(update, context, text, language)
-                return
+                if profile_handlers.may_arm_phone_otp(user_state) and not user_state.get(PHONE_OTP_ARMED_AT):
+                    # Armed before this release, or the durable arm write failed:
+                    # stamp it now, so a live code still verifies and never lands
+                    # in the Support Inbox. Such a prompt lives at most one more
+                    # PHONE_OTP_EXPIRY. A NEWER prompt holding `awaiting_input` is
+                    # never overwritten: its text is its own.
+                    await profile_handlers.arm_phone_otp(
+                        context, user_id,
+                        user_state.get('pending_phone_verification')
+                        or context.user_data.get('pending_phone_verification'),
+                    )
+                    user_state = await self.user_repository.get_user_state(user_id)
+                if profile_handlers.phone_code_expired(user_state):
+                    # The code's lifetime is over, or a newer prompt holds
+                    # `awaiting_input`: the code step is gone, and this text is
+                    # routed like any other.
+                    await profile_handlers.disarm_phone_otp(context, user_id)
+                    user_state = await self.user_repository.get_user_state(user_id)
+                else:
+                    code = otp_code_in(text)
+                    if code is not None:
+                        # Rehydrate what the dead process was holding, so the verifier
+                        # knows which number this code belongs to.
+                        if not context.user_data.get('pending_phone_verification'):
+                            pending = user_state.get('pending_phone_verification')
+                            if pending:
+                                context.user_data['pending_phone_verification'] = pending
+                        context.user_data['awaiting_otp'] = True
+                        await self._handle_otp_verification(update, context, code, language)
+                        return
+                    # Not a code: routed below like any other message, with no
+                    # "invalid code" reply. The prompt stays armed, so the SMS that
+                    # arrives afterwards still verifies (spec §2, "Why").
 
-            if user_state.get('awaiting_input'):
+            # A live `phone_otp` prompt is answered by the branch above and by
+            # nothing else: the non-code text it let through goes on to support.
+            if user_state.get('awaiting_input') not in (None, 'phone_otp'):
                 # Handle contextual input
                 await self._handle_contextual_input(update, context, user_state, language)
             elif user_state.get('address_draft'):
@@ -1707,45 +1695,53 @@ class WaterBusinessBot:
         except Exception as e:
             logger.error(f"Error handling attachment message: {e}")
 
+    async def _dispatch_menu_tap(self, key: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Open the screen a bottom-keyboard label stands for (the one label -> screen table).
+
+        A key with no row raises KeyError, which `_handle_text_message` logs; it
+        never falls through to a silent support capture.
+        """
+        async def open_cart(update, context):
+            context.user_data.pop('cart_edit_return', None)
+            await product_handlers.show_cart(update, context, edit_mode=False)
+
+        table = {
+            "telegram.menu.products": quick_order_handlers.order_water,
+            "telegram.menu.orders": order_handlers.orders_menu,
+            "telegram.cart_title": open_cart,
+            "telegram.menu.subscriptions": subscription_handlers.subscriptions_menu,
+            "telegram.menu.loyalty": loyalty_handlers.loyalty_menu,
+            "telegram.menu.profile": profile_handlers.profile_menu,
+            "telegram.menu.support": support_handlers.support_menu,
+        }
+        await table[key](update, context)
+
     async def _handle_otp_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                       text: str, language: str):
+                                       code: str, language: str):
         """Handle OTP verification from user input"""
         try:
             user_id = update.effective_user.id
 
-            # Validate OTP format (6 digits)
-            if not text.isdigit() or len(text) != 6:
-                await update.message.reply_text(
-                    i18n.get('telegram.bot.otp.invalid_format', language)
-                )
-                return
-
-            # Verify OTP via API
+            # Verify OTP via API. `code` is the router's `otp_code_in`, never raw text.
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await update.message.reply_text(
                         i18n.get('telegram.bot.otp.auth_error', language)
                     )
-                    context.user_data.pop('awaiting_otp', None)
-                    context.user_data.pop('pending_phone_verification', None)
-                    context.user_data.pop('otp_prompted_update_id', None)
-                    await self._disarm_otp(user_id)
+                    await profile_handlers.disarm_phone_otp(context, user_id)
                     return
 
-                response = await client.verify_phone_otp(user_token, text)
+                response = await client.verify_phone_otp(user_token, code)
                 if response.success:
-                    await update.message.reply_text(
-                        i18n.get('telegram.bot.otp.success_message', language),
+                    await send_menu_keyboard(
+                        context.bot, update.effective_chat.id, user_id,
+                        i18n.get('telegram.bot.otp.success_message', language), language,
                         parse_mode='Markdown',
-                        reply_markup=await main_menu_for(update.effective_user.id, language)
                     )
 
                     # Clear OTP flags
-                    context.user_data.pop('awaiting_otp', None)
-                    context.user_data.pop('pending_phone_verification', None)
-                    context.user_data.pop('otp_prompted_update_id', None)
-                    await self._disarm_otp(user_id)
+                    await profile_handlers.disarm_phone_otp(context, user_id)
 
                     logger.info(f"Phone verification successful for user {user_id}")
                 else:
@@ -1762,26 +1758,7 @@ class WaterBusinessBot:
             await update.message.reply_text(
                 i18n.get('telegram.bot.otp.failed_generic', language)
             )
-            context.user_data.pop('awaiting_otp', None)
-            context.user_data.pop('pending_phone_verification', None)
-            context.user_data.pop('otp_prompted_update_id', None)
-            await self._disarm_otp(user_id)
-
-    async def _disarm_otp(self, user_id: int) -> None:
-        """Drop the DURABLE half of the OTP arming.
-
-        Its twin in `user_data` is popped beside every call to this. Leaving the
-        `bot_state` row armed would be worse than the bug it fixes: every later
-        message the customer sent would be read as another verification code
-        instead of reaching the Support Inbox, and nothing would ever clear it.
-
-        Named prompts only (`disarm` preserves `_PRESERVED_KEYS`), so a
-        half-finished `address_draft` sitting alongside is not collateral.
-        """
-        try:
-            await self.user_repository.disarm(user_id, 'phone_otp')
-        except Exception as disarm_error:
-            logger.warning("Could not disarm the OTP prompt for %s: %s", user_id, disarm_error)
+            await profile_handlers.disarm_phone_otp(context, user_id)
 
     async def _handle_contextual_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      user_state: Dict, language: str):

@@ -754,6 +754,12 @@ class NotificationService:
             )
             raise BottleSummaryNotReady(f"Bottle ledger not committed yet for order {order.id}")
 
+        # Step 3b — R8: the bot draws "Order again" from this field only. Read before the claim so a
+        # failing read never strands the notif:bottle_summary:<id> key.
+        from business_app.services.order_service import OrderService
+
+        reorder_order_id = order.id if OrderService.can_reorder(order) else None
+
         # Step 4 — claim idempotency (72h TTL, above the task's max retry window).
         idempotency_key = f"notif:bottle_summary:{order.id}"
         claimed = redis_client.set(idempotency_key, 1, nx=True, ex=259200)
@@ -769,6 +775,7 @@ class NotificationService:
             "bottles_delivered": format_bottle_quantity(summary["bottles_delivered"]),
             "bottles_collected": format_bottle_quantity(summary["bottles_collected"]),
             "balance": format_bottle_quantity(summary["balance"]),
+            "reorder_order_id": reorder_order_id,
         }
 
         # Step 6 — dispatch. trigger_bot_webhook never raises; inspect success.

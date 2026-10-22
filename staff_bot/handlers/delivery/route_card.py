@@ -44,6 +44,26 @@ class RenderOutcome(str, Enum):
     NOOP = "noop"           # already showing exactly this
     BLOCKED = "blocked"     # borrowed by a detail view -- intentional, not a failure
     FAILED = "failed"       # a Telegram-side failure this function swallowed
+    # The card took back a borrowed screen of the stop an order cancel just took
+    # off the list (`dropped_delivery_id`), and now shows this render.
+    GAVE_WAY = "gave_way"
+
+
+def card_is_current(outcome: Optional[RenderOutcome]) -> bool:
+    """Does the card now show this render: drawn, already showing it, or drawn over a screen
+    that gave way? The one narrowing of a `RenderOutcome` to the webhook's bool."""
+    return outcome in (RenderOutcome.RENDERED, RenderOutcome.NOOP, RenderOutcome.GAVE_WAY)
+
+
+def open_route_card_keyboard(language: str) -> InlineKeyboardMarkup:
+    """The one "Open route card" button: the head-change alert's, and what a cancelled stop's
+    screen on another message is left with."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            f"🚚 {i18n.get('staff.route.open_route_card', language)}",
+            callback_data="staff_route_view_next",
+        )
+    ]])
 
 
 _KEYCAPS = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣",
@@ -335,9 +355,10 @@ def local_date_str() -> str:
 def is_current_borrow(state: Optional[dict], today: str) -> bool:
     """Is this card borrowed by a detail view *for the current shift*?
 
-    SSOT for a predicate two paths need: `update_card_for_driver`'s cheap
+    SSOT for a predicate two paths need: `refresh_card_from_webhook`'s cheap
     pre-check (which skips a token fetch and an HTTP round trip on the
-    common path) and `render_route_card`'s authoritative in-lock recheck.
+    common path) and `render_route_card`'s authoritative in-lock recheck,
+    both through `borrow_blocks_push`.
     Written out twice it drifted silently -- each site had a test, neither
     asserted the two agreed, so an edit to one left the suite green.
 
@@ -351,6 +372,25 @@ def is_current_borrow(state: Optional[dict], today: str) -> bool:
         and state.get("view") == route_card_state.VIEW_BORROWED
         and state.get("card_date") == today
     )
+
+
+def borrow_shows_stop(state: Optional[dict], delivery_id: Optional[int]) -> bool:
+    """Does the borrowed card show one of this stop's screens: its detail, Navigate, or a status
+    confirm / at-door prompt?
+
+    Read from the screen `route_card_state.note_borrowed_screen` recorded. A borrow that noted
+    no screen (left by a bot from before status screens were noted) never matches.
+    """
+    screen = (state or {}).get("borrowed_screen") or {}
+    return delivery_id is not None and screen.get("delivery_id") == delivery_id
+
+
+def borrow_blocks_push(state: Optional[dict], today: str, dropped_delivery_id: Optional[int]) -> bool:
+    """A borrow of the current shift that does not show the dropped stop: a webhook push leaves
+    the card alone (BLOCKED). With no dropped stop (every push but an order cancel's), any
+    current borrow blocks. SSOT for the pre-check in `refresh_card_from_webhook` and the
+    in-lock check in `render_route_card`."""
+    return is_current_borrow(state, today) and not borrow_shows_stop(state, dropped_delivery_id)
 
 
 async def _get_user_language(telegram_id: int) -> str:
@@ -428,6 +468,7 @@ async def render_route_card(
     respect_borrowed: bool = False,
     session_hint: Optional[Dict[str, Any]] = None,
     force: bool = False,
+    dropped_delivery_id: Optional[int] = None,
 ) -> "RenderOutcome":
     """THE single read-modify-write path for the route card. Both the PTB
     handlers (driver taps a button) and the aiohttp webhook server (backend
@@ -476,6 +517,18 @@ async def render_route_card(
     survive a concurrent render instead of being clobbered; without this
     date guard a reliable borrow would strand the card indefinitely instead
     of just racily.
+
+    dropped_delivery_id (owner, 2026-10-22): the stop an order cancel just
+    took off the driver's list. A borrow showing one of that stop's screens
+    (`borrow_shows_stop`) no longer protects anything, so a webhook render
+    takes it back: the card is drawn over it, the borrow is released and its
+    note dropped, as a driver's own tap would, and the outcome is GAVE_WAY.
+    When that screen sits on another message than the card (a stop opened
+    from the "Address changed" alert), that message keeps its text and its
+    live buttons give way to the one Open-route-card button, best-effort.
+    Decided here, inside the lock, for the same reason as the borrowed check
+    itself: a tap onto another screen during the push's fetch forgets the
+    noted screen (`mark_borrowed`), and wins.
 
     force (tap-feedback spec §4.2): this render was asked for by the DRIVER,
     not pushed by the backend. Two effects, both deliberate: the header is
@@ -548,8 +601,21 @@ async def render_route_card(
         # This only bites now that C1 (the same review) makes a borrow
         # actually survive a concurrent render instead of being clobbered
         # -- fixing C1 without this turns the race into a stuck card.
-        if respect_borrowed and is_current_borrow(state, today):
+        if respect_borrowed and borrow_blocks_push(state, today, dropped_delivery_id):
             return RenderOutcome.BLOCKED
+
+        # Past the check above, a current borrow is one showing the dropped stop: take it back.
+        taken_screen = (
+            state.pop("borrowed_screen", None)
+            if respect_borrowed and is_current_borrow(state, today)
+            else None
+        )
+
+        async def _done(outcome: RenderOutcome, *card_message_ids) -> RenderOutcome:
+            if taken_screen is None:
+                return outcome
+            await _strip_taken_screen(bot, taken_screen, card_message_ids, language)
+            return RenderOutcome.GAVE_WAY
 
         if view is None:
             stored = (state or {}).get("view")
@@ -594,7 +660,7 @@ async def render_route_card(
             # means the edit is never actually identical anyway.
             if not force and state.get("content_sig") == sig and state.get("view") == view:
                 _keep_hint_warm(state)
-                return RenderOutcome.NOOP
+                return await _done(RenderOutcome.NOOP, state["message_id"])
             try:
                 await bot.edit_message_text(
                     chat_id=state.get("chat_id", chat_id),
@@ -604,7 +670,7 @@ async def render_route_card(
                 state.update({"view": view, "content_sig": sig})
                 await route_card_state.save(telegram_id, state)
                 _keep_hint_warm(state)
-                return RenderOutcome.RENDERED
+                return await _done(RenderOutcome.RENDERED, state["message_id"])
             except BadRequest as exc:
                 reason = str(exc).lower()
                 if "not modified" in reason:
@@ -635,7 +701,7 @@ async def render_route_card(
                     state.update({"view": view, "content_sig": sig})
                     await route_card_state.save(telegram_id, state)
                     _keep_hint_warm(state)
-                    return RenderOutcome.NOOP
+                    return await _done(RenderOutcome.NOOP, state["message_id"])
                 message_gone = (
                     "message to edit not found" in reason
                     or "message can't be edited" in reason
@@ -702,18 +768,38 @@ async def render_route_card(
         }
         await route_card_state.save(telegram_id, new_state)
         _keep_hint_warm(new_state)
-        return RenderOutcome.RENDERED
+        # The old card was deleted by the create, so neither card message is "another" message.
+        return await _done(RenderOutcome.RENDERED, (state or {}).get("message_id"), sent.message_id)
 
 
-async def update_card_for_driver(
+async def _strip_taken_screen(bot, screen: Dict[str, Any], card_message_ids, language: str) -> None:
+    """A taken-back screen drawn on another message than the card keeps its text, and its live
+    buttons give way to the Open-route-card button. Best-effort: an edit never notifies, and a
+    refusal (the message is gone, too old, already plain) never fails the card refresh."""
+    if screen.get("message_id") in card_message_ids:
+        return
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=screen.get("chat_id"),
+            message_id=screen.get("message_id"),
+            reply_markup=open_route_card_keyboard(language),
+        )
+    except TelegramError as exc:  # BadRequest included
+        logger.debug("route card: the given-way screen kept its buttons: %s", exc)
+
+
+async def refresh_card_from_webhook(
     bot_app,
     telegram_id: int,
     *,
     language: Optional[str] = None,
     reference_message_id: Optional[int] = None,
-) -> bool:
-    """Webhook-side silent card refresh. Returns False when skipped, or when
-    the render did not happen (see `render_route_card`'s return contract).
+    dropped_delivery_id: Optional[int] = None,
+) -> Optional["RenderOutcome"]:
+    """Webhook-side silent card refresh. Returns the render's outcome, BLOCKED
+    when the cheap pre-check below skipped it, or None when it was skipped
+    before any render could be tried (see `render_route_card`'s return
+    contract; `update_card_for_driver` narrows this to a bool).
 
     Skips before any network work when there is no token manager wired up,
     no valid token (logged-out driver), the active-deliveries API call
@@ -764,36 +850,58 @@ async def update_card_for_driver(
     path (`active_delivery.py`'s `show_active_deliveries` -> `render_route_card`
     directly, not through this function) still has a genuine reference
     message and legitimately uses the repost heuristic.
+
+    dropped_delivery_id (owner, 2026-10-22): the stop an order cancel just
+    took off the driver's list, from the push's `delivery_id`. A card
+    borrowed by one of that stop's screens is not skipped: the render takes
+    the borrow back and answers GAVE_WAY (`render_route_card`, which
+    re-decides inside the lock). The pre-check below asks the same
+    `borrow_blocks_push` the in-lock check does.
     """
     state = await route_card_state.load(telegram_id)
-    if is_current_borrow(state, local_date_str()):
-        return False
+    if borrow_blocks_push(state, local_date_str(), dropped_delivery_id):
+        return RenderOutcome.BLOCKED
     token_manager = (getattr(bot_app, "bot_data", None) or {}).get("token_manager")
     if token_manager is None:
-        return False
+        return None
     token = await token_manager.get_valid_token(int(telegram_id), api_client)
     if not token:
-        return False
+        return None
     async with api_client as client:
         response = await client.get_active_deliveries(token)
     if not getattr(response, "success", False):
         logger.warning("route card webhook refresh: API failed for %s", telegram_id)
-        return False
+        return None
     payload = response.data if isinstance(response.data, dict) else {"items": response.data or []}
     if language is None:
         language = await _get_user_language(telegram_id)
-    outcome = await render_route_card(
+    return await render_route_card(
         bot_app.bot, telegram_id=int(telegram_id), chat_id=int(telegram_id),  # private chat: chat_id == user id
         language=language, payload=payload,
         view=None, reference_message_id=reference_message_id,
-        respect_borrowed=True,
+        respect_borrowed=True, dropped_delivery_id=dropped_delivery_id,
     )
-    # Deliberately narrowed back to a bool: staff_bot/webhook_server.py:295
-    # returns this straight out of an HTTP handler, and
-    # tests/staff_bot/test_route_updated_sound_gate.py asserts on True/False.
-    # The enum's extra resolution is only useful to the DRIVER-TAP caller,
-    # which reaches render_route_card directly.
-    return outcome in (RenderOutcome.RENDERED, RenderOutcome.NOOP)
+
+
+async def update_card_for_driver(
+    bot_app,
+    telegram_id: int,
+    *,
+    language: Optional[str] = None,
+    reference_message_id: Optional[int] = None,
+) -> bool:
+    """`refresh_card_from_webhook`, narrowed to a bool: False when skipped, or
+    when the render did not happen.
+
+    Deliberately narrowed: staff_bot/webhook_server.py returns this straight
+    out of an HTTP handler, and tests/staff_bot/test_route_updated_sound_gate.py
+    asserts on True/False. The enum's extra resolution is only useful to the
+    DRIVER-TAP caller, which reaches render_route_card directly, and to an
+    order cancel's push, which calls `refresh_card_from_webhook` itself.
+    """
+    return card_is_current(await refresh_card_from_webhook(
+        bot_app, telegram_id, language=language, reference_message_id=reference_message_id,
+    ))
 
 
 # --- head-change alert (Task 9) ----------------------------------------------
@@ -946,12 +1054,7 @@ async def send_head_change_alert(bot_app, *, telegram_id: int) -> None:
         logger.warning("head-change alert: language lookup failed for %s: %s", telegram_id, exc)
         language = i18n.fallback_language
 
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
-            f"🚚 {i18n.get('staff.route.open_route_card', language)}",
-            callback_data="staff_route_view_next",
-        )
-    ]])
+    keyboard = open_route_card_keyboard(language)
 
     # Fix round 3, I2: decide + supersede-delete + send + save as ONE
     # critical section -- see the docstring note above. Everything that

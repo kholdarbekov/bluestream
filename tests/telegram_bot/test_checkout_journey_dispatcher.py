@@ -40,6 +40,11 @@ import pytest
 from handlers.products import min_order_shortfall
 from shared.business_config import MIN_ORDER_AMOUNT
 
+from tests.telegram_bot.menu_keyboard_helpers import (
+    assert_no_edit_carries_a_reply_keyboard,
+    expected_labels,
+    menu_sends,
+)
 from tests.telegram_bot.ptb_harness import (
     DEFAULT_USER_ID,
     BackendCall,
@@ -558,7 +563,7 @@ async def test_browsing_a_category_and_opening_a_product_shows_its_price_and_an_
 
     categories_screen = bot.telegram.last_shown()
     assert categories_screen.callback_data() == [
-        f"category_{WATER}", f"category_{HARDWARE}", "back_to_main",
+        f"category_{WATER}", f"category_{HARDWARE}",
     ]
 
     await bot.send(user.tap(f"category_{WATER}"))
@@ -581,20 +586,20 @@ async def test_browsing_a_category_and_opening_a_product_shows_its_price_and_an_
     assert_no_swallowed_crash(bot)
 
 
-async def test_a_one_category_shop_skips_the_picker_and_backs_out_to_the_main_menu(
+async def test_a_one_category_shop_skips_the_picker_and_offers_no_back_row(
     bot, user
 ):
     """With a single category the picker would be a one-button dead end, so
-    products.py short-circuits past it. The Back button then HAS to point at
-    the main menu: pointing it at the (skipped) category list strands the
-    customer on an empty screen."""
+    products.py short-circuits past it. There is then no Back row at all: the
+    bottom keyboard is the way out, and a Back to the (skipped) category list
+    would strand the customer on an empty screen."""
     Shop(bot.backend, categories=[{"id": WATER, "name": "Suv"}])
 
     await bot.send(user.tap("menu_products"))
 
     listing = bot.telegram.last_shown()
     assert listing.callback_data() == [
-        f"product_{BOTTLE_19L}", f"product_{BOTTLE_5L}", "back_to_main",
+        f"product_{BOTTLE_19L}", f"product_{BOTTLE_5L}",
     ]
     assert not any(data.startswith("category_") for data in listing.callback_data())
 
@@ -739,7 +744,7 @@ async def test_an_empty_cart_screen_offers_shopping_rather_than_checkout(bot, sh
 
     assert shop.cart == {}
     empty_screen = bot.telegram.last_shown()
-    assert empty_screen.callback_data() == ["menu_products", "back_to_main"]
+    assert empty_screen.callback_data() == ["menu_products"]
     assert empty_screen.text == "Cart empty"
 
 
@@ -1160,6 +1165,8 @@ async def test_a_cash_order_clears_the_cart_and_shows_the_order_number(bot, shop
 
     assert shop.cart == {}, "a placed cash order must empty the cart"
     success = bot.telegram.last_shown()
+    assert (success.method, success.callback_data()) == ("editMessageText", [])
+    assert_no_edit_carries_a_reply_keyboard(bot)
     assert "Placed success" in success.text
     assert f"Order BS-{shop.next_order_id}" in success.text
     assert "Total 45,000 UZS" in success.text
@@ -1279,6 +1286,7 @@ async def test_a_tax_committee_outage_offers_a_cash_rescue_that_revives_the_same
     assert "Placed success" in rescued.text
     assert "Order BS-7101" in rescued.text
     assert "Cash note" in rescued.text
+    assert rescued.callback_data() == []
 
 
 async def test_a_failed_payment_link_leaves_one_order_and_a_retry_that_reuses_it(
@@ -1611,7 +1619,8 @@ async def test_cancelling_at_the_confirmation_screen_keeps_the_cart_and_disarms_
 
     await bot.send(user.tap("cancel_order"))
 
-    assert bot.telegram.last_shown().text == "Action cancelled"
+    cancelled = bot.telegram.last_shown()
+    assert (cancelled.text, cancelled.callback_data()) == ("Action cancelled", [])
     assert shop.cart == {BOTTLE_19L: 3}, "cancelling checkout must not empty the cart"
     assert "selected_address_id" not in user_data(bot)
     assert "selected_payment_method" not in user_data(bot)
@@ -1853,3 +1862,22 @@ async def test_the_quantity_selectors_checkout_button_reaches_checkout_too(
         "address_900", "add_new_address_checkout", "back_to_cart",
     ]
     assert "Uy" in confirmation.text
+
+
+async def test_cancel_on_the_zero_address_keyboard_puts_the_menu_back_and_returns_to_the_cart(bot, shop, user):
+    """The location keyboard rides the checkout message with no conversation open
+    (orders.py:892-923). Cancel on it must put the menu back AND land on the cart, not the menu."""
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await bot.send(user.tap("cart_view"))
+    await bot.send(user.tap("cart_checkout"))
+    assert bot.telegram.last_shown().button_labels()[-1] == "Cancel"
+    bot.telegram.reset()
+
+    await bot.send(user.text("Cancel"))
+
+    [carrier] = menu_sends(bot)
+    assert (carrier.text, carrier.button_labels()) == ("Action cancelled short", expected_labels())
+    cart_screen = bot.telegram.last_shown()
+    assert cart_screen is not carrier and "cart_checkout" in cart_screen.callback_data()
+    assert "address_flow_origin" not in user_data(bot)
+    assert shop.cart == {BOTTLE_19L: 3}

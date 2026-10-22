@@ -20,6 +20,7 @@ from business_app.models.loyalty import LoyaltyTransaction
 from business_app.models.user import User
 
 from tests.integration.test_web_password_reset_and_change import WEB_HEADERS, _logged_in_browser
+from tests.telegram_bot.menu_keyboard_helpers import expected_labels
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure
 from tests.telegram_bot.test_registration_journey_dispatcher import (
     CHECK_PHONE,
@@ -36,6 +37,7 @@ from tests.telegram_bot.test_web_link_journey_dispatcher import (  # noqa: F401 
     copy,
     created_no_account,
     link_bot,
+    linked_row,
     make_bot,
     no_language_card,
 )
@@ -47,11 +49,12 @@ ISSUE = "/api/v1/auth/telegram-link"
 OTHER_TELEGRAM = 700100777
 
 
-def _bridge(bot, signed_bot_post, endpoint, seen):
+def _bridge(bot, signed_bot_post, endpoint, seen, *, on_ok=None):
     """Answer the bot's call to `endpoint` with the real signed route, and keep each body in `seen`.
 
     A refusal goes back the way `_make_request` surfaces a 4xx/5xx: the body's `message` as the
     error and the whole body as the data, so the bot reads the real envelope's `error_code`.
+    `on_ok` is called with the body of a 200.
     """
 
     def _respond(call):
@@ -60,6 +63,8 @@ def _bridge(bot, signed_bot_post, endpoint, seen):
         body = resp.get_json()
         seen.append(body)
         if resp.status_code == 200:
+            if on_ok:
+                on_ok(body)
             return body
         return backend_failure(body["message"], resp.status_code, data=body)
 
@@ -89,8 +94,10 @@ async def _connect(app, auth_token, signed_bot_post, link_bot):
     payload = issued.get_json()["data"]["telegram_link"].split("?start=", 1)[1]
 
     bot, seen = await link_bot(), []
-    for endpoint in (PREVIEW, CONFIRM):
-        _bridge(bot, signed_bot_post, endpoint, seen)
+    _bridge(bot, signed_bot_post, PREVIEW, seen)
+    # The real confirm links this Telegram on the backend; the bot's own SQL then reads that row.
+    _bridge(bot, signed_bot_post, CONFIRM, seen,
+            on_ok=lambda body: setattr(bot.database, "row", linked_row(body["data"])))
     user = bot.updates()
     await bot.send(user.command(f"/start {payload}"))
     assert created_no_account(bot), "no telegram-register or telegram-login before Yes (C6)"
@@ -117,7 +124,7 @@ async def test_a_web_only_customer_connects_telegram_with_one_tap(
     assert bot.tokens.stored == [{"user_id": DEFAULT_USER_ID, "access_token": tokens["access_token"],
                                   "refresh_token": tokens["refresh_token"], "expires_in": tokens["expires_in"]}]
     shown = bot.telegram.last_shown()
-    assert shown.text == copy("telegram.web_link.connected", name="Test") and "menu_support" in shown.callback_data()
+    assert shown.text == copy("telegram.web_link.connected", name="Test") and shown.button_labels() == expected_labels("ru")
     assert created_no_account(bot)
 
 

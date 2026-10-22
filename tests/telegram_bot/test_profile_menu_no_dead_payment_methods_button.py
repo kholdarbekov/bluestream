@@ -22,4 +22,4 @@ def test_profile_menu_keeps_other_expected_buttons():
     assert "phone_verification" in cbs
     assert "notification_settings" in cbs
     assert "my_bottles" in cbs
-    assert "back_to_main" in cbs
+    assert "menu_language" in cbs and "back_to_main" not in cbs

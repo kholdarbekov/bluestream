@@ -73,13 +73,10 @@ REFUSALS = (
 BOT_REFUSAL_KEYS = tuple(bot_key for _code, _web_key, bot_key in REFUSALS)
 NEW_BOT_COPY_KEYS = BOT_REFUSAL_KEYS + (AWAITING_LABEL_KEY, STATUS_HEADING_KEY)
 
-# The refusals that ask the customer to write to us (spec §3.3 copy table, F16), and
-# the word each language uses for "this chat". `not_cancellable` asks for nothing.
-CHAT_POINTING_KEYS = (
-    "telegram.orders.cancel_refused.with_driver",
-    "telegram.orders.cancel_refused.awaiting_new_date",
-    "telegram.orders.cancel_refused.paid",
-)
+# Every bot refusal asks the customer to write to us in this chat (spec §3.3 copy table, F16;
+# `not_cancellable` since 2026-10-22, owner), so the guard below runs over all of them, and
+# the word each language uses for "this chat".
+CHAT_POINTING_KEYS = BOT_REFUSAL_KEYS
 CHAT_WORDS = {"en": "chat", "uz": "chatda", "ru": "чате"}
 
 # The screens here are served the real seeded copy, so every assertion reads what a
@@ -479,7 +476,7 @@ class TestTheNewCopyIsRealCopy:
         assert re.search(r"[А-Яа-яЁё]", row["ru"]), f"{key} ru copy is not Russian"
 
     @pytest.mark.parametrize("key", CHAT_POINTING_KEYS)
-    def test_the_refusals_that_ask_for_a_word_point_to_this_chat(self, key):
+    def test_every_refusal_points_to_this_chat(self, key):
         """F16: inside the bot, the customer-cancel refusal points to the bot chat,
         whose free text lands in the admin Support Inbox."""
         row = BACKEND_TRANSLATIONS[key]

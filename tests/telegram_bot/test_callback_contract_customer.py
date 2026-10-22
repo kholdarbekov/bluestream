@@ -42,13 +42,15 @@ KEYBOARD BUILDERS THIS FILE DELIBERATELY DOES NOT CALL
 Check (3) is only as good as the set of builders it can invoke, so the gap is
 written down here rather than left invisible:
 
-* ``KeyboardBuilder.build_inline_keyboard`` / ``build_reply_keyboard`` and
-  ``i18n_button`` — plumbing. They emit whatever their caller passes; there is
+* ``KeyboardBuilder.build_inline_keyboard`` / ``build_reply_keyboard``,
+  ``i18n_button`` and ``MenuKeyboards.back_button(language, callback_data)``
+  (its parent is always its caller's) — plumbing. They emit whatever their caller passes; there is
   no callback_data of their own to harvest.
-* ``ProfileKeyboards.phone_request`` and ``ProfileKeyboards.location_request``
-  — REPLY keyboards. They carry no callback_data at all (their taps arrive as
-  text, and the address conversation matches them by localized regex; that
-  wiring is covered by ``test_address_location_patterns.py``).
+* ``MenuKeyboards.bottom_menu``, ``ProfileKeyboards.phone_request`` and
+  ``ProfileKeyboards.location_request`` — REPLY keyboards. They carry no
+  callback_data at all (their taps arrive as text, and the address
+  conversation matches them by localized regex; that wiring is covered by
+  ``test_address_location_patterns.py``).
 * ``ProductKeyboards._build_quantity_presets`` — returns integers, not buttons.
   (What it may return at all is decided by ``ProductHandlers._purchase_bounds``
   and driven end to end in ``test_cart_and_quantity_journeys.py``.)
@@ -81,6 +83,7 @@ from telegram.ext import (
 # Bot modules resolve by bare name; tests/telegram_bot/conftest.py ranks
 # telegram_bot/ first on sys.path.
 from config import config
+from flow_exit import FLOW_EXIT_GROUP, FlowExitHandler
 from handlers.orders import _cancel_confirmation_callback
 from handlers.subscriptions import (
     CONFIRM_SUBSCRIPTION,
@@ -89,17 +92,19 @@ from handlers.subscriptions import (
 )
 from keyboards import (
     product_page_callback,
+    DeliverySummaryKeyboards,
     LanguageKeyboards,
     MenuKeyboards,
     OrderKeyboards,
     PaymentKeyboards,
     ProductKeyboards,
     ProfileKeyboards,
+    ReorderKeyboards,
     ReorderReminderKeyboards,
     SubscriptionKeyboards,
 )
 
-from tests.telegram_bot.ptb_harness import build_bot_harness
+from tests.telegram_bot.ptb_harness import build_bot_harness, menu_already_installed
 # The debounce window is 2 REAL seconds. Ageing the guard's own lock table is
 # what the wall clock would do, without putting two seconds into the suite —
 # reused rather than re-typed so there is one expression of the trick.
@@ -611,9 +616,6 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         out.extend(_emitted(source, markup))
 
     # -- menus ---------------------------------------------------------------
-    add("MenuKeyboards.main_menu(loyalty)", MenuKeyboards.main_menu(lang, show_loyalty=True))
-    add("MenuKeyboards.main_menu(no loyalty)", MenuKeyboards.main_menu(lang, show_loyalty=False))
-    add("MenuKeyboards.back_button", MenuKeyboards.back_button(lang))
     add("MenuKeyboards.cancel_button", MenuKeyboards.cancel_button(lang))
     # The ONLY production caller (handlers/orders.py::cancel_order) passes these
     # two explicitly; the builder's own defaults are never rendered. The strings
@@ -796,6 +798,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
             ProfileKeyboards.profile_menu(lang, phone_verified=verified),
         )
     add("ProfileKeyboards.profile_edit_menu", ProfileKeyboards.profile_edit_menu(lang))
+    add("ProfileKeyboards.phone_code_prompt", ProfileKeyboards.phone_code_prompt(lang))
     for enabled in (True, False):
         for reminders in (True, False, None):
             add(
@@ -850,7 +853,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         "PaymentKeyboards.payment_failed",
         PaymentKeyboards.payment_failed(51, lang, may_pay=True, may_cancel=True),
     )
-    add("PaymentKeyboards.payment_link", PaymentKeyboards.payment_link("https://pay.example/1", lang))
+    add("PaymentKeyboards.payment_link", PaymentKeyboards.payment_link("https://pay.example/1", lang, 51))
 
     # -- reorder reminders (spec 2026-10-09 §7.3) ------------------------------
     # Both shapes of Order again (own order / catalogue) and the R1 / R2 rows.
@@ -861,6 +864,15 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
                 lang, episode_id=77, reorder_order_id=reorder_order_id, show_later=show_later, snooze_days=14
             ),
         )
+
+    for continue_callback in ("order_water_go", "reorder_go_9001"):
+        add(
+            f"ReorderKeyboards.open_order_notice({continue_callback})",
+            ReorderKeyboards.open_order_notice(lang, 51, continue_callback),
+        )
+
+    for reorder_order_id in (9001, None):
+        add(f"DeliverySummaryKeyboards.summary(reorder={reorder_order_id})", DeliverySummaryKeyboards.summary(lang, 51, reorder_order_id))
 
     return out
 
@@ -1188,6 +1200,8 @@ async def test_the_quick_order_suggestion_buttons_are_wired_to_their_handlers(bo
         ("quick_repeat_last", "QuickOrderHandlers.handle_repeat_last"),
         ("quick_usual", "QuickOrderHandlers.handle_usual"),
         ("reorder_51", "QuickOrderHandlers.handle_reorder_from_history"),
+        ("order_water_go", "QuickOrderHandlers.order_water_continue"),
+        ("reorder_go_51", "QuickOrderHandlers.reorder_continue"),
     ):
         matched = bot.handlers_matching(user.tap(data))
         owners = {handler.callback.__qualname__ for _group, handler in matched}
@@ -1216,6 +1230,11 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
     other tap or command) must run AFTER the dedup guard — a dropped duplicate
     navigates nowhere — and BEFORE every conversation, so the window is shut
     before whatever was tapped arms its own prompt.
+
+    The menu-keyboard installer (spec 2026-10-21 §1) runs BEFORE dispatch, between
+    the reachability recovery and the dedup guard, and never stops it: the bottom
+    keyboard it sends goes out ahead of the screen, so a phone or location
+    keyboard the handler sends afterwards still wins.
     """
     groups = bot.application.handlers
 
@@ -1226,19 +1245,13 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
         for handler in handlers
         if isinstance(handler, TypeHandler)
     )
-    assert len(middleware_groups) == 4, (
-        f"expected exactly the four dispatcher middlewares, found groups "
-        f"{middleware_groups}"
-    )
-    assert middleware_groups[0] == debug_logger_group == -10
-    assert middleware_groups[1] == -9, (
-        "the Telegram-reachability recovery middleware (spec 2026-10-09 §7.2 b) "
-        "moved out of group -9"
-    )
-    assert middleware_groups[2] == -5, "the callback-dedup guard moved out of group -5"
-    assert middleware_groups[3] == -4, (
-        "the quantity-screen middleware must sit between the dedup guard and "
-        "the conversations"
+    assert debug_logger_group == -10
+    assert middleware_groups == [-10, -9, -6, -5, -4], (
+        "expected exactly the five dispatcher middlewares: the debug logger (-10), the "
+        "Telegram-reachability recovery (-9, spec 2026-10-09 §7.2 b), the menu-keyboard "
+        "installer (-6) which runs before dispatch, between reachability recovery and the "
+        "dedup guard, the callback-dedup guard (-5) and the quantity-screen middleware (-4) "
+        f"between the dedup guard and the conversations; found groups {middleware_groups}"
     )
 
     conversation_groups = sorted({group for group, _ in _conversations(bot.application)})
@@ -1250,6 +1263,17 @@ async def test_middlewares_run_before_conversations_which_run_before_the_catch_a
     assert max(conversation_groups) < 0, (
         "a conversation slipped into group 0 and now competes with the callback "
         "handlers and the text catch-all"
+    )
+    exit_groups = [
+        group for group, handlers in groups.items() for handler in handlers
+        if isinstance(handler, FlowExitHandler)
+    ]
+    assert exit_groups == [FLOW_EXIT_GROUP] == [-3], (
+        f"expected exactly one flow-exit handler, in group -3; found {exit_groups}"
+    )
+    assert middleware_groups[-1] < FLOW_EXIT_GROUP < min(conversation_groups), (
+        "the flow exit must run after the quantity-screen middleware and before every "
+        "conversation, or a conversation answers a label before the exit ends it"
     )
 
 
@@ -1325,10 +1349,10 @@ async def test_both_dispatcher_middlewares_claim_every_update(bot, user):
         type_handlers = [
             handler for _group, handler in claimed if isinstance(handler, TypeHandler)
         ]
-        assert len(type_handlers) == 4, (
+        assert len(type_handlers) == 5, (
             f"{update} is seen by {len(type_handlers)} middleware(s); the debug "
-            "logger, the reachability recovery, the callback-dedup guard and the "
-            "quantity-screen window must all see every update"
+            "logger, the reachability recovery, the menu-keyboard installer, the "
+            "callback-dedup guard and the quantity-screen window must all see every update"
         )
 
 
@@ -1349,7 +1373,7 @@ async def test_the_slash_commands_reach_their_handlers(bot, user):
         # NOT the SupportHandlers class in handlers/support.py — worth pinning,
         # because the two have same-named methods and the wrong one is a plausible
         # future mis-wire.
-        ("help", "SimpleHandlers.help_handler"),
+        ("help", "SimpleHandlers.support_menu"),
         ("language", "LanguageHandler.language_menu"),
     ):
         matched = bot.handlers_matching(user.command(command))
@@ -1377,6 +1401,7 @@ async def test_a_button_from_a_deleted_feature_does_not_crash_the_dispatcher(bot
     without this a raised exception would be swallowed by PTB and the assertion
     would pass on a bot that is actually crashing.
     """
+    await menu_already_installed(bot)
     errors = []
     bot.application.add_error_handler(
         lambda update, context: errors.append(context.error) or None
@@ -1416,17 +1441,34 @@ async def test_a_stale_button_carrying_a_corrupted_id_does_not_crash_the_dispatc
     )
 
 
-async def test_every_button_on_the_real_main_menu_is_answered_by_a_handler(bot, user):
-    """The screen every customer sees first, checked as it is actually rendered
-    rather than as the builder is called: the bot decides at runtime whether the
-    loyalty button belongs, so the rendered keyboard is the only honest source."""
-    await bot.send(user.tap("back_to_main"))
+async def test_every_label_on_the_rendered_bottom_menu_opens_its_screen(bot, user, monkeypatch):
+    """The keyboard every customer keeps, checked as /menu actually renders it: every label resolves
+    to a MAIN_MENU_KEYS entry, and typing it opens a screen instead of filing a support message."""
+    import utils as utils_module
+    from keyboards import MAIN_MENU_KEYS
+    from menu_tap import resolve_tapped_label
 
-    shown = bot.telegram.last_shown()
-    data = shown.callback_data()
-    assert data, "the main menu rendered with no buttons at all"
+    async def _allowed(_user_id):
+        return True
 
-    for callback in data:
-        assert bot.handlers_matching(user.tap(callback)), (
-            f"the main-menu button {callback!r} lands nowhere"
+    # Seven texts from one customer; "allowed" is the production-normal answer, not the shared Redis.
+    monkeypatch.setattr(utils_module.rate_limiter, "allow_request", _allowed)
+
+    await bot.send(user.command("menu"))
+    labels = bot.telegram.last_shown().button_labels()
+    assert len(labels) == len(MAIN_MENU_KEYS)
+
+    for label in labels:
+        assert resolve_tapped_label(label, MAIN_MENU_KEYS) is not None, label
+        bot.telegram.reset()
+        bot.backend.calls.clear()
+        await bot.send(user.text(label))
+        assert not [c for c in bot.backend.calls if c.endpoint == "/api/v1/support/messages"], (
+            f"{label!r} was filed as a support message"
         )
+        assert bot.telegram.shown, f"{label!r} opened nothing"
+
+
+async def test_no_keyboard_offers_the_retired_back_to_main(bot):
+    """The bottom keyboard is the menu (spec §1). back_to_main stays registered for old messages only."""
+    assert "back_to_main" not in {data for _source, data in _keyboard_callbacks()}

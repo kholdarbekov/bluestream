@@ -58,6 +58,20 @@ async def fetch_active_row(bot_app, telegram_id: int, delivery_id: int) -> Optio
         return None
 
 
+def held_snapshot(bot_app, telegram_id: int, delivery_id: int) -> Optional[dict]:
+    """The driver's `user_data` when its `current_delivery` names this stop, else None.
+
+    Read from outside a PTB update (a webhook), so through `bot_app.user_data`. Shared by
+    the address change (`refresh_current_delivery`) and an order cancel's route push
+    (`webhook_server._leave_dropped_stop`), so the two always ask the same question.
+    """
+    # `.get`, never `[]`: `user_data` creates an entry for any id it is indexed with.
+    ud = bot_app.user_data.get(telegram_id)
+    if ((ud or {}).get("current_delivery") or {}).get("delivery_id") != delivery_id:
+        return None
+    return ud
+
+
 def refresh_current_delivery(
     bot_app, telegram_id: int, delivery_id: int, *, row: Optional[Mapping], payload: Mapping
 ) -> str:
@@ -67,9 +81,8 @@ def refresh_current_delivery(
     "refreshed" (rebuilt from the fresh row) or "patched" (the fetch failed, so only the
     address fields moved, `apply_address_change`). It never deletes the key.
     """
-    # `.get`, never `[]`: `user_data` creates an entry for any id it is indexed with.
-    ud = bot_app.user_data.get(telegram_id)
-    if ((ud or {}).get("current_delivery") or {}).get("delivery_id") != delivery_id:
+    ud = held_snapshot(bot_app, telegram_id, delivery_id)
+    if ud is None:
         return "untouched"
     if row is not None:
         ud["current_delivery"] = snapshot_from_active_row(row, delivery_id)

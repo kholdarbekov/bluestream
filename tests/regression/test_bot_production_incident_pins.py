@@ -63,10 +63,18 @@ The incidents
     `title → apartment → floor → instructions → geocode → confirm → title → …`
     and could never be saved. The doc marks that gate load-bearing; nothing
     tested it.
+11. **A backtick in a saved address that broke checkout** — customer bot,
+    2026-10-18 16:54-16:58 Tashkent (Loki: 4 x `checkout_handler` 'Can't parse
+    entities: can't find end of the entity starting at byte offset 100').
+    `_show_address_confirmation` put the title and full address raw into a
+    legacy-Markdown card, and the geocoder spelled the Uzbek o' as one
+    backtick. On the cart path `_edit_or_replace_callback_message` deleted the
+    cart before its resend failed the same way. Staff re-entered the order by
+    hand. This is incident 4's class, one screen later.
 
 Why these are DISPATCHER tests
 ------------------------------
-Six of the ten live in the seam BETWEEN handlers — conversation state, handler
+Seven of the eleven live in the seam BETWEEN handlers — conversation state, handler
 groups, entry-point re-entry, middleware ordering. A test that calls a handler
 coroutine directly cannot see any of that, which is exactly how a suite of
 eighty-odd bot test files shipped incident 1. So every behavioural test here
@@ -137,6 +145,7 @@ from handlers.profile import (  # noqa: E402
     ADDRESS_TITLE,
 )
 
+from tests.bot_dispatcher_harness import telegram_entity_error  # noqa: E402
 from tests.staff_bot.ptb_harness import (  # noqa: E402
     DEFAULT_DRIVER_TELEGRAM_ID,
     FakeStaffDatabase,
@@ -145,6 +154,7 @@ from tests.staff_bot.ptb_harness import (  # noqa: E402
 from tests.telegram_bot.ptb_harness import (  # noqa: E402
     DEFAULT_USER_ID,
     build_bot_harness,
+    menu_already_installed,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -177,8 +187,10 @@ def _function_named(tree: ast.AST, name: str):
 def _type_handler_groups(scope: ast.AST) -> dict:
     """``{middleware callback name: handler group}`` for TypeHandlers added in `scope`.
 
-    Only `add_handler(TypeHandler(Update, <name>), group=<int>)` counts, which
-    is exactly the shape both dispatcher middlewares are registered in.
+    Only `add_handler(TypeHandler(Update, <name>), group=<int> or a named group
+    constant)` counts, which is exactly the shape the dispatcher middlewares are
+    registered in. A named constant is recorded by its name
+    (e.g. ``"MENU_INSTALLER_GROUP"``), since its value lives in another module.
     """
     found = {}
     for node in ast.walk(scope):
@@ -196,7 +208,12 @@ def _type_handler_groups(scope: ast.AST) -> dict:
         ):
             continue
         group = next((kw.value for kw in node.keywords if kw.arg == "group"), None)
-        found[handler.args[1].id] = 0 if group is None else ast.literal_eval(group)
+        if group is None:
+            found[handler.args[1].id] = 0
+        elif isinstance(group, (ast.Name, ast.Attribute)):
+            found[handler.args[1].id] = ast.unparse(group)  # e.g. "MENU_INSTALLER_GROUP"
+        else:
+            found[handler.args[1].id] = ast.literal_eval(group)
     return found
 
 
@@ -267,6 +284,7 @@ async def bot(monkeypatch):
         "/api/v1/addresses/reverse-geocode",
         lambda _c: {"data": {"formatted_address": GEOCODED}},
     )
+    await menu_already_installed(harness)
     return harness
 
 
@@ -810,7 +828,7 @@ async def test_incident_20260821_a_timed_out_checkout_origin_cannot_hijack_the_n
 
     UPDATED 2026-08-26 (pin-routing ruling, Task 6): the fix for this incident
     is no longer merely "the second flow happens not to see the stale key" —
-    `ProfileHandlers._clear_address_flow_keys` (added to close a SEPARATE
+    `ProfileHandlers.clear_address_flow_keys` (added to close a SEPARATE
     hole: `awaiting_location` outliving a cancelled/timed-out flow) now pops
     `address_flow_origin` on every teardown, timeout included. A stale origin
     can no longer survive a timed-out checkout flow AT ALL, so this test now
@@ -938,7 +956,7 @@ async def test_incident_20260821_a_prompt_telegram_still_refuses_is_resent_as_pl
     end the conversation and leave the customer on a dead screen. Losing the
     bold is a much smaller price than losing the flow.
 
-    Depends on `ProfileHandlers._reply_markdown_or_plain`.
+    Depends on `BaseHandler._reply_markdown_or_plain`.
     """
     await open_address_flow(bot, user)
 
@@ -977,6 +995,62 @@ async def test_incident_20260821_a_prompt_telegram_still_refuses_is_resent_as_pl
 
 
 # ===========================================================================
+# INCIDENT 11 — 2026-10-18: one backtick in a saved address broke checkout
+# ===========================================================================
+
+# Rebuilt from the Loki trace: the uz card label (29 bytes), a typed Cyrillic
+# title, and the geocoder's o' as ONE backtick, which lands on UTF-8 byte 100.
+INCIDENT_20261018_LABEL = "📍 Yetkazib berish manzili:"
+INCIDENT_20261018_TITLE = "Бувимнинг уйи Навоий кўчасида"
+INCIDENT_20261018_ADDRESS = "5, Navoiy ko`chasi, Toshkent"
+
+
+async def test_incident_20261018_a_backtick_in_the_saved_address_no_longer_breaks_checkout(monkeypatch):
+    """Crash #1 was the message branch (address saved from checkout); crashes #2-#4 the
+    cart's Checkout button, which deleted the cart before a resend that failed the same way.
+
+    Depends on `address_text.address_block_markdown_v2` in `_show_address_confirmation`.
+    """
+    old_card = f"{INCIDENT_20261018_LABEL}\n*{INCIDENT_20261018_TITLE}*\n{INCIDENT_20261018_ADDRESS}"
+    assert telegram_entity_error(old_card, "Markdown") == (
+        "Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 100"
+    ), "the fixture no longer reproduces the prod refusal, so the rest proves nothing"
+
+    bot = await build_bot_harness(
+        monkeypatch,
+        translations={**TRANSLATIONS, "telegram.checkout.delivering_to": INCIDENT_20261018_LABEL},
+        strict_entities=True,
+    )
+    geocodes_to(bot, INCIDENT_20261018_ADDRESS)
+    user = bot.updates()
+
+    # Crash #1, the MESSAGE path: Checkout with no address, pin, typed title, three Skips.
+    await bot.send(user.tap("cart_checkout"))
+    await bot.send(user.location(PIN_LAT, PIN_LNG))
+    await bot.send(user.text(INCIDENT_20261018_TITLE))
+    for skip in ("skip_apartment", "skip_floor", "skip_delivery_instructions"):
+        await bot.send(user.tap(skip))
+
+    (address_id,) = bot.backend.addresses
+    assert [c.refused for c in bot.telegram.calls if c.refused] == []
+    card = bot.telegram.delivered[-1]
+    assert card.method == "sendMessage"
+    assert card.text == (
+        "📍 Yetkazib berish manzili:\n*Бувимнинг уйи Навоий кўчасида*\n5, Navoiy ko\\`chasi, Toshkent"
+    )
+    assert card.callback_data() == [f"address_{address_id}", "add_new_address_checkout", "back_to_cart"]
+
+    # Crashes #2-#4, the CALLBACK path: Checkout again from the cart.
+    bot.telegram.reset()
+    await deliberate_retap(bot, user.tap("cart_checkout"))
+
+    assert [c.refused for c in bot.telegram.calls if c.refused] == []
+    (edit,) = bot.telegram.of("editMessageText")
+    assert (edit.text, edit.callback_data()) == (card.text, card.callback_data())
+    assert bot.telegram.of("deleteMessage") == [], "the cart message is never deleted"
+
+
+# ===========================================================================
 # INCIDENT 5 — the dispatcher middlewares lived in initialize(), not _setup_handlers()
 # ===========================================================================
 
@@ -1009,6 +1083,9 @@ def test_incident_20260821_production_registers_both_middlewares_in_setup_handle
     assert "callback_dedup_middleware" not in in_initialize, (
         "the dedup guard has been split back out into initialize() — that is "
         "the incident, not the fix"
+    )
+    assert registered.get("ensure_menu_keyboard_middleware") == "MENU_INSTALLER_GROUP", (
+        f"the menu-keyboard installer is not registered inside _setup_handlers(): {registered}"
     )
 
 
@@ -1047,11 +1124,12 @@ async def test_incident_20260821_a_harness_built_bot_carries_both_middlewares(bo
     )
 
     # And the middlewares really are offered every update, catch-alls included. Group -9 is the
-    # Telegram-reachability recovery (spec 2026-10-09 §7.2 b): it sits between the logger and the
-    # guard and never stops dispatch, so the guard still sees a tap before any conversation.
+    # Telegram-reachability recovery (spec 2026-10-09 §7.2 b) and group -6 the menu-keyboard
+    # installer (spec 2026-10-21 §1): both sit between the logger and the guard and never stop
+    # dispatch, so the guard still sees a tap before any conversation.
     matched = bot.handlers_matching(user.tap("add_new_address"), include_catch_alls=True)
-    assert [group for group, _handler in matched][:3] == [-10, -9, -5], (
-        f"the middlewares are not the first three handlers to see a tap: {matched}"
+    assert [group for group, _handler in matched][:4] == [-10, -9, -6, -5], (
+        f"the middlewares are not the first four handlers to see a tap: {matched}"
     )
 
 

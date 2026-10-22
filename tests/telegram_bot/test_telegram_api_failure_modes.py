@@ -60,6 +60,7 @@ from tests.telegram_bot.ptb_harness import (
     DEFAULT_CHAT_ID,
     DEFAULT_USER_ID,
     build_bot_harness,
+    menu_already_installed,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -236,6 +237,7 @@ async def bot(monkeypatch):
             )
         },
     )
+    await menu_already_installed(harness)
     return harness
 
 
@@ -504,6 +506,24 @@ async def test_a_rejected_markdown_prompt_is_resent_as_plain_text(bot, user):
     assert bot.conversation_state("address_conversation") == ADDRESS_TITLE, (
         "a formatting problem must not end the address flow"
     )
+
+
+async def test_a_refusal_that_is_not_about_markup_is_not_resent_as_plain_text(bot, user):
+    """The plain-text resend rescues exactly one kind of refusal: Telegram could not parse
+    the markup. Any other refusal (too long, chat gone, bad button) fails a plain resend
+    identically. One rule, `BaseHandler._is_entity_parse_error`, shared with the edit backstop."""
+    await bot.send(user.tap("add_new_address"))
+    rejection = reject(bot, "sendMessage", "Bad Request: message is too long", when=is_markdown)
+    bot.telegram.reset()
+
+    await bot.send(user.location(PIN_LAT, PIN_LNG))
+
+    (refused_prompt,) = rejection.rejected
+    plain_resends = [
+        call for call in bot.telegram.of("sendMessage")
+        if call.text == refused_prompt["text"] and "parse_mode" not in call.params
+    ]
+    assert plain_resends == []
 
 
 async def test_a_geocoded_address_without_metacharacters_reaches_the_title_step(

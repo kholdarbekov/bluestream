@@ -20,7 +20,7 @@ per-update whether an arming marker is present, not whether a conversation
 happens to be "active"."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 
@@ -37,6 +37,7 @@ import pytest
 # string-path monkeypatch.setattr then does a *fresh* `__import__("i18n")`
 # that can resolve `from config import config` against the repo-root
 # config.py instead of telegram_bot/config.py.
+import menu_keyboard
 from handlers.profile import ProfileHandlers
 
 from tests.telegram_bot.helpers import DummyLocation, DummyUpdate, make_context
@@ -116,6 +117,7 @@ async def test_pin_at_checkout_stores_coordinates_and_keeps_the_origin(echo_i18n
 
     monkeypatch.setattr("handlers.profile.api_client", _Client())
     monkeypatch.setattr("handlers.profile.get_auth_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr("handlers.profile.send_menu_keyboard", create_autospec(menu_keyboard.send_menu_keyboard))
 
     await handler.location_received(update, ctx)
 

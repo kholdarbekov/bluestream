@@ -111,9 +111,17 @@ class DummyUpdate:
             last_name=last_name,
             language_code="en",
         )
+        self.effective_chat = SimpleNamespace(id=user_id, type="private")
         self.message = DummyMessage()
         self.callback_query = None
         self.edited_message = None
+
+    @property
+    def effective_message(self):
+        """As PTB defines it: the callback query's message, else the update's own message."""
+        if self.callback_query is not None:
+            return self.callback_query.message
+        return self.message
 
 
 def make_context(args=None):

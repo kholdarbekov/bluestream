@@ -1,12 +1,9 @@
 """Leaf eligibility helpers for the Telegram bot.
 
-Provides two thin functions consumed by menu-rendering and handler guard code:
-
-- is_loyalty_eligible(telegram_id)  — async; delegates to BotUserRepository
-- main_menu_for(telegram_id, language) — async; returns the correct main-menu
-  keyboard depending on eligibility.  The show_loyalty parameter it passes to
-  MenuKeyboards.main_menu is added in Task 8; do not call this function until
-  Task 8 has landed.
+- is_loyalty_eligible(telegram_id) — async; delegates to BotUserRepository.
+- main_menu_for(telegram_id, language) — async; the bottom keyboard this customer
+  should see, with Aqua Club only when they are loyalty-eligible. Its one caller is
+  `menu_keyboard.send_menu_keyboard`, the only sender of that keyboard.
 """
 
 from database import BotUserRepository, db_manager
@@ -22,13 +19,10 @@ async def is_loyalty_eligible(telegram_id: int) -> bool:
 
 
 async def main_menu_for(telegram_id, language: str):
-    """Return the correct main-menu keyboard for this user.
+    """The bottom keyboard for this customer: Aqua Club only when they are eligible.
 
-    show_loyalty is set to the user's eligibility result, or True when
-    telegram_id is None (unauthenticated context).
-
-    NOTE: MenuKeyboards.main_menu must accept a show_loyalty keyword argument
-    (added in Task 8).  Do not call this function before Task 8 lands.
+    `telegram_id=None` (no customer to ask about) shows it. Send the result only through
+    `menu_keyboard.send_menu_keyboard`, which keeps the install marker true.
     """
     # Lazy import avoids circular-import issues at module load time.
     from keyboards import MenuKeyboards
@@ -38,4 +32,4 @@ async def main_menu_for(telegram_id, language: str):
     else:
         show_loyalty = await is_loyalty_eligible(telegram_id)
 
-    return MenuKeyboards.main_menu(language, show_loyalty=show_loyalty)
+    return MenuKeyboards.bottom_menu(language, show_loyalty=show_loyalty)

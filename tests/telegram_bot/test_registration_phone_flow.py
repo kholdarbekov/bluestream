@@ -10,11 +10,12 @@ Covers the P1 bot-side fixes:
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from telegram.ext import ConversationHandler
 
+import menu_keyboard
 from handlers import profile as profile_module
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
 
@@ -62,7 +63,8 @@ class TestLinkAccountResponseNesting:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **kw: f"{key}:{lang}:{kw}")
-        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
+        send = create_autospec(menu_keyboard.send_menu_keyboard)
+        monkeypatch.setattr(profile_module, "send_menu_keyboard", send)
         monkeypatch.setattr(profile_module, "api_client", _APIContext())
 
         state = await handler.link_account_otp(update, context)
@@ -71,8 +73,8 @@ class TestLinkAccountResponseNesting:
         # Merged-account tokens must be cached (previously never were).
         token_manager.store_tokens.assert_awaited_once_with(1301, "acc", "ref", 7200)
         # Success message must read the nested user's first_name.
-        success_call = update.message.reply_text.await_args
-        assert "Jamshid" in success_call.args[0]
+        assert send.await_args.args[:3] == (context.bot, 1301, 1301)
+        assert "Jamshid" in send.await_args.args[3]
         assert "pending_link_phone" not in context.user_data
 
     async def test_link_account_confirm_shows_masked_phone_from_nested_payload(self, monkeypatch):
@@ -121,7 +123,6 @@ class TestStrandedUserReprompt:
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate(user_id=1401)
         context = make_context()
-        cleanup_mock = AsyncMock(return_value=True)
 
         # Existing row, phone never captured.
         user_repo = SimpleNamespace(
@@ -131,7 +132,6 @@ class TestStrandedUserReprompt:
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="uz"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(profile_module.ProfileKeyboards, "phone_request", lambda _lang: "phone-kbd")
-        monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         state = await handler.start_registration_new(update, context)
 
@@ -145,7 +145,7 @@ class TestStrandedUserReprompt:
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate(user_id=1402)
         context = make_context()
-        cleanup_mock = AsyncMock(return_value=True)
+        send = create_autospec(menu_keyboard.send_menu_keyboard)
 
         user_repo = SimpleNamespace(
             get_user_by_telegram_id=AsyncMock(return_value={"id": 1, "phone": "+998901112233"})
@@ -153,16 +153,12 @@ class TestStrandedUserReprompt:
         monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
-        monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
+        monkeypatch.setattr(profile_module, "send_menu_keyboard", send)
 
         state = await handler.start_registration_new(update, context)
 
         assert state == ConversationHandler.END
-        update.message.reply_text.assert_awaited_once_with(
-            text="telegram.welcome:en",
-            reply_markup="menu-kbd",
-        )
+        send.assert_awaited_once_with(context.bot, 1402, 1402, "telegram.main_menu:en", "en")
 
 
 @pytest.mark.unit
@@ -326,7 +322,8 @@ class TestRegistrationOtpInsideConversation:
 
         monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **kw: f"{key}:{lang}")
-        monkeypatch.setattr(profile_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
+        send = create_autospec(menu_keyboard.send_menu_keyboard)
+        monkeypatch.setattr(profile_module, "send_menu_keyboard", send)
         monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="user-token"))
         monkeypatch.setattr(profile_module, "api_client", _APIContext())
 
@@ -336,10 +333,9 @@ class TestRegistrationOtpInsideConversation:
         # Correct registration endpoint used; account-merge endpoint never touched.
         assert calls["verify_phone_otp"] == 1
         assert calls["link_phone_verify"] == 0
-        # Pending phone cleared and a main-menu keyboard shown on success.
+        # Pending phone cleared and the bottom keyboard installed on success.
         assert "pending_phone_verification" not in context.user_data
-        success_call = update.message.reply_text.await_args
-        assert success_call.kwargs.get("reply_markup") == "menu-kbd"
+        assert send.await_args.args[3] == "telegram.registration_complete:en"
 
     async def test_register_otp_received_invalid_format_reprompts_without_verify(self, monkeypatch):
         handler = profile_module.ProfileHandlers()

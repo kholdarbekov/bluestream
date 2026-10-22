@@ -606,10 +606,12 @@ def create_app(config_class=None):
         register_payment_confirmation_dispatch,
     )
     from business_app.utils.reorder_reminder_dispatch import register_reorder_reminder_dispatch
+    from business_app.utils.route_card_refresh_dispatch import register_route_card_refresh_dispatch
 
     register_loyalty_award_dispatch(db)
     register_payment_confirmation_dispatch(db)
     register_reorder_reminder_dispatch(db)
+    register_route_card_refresh_dispatch(db)
     migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
     cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)

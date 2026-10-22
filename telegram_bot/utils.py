@@ -8,13 +8,15 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
 import json
+import re
 
+from shared.business_config import OTP_CODE_LENGTH
 from shared.constants import DISPLAY_TIMEZONE, ORDER_DISPLAY_AWAITING_NEW_DATE
 
 import redis.asyncio as aioredis
 import sentry_sdk
 from telegram import Update, ReplyKeyboardRemove
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, filters
 from telegram.error import TelegramError, NetworkError, TimedOut
 
 from database import db_manager, BotUserRepository
@@ -26,7 +28,6 @@ logger = logging.getLogger('utils')
 
 _NETWORK_ERROR_LOG_COOLDOWN_SECONDS = 60
 _last_network_error_log_at: Optional[datetime] = None
-_REPLY_KEYBOARD_CLEANUP_COOLDOWN_SECONDS = 6 * 3600
 
 
 def _is_transient_polling_network_error(update: object, error: Exception) -> bool:
@@ -479,7 +480,8 @@ async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
                     await update.callback_query.answer()
                 else:
                     await update.message.reply_text(
-                        f"{welcome_msg}\n\n{start_prompt}"
+                        f"{welcome_msg}\n\n{start_prompt}",
+                        reply_markup=ReplyKeyboardRemove(),
                     )
             except Exception as e:
                 logger.error(f"Error sending registration message: {e}")
@@ -692,54 +694,6 @@ async def send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.warning(f"Failed to send typing action: {e}")
 
 
-async def maybe_remove_stale_reply_keyboard(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    force: bool = False,
-) -> bool:
-    """
-    Best-effort cleanup for lingering reply keyboards from older flows.
-
-    Telegram keeps reply keyboards client-side until explicitly removed.
-    This sends a transient cleanup message with ReplyKeyboardRemove and
-    deletes it immediately to avoid chat clutter.
-    """
-    try:
-        if not update or not context or not getattr(update, "effective_chat", None):
-            return False
-
-        user_data = getattr(context, "user_data", None)
-        if user_data is None:
-            return False
-
-        now_ts = datetime.now(timezone.utc).timestamp()
-        last_cleanup_ts = user_data.get("reply_keyboard_cleanup_at_ts")
-        if (
-            not force
-            and isinstance(last_cleanup_ts, (int, float))
-            and now_ts - last_cleanup_ts < _REPLY_KEYBOARD_CLEANUP_COOLDOWN_SECONDS
-        ):
-            return False
-
-        cleanup_message = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="⁠",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        user_data["reply_keyboard_cleanup_at_ts"] = now_ts
-
-        try:
-            await cleanup_message.delete()
-        except Exception as delete_error:
-            logger.debug("Reply-keyboard cleanup message deletion skipped: %s", delete_error)
-
-        return True
-    except Exception as cleanup_error:
-        logger.debug("Reply-keyboard cleanup skipped due to error: %s", cleanup_error)
-        return False
-
-
 async def arm_location_request(context: ContextTypes.DEFAULT_TYPE,
                                user_id: int = None) -> None:
     """Record that the BOT asked for a pin, so the next location update is
@@ -815,6 +769,52 @@ def is_stamp_stale(armed_at_raw, minutes: int) -> bool:
     return (datetime.now(timezone.utc) - armed_at) > timedelta(minutes=minutes)
 
 
+# Spaces and hyphens a customer writes inside a code: "482 913", "482-913".
+_OTP_SEPARATORS = re.compile(r'[\s-]+')
+# A run of exactly OTP_CODE_LENGTH digits with no word character or hyphen on either side, so the
+# six digits inside an order, try-out or delivery number ("TG_000413_26", "TRY_000123_26",
+# "DLV-000123") are never a code. A hyphenated code ("482-913") is read whole, before this run.
+_STANDALONE_OTP_RUN = re.compile(rf'(?<![\w-])[0-9]{{{OTP_CODE_LENGTH}}}(?![\w-])')
+
+
+def otp_code_in(text: Optional[str]) -> Optional[str]:
+    """The one-time code a message carries, or None when it is not code-shaped.
+
+    The ONE expression of "is this a code, and which?" for every step that waits
+    for an SMS code: the profile prompt's router branch, ``PHONE_VERIFY_OTP``'s
+    state filter (``OtpShapedFilter``), and registration's and account-link's
+    code steps. A message is code-shaped when either:
+
+    (a) without its spaces and hyphens it is exactly ``OTP_CODE_LENGTH`` digits
+        ("482 913", "482-913"), or
+    (b) it holds exactly ONE standalone run of ``OTP_CODE_LENGTH`` digits (a
+        pasted SMS, "Kod: 482913"), which is the code. Standalone means no
+        word character or hyphen beside it, so an order number is not a code.
+
+    Zero or several such runs are not a code. A live code must never be filed to
+    the Support Inbox (spec 2026-10-21 §2, "Late codes / Why"), so a code written
+    loosely is still read as one. The length is the backend serializer's own
+    (``shared.business_config.OTP_CODE_LENGTH``), and only ASCII digits count.
+    """
+    if not text:
+        return None
+    compact = _OTP_SEPARATORS.sub('', text)
+    if len(compact) == OTP_CODE_LENGTH and compact.isascii() and compact.isdigit():
+        return compact
+    runs = _STANDALONE_OTP_RUN.findall(text)
+    return runs[0] if len(runs) == 1 else None
+
+
+class OtpShapedFilter(filters.MessageFilter):
+    """Matches a message that carries a one-time code (``otp_code_in``; spec
+    2026-10-21 §2, "Phone-code steps"): a code-step state answers only codes, and
+    anything else the customer types ends the step instead of looping on
+    "invalid code"."""
+
+    def filter(self, message) -> bool:
+        return otp_code_in(message.text) is not None
+
+
 # Mirrors `handlers/support.py::_SUPPORT_STALE_MINUTES` — same 30-minute
 # window, same rationale: a marker with no time-based expiry outlives the
 # flow that armed it once event-based teardown is skipped (no conversation
@@ -876,6 +876,12 @@ ORDER_STATUS_LABEL_KEYS = {
 }
 
 
+def order_status_label(status: str, language: str) -> str:
+    """The customer-facing label for an order status; unknown statuses are title-cased."""
+    label_key = ORDER_STATUS_LABEL_KEYS.get(status)
+    return i18n.get(label_key, language) if label_key else status.replace('_', ' ').title()
+
+
 class MessageBuilder:
     """Helper class for building formatted messages"""
 
@@ -928,8 +934,7 @@ class MessageBuilder:
             # failed delivery waits for a new date, the order status otherwise.
             status = order.get('display_status') or order['status']
             icon = ORDER_STATUS_ICONS.get(status, DEFAULT_STATUS_ICON)
-            label_key = ORDER_STATUS_LABEL_KEYS.get(status)
-            label = i18n.get(label_key, language) if label_key else status.replace('_', ' ').title()
+            label = order_status_label(status, language)
             heading = i18n.get('telegram.orders.detail_status_label', language)
             lines.append(f"📊 {heading}: {icon} {label}")
 

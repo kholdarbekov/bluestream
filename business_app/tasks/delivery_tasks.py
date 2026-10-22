@@ -17,6 +17,7 @@ from business_app.services.maps_service import MapsService
 from shared.enums import DeliveryStatus, UserRole, OrderStatus
 from business_app import db
 from business_app.utils.exceptions import ValidationError
+from business_app.utils.state_validators import DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES
 
 logger = get_task_logger(__name__)
 
@@ -119,9 +120,11 @@ def generate_driver_performance_report(self, driver_id: int, start_date: str, en
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
 
-        # Get driver's deliveries
+        # Get driver's deliveries. A cancelled delivery is not one of the driver's.
         deliveries = Delivery.query.filter(
-            Delivery.delivery_person_id == driver_id, Delivery.created_at.between(start_dt, end_dt)
+            Delivery.delivery_person_id == driver_id,
+            Delivery.created_at.between(start_dt, end_dt),
+            Delivery.status.notin_(DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES),
         ).all()
 
         if not deliveries:
@@ -300,6 +303,33 @@ def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
         db.session.rollback()
         logger.error(f"Route optimization failed for driver {driver_id}: {exc}")
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, time_limit=60, soft_time_limit=50)
+def refresh_driver_route_card_task(self, driver_id: int, delivery_id: int):
+    """Refresh, silently, the pinned route card of a driver whose stop `delivery_id` was cancelled.
+
+    Owner, 2026-10-22: no sound and no alert when an order is cancelled. Published after the
+    cancel commits (`business_app/utils/route_card_refresh_dispatch.py`). It re-solves nothing:
+    the cascade already dropped the stop from the route, and the card reads `/delivery/active`,
+    which leaves cancelled deliveries out. Not `optimize_driver_route_task`, whose gate can sound
+    on a head cancel and which pushes nothing once the last stop is gone.
+
+    The push names the cancelled stop, so the bot can take back a borrowed screen showing it.
+    Best-effort, like every route push: `notify_route_updated` never raises, and answers False
+    when the driver has no Telegram link or the bot is unreachable. The event id is the task id,
+    stable across a redelivery.
+    """
+    from business_app.services.route_optimization_service import ORDER_CANCELLED_TRIGGER
+    from business_app.utils.bot_webhook import notify_route_updated
+
+    return notify_route_updated(
+        driver_id,
+        sound=False,
+        trigger=ORDER_CANCELLED_TRIGGER,
+        event_id=f"route_updated:{self.request.id}",
+        delivery_id=delivery_id,
+    )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=60, soft_time_limit=50)

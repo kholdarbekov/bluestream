@@ -3,7 +3,7 @@
 The buttons come from the REAL `ReorderReminderKeyboards.reminder` (the builder the
 /internal/reorder-reminder route sends) and are tapped through the real dispatcher built by
 `WaterBusinessBot._setup_handlers()`. `reorder_<id>` reopens that order through the existing
-Quick Order flow (cart refilled, nothing placed on the tap); `menu_products` opens the
+Quick Order flow (cart refilled by the backend's fill-from-order, nothing placed on the tap); `menu_products` opens the
 catalogue. The Later / Stop taps are wired in Task 16b
 (tests/telegram_bot/test_reorder_reminder_callbacks.py).
 """
@@ -52,9 +52,12 @@ async def test_order_again_reopens_the_recipients_own_order(bot, user):
 
     await bot.send(user.tap(order_again))
 
-    fetched = [c for c in bot.backend.calls if c.method == "GET" and c.endpoint == "/api/v1/orders/9001"]
-    assert len(fetched) == 1
-    assert fetched[0].user_token == "test-access-token"
+    fills = [c for c in bot.backend.calls if c.method == "POST" and c.endpoint == "/api/v1/cart/fill-from-order/9001"]
+    assert [(c.data, c.user_token) for c in fills] == [(None, "test-access-token")]
+    assert not [
+        c for c in bot.backend.calls
+        if c.endpoint in ("/api/v1/orders/9001", "/api/v1/cart/clear", "/api/v1/cart/items")
+    ]
 
 
 async def test_without_an_own_order_the_button_opens_the_catalogue(bot, user):

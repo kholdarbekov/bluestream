@@ -512,3 +512,22 @@ async def test_a_message_telegram_refuses_to_edit_still_reaches_the_customer(bot
         f"nothing replaced the message Telegram refused to edit: {bot.telegram.calls}"
     )
     assert bot.conversation_state("subscription_creation") == SELECT_FREQUENCY
+
+
+@pytest.mark.parametrize(
+    "side_flow,enter",
+    [("item_management", f"add_item_{SUB_ID}"), ("update_item", f"update_item_{SUB_ID}_33")],
+)
+async def test_an_item_flow_expiring_leaves_a_subscription_being_built_alone(bot, user, side_flow, enter):
+    """Each timeout drops only its own flow's keys; only an exit gesture drops
+    them all. A shared list would delete the basket that the still-open creation
+    flow appends to next (subscriptions.py:260 raises KeyError)."""
+    await reach_payment_screen(bot, user)
+    flow_data = bot.application.user_data[DEFAULT_USER_ID]
+    before = {key: flow_data.get(key) for key in ("subscription_creation", "current_product_id")}
+    assert before["subscription_creation"], "the half-built basket"
+    await bot.send(user.tap(enter))
+
+    await fire_conversation_timeout(bot, side_flow, user.tap(enter))
+
+    assert {key: flow_data.get(key) for key in before} == before

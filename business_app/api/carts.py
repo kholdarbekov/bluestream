@@ -1,5 +1,6 @@
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from flasgger import swag_from
 
 from business_app.utils.service_factory import (
     get_cart_service,
@@ -77,6 +78,26 @@ def clear_cart():
     cart_service.clear_cart(user_id)
 
     return success_response(data={"message": get_translation("api.cart.cleared")})
+
+
+@cart_bp.route("/fill-from-order/<int:order_id>", methods=["POST"])
+@jwt_required()
+@handle_api_exception
+@swag_from(
+    {
+        "tags": ["Cart"],
+        "description": "Replace the cart with an order's reorderable lines",
+        "security": [{"Bearer": []}],
+        "parameters": [{"name": "order_id", "in": "path", "type": "integer", "required": True}],
+        "responses": {
+            "200": {"description": "data: {added, dropped}"},
+            "404": {"description": "Not the caller's order"},
+        },
+    }
+)
+def fill_cart_from_order(order_id):
+    """Replace the cart with an order's reorderable lines"""
+    return success_response(data=get_cart_service().fill_from_order(get_jwt_identity(), order_id))
 
 
 @cart_bp.route("/sync", methods=["POST"])

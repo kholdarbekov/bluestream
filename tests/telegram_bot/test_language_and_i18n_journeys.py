@@ -7,7 +7,7 @@ and every one of those defects lived in a seam no handler-level test can see:
 
 * a reply-keyboard label regex compiled from the ENGLISH copy only, so Cancel
   was dead in uz and ru and the tap escaped the conversation entirely
-  (``telegram_bot/bot.py::_resolve_tapped_label`` exists because of that);
+  (``telegram_bot/menu_tap.py::resolve_tapped_label`` exists because of that);
 * ``preferred_language`` stored raw from Telegram's ``language_code`` — an IETF
   tag like ``ru-RU`` — which missed the lookup in :meth:`i18n.Translation.get`
   and silently served the FALLBACK language to a Russian speaker
@@ -26,7 +26,7 @@ in the loop.
 
 THE COUPLING THIS FILE LEANS ON
 -------------------------------
-``_resolve_tapped_label`` calls ``i18n.get`` WHEN THE TAP ARRIVES, off the same
+``menu_tap.resolve_tapped_label`` calls ``i18n.get`` WHEN THE TAP ARRIVES, off the same
 translation table the keyboard builder renders from. So the table a test
 installs is the table the router matches against for as long as it stays
 installed — and a test may change it mid-flight and expect the change to take
@@ -377,7 +377,7 @@ async def test_the_next_screen_after_a_language_switch_reads_in_the_new_language
     )
 
     uz_bot.telegram.reset()
-    await uz_bot.send(user.tap("back_to_main"))
+    await uz_bot.send(user.command("menu"))
 
     main_menu = uz_bot.telegram.last_shown()
     assert main_menu.text == copy_in("telegram.main_menu", RU)
@@ -477,7 +477,7 @@ async def test_a_backend_outage_still_changes_the_language_the_bot_renders(uz_bo
     assert copy_in("telegram.language.confirmation_title", RU) in uz_bot.telegram.last_shown().text
 
     uz_bot.telegram.reset()
-    await uz_bot.send(user.tap("back_to_main"))
+    await uz_bot.send(user.command("menu"))
     assert uz_bot.telegram.last_shown().text == copy_in("telegram.main_menu", RU)
 
 
@@ -511,7 +511,7 @@ async def test_a_customer_who_tries_russian_and_changes_their_mind_gets_uzbek_ba
     assert copy_in("telegram.language.confirmation_title", UZ) in uz_bot.telegram.last_shown().text
 
     uz_bot.telegram.reset()
-    await uz_bot.send(user.tap("back_to_main"))
+    await uz_bot.send(user.command("menu"))
     assert uz_bot.telegram.last_shown().text == copy_in("telegram.main_menu", UZ)
 
 
@@ -591,7 +591,7 @@ async def test_a_customer_stored_as_ru_RU_reads_russian_not_the_fallback(monkeyp
     bot = await bot_for(monkeypatch, "ru-RU")
     user = bot.updates()
 
-    await bot.send(user.tap("back_to_main"))
+    await bot.send(user.command("menu"))
 
     menu = bot.telegram.last_shown()
     assert menu.text == copy_in("telegram.main_menu", RU)
@@ -610,7 +610,7 @@ async def test_a_junk_preferred_language_falls_back_to_the_configured_default(mo
     bot = await bot_for(monkeypatch, "klingon")
     user = bot.updates()
 
-    await bot.send(user.tap("back_to_main"))
+    await bot.send(user.command("menu"))
 
     assert bot.telegram.last_shown().text == copy_in("telegram.main_menu", DEFAULT_LANGUAGE)
 
@@ -680,7 +680,7 @@ async def test_cancel_ends_the_address_flow_in_every_supported_language(monkeypa
     """The defect this file is named after.
 
     `telegram.cancel` is seeded as "❌ Bekor qilish" / "❌ Отмена" / "❌ Cancel".
-    The pattern that preceded `_resolve_tapped_label` matched the English word
+    The pattern that preceded `menu_tap.resolve_tapped_label` matched the English word
     only, so Cancel did nothing in uz and ru — the customer was stuck in the
     address flow with a Cancel button that answered with silence.
 
@@ -700,22 +700,6 @@ async def test_cancel_ends_the_address_flow_in_every_supported_language(monkeypa
         "in the address flow"
     )
     shown = bot.telegram.shown
-    dismissal = next(
-        (
-            call
-            for call in shown
-            if call.text == copy_in("telegram.action_cancelled_short", language)
-        ),
-        None,
-    )
-    assert dismissal is not None, (
-        f"the customer was never told the flow was cancelled; they saw "
-        f"{[call.text for call in shown]}"
-    )
-    assert dismissal.reply_markup.get("remove_keyboard") is True, (
-        "the location keyboard must be taken away with the flow, or the "
-        "customer is left holding buttons that now lead nowhere"
-    )
     # Located by its own text rather than by position: PTB runs one handler per
     # GROUP, so this same text is ALSO delivered to the group-0 catch-all
     # (`_handle_text_message`), which appends a message of its own. Asserting on
@@ -730,6 +714,7 @@ async def test_cancel_ends_the_address_flow_in_every_supported_language(monkeypa
     assert copy_in("telegram.menu.products", language) in landing.button_labels(), (
         "cancelling must land the customer on a usable main menu"
     )
+    assert "remove_keyboard" not in landing.reply_markup
 
 
 async def test_a_cancel_label_left_over_from_the_previous_language_still_cancels(monkeypatch):
@@ -737,7 +722,7 @@ async def test_a_cancel_label_left_over_from_the_previous_language_still_cancels
 
     Telegram reply keyboards are client-side and survive unrelated messages, so
     the Uzbek "❌ Bekor qilish" is still sitting on this customer's screen after
-    they switch to Russian. `_resolve_tapped_label` sweeps every supported
+    they switch to Russian. `menu_tap.resolve_tapped_label` sweeps every supported
     language on every tap precisely so the stale button keeps working — and the
     reply they get must be in their NEW language, because that is the one the
     handler re-reads from the database.
@@ -747,13 +732,13 @@ async def test_a_cancel_label_left_over_from_the_previous_language_still_cancels
     assert await open_address_flow(bot, user) == ADDRESS_LOCATION
     assert copy_in("telegram.cancel", UZ) != copy_in("telegram.cancel", RU)
 
-    # The customer reaches for /language mid-flow; the address conversation has
-    # no handler for it, so it is served by the top-level command handler and
-    # the flow stays open underneath.
+    # /language is an exit gesture (spec §2), so it ends the address flow. The
+    # stale Uzbek Cancel below is then answered by the address conversation's
+    # own entry point (`TEXT & MenuTapFilter('telegram.cancel')`).
     await bot.send(user.command("language"))
     await bot.send(user.tap("set_language_ru"))
-    assert bot.conversation_state("address_conversation") == ADDRESS_LOCATION, (
-        "switching language must not silently destroy the flow in progress"
+    assert bot.conversation_state("address_conversation") is None, (
+        "/language is an exit gesture: it ends the flow it was typed in"
     )
     assert bot.database.user["preferred_language"] == "ru"
 
@@ -776,7 +761,7 @@ async def test_an_ordinary_sentence_about_cancelling_is_not_the_cancel_button(mo
     containing the word, so a customer typing "I don't want to cancel" mid-flow
     would have had their address flow cancelled by the bot agreeing with them.
     Its successor `_label_pattern` then allowed one leading token, so a note
-    that merely ENDED in the copy did the same thing; `_resolve_tapped_label`
+    that merely ENDED in the copy did the same thing; `menu_tap.resolve_tapped_label`
     strips only an emoji decoration a keyboard row could have carried.
     """
     bot = await bot_for(monkeypatch, RU)
@@ -794,7 +779,7 @@ async def test_the_label_matcher_reads_the_table_the_harness_installed(monkeypat
     """The matcher resolves against the LIVE translation table, not a seed file.
 
     Proved with copy that exists nowhere in the seed script, so the only way
-    this tap can land is if `_resolve_tapped_label` read the table this test
+    this tap can land is if `menu_tap.resolve_tapped_label` read the table this test
     supplied. (This used to assert an ORDERING — the table had to be installed
     before `_setup_handlers()` compiled the regexes. It no longer has to be:
     the lookup happens when the tap arrives. What survives is the half that
@@ -826,7 +811,7 @@ async def test_copy_reseeded_after_startup_matches_the_moment_it_renders(monkeyp
     until a restart, and their tap fell through to the group-0 catch-all, where
     a Cancel became a support ticket with no reply.
 
-    `MenuTapFilter` asks `_resolve_tapped_label` WHEN THE TAP ARRIVES, off the
+    `MenuTapFilter` asks `menu_tap.resolve_tapped_label` WHEN THE TAP ARRIVES, off the
     same `i18n.get` the keyboard builder renders from, so the two can no longer
     describe different strings. The retired copy stops matching in the same
     instant, which is the other half of the guarantee: it cannot linger as an
@@ -912,7 +897,7 @@ async def test_a_bot_with_no_translations_at_all_still_renders_a_tappable_menu(m
     bot = await build_bot_harness(monkeypatch, database=customer_speaking(UZ))
     user = bot.updates()
 
-    await bot.send(user.tap("back_to_main"))
+    await bot.send(user.command("menu"))
 
     menu = bot.telegram.last_shown()
     assert menu.text == Translation.humanised_missing_key("telegram.main_menu") == "Main menu"
@@ -984,7 +969,7 @@ async def test_a_placeholder_the_call_site_never_fills_is_never_shown_to_the_cus
     )
     user = bot.updates()
 
-    await bot.send(user.tap("back_to_main"))
+    await bot.send(user.command("menu"))
 
     menu = bot.telegram.last_shown()
     assert "{" not in menu.text, (

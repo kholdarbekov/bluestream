@@ -944,6 +944,8 @@ def test_the_driver_on_the_stop_is_told_once_and_the_route_resorts_quietly(
             "materiality": None,
             "trigger": "address_change",
             "event_id": None,
+            # Only an order cancel names the stop that left the route.
+            "delivery_id": None,
         }
     ]
     assert address_fanout.calls["optimize"] == [{"driver_id": rostered_driver.id, "trigger": "address_change"}]

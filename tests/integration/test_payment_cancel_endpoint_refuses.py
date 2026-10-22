@@ -335,13 +335,16 @@ class TestOrderCancellabilityAgreesWithTheRealCancelPath:
     """
 
     # One row per input the predicate reads besides the order status: the payment,
-    # `order.is_paid`, and whether the delivery is driverless, taken, or failed.
+    # `order.is_paid`, and whether the delivery is driverless, accepted by a driver, picked
+    # up, or failed. Accepted is on the cancellable side since F5 was amended on 2026-10-21;
+    # picked up keeps the driver refusal covered.
     MONEY_AND_DELIVERY = [
         pytest.param(PaymentStatus.PENDING, False, None, id="unpaid-no-delivery"),
         pytest.param(PaymentStatus.COMPLETED, True, None, id="paid"),
         pytest.param(PaymentStatus.PARTIALLY_PAID, False, None, id="partially-paid"),
         pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.SCHEDULED, id="driverless-delivery"),
-        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.ASSIGNED, id="driver-has-it"),
+        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.ASSIGNED, id="driver-accepted"),
+        pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.PICKED_UP, id="driver-picked-it-up"),
         pytest.param(PaymentStatus.PENDING, False, DeliveryStatus.FAILED, id="delivery-failed"),
     ]
 

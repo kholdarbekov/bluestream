@@ -315,14 +315,19 @@ class DeliveryService:
         """Advance an assigned delivery directly to in-transit for legacy entrypoints."""
         actor_user_id = self._normalize_actor_id(actor_user_id)
         required_driver_id = self._normalize_actor_id(required_driver_id)
-        delivery = Delivery.query.get(delivery_id)
+        # Locked and re-read: a customer may cancel an accepted (`assigned`) order since
+        # 2026-10-21, and that cancel locks this row first. Read unlocked, a start whose read
+        # came before the cancel committed wrote `in_transit` over it, leaving a live stop on a
+        # cancelled order. Under the lock the order can be read as committed, too.
+        delivery = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
         if not delivery:
             raise NotFoundError("Delivery not found")
 
         if required_driver_id is not None and delivery.delivery_person_id != required_driver_id:
             raise NotFoundError("Delivery not found or not assigned")
 
-        if delivery.status != DeliveryStatus.ASSIGNED:
+        order = db.session.get(Order, delivery.order_id, populate_existing=True)
+        if delivery.status != DeliveryStatus.ASSIGNED or order is None or order.status == OrderStatus.CANCELLED:
             raise ValidationError("Cannot start delivery at the current stage")
 
         from .bottle_tracking_service import BottleTrackingService

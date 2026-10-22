@@ -115,11 +115,12 @@ def _html_escaped(value) -> str:
 def _order_id_or_none(value) -> Optional[int]:
     """The positive whole order id `value` stands for, or None.
 
-    Feeds the Order-again button's ``reorder_<id>`` callback, which the bot only claims as
+    Feeds the Order-again button's ``reorder_<id>`` callback (reorder reminder and delivery
+    summary), which the bot only claims as
     ``^reorder_\\d+$``. Anything else would ship a button that does nothing: ``9001.0``, ``"abc"``,
     ``-5``, ``True`` (``int(True)`` is 1, someone else's order). A whole float or a numeric
-    string is coerced (``9001.0`` -> 9001); everything else is None, which makes the keyboard
-    open the catalogue instead.
+    string is coerced (``9001.0`` -> 9001); everything else is None, which opens the catalogue on a
+    reminder and drops Order again from a delivery summary.
     """
     if isinstance(value, bool):
         return None
@@ -609,10 +610,11 @@ class WebhookServer:
                     )
                     stored_message_id = None
 
+            from keyboards import PaymentKeyboards
+            keyboard = PaymentKeyboards.payment_success(order_id, language)
+
             if stored_message_id:
                 try:
-                    from keyboards import PaymentKeyboards
-                    keyboard = PaymentKeyboards.payment_success(order_id, language)
                     await self.bot_app.bot.edit_message_text(
                         chat_id=telegram_id,
                         message_id=int(stored_message_id),
@@ -639,7 +641,8 @@ class WebhookServer:
             if not message_edited:
                 await self.bot_app.bot.send_message(
                     chat_id=telegram_id,
-                    text=message_text
+                    text=message_text,
+                    reply_markup=keyboard,
                 )
 
             return web.json_response({
@@ -665,11 +668,13 @@ class WebhookServer:
             "telegram_id": 12345,
             "bottles_delivered": "4",   # normalized Decimal strings, pre-formatted
             "bottles_collected": "3",   # by the backend (format_bottle_quantity)
-            "balance": "5"
+            "balance": "5",
+            "reorder_order_id": 67890   # or null
         }
 
-        Sends the customer a delivery summary with a "Report an issue" inline
-        button. Numbers arrive pre-formatted as strings and are rendered verbatim
+        Sends the customer a delivery summary with two inline buttons: "Order again"
+        (``reorder_<reorder_order_id>``, only when that is not null) above "Report an issue".
+        Numbers arrive pre-formatted as strings and are rendered verbatim
         — the bot performs no numeric formatting of its own.
         """
         try:
@@ -703,6 +708,7 @@ class WebhookServer:
             bottles_delivered = str(data.get('bottles_delivered', '0'))
             bottles_collected = str(data.get('bottles_collected', '0'))
             balance = str(data.get('balance', '0'))
+            reorder_order_id = _order_id_or_none(data.get('reorder_order_id'))
 
             if not order_id or not telegram_id:
                 return web.json_response({
@@ -776,13 +782,8 @@ class WebhookServer:
 
                 # Lazy import mirrors payment_success_handler's `from keyboards import
                 # PaymentKeyboards` — keeps keyboards out of module import time.
-                from keyboards import KeyboardBuilder
-                keyboard = KeyboardBuilder.build_inline_keyboard([[
-                    {
-                        'text': i18n.get('telegram.delivery_summary.report_button', language),
-                        'callback_data': f'report_issue_{order_id}',
-                    }
-                ]])
+                from keyboards import DeliverySummaryKeyboards
+                keyboard = DeliverySummaryKeyboards.summary(language, order_id, reorder_order_id)
 
                 await self.bot_app.bot.send_message(
                     chat_id=telegram_id,
@@ -1019,7 +1020,9 @@ class WebhookServer:
             "days": 12,                    # whole local days since the supply delivery
             "gap": 7,                      # usual gap in days, or null on the preset
             "snooze_days": 14,
-            "reorder_order_id": 9001,      # the recipient's own newest delivered order, or null
+            "reorder_order_id": 9001,      # the recipient's own reorder candidate, or null: never a
+                                           # subscription delivery, never a reward-only order
+                                           # (OrderService.reorder_candidate)
             "items": [{"qty": 2, "names": {"uz": "Toza suv 19 l", "ru": "Чистая вода 19 л",
                                            "en": "Pure Water 19L"}}],
             "language": "ru",              # shared.i18n_rendering.reminder_language, resolved

@@ -472,7 +472,6 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.MessageBuilder, "build_order_summary", lambda _o, _l: "order-summary")
-        monkeypatch.setattr(orders_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
             create_order=_resp(success=True, data=order_data),

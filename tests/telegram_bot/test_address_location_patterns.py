@@ -9,7 +9,7 @@ filed as a support ticket with no reply.
 The regex builder that fixed that (`_label_pattern`) has since been deleted:
 it resolved the copy ONCE, at handler-build time, so an admin retitling a label
 produced a button that rendered with the new text and matched nothing. The rule
-now lives in `_resolve_tapped_label`, asked per update by `MenuTapFilter`.
+now lives in `menu_tap.resolve_tapped_label`, asked per update by `MenuTapFilter`.
 These are its unit-level guarantees; the journey-level ones live in
 `test_language_and_i18n_journeys.py`.
 """
@@ -23,7 +23,7 @@ import pytest
 # `TelegramBot` symbol anywhere in telegram_bot/. Importing the real name here;
 # see the Task 11 report for the discrepancy note.
 import bot as bot_module
-from bot import MenuTapFilter, _resolve_tapped_label
+from menu_tap import MenuTapFilter, resolve_tapped_label
 
 pytestmark = pytest.mark.unit
 
@@ -42,17 +42,17 @@ def seeded_cancel_copy(monkeypatch):
 
 def test_cancel_matches_every_language(seeded_cancel_copy):
     for language, label in LABELS.items():
-        assert _resolve_tapped_label(label, [CANCEL]) == CANCEL, (
+        assert resolve_tapped_label(label, [CANCEL]) == CANCEL, (
             f"{label!r} ({language}) must resolve to the Cancel button"
         )
 
 
 def test_cancel_is_whole_string_not_substring(seeded_cancel_copy):
     """The substring patterns this replaces would swallow an ordinary sentence."""
-    assert _resolve_tapped_label(
+    assert resolve_tapped_label(
         "I would like to cancel my order please", [CANCEL]
     ) is None
-    assert _resolve_tapped_label(
+    assert resolve_tapped_label(
         "Я не хочу ❌ Отмена заказа, просто вопрос", [CANCEL]
     ) is None
 
@@ -68,7 +68,7 @@ def test_a_word_typed_in_front_of_the_label_is_not_a_tap(seeded_cancel_copy):
     keyboard row may carry is strippable; a word a person typed is not.
     """
     for typed in ("Sardor ❌ Bekor qilish", "Пожалуйста ❌ Отмена", "please ❌ Cancel"):
-        assert _resolve_tapped_label(typed, [CANCEL]) is None, (
+        assert resolve_tapped_label(typed, [CANCEL]) is None, (
             f"{typed!r} is typed text, not a button tap"
         )
 
@@ -81,9 +81,9 @@ def test_the_emoji_decoration_may_differ_on_either_side(seeded_cancel_copy):
     removing one leaves a live keyboard whose decoration no longer matches the
     row. The label still routes; only the decoration is allowed to differ.
     """
-    assert _resolve_tapped_label("Bekor qilish", [CANCEL]) == CANCEL
-    assert _resolve_tapped_label("🚫 Bekor qilish", [CANCEL]) == CANCEL
-    assert _resolve_tapped_label("  ❌ Bekor qilish  ", [CANCEL]) == CANCEL
+    assert resolve_tapped_label("Bekor qilish", [CANCEL]) == CANCEL
+    assert resolve_tapped_label("🚫 Bekor qilish", [CANCEL]) == CANCEL
+    assert resolve_tapped_label("  ❌ Bekor qilish  ", [CANCEL]) == CANCEL
 
 
 def test_a_different_emoji_alone_is_not_a_tap(monkeypatch):
@@ -91,8 +91,8 @@ def test_a_different_emoji_alone_is_not_a_tap(monkeypatch):
     monkeypatch.setattr("i18n.i18n.supported_languages", ["uz", "ru", "en"])
     monkeypatch.setattr("i18n.i18n.get", lambda key, language=None, *a, **kw: "❌")
 
-    assert _resolve_tapped_label("❌", [CANCEL]) == CANCEL
-    assert _resolve_tapped_label("🚫", [CANCEL]) is None
+    assert resolve_tapped_label("❌", [CANCEL]) == CANCEL
+    assert resolve_tapped_label("🚫", [CANCEL]) is None
 
 
 def test_nothing_matches_when_copy_is_missing(monkeypatch):
@@ -101,13 +101,13 @@ def test_nothing_matches_when_copy_is_missing(monkeypatch):
     monkeypatch.setattr("i18n.i18n.supported_languages", ["uz", "ru", "en"])
     monkeypatch.setattr("i18n.i18n.get", lambda key, language=None, *a, **kw: "")
 
-    assert _resolve_tapped_label("", [CANCEL]) is None
-    assert _resolve_tapped_label("anything at all", [CANCEL]) is None
-    assert _resolve_tapped_label(None, [CANCEL]) is None
+    assert resolve_tapped_label("", [CANCEL]) is None
+    assert resolve_tapped_label("anything at all", [CANCEL]) is None
+    assert resolve_tapped_label(None, [CANCEL]) is None
 
 
 def test_the_filter_asks_the_matcher_and_reports_which_key(seeded_cancel_copy):
-    """One rule, one implementation: `MenuTapFilter` IS `_resolve_tapped_label`.
+    """One rule, one implementation: `MenuTapFilter` IS `resolve_tapped_label`.
 
     The staff bot shipped a filter and a matcher that disagreed; this pins that
     the customer bot has only the one decider, and that a multi-key filter
@@ -119,8 +119,8 @@ def test_the_filter_asks_the_matcher_and_reports_which_key(seeded_cancel_copy):
     assert tap_filter.filter(_message(LABELS["ru"])) is True
     assert tap_filter.filter(_message("просто вопрос")) is False
     # Both keys render the same copy under this fixture, so key ORDER decides.
-    assert _resolve_tapped_label(LABELS["ru"], [other, CANCEL]) == other
-    assert _resolve_tapped_label(LABELS["ru"], [CANCEL, other]) == CANCEL
+    assert resolve_tapped_label(LABELS["ru"], [other, CANCEL]) == other
+    assert resolve_tapped_label(LABELS["ru"], [CANCEL, other]) == CANCEL
 
 
 def test_the_address_flow_escapes_are_wired_to_the_dispatch_time_filter():
@@ -140,9 +140,15 @@ def test_the_address_flow_escapes_are_wired_to_the_dispatch_time_filter():
 
     required_fragments = [
         "MenuTapFilter(\n                        'telegram.address.enter_manually_button'\n                    )",
-        "MenuTapFilter('telegram.cancel')",
-        "'telegram.address.enter_manually_button',\n                            "
-        "'telegram.address.reenter_manually_button',",
+        # The two shared filters: the address conversation answers them and the
+        # phone conversation leaves them alone (bot.py, both forms open at once).
+        "cancel_tap = MenuTapFilter('telegram.cancel')",
+        "address_manual_entry_tap = MenuTapFilter(\n"
+        "            'telegram.address.enter_manually_button',\n"
+        "            'telegram.address.reenter_manually_button',\n"
+        "        )",
+        "filters.TEXT & address_manual_entry_tap",
+        "filters.TEXT & cancel_tap",
     ]
     missing = [fragment for fragment in required_fragments if fragment not in text]
     assert not missing, f"Address-flow escape wiring is not the tap filter: {missing}"

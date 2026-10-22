@@ -3269,7 +3269,10 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 657 -> 660: auth.request_telegram_link, bot.preview_web_link and bot.confirm_web_link (web-to-Telegram link).
     # 660 -> 657: POST /auth/logout-all, its /auth/sessions/revoke-all alias and POST
     # /session/sessions/revoke-all (R10: each app logs out only itself).
-    assert len(routes) == 657
+    # 657 -> 659: GET /api/v1/orders/reorder-info (orders.get_reorder_info) and POST
+    # /api/v1/cart/fill-from-order/<int:order_id> (cart.fill_cart_from_order) -- the customer bot's
+    # Order water / Order again. Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 659
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

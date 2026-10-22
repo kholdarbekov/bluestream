@@ -246,10 +246,13 @@ class CancelCase(NamedTuple):
 CANCEL_CASES = [
     CancelCase("pending-unpaid", OS.PENDING, None, False, True),
     CancelCase("confirmed-in-the-pool", OS.CONFIRMED, DS.PENDING, False, True),
+    # F5 as amended 2026-10-21: an accepted order stays cancellable until the driver picks it up.
+    CancelCase("confirmed-driver-accepted", OS.CONFIRMED, DS.ASSIGNED, False, True),
     # The old page drew Cancel for the next three. Pending or confirmed was all it asked.
-    CancelCase("confirmed-driver-accepted", OS.CONFIRMED, DS.ASSIGNED, False, False),
     CancelCase("confirmed-awaiting-new-date", OS.CONFIRMED, DS.FAILED, False, False),
     CancelCase("pending-paid", OS.PENDING, None, True, False),
+    CancelCase("confirmed-driver-picked-up", OS.CONFIRMED, DS.PICKED_UP, False, False),
+    CancelCase("out-for-delivery-picked-up", OS.OUT_FOR_DELIVERY, DS.PICKED_UP, False, False),
     CancelCase("out-for-delivery", OS.OUT_FOR_DELIVERY, DS.IN_TRANSIT, False, False),
 ]
 

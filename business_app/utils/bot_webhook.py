@@ -263,6 +263,7 @@ def notify_route_updated(
     materiality: Optional[Dict[str, Any]] = None,
     trigger: Optional[str] = None,
     event_id: Optional[str] = None,
+    delivery_id: Optional[int] = None,
 ) -> bool:
     """Tell the staff bot the driver's optimized route changed.
 
@@ -287,6 +288,12 @@ def notify_route_updated(
     callers with no such handle — the four `RouteEditService` paths are
     synchronous Flask request handlers with no retry wrapper, so a random id
     is correct for them: every call really is a distinct event.
+
+    `delivery_id`: the stop that just left the driver's route, sent only by
+    `refresh_driver_route_card_task` after an order cancel. The bot forgets its
+    snapshot of that stop, and a borrowed card showing that stop's screen gives
+    way to the refreshed card. Omitted from the payload when None, so every
+    other caller's payload is unchanged.
     """
     telegram_id = _resolve_driver_telegram_id(driver_id)
     if telegram_id is None:
@@ -309,6 +316,8 @@ def notify_route_updated(
                 "driver_initiated": bool(materiality.get("driver_initiated", False)),
             }
         )
+    if delivery_id is not None:
+        payload["delivery_id"] = int(delivery_id)
     return _send_staff_bot_webhook("/internal/route-updated", payload)
 
 

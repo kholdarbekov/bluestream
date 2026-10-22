@@ -51,7 +51,6 @@ from business_app.services.reorder_reminders.tokens import site_url, unsubscribe
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.bot_webhook import trigger_bot_webhook
 from business_app.utils.constants import NotificationChannel, NotificationType
-from business_app.utils.delivery_cadence import delivery_instants_by_customer
 from business_app.utils.local_windows import local_date
 from business_app.utils.timezone_utils import ensure_utc, get_utc_now
 from business_app.utils.translations import get_translation
@@ -265,7 +264,8 @@ def _with_neutralised_names(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
 
 def _recipient_order_lines(user_id: int) -> Tuple[Optional[int], List[Dict[str, Any]]]:
-    """The recipient's OWN newest delivered order and its largest lines (spec §7.3).
+    """The recipient's reorder candidate (`OrderService.reorder_candidate`), never a subscription
+    delivery, and its largest lines (spec §7.3).
 
     Own, not the cluster's: the bot's `reorder_<id>` checks that the tapping account owns the
     order. Free reward lines are never "your usual". Each line carries the product's name in
@@ -279,17 +279,14 @@ def _recipient_order_lines(user_id: int) -> Tuple[Optional[int], List[Dict[str, 
     costs the customer one of theirs. Building stops at the MAX_ITEMS-th printable line, so a large
     order costs no name lookups past it.
     """
-    newest = delivery_instants_by_customer({"recipient": (user_id,)}).get("recipient") or []
-    if not newest:
+    from business_app.services.order_service import OrderService
+
+    candidate = OrderService.reorder_candidate(user_id)
+    if candidate is None:
         return None, []
-    order_id = newest[0][0]
-    lines = (
-        OrderItem.query.filter(OrderItem.order_id == order_id, OrderItem.is_reward_item.is_(False))
-        .order_by(OrderItem.quantity.desc(), OrderItem.id.asc())
-        .all()
-    )
+    lines = sorted(OrderService.reorderable_lines(candidate), key=lambda line: (-line.quantity, line.id))
     readable = (item for item in map(_order_line, lines) if reorder_reminder_copy.printable(item))
-    return order_id, list(islice(readable, reorder_reminder_copy.MAX_ITEMS))
+    return candidate.id, list(islice(readable, reorder_reminder_copy.MAX_ITEMS))
 
 
 def telegram_payload(

@@ -18,17 +18,23 @@ Every update goes in through ``Application.process_update``; only Telegram, the
 backend and the bot's own SQL are faked (``tests/telegram_bot/ptb_harness.py``).
 """
 
+import json
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from telegram.ext import CallbackContext, ConversationHandler
 
 import utils as utils_module
 from handlers.profile import PHONE_VERIFY_NAME, PHONE_VERIFY_OTP, PHONE_VERIFY_PHONE
+from shared.business_config import PHONE_OTP_EXPIRY
 
 from tests.telegram_bot.ptb_harness import (
     DEFAULT_USER_ID,
     backend_failure,
     build_bot_harness,
 )
+from tests.telegram_bot.menu_keyboard_helpers import expected_labels, menu_sends
+from tests.telegram_bot.test_menu_label_routing import MENU_LABEL_TRANSLATIONS
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -44,9 +50,11 @@ SUPPORT_MESSAGES = "/api/v1/support/messages"
 NEW_PHONE_E164 = "+998935554433"
 MASKED = "+99***4433"
 
-KEYBOARD_CLEANUP_FILLER = "⁠"
-
 TRANSLATIONS = {
+    **MENU_LABEL_TRANSLATIONS,
+    "telegram.support.menu_intro": "Help screen",
+    "telegram.help.command_hint": "Use the buttons below",
+    "telegram.bot.otp.success_message": "Phone verified by code",
     "telegram.phone.send_code_prompt": "Share your phone to receive a code",
     "telegram.profile.share_phone": "SHARE-CONTACT-BUTTON",
     "telegram.phone.phone_accepted": "Phone accepted",
@@ -100,7 +108,7 @@ def texts(bot):
     return [
         call.text
         for call in bot.telegram.shown
-        if call.text and call.text != KEYBOARD_CLEANUP_FILLER
+        if call.text
     ]
 
 
@@ -186,13 +194,6 @@ async def test_a_typed_number_is_saved_only_after_its_code_and_the_name_step_sti
     assert "Code sent to " + MASKED in texts(bot), (
         "the prompt must echo the backend's MASKED number"
     )
-
-    # Fat-fingered: five digits cost no backend call.
-    bot.telegram.reset()
-    await bot.send(user.text("12345"))
-    assert last_text(bot) == "The code must be 6 digits"
-    assert calls(bot, "POST", VERIFY_PHONE) == []
-    assert state(bot) == PHONE_VERIFY_OTP
 
     # Right shape, wrong code: one retry, not the end of the flow.
     bot.backend.route(
@@ -289,3 +290,149 @@ async def test_a_timed_out_code_step_says_so_and_drops_the_pending_number(bot, u
     assert "pending_phone_verification" not in flow_data(bot)
     assert calls(bot, "POST", VERIFY_PHONE) == []
     assert phone_writes(bot) == []
+
+
+def bot_state(bot):
+    return json.loads(bot.database.user.get("bot_state") or "{}")
+
+
+@pytest.mark.parametrize("typed", ["Kod kelmadi", "12345"], ids=["words", "five-digits"])
+async def test_text_that_is_not_a_code_ends_the_code_step_and_the_code_stays_live(bot, user, typed):
+    """Spec §2 "Other text": no endless 'the code must be 6 digits' loop. The step
+    ends and the message goes where any other message goes, but the code stays
+    answerable for the rest of its lifetime ("Why"): the real code typed next
+    verifies the number it was sent to and never lands in the Support Inbox."""
+    await reach_code_step(bot, user)
+    sent_at = flow_data(bot)["phone_otp_sent_at"]
+
+    await bot.send(user.text(typed))
+
+    assert state(bot) is None
+    assert "pending_phone_verification" not in flow_data(bot)
+    assert calls(bot, "POST", VERIFY_PHONE) == []
+    assert payloads(bot, "POST", SUPPORT_MESSAGES) == [{"content": typed, "message_type": "text"}]
+    assert texts(bot) == [], "support capture is silent"
+    durable = bot_state(bot)
+    assert durable["awaiting_input"] == "phone_otp"
+    assert durable["pending_phone_verification"] == NEW_PHONE_E164
+    assert durable["phone_otp_armed_at"] == sent_at, "the lifetime counts from the SMS"
+
+    bot.backend.route("POST", VERIFY_PHONE, lambda _c: {"data": {"phone": NEW_PHONE_E164}})
+    await bot.send(user.text("123456"))
+
+    assert payloads(bot, "POST", SEND_OTP) == [{"phone": NEW_PHONE_E164}]
+    assert payloads(bot, "POST", VERIFY_PHONE) == [{"otp": "123456"}]
+    assert last_text(bot) == "Phone verified by code"
+    assert "awaiting_input" not in bot_state(bot)
+    assert payloads(bot, "POST", SUPPORT_MESSAGES) == [{"content": typed, "message_type": "text"}]
+    assert phone_writes(bot) == []
+
+
+async def test_text_at_the_code_step_after_the_code_lifetime_lets_nothing_verify_later(bot, user):
+    await reach_code_step(bot, user)
+    flow_data(bot)["phone_otp_sent_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=PHONE_OTP_EXPIRY + 1)
+    ).isoformat()
+
+    await bot.send(user.text("12345"))
+    await bot.send(user.text("123456"))
+
+    assert state(bot) is None
+    assert calls(bot, "POST", VERIFY_PHONE) == []
+    assert "awaiting_input" not in bot_state(bot)
+    assert payloads(bot, "POST", SUPPORT_MESSAGES) == [
+        {"content": "12345", "message_type": "text"},
+        {"content": "123456", "message_type": "text"},
+    ]
+
+
+async def test_a_code_typed_after_leaving_the_code_step_still_verifies_the_number(bot, user):
+    """Spec §2 "Late codes": the customer tapped a menu button while the SMS was on
+    its way. The code they then type is still checked against the number it was
+    sent to, and never lands in the Support Inbox."""
+    await reach_code_step(bot, user)
+    sent_at = flow_data(bot)["phone_otp_sent_at"]
+
+    await bot.send(user.text("🆘 Yordam"))
+
+    assert state(bot) is None
+    assert last_text(bot) == "Help screen\n\nUse the buttons below"
+    durable = bot_state(bot)
+    assert durable["awaiting_input"] == "phone_otp"
+    assert durable["pending_phone_verification"] == NEW_PHONE_E164
+    assert durable["phone_otp_armed_at"] == sent_at, "the lifetime counts from the SMS, not the tap"
+
+    bot.backend.route("POST", VERIFY_PHONE, lambda _c: {"data": {"phone": NEW_PHONE_E164}})
+    bot.telegram.reset()
+    await bot.send(user.text("123456"))
+
+    assert payloads(bot, "POST", SEND_OTP) == [{"phone": NEW_PHONE_E164}]
+    assert payloads(bot, "POST", VERIFY_PHONE) == [{"otp": "123456"}]
+    assert last_text(bot) == "Phone verified by code"
+    assert "awaiting_input" not in bot_state(bot)
+    assert calls(bot, "POST", SUPPORT_MESSAGES) == []
+    assert phone_writes(bot) == []
+
+
+async def test_leaving_the_code_step_late_does_not_stretch_the_code_lifetime(bot, user):
+    """The SMS went out PHONE_OTP_EXPIRY + 1 s before the customer tapped away. The
+    exit must not give that code a fresh lifetime."""
+    await reach_code_step(bot, user)
+    sent_at = (datetime.now(timezone.utc) - timedelta(seconds=PHONE_OTP_EXPIRY + 1)).isoformat()
+    flow_data(bot)["phone_otp_sent_at"] = sent_at
+
+    await bot.send(user.text("🆘 Yordam"))
+
+    assert bot_state(bot)["phone_otp_armed_at"] == sent_at
+
+    bot.telegram.reset()
+    await bot.send(user.text("123456"))
+
+    assert calls(bot, "POST", VERIFY_PHONE) == []
+    assert "awaiting_input" not in bot_state(bot)
+    assert payloads(bot, "POST", SUPPORT_MESSAGES) == [{"content": "123456", "message_type": "text"}]
+
+
+async def test_a_code_written_with_a_space_at_the_code_step_is_verified_as_its_digits(bot, user):
+    """One rule for "is this a code" (utils.otp_code_in): the code step verifies the
+    digits of "123 456", and the flow goes on to the name step."""
+    await reach_code_step(bot, user)
+    bot.backend.route("POST", VERIFY_PHONE, lambda _c: {"data": {"phone": NEW_PHONE_E164}})
+
+    await bot.send(user.text("123 456"))
+
+    assert payloads(bot, "POST", VERIFY_PHONE) == [{"otp": "123456"}]
+    assert texts(bot) == ["Phone number is verified", "Enter your full name"]
+    assert state(bot) == PHONE_VERIFY_NAME
+    assert calls(bot, "POST", SUPPORT_MESSAGES) == []
+
+
+async def test_the_share_contact_step_offers_cancel_and_cancel_puts_the_menu_back(bot, user):
+    await bot.send(user.tap("add_phone_number"))
+    assert bot.telegram.last_shown().reply_markup["keyboard"] == [
+        [{"text": "SHARE-CONTACT-BUTTON", "request_contact": True}],
+        [{"text": "Cancel"}],
+    ]
+    bot.telegram.reset()
+
+    await bot.send(user.text("Cancel"))
+
+    assert state(bot) is None
+    assert bot.conversation_state("address_conversation") is None, "the address form's own Cancel must not claim it"
+    assert texts(bot) == ["Cancelled. Here is the menu"]
+    [carrier] = menu_sends(bot)
+    assert carrier.button_labels() == expected_labels()
+
+
+@pytest.mark.parametrize("how,next_prompt", [
+    ("contact", "Enter your full name"),
+    ("typed", f"Code sent to {MASKED}"),
+])
+async def test_an_accepted_number_puts_the_menu_back_before_the_next_question(bot, user, how, next_prompt):
+    await reach_typed_phone_step(bot, user)
+
+    await bot.send(user.contact("998978730111") if how == "contact" else user.text(NEW_PHONE_E164))
+
+    [carrier] = menu_sends(bot)
+    assert (carrier.text, carrier.button_labels()) == ("Phone accepted", expected_labels())
+    assert texts(bot)[-1] == next_prompt

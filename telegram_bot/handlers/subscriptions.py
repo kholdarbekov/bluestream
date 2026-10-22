@@ -4,10 +4,10 @@ Subscription management handlers with complete implementation
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
-from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
+from flow_exit import ITEM_MANAGEMENT_KEYS, SUBSCRIPTION_CREATION_KEYS, UPDATE_ITEM_KEYS
 from utils import user_middleware, get_auth_token
 from shared.constants import SUBSCRIPTION_STATUS_ICONS
 # `BaseHandler._ack` is why every ack below goes through `self._ack`: answering
@@ -531,10 +531,6 @@ class SubscriptionHandlers(BaseHandler):
                 InlineKeyboardButton(
                     i18n.get('telegram.subscription.view', language),
                     callback_data=f'subscription_{subscription.get("id")}'
-                ),
-                InlineKeyboardButton(
-                    i18n.get('telegram.back_to_menu', language),
-                    callback_data='back_to_main'
                 )
             ]]
 
@@ -542,8 +538,8 @@ class SubscriptionHandlers(BaseHandler):
             await self._ack(query, i18n.get('telegram.subscription.created_success', language))
 
             # Clear context
-            if 'subscription_creation' in context.user_data:
-                del context.user_data['subscription_creation']
+            for name in SUBSCRIPTION_CREATION_KEYS:
+                context.user_data.pop(name, None)
 
             return ConversationHandler.END
 
@@ -599,13 +595,13 @@ class SubscriptionHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             # Clear context
-            if 'subscription_creation' in context.user_data:
-                del context.user_data['subscription_creation']
+            for name in SUBSCRIPTION_CREATION_KEYS:
+                context.user_data.pop(name, None)
 
             text = i18n.get('telegram.subscription.creation_cancelled', language)
-            keyboard = await main_menu_for(update.effective_user.id, language)
 
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+            # An edit carries no menu: the bottom keyboard is the way on.
+            await self._edit_or_replace_callback_message(query, text=text)
             await self._ack(query)
 
             return ConversationHandler.END
@@ -911,10 +907,8 @@ class SubscriptionHandlers(BaseHandler):
             await self._ack(query)
 
             # Clear context
-            if 'editing_subscription_id' in context.user_data:
-                del context.user_data['editing_subscription_id']
-            if 'adding_product_id' in context.user_data:
-                del context.user_data['adding_product_id']
+            for name in ITEM_MANAGEMENT_KEYS:
+                context.user_data.pop(name, None)
 
             return ConversationHandler.END
 
@@ -1008,10 +1002,8 @@ class SubscriptionHandlers(BaseHandler):
             await self._ack(query)
 
             # Clear context
-            if 'editing_subscription_id' in context.user_data:
-                del context.user_data['editing_subscription_id']
-            if 'editing_item_id' in context.user_data:
-                del context.user_data['editing_item_id']
+            for name in UPDATE_ITEM_KEYS:
+                context.user_data.pop(name, None)
 
             return ConversationHandler.END
 

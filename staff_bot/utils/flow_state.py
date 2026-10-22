@@ -179,6 +179,22 @@ PENDING_FLOW_USER_DATA_KEYS = (
     'pending_status',
 )
 
+# The flows that arm the active-flow mirror: exactly the keys `mark_active` is called
+# with (the at-door cash flow, the reconciliation hand-off, a COD collection, a bottle
+# collection, a try-out pick-up). A subset of the list above. Read by the order-cancel
+# route push (`webhook_server._leave_dropped_stop`), which keeps the mirror only while
+# one of these is still armed; tests/staff_bot/test_webhook_route_updated_cancelled_stop.py
+# checks the set against every `mark_active` call in the source. Every `mark_active` call must
+# pass its flow name as a literal string (positional or `flow_name=`); the test fails on any call
+# whose name it cannot read, so a computed name cannot slip past it.
+ACTIVE_FLOW_MARKER_KEYS = (
+    'pending_delivery_cash_flow',
+    'pending_reconciliation_flow',
+    'pending_cod_collection_flow',
+    'pending_bottle_collection_flow',
+    'tryout_pickup_task_id',
+)
+
 
 async def clear_pending_flows(context, update=None) -> None:
     """THE clean-up for leaving a flow: drop every `context.user_data` key a flow

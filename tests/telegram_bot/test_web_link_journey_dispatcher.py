@@ -35,6 +35,7 @@ from handlers.profile import (
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 from shared.i18n_rendering import render_translation
 
+from tests.telegram_bot.menu_keyboard_helpers import expected_labels, menu_sends
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, _install_translations, backend_failure
 from tests.telegram_bot.test_checkout_journey_dispatcher import expire_dedup_window
 from tests.telegram_bot.test_registration_journey_dispatcher import (  # noqa: F401  (make_bot is a fixture)
@@ -116,6 +117,13 @@ def confirmed(phone_status="verified", phone="+998901112233"):
     }
 
 
+def linked_row(data):
+    """The bot's own users row once confirm has linked this Telegram: what
+    `customer_telegram_link_service.confirm` leaves behind (this Telegram's id, the page's language
+    and the account's phone)."""
+    return {**ROW, "phone": data.get("phone"), "preferred_language": data["language"]}
+
+
 def refused(code, status=409):
     """A refusal as `@handle_exceptions` sends it: `error_code` at the top level of the body."""
     return backend_failure(code, status, data={"error_code": code, "message": code})
@@ -153,7 +161,14 @@ async def link_bot(make_bot, monkeypatch):
             **{(lang, key): BACKEND_TRANSLATIONS[key][lang] for key in BOT_KEYS for lang in LANGS},
         })
         bot.backend.route("POST", PREVIEW, lambda _call: preview or PREVIEW_OK)
-        bot.backend.route("POST", CONFIRM, lambda _call: confirm or confirmed())
+        reply = confirm or confirmed()
+
+        def _confirm(_call):
+            if isinstance(reply, dict):   # a success: the backend has linked this Telegram to the account
+                bot.database.row = linked_row(reply["data"])
+            return reply                  # a backend_failure links nothing
+
+        bot.backend.route("POST", CONFIRM, _confirm)
         return bot
 
     return _make
@@ -190,7 +205,7 @@ async def test_yes_connects_stores_the_tokens_and_greets_in_the_account_language
     assert bot.tokens.stored == [{"user_id": DEFAULT_USER_ID, "access_token": "link-access",
                                   "refresh_token": "link-refresh", "expires_in": 3600}]
     shown = bot.telegram.last_shown()
-    assert shown.text == copy("telegram.web_link.connected", name="Zarina") and "menu_support" in shown.callback_data()
+    assert shown.text == copy("telegram.web_link.connected", name="Zarina") and shown.button_labels() == expected_labels("ru")
     assert bot.telegram.of("editMessageReplyMarkup") and state(bot) is None and posts(bot, REGISTER) == []
     assert WEB_LINK_PENDING_KEY not in bot.application.user_data[user.user_id]
     assert created_no_account(bot)
@@ -228,8 +243,8 @@ async def test_a_dead_link_from_an_unknown_telegram_says_so_and_shows_no_languag
 async def test_a_dead_link_from_a_known_telegram_is_a_plain_start(link_bot):                  # D15a
     bot = await link_bot(row=dict(ROW), preview=refused("WEB_LINK_EXPIRED", 400)); user = bot.updates()
     await bot.send(user.command(f"/start web_{TOKEN}"))
-    assert texts(bot)[-1] == TRANSLATIONS[("uz", "telegram.welcome")]
-    assert "menu_support" in bot.telegram.last_shown().callback_data() and state(bot) is None
+    assert texts(bot)[-1] == TRANSLATIONS[("uz", "telegram.main_menu")]
+    assert bot.telegram.last_shown().button_labels() == expected_labels("uz") and state(bot) is None
 
 
 @pytest.mark.parametrize("phone", ["+998901112233", None])
@@ -239,7 +254,10 @@ async def test_a_telegram_with_its_own_account_goes_to_the_chat_and_the_flow_end
     await bot.send(user.command(f"/start web_{TOKEN}"))
     assert texts(bot)[-1] == copy("telegram.web_link.has_account", "uz")
     assert state(bot) is None, "never parked in PHONE: their next message must reach the Support Inbox"
-    assert ("menu_support" in bot.telegram.last_shown().callback_data()) is (phone is not None)
+    if phone is not None:
+        assert bot.telegram.last_shown().button_labels() == expected_labels("uz")
+    else:
+        assert bot.telegram.last_shown().reply_markup == {"remove_keyboard": True}
     assert has_contact_button(bot) is False and created_no_account(bot)
 
 
@@ -403,7 +421,11 @@ async def offered_a_merge(link_bot, how="contact"):
 @pytest.mark.parametrize("how", ["contact", "typed"])
 async def test_a_number_held_by_another_account_gets_the_usual_merge_and_its_own_success(link_bot, how):  # R8
     bot, user = await offered_a_merge(link_bot, how)
-    bot.backend.route("POST", LINK_VERIFY, lambda _call: MERGED)
+    def _merged(_call):
+        bot.database.row = {**bot.database.row, "phone": MY_PHONE_E164}   # the survivor holds the number
+        return MERGED
+
+    bot.backend.route("POST", LINK_VERIFY, _merged)
     prompt = bot.telegram.last_shown()
     assert (prompt.text, prompt.callback_data()) == (
         "This number already belongs to C*** W***. Link the accounts?", ["link_yes", "link_no"]
@@ -417,7 +439,7 @@ async def test_a_number_held_by_another_account_gets_the_usual_merge_and_its_own
 
     assert payloads(bot, LINK_VERIFY) == [{"telegram_id": DEFAULT_USER_ID, "otp": "123456"}]
     shown = bot.telegram.last_shown()
-    assert shown.text == "Welcome back, Co! Accounts linked" and "menu_support" in shown.callback_data()
+    assert shown.text == "Welcome back, Co! Accounts linked" and shown.button_labels() == expected_labels("ru")
     assert bot.tokens.stored[-1] == {"user_id": DEFAULT_USER_ID, "access_token": "merged-access",
                                      "refresh_token": "merged-refresh", "expires_in": 3600}
     assert not {copy("telegram.web_link.connected", lang, name="Zarina") for lang in LANGS} & set(texts(bot))
@@ -476,17 +498,23 @@ async def test_a_step_that_fails_unexpectedly_leaves_no_deferred_greeting(link_b
 
 
 @pytest.mark.parametrize("how", ["contact", "typed"])
-async def test_a_number_whose_account_cannot_be_claimed_points_to_the_chat_and_greets(link_bot, how):   # D12, R6
+async def test_a_number_whose_account_cannot_be_claimed_asks_for_the_phone_again_and_keeps_the_greeting(
+    link_bot, how
+):   # D12, R6; spec §1: a phoneless greeting would be a dead end
     bot = await link_bot(confirm=confirmed(phone_status="missing", phone=None)); user = bot.updates()
     bot.backend.route("POST", CHECK_PHONE, lambda _call: NOT_CLAIMABLE)
     await bot.send(user.command(f"/start web_{TOKEN}")); await bot.send(user.tap("weblink_yes", card_id(bot)))
     await bot.send(share(user, how))
     assert len(posts(bot, CHECK_PHONE)) == 1 and posts(bot, LINK_SEND_OTP) == []
-    assert texts(bot)[-2:] == [copy("telegram.web_link.has_account"), copy("telegram.web_link.connected", name="Zarina")]
-    assert bot.telegram.shown[-2].reply_markup == {"remove_keyboard": True}, "the contact keyboard goes away"
-    assert not [shown for shown in bot.telegram.shown if "link_yes" in shown.callback_data()]
+    assert texts(bot)[-1] == copy("telegram.registration.share_contact_prompt")
+    assert has_contact_button(bot) and state(bot) == PHONE and menu_sends(bot) == []
+    assert bot.application.user_data[user.user_id][WEB_LINK_GREETING_KEY] == {"name": "Zarina", "language": "ru"}
+
+    bot.backend.route("POST", CHECK_PHONE, lambda _call: {"data": {"available": True}})
+    await bot.send(user.contact(MY_PHONE_AS_TELEGRAM_SENDS_IT))
+    assert texts(bot)[-1] == copy("telegram.web_link.connected", name="Zarina")
+    assert bot.telegram.last_shown().button_labels() == expected_labels("ru")
     assert state(bot) is None and created_no_account(bot)
-    assert WEB_LINK_GREETING_KEY not in bot.application.user_data[user.user_id]
 
 
 async def test_in_plain_signup_a_number_held_elsewhere_still_asks_for_another(link_bot):   # _number_taken's other arm

@@ -74,6 +74,11 @@ EXPLICIT_REQUEST_TRIGGERS = ("manual", "admin_dispatch_reset")
 ADDRESS_CHANGE_TRIGGER = "address_change"
 ANNOUNCED_TRIGGERS = frozenset({ADDRESS_CHANGE_TRIGGER})
 
+# The silent route-card refresh after one of the driver's stops was cancelled
+# (`refresh_driver_route_card_task`). A label only, for logs and the push's `trigger` field: that
+# push never re-solves and is always silent, so it belongs to none of the gate sets above.
+ORDER_CANCELLED_TRIGGER = "order_cancelled"
+
 LOCATION_FRESH_DEFAULT_SECONDS = 1800  # 30 min
 
 # Uncertainty radius, in metres, beyond which a reported fix is refused outright

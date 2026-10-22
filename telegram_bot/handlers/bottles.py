@@ -301,7 +301,7 @@ def _balance_keyboard(balances: list, language: str):
         }])
     buttons.append([{
         'text': i18n.get('telegram.back', language),
-        'callback_data': 'back_to_main',
+        'callback_data': 'menu_profile',
     }])
     return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -388,7 +388,7 @@ class BottleBalanceHandler(BaseHandler):
                     f"📦 <b>{title}</b>\n\n"
                     f"{i18n.get('telegram.bottles.no_balance', language)}"
                 )
-                keyboard = MenuKeyboards.back_button(language)
+                keyboard = MenuKeyboards.back_button(language, 'menu_profile')
             else:
                 text = '\n'.join(_build_balance_lines(overview, language))
                 keyboard = _balance_keyboard(balances, language)

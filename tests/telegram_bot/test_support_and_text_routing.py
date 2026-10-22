@@ -57,6 +57,7 @@ from handlers.profile import (
     ADDRESS_LOCATION,
     ADDRESS_TITLE,
 )
+from menu_keyboard import MENU_KEYBOARD_STATE_KEY
 from support_capture import MAX_SUPPORT_CONTENT
 
 from tests.telegram_bot.ptb_harness import (
@@ -99,7 +100,7 @@ TRANSLATIONS = {
     "telegram.support.menu_intro": "🆘 Savolingiz bormi? Uni shu chatga yozing, jamoamiz shu yerda javob beradi.",
     "telegram.support.faq_coming_soon": "❓ Tez-tez so'raladigan savollar tez orada qo'shiladi!",
     "telegram.support.contact_message": "📞 Yordam bilan bog'lanish: @aqua_element_support",
-    "telegram.help.command_hint": "🆘 Yordam: Mavjud bo'limlarni ko'rish uchun /menu dan foydalaning.",
+    "telegram.help.command_hint": "Kerakli bo'limni pastdagi tugmalar orqali tanlang 👇",
     "telegram.back": "⬅️ Ortga",
     "telegram.main_menu": "Asosiy menyu",
     "telegram.address.title_prompt": "Manzilga nom bering:",
@@ -340,6 +341,9 @@ async def test_starting_the_address_flow_leaves_a_pending_concern_report_armed(
     # prompt (tests/telegram_bot/test_armed_prompts_survive_a_restart.py); this
     # test is about the CONCERN keys surviving, not about the set being empty.
     state.pop("awaiting_location_at", None)
+    # The bottom keyboard's install marker: the pin step put the menu back
+    # in place of the location keyboard (spec 2026-10-21 §1).
+    state.pop(MENU_KEYBOARD_STATE_KEY, None)
     assert state == {
         "awaiting_input": "support_message",
         "support_order_id": ORDER_ID,
@@ -365,7 +369,7 @@ async def test_starting_the_address_flow_leaves_a_pending_concern_report_armed(
         "reference and no way to tell it apart from a genuine message"
     )
     # I1 (coordinator review, Task 6): the save above completed the flow via
-    # `save_address_final`, which tears it down through `_clear_address_flow_keys`
+    # `save_address_final`, which tears it down through `clear_address_flow_keys`
     # -> `clear_address_draft`. That teardown call was previously exercised in
     # tests only through `SimpleNamespace(clear_address_draft=AsyncMock())`
     # fakes nothing asserted on, and is wrapped in `except Exception` for
@@ -464,14 +468,16 @@ def test_the_conversations_stop_dispatch_before_the_default_group_catch_all():
         Path(__file__).resolve().parents[2] / "telegram_bot" / "bot.py"
     ).read_text(encoding="utf-8")
 
+    # The filter is `flow_exit.FREE_TEXT_FILTER`, shared with the flow exit
+    # (test_flow_exits.py pins the sharing at runtime).
     registration = source.split(
-        "filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE", 1
+        "MessageHandler(FREE_TEXT_FILTER, self._handle_text_message", 1
     )
-    assert len(registration) == 2, "the free-text catch-all is no longer registered"
+    assert len(registration) == 2, (
+        "the free-text catch-all is no longer registered on FREE_TEXT_FILTER "
+        "attached to _handle_text_message"
+    )
     tail = registration[1][:120]
-    assert "self._handle_text_message" in tail, (
-        "the catch-all filter is no longer attached to _handle_text_message"
-    )
     assert "group=" not in tail, (
         "the catch-all now names a group; it is supposed to stay in the "
         "default group, behind the conversations"
@@ -480,6 +486,13 @@ def test_the_conversations_stop_dispatch_before_the_default_group_catch_all():
     # `filters.TEXT` matches an edit, `update.message` is None on one, and
     # `_handle_text_message` dereferences it twice — once in the body and again
     # in its own except branch. tests/telegram_bot/test_edited_message_router.py
+    flow_exit_source = (
+        Path(__file__).resolve().parents[2] / "telegram_bot" / "flow_exit.py"
+    ).read_text(encoding="utf-8")
+    assert (
+        "FREE_TEXT_FILTER = filters.TEXT & ~filters.COMMAND & ~filters.UpdateType.EDITED_MESSAGE"
+        in flow_exit_source
+    ), "the shared free-text filter lost ~COMMAND or ~EDITED_MESSAGE"
     assert "address_handler, group=-2" in source, (
         "the conversations moved out of group -2; re-check this whole file"
     )
@@ -643,6 +656,8 @@ async def test_a_slash_command_typed_mid_conversation_is_not_filed_as_a_support_
     navigating, not complaining. Filing it would fill the Support Inbox with
     "/menu" tickets — and unlike the free-text leak above, this one would be
     indistinguishable from noise, so nobody would ever notice it started.
+    /menu also ends the address flow it was typed in (spec §2: it is an exit
+    gesture), so the prompt the customer walked away from is no longer live.
     """
     await walk_to_delivery_instructions(bot, user)
     bot.telegram.reset()
@@ -654,9 +669,9 @@ async def test_a_slash_command_typed_mid_conversation_is_not_filed_as_a_support_
 
     assert support_posts(bot) == [], "a command is not a support message"
     assert bot.telegram.shown, "and the customer must still get their menu"
-    assert address_state(bot, user) == ADDRESS_DELIVERY_INSTRUCTIONS, (
-        "the address flow is not a fallback for /menu, so the customer is "
-        "still parked in it — the prompt they abandoned is still live"
+    assert address_state(bot, user) is None, (
+        "/menu is an exit gesture: it ends the address flow it was typed in, so "
+        "the abandoned prompt cannot swallow the customer's next message"
     )
 
 
@@ -667,10 +682,8 @@ async def test_the_help_command_opens_help_instead_of_filing_a_ticket(bot, user)
     await bot.send(user.command("help"))
 
     assert support_posts(bot) == []
-    assert bot.telegram.last_shown().text == TRANSLATIONS["telegram.help.command_hint"]
-    assert "back_to_main" in bot.telegram.last_shown().callback_data(), (
-        "a dead-end help screen is how customers end up typing free text at us"
-    )
+    assert bot.telegram.last_shown().text == f"{TRANSLATIONS['telegram.support.menu_intro']}\n\n{TRANSLATIONS['telegram.help.command_hint']}"
+    assert bot.telegram.last_shown().callback_data() == []
 
 
 # ===========================================================================
@@ -678,42 +691,14 @@ async def test_the_help_command_opens_help_instead_of_filing_a_ticket(bot, user)
 # ===========================================================================
 
 
-async def test_the_support_menu_opens_and_offers_a_way_back(bot, user):
-    """A menu with no exit is a trap: the only thing left to tap is the
-    keyboard, and whatever the customer then types becomes a support ticket."""
+async def test_the_support_menu_opens_with_the_one_help_text_and_no_inline_back(bot, user):
+    """The bottom keyboard is the way on; the screen is the intro plus the hint under it."""
     await bot.send(user.tap("menu_support"))
 
     shown = bot.telegram.last_shown()
-    assert shown.text == TRANSLATIONS["telegram.support.menu_intro"]
-    assert shown.callback_data() == ["back_to_main"]
-    assert shown.button_labels() == [TRANSLATIONS["telegram.back"]], (
-        "the exit has to be labelled in the customer's language, not left as a "
-        "raw translation key"
-    )
-
-
-async def test_every_button_the_support_menu_renders_is_answered_by_a_handler(bot, user):
-    """A tap with no matching handler shows a spinner and then nothing."""
-    await bot.send(user.tap("menu_support"))
-
-    for data in bot.telegram.last_shown().callback_data():
-        assert bot.handlers_matching(user.tap(data)), (
-            f"the '{data}' button on the support menu lands nowhere"
-        )
-
-
-async def test_back_from_the_support_menu_returns_the_customer_to_the_main_menu(bot, user):
-    """The escape has to actually escape."""
-    await bot.send(user.tap("menu_support"))
-    bot.telegram.reset()
-
-    await bot.send(user.tap("back_to_main"))
-
-    shown = bot.telegram.last_shown()
-    assert shown.text == TRANSLATIONS["telegram.main_menu"]
-    assert "menu_support" in shown.callback_data(), (
-        "the main menu must still offer the way back into support"
-    )
+    assert shown.text == f"{TRANSLATIONS['telegram.support.menu_intro']}\n\n{TRANSLATIONS['telegram.help.command_hint']}"
+    assert shown.callback_data() == []
+    assert shown.button_labels() == []
 
 
 async def test_the_contact_and_faq_screens_answer_with_real_copy(bot, user):
@@ -728,7 +713,7 @@ async def test_the_contact_and_faq_screens_answer_with_real_copy(bot, user):
         await bot.send(user.tap(data))
         shown = bot.telegram.last_shown()
         assert shown.text == TRANSLATIONS[key], f"{data} rendered {shown.text!r}"
-        assert "back_to_main" in shown.callback_data(), f"{data} is a dead end"
+        assert shown.callback_data() == []
 
 
 # ===========================================================================
@@ -831,7 +816,10 @@ async def test_a_concern_typed_half_an_hour_late_loses_its_order_and_its_acknowl
         "and the acknowledgement goes with it — the customer is not told their "
         "complaint reached anyone"
     )
-    assert bot.database.user["bot_state"] == "{}", (
+    left = json.loads(bot.database.user["bot_state"])
+    # The bottom keyboard's install marker, written by the Report tap: the screen, not a prompt.
+    left.pop(MENU_KEYBOARD_STATE_KEY, None)
+    assert left == {}, (
         "the stale arming must be cleared, or every later message would take "
         "this same silent path"
     )
@@ -972,26 +960,16 @@ async def test_a_very_long_concern_is_truncated_to_something_telegram_will_accep
 async def test_the_report_button_the_delivered_summary_renders_is_claimed_by_a_handler(
     bot, user
 ):
-    """The button is rendered in `telegram_bot/webhook_server.py` as
-    `report_issue_<order_id>` and registered in `bot.py` as
-    `^report_issue_\\d+$`. Those are two files that have to agree, and nothing
-    else checks that they do — a rename on either side leaves the delivered
-    summary showing a button that spins forever.
+    """The delivered summary's two buttons are built by `DeliverySummaryKeyboards.summary` in
+    `keyboards.py`, and claimed in `bot.py` by `^reorder_\\d+$` and `^report_issue_\\d+$`. Those
+    two places must agree. A rename on either side leaves a button that spins forever.
     """
-    from pathlib import Path
+    from handlers import quick_order_handlers, support_flow_handlers
+    from keyboards import DeliverySummaryKeyboards
 
-    webhook_source = (
-        Path(__file__).resolve().parents[2] / "telegram_bot" / "webhook_server.py"
-    ).read_text(encoding="utf-8")
-    assert "'callback_data': f'report_issue_{order_id}'" in webhook_source, (
-        "the delivered summary no longer renders report_issue_<order_id>; "
-        "update the pattern assertion below with it"
-    )
-
-    assert bot.handlers_matching(user.tap("report_issue_9001")), (
-        "the Report button on the delivered summary is claimed by no handler"
-    )
-    assert not bot.handlers_matching(user.tap("report_issue_")), (
-        "an id-less callback must not match — it would crash the int() parse "
-        "inside the handler on every malformed tap"
-    )
+    summary = DeliverySummaryKeyboards.summary("uz", 1234, 9001)
+    order_again, report = [b.callback_data for row in summary.inline_keyboard for b in row]
+    assert (order_again, report) == ("reorder_9001", "report_issue_1234")
+    assert quick_order_handlers.handle_reorder_from_history in [h.callback for _g, h in bot.handlers_matching(user.tap(order_again))]
+    assert support_flow_handlers.start_order_issue_report in [h.callback for _g, h in bot.handlers_matching(user.tap(report))]
+    assert not bot.handlers_matching(user.tap("report_issue_"))

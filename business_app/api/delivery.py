@@ -488,6 +488,19 @@ def start_delivery(delivery_id):
             }
         )
 
+    except ValidationError as ve:
+        db.session.rollback()
+        error_code = getattr(ve, "error_code", None)
+        if error_code:
+            # A coded refusal (BOTTLE_SESSION_REQUIRED, BOTTLE_SESSION_CAPACITY_EXCEEDED) says what
+            # to do next; the completion route below answers it the same way.
+            return jsonify({"error": str(ve), "error_code": error_code}), 400
+        # `begin_delivery_in_transit` re-reads the delivery under a lock, so a start whose read
+        # above came before a cancel (or any other move) committed is refused there.
+        return jsonify({"error": get_translation("api.delivery.error.cannot_start_at_stage")}), 400
+    except NotFoundError:
+        db.session.rollback()
+        return jsonify({"error": get_translation("api.delivery.error.not_found_or_not_assigned")}), 404
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Start delivery error: {e}")

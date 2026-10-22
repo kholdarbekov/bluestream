@@ -794,6 +794,20 @@ class BusinessAPIClient:
             params={'limit': limit, 'period_days': period_days},
         )
 
+    async def get_reorder_info(self, user_token: str) -> APIResponse:
+        """The backend's reorder candidate and the customer's open order."""
+        return await self._make_request(
+            'GET', '/api/v1/orders/reorder-info',
+            user_token=user_token,
+        )
+
+    async def fill_cart_from_order(self, user_token: str, order_id: int) -> APIResponse:
+        """Replace the cart with the reorderable lines of one of the customer's orders."""
+        return await self._make_request(
+            'POST', f'/api/v1/cart/fill-from-order/{order_id}',
+            user_token=user_token,
+        )
+
     async def retry_order_with_cash(self, user_token: str, order_id: int) -> APIResponse:
         """Switch a tax-committee-cancelled order to cash payment.
 

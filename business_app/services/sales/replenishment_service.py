@@ -268,7 +268,7 @@ class ReplenishmentService:
 
     @staticmethod
     def last_delivered_qty(outlet: Outlet, product: Product) -> Optional[int]:
-        """The quantity on the most recent delivered order — the D15 fallback."""
+        """The quantity on the most recent delivered order — the D15 fallback. Paid lines only."""
         if not outlet.user_id:
             return None
 
@@ -282,6 +282,7 @@ class ReplenishmentService:
                 OutletService.order_scope(outlet),
                 Order.status == OrderStatus.DELIVERED,
                 OrderItem.product_id == product.id,
+                OrderItem.is_reward_item.is_(False),
                 OrderStatusHistory.new_status == OrderStatus.DELIVERED,
             )
             .order_by(OrderStatusHistory.changed_at.desc(), Order.id.desc())

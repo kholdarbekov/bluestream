@@ -513,8 +513,6 @@ class TestCartEditReturnFlagClearing:
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
-        # main_menu_for is called inside cancel_checkout
-        monkeypatch.setattr(orders_module, "main_menu_for", AsyncMock(return_value=None))
 
         await handler.cancel_checkout(update, context)
 

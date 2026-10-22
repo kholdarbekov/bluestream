@@ -6,9 +6,11 @@ Two entry points lead here:
     Products menu by `ProductHandlers.products_menu`.
   * "🔁 Reorder" button rendered on delivered orders in order history.
 
-The flow is intentionally non-destructive: items are placed in the cart and
-the user is routed through the existing checkout flow (address +
-payment + final confirmation). We never call `POST /orders/repeat/{id}`
+The flow is intentionally non-destructive: both reorder entry points refill the
+cart through the backend's fill-from-order (the backend decides which lines a
+reorder copies) and route the user through the existing checkout flow (address
++ payment + final confirmation). Checkout opens as a NEW message; the tapped
+message is never edited or deleted. We never call `POST /orders/repeat/{id}`
 directly — that endpoint creates a finalized order with no confirmation
 step, which would bypass the user's "yes, place this order" tap.
 """
@@ -20,7 +22,8 @@ from telegram.ext import ContextTypes
 
 from i18n import i18n
 from api_client import api_client
-from utils import user_middleware, get_auth_token
+from keyboards import ReorderKeyboards
+from utils import user_middleware, get_auth_token, order_status_label
 from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
@@ -84,50 +87,38 @@ class QuickOrderHandlers(BaseHandler):
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """Handle the 'Repeat last' button from the Products menu."""
+        # Every render and error goes to `screen`, so the tapped message is never edited.
+        screen = self.as_message_update(update)
         try:
-            user = await user_middleware(update)
+            await self._ack(update.callback_query)
+            user = await user_middleware(screen)
             if not user:
                 return
 
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
+                user_token = await get_auth_token(screen, context, client)
                 if not user_token:
-                    await self._handle_auth_error(update, language)
+                    await self._handle_auth_error(screen, language)
                     return
 
-                last_order = await self._fetch_last_order_with_items(client, user_token)
-                if not last_order:
-                    await self._reply_error(
-                        update,
-                        i18n.get('telegram.quick_order.no_history', language),
-                    )
+                info = await self._reorder_info(client, user_token)
+                if info is None:
+                    await self._reply_error(screen, i18n.get('telegram.error.generic', language))
+                    return
+                candidate = info.get('candidate')
+                if not candidate:
+                    await self._reply_error(screen, i18n.get('telegram.quick_order.no_history', language))
                     return
 
-                items = self._extract_cart_items(last_order)
-                if not items:
-                    await self._reply_error(
-                        update,
-                        i18n.get('telegram.quick_order.unavailable', language),
-                    )
-                    return
-
-                ok = await self._replace_cart_with_items(client, user_token, items, update, language)
-                if not ok:
-                    return
-
-                # Address auto-selection: "Repeat last" means same address as
-                # last order. Picked here so checkout_handler can skip the
-                # picker / show only confirmation depending on address count.
-                address_id = self._extract_address_id(last_order)
-
-            self._mark_quick_order_flow(context, address_id)
-            await self._proceed_to_checkout(update, context)
+                await self._fill_and_open_checkout(
+                    screen, context, client, user_token,
+                    candidate['order_id'], self._address_id(candidate), language,
+                )
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="handle_repeat_last")
+            await self._handle_error(screen, exc=e, operation="handle_repeat_last")
 
     async def handle_usual(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -174,91 +165,237 @@ class QuickOrderHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="handle_usual")
 
-    async def handle_reorder_from_history(
+    async def order_water(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle the 'Reorder' button from an order's history entry.
+        """The bottom-menu "Order water" row: an open order first (R9), then the cart, then a refill."""
+        await self._order_water(update, context, fresh_order=False)
 
-        Callback format: `reorder_{order_id}`.
+    async def order_water_continue(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """The open-order notice's "Order again" button (`order_water_go`): a FRESH order, never a repeat.
+
+        The cart if it holds something, else Products, where the customer picks product, quantity and
+        (at checkout) address. No open-order check, no reorder-info read, no refill.
         """
+        await self._order_water(update, context, fresh_order=True)
+
+    async def _order_water(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, fresh_order: bool
+    ) -> None:
+        """Order water: notice -> cart -> Products -> refill-and-checkout (spec §3, R9).
+
+        `fresh_order` is the notice's "Order again" tap (amended 2026-10-22): skip the notice and the
+        refill, so the flow is only cart -> Products and the customer chooses everything.
+
+        A cart that cannot be read stops the flow: nothing is ever filled over a cart we could
+        not see. The refill replaces the cart, so only an empty one (`cart_is_empty`) is refilled.
+        """
+        screen = self.as_message_update(update)
         try:
-            user = await user_middleware(update)
+            await self._ack(update.callback_query)
+            user = await user_middleware(screen)
             if not user:
                 return
 
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
-            query = update.callback_query
-            try:
-                order_id = int(query.data.split('_', 1)[1])
-            except (IndexError, ValueError):
-                await self._reply_error(
-                    update,
-                    i18n.get('telegram.quick_order.unavailable', language),
+            async with api_client as client:
+                user_token = await get_auth_token(screen, context, client)
+                if not user_token:
+                    await self._handle_auth_error(screen, language)
+                    return
+
+                cart_response = await client.get_cart(user_token)
+                if not cart_response.success:
+                    logger.warning("Order water: cart read failed: %s", cart_response.error)
+                    await self._reply_error(screen, i18n.get('telegram.error.generic', language))
+                    return
+                cart = ((cart_response.data or {}).get('data') or {}).get('cart') or {}
+
+                info = {} if fresh_order else await self._reorder_info(client, user_token)
+                if info is None:
+                    await self._reply_error(screen, i18n.get('telegram.error.generic', language))
+                    return
+
+                open_order = info.get('open_order')
+                if open_order:
+                    await self._send_open_order_notice(screen, open_order, 'order_water_go', language)
+                    return
+
+                # Local imports: products.py imports this module at load time.
+                from handlers import product_handlers
+                from handlers.products import cart_is_empty
+
+                if not cart_is_empty(cart):
+                    await product_handlers.show_cart(screen, context)
+                    return
+
+                candidate = info.get('candidate')
+                if not candidate:
+                    await product_handlers.products_menu(screen, context)
+                    return
+
+                await self._fill_and_open_checkout(
+                    screen, context, client, user_token,
+                    candidate['order_id'], self._address_id(candidate), language,
                 )
+
+        except Exception as e:
+            await self._handle_error(screen, exc=e, operation="order_water")
+
+    async def handle_reorder_from_history(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle the 'Order again' / 'Reorder' button (reminder, order history).
+
+        Callback format: `reorder_{order_id}`.
+        """
+        await self._reorder(update, context, check_open=True)
+
+    async def reorder_continue(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """The open-order notice's continue button. Callback format: `reorder_go_{order_id}`."""
+        await self._reorder(update, context, check_open=False)
+
+    async def _reorder(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, check_open: bool
+    ) -> None:
+        """Order again: an explicit "this order again", so the cart is replaced, never consulted.
+
+        `rsplit('_', 1)` reads the id from both `reorder_<id>` and `reorder_go_<id>`.
+        """
+        screen = self.as_message_update(update)
+        try:
+            await self._ack(update.callback_query)
+            user = await user_middleware(screen)
+            if not user:
+                return
+
+            language = await i18n.get_user_language(update.effective_user.id)
+
+            try:
+                order_id = int(update.callback_query.data.rsplit('_', 1)[1])
+            except (IndexError, ValueError):
+                await self._reply_error(screen, i18n.get('telegram.quick_order.unavailable', language))
                 return
 
             async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
+                user_token = await get_auth_token(screen, context, client)
                 if not user_token:
-                    await self._handle_auth_error(update, language)
+                    await self._handle_auth_error(screen, language)
                     return
 
-                response = await client.get_order(user_token, order_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
+                info = await self._reorder_info(client, user_token)
+                if info is None:
+                    await self._reply_error(screen, i18n.get('telegram.error.generic', language))
                     return
 
-                order = response.data.get('data', {}).get('order') or {}
-                items = self._extract_cart_items(order)
-                if not items:
-                    await self._reply_error(
-                        update,
-                        i18n.get('telegram.quick_order.unavailable', language),
-                    )
+                open_order = info.get('open_order')
+                if check_open and open_order:
+                    await self._send_open_order_notice(screen, open_order, f'reorder_go_{order_id}', language)
                     return
 
-                ok = await self._replace_cart_with_items(client, user_token, items, update, language)
-                if not ok:
-                    return
-
-                address_id = self._extract_address_id(order)
-
-            self._mark_quick_order_flow(context, address_id)
-            await self._proceed_to_checkout(update, context)
+                # The saved address rides along only for the order the backend names as the
+                # candidate; any other order gets the normal checkout.
+                candidate = info.get('candidate')
+                address_id = (
+                    self._address_id(candidate)
+                    if candidate and candidate.get('order_id') == order_id
+                    else None
+                )
+                await self._fill_and_open_checkout(
+                    screen, context, client, user_token, order_id, address_id, language,
+                )
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="handle_reorder_from_history")
+            await self._handle_error(screen, exc=e, operation="reorder")
+
+    @staticmethod
+    async def _send_open_order_notice(
+        screen, open_order: Dict, continue_callback: str, language: str
+    ) -> None:
+        """Say an order is already in progress, with View order and a way to carry on (R9).
+
+        No parse_mode: order numbers contain underscores.
+        """
+        await screen.message.reply_text(
+            i18n.get(
+                'telegram.orders.open_order_notice', language,
+                order_number=open_order['order_number'],
+                status=order_status_label(open_order['status'], language),
+            ),
+            reply_markup=ReorderKeyboards.open_order_notice(language, open_order['id'], continue_callback),
+        )
+
+    async def _reorder_info(self, client, user_token: str) -> Optional[Dict]:
+        """The backend's reorder-info payload; `{}` = no candidate and no open order; None = the call failed."""
+        response = await client.get_reorder_info(user_token)
+        if not response.success:
+            logger.warning("Quick order: reorder-info failed: %s", response.error)
+            return None
+        return (response.data or {}).get('data') or {}
+
+    @staticmethod
+    def _address_id(candidate: Optional[Dict]) -> Optional[int]:
+        """The candidate's saved address id; None when the backend says it is no longer saved."""
+        return ((candidate or {}).get('address') or {}).get('id')
+
+    async def _fill_and_open_checkout(
+        self,
+        screen,
+        context: ContextTypes.DEFAULT_TYPE,
+        client,
+        user_token: str,
+        order_id: int,
+        address_id: Optional[int],
+        language: str,
+    ) -> None:
+        """Fill the cart from the order through the backend, then open the right next screen."""
+        response = await client.fill_cart_from_order(user_token, order_id)
+        if not response.success:
+            logger.warning("Quick order: fill-from-order %s failed: %s", order_id, response.error)
+            await self._reply_error(screen, i18n.get('telegram.error.generic', language))
+            return
+
+        result = (response.data or {}).get('data') or {}
+        added = result.get('added') or []
+        dropped = result.get('dropped') or []
+
+        # Local import: products.py imports this module at load time.
+        from handlers import product_handlers
+
+        if not added:
+            await screen.message.reply_text(i18n.get('telegram.quick_order.unavailable', language))
+            await product_handlers.products_menu(screen, context)
+            return
+        if dropped:
+            await screen.message.reply_text(i18n.get('telegram.quick_order.unavailable', language))
+            await product_handlers.show_cart(screen, context)
+            return
+
+        self._mark_quick_order_flow(context, address_id, source='reorder')
+        await self._proceed_to_checkout(screen, context)
 
     @staticmethod
     def _mark_quick_order_flow(
         context: ContextTypes.DEFAULT_TYPE,
         address_id: Optional[int],
+        *,
+        source: str = 'quick_order',
     ) -> None:
         """Tag the checkout context so downstream handlers can branch.
 
-        ``checkout_source='quick_order'`` flips checkout_handler into the
-        skip-address-when-possible mode and routes the address-confirmation
-        Back button to the products menu instead of the cart.
+        ``source='reorder'`` (Order water, Repeat last, Order again) goes
+        straight to the payment picker on a saved address, whatever the address
+        count. ``'quick_order'`` (Your usual) keeps the "Delivering to" card,
+        whose Back button opens the products menu instead of the cart.
         """
-        context.user_data['checkout_source'] = 'quick_order'
+        context.user_data['checkout_source'] = source
         if address_id is not None:
             context.user_data['quick_order_address_id'] = int(address_id)
-
-    @staticmethod
-    def _extract_address_id(order: Dict) -> Optional[int]:
-        """Pull the delivery_address_id out of an order payload (best-effort)."""
-        if not order:
-            return None
-        address = order.get('delivery_address') or {}
-        if isinstance(address, dict) and address.get('id'):
-            return int(address['id'])
-        # Some serializers may expose the flat field instead.
-        flat = order.get('delivery_address_id')
-        if flat:
-            return int(flat)
-        return None
 
     async def _resolve_usual_address_id(
         self,
@@ -286,21 +423,14 @@ class QuickOrderHandlers(BaseHandler):
     # --- Internal helpers ---------------------------------------------------
 
     async def _get_last_order_summary(self, client, user_token: str) -> Optional[Dict]:
-        """Return a Quick Order suggestion for the user's most recent delivered order.
+        """Return a Quick Order suggestion for the backend's reorder candidate.
 
-        Returns None when the user has no qualifying past orders. Only the order
-        summary is needed (not full items) to render the button label.
+        Returns None when there is no candidate (or the call failed).
         """
-        response = await client.get_user_orders(user_token, status='delivered')
-        if not response or not getattr(response, 'success', False):
+        info = await self._reorder_info(client, user_token)
+        items = ((info or {}).get('candidate') or {}).get('items') or []
+        if not items:
             return None
-
-        orders = response.data.get('data', {}).get('orders') or []
-        if not orders:
-            return None
-
-        last = orders[0]  # API returns newest-first
-        items = last.get('order_items') or last.get('items') or []
 
         # Single-item label: "Repeat last: 5× Product"
         # Multi-item label:  "Repeat last order (3 items)"
@@ -366,38 +496,6 @@ class QuickOrderHandlers(BaseHandler):
         if a.get('product_id') is None or b.get('product_id') is None:
             return False
         return (a['product_id'] == b['product_id']) and (a.get('quantity') == b.get('quantity'))
-
-    @staticmethod
-    def _extract_cart_items(order: Dict) -> List[Dict]:
-        """Pull (product_id, quantity) tuples out of an order payload."""
-        raw_items = order.get('order_items') or order.get('items') or []
-        items: List[Dict] = []
-        for raw in raw_items:
-            product_id = raw.get('product_id')
-            quantity = raw.get('quantity')
-            if product_id and quantity:
-                items.append({'product_id': int(product_id), 'quantity': int(quantity)})
-        return items
-
-    async def _fetch_last_order_with_items(self, client, user_token: str) -> Optional[Dict]:
-        """Fetch the user's most recent delivered order, with full item details."""
-        list_resp = await client.get_user_orders(user_token, status='delivered')
-        if not list_resp.success:
-            return None
-
-        orders = list_resp.data.get('data', {}).get('orders') or []
-        if not orders:
-            return None
-
-        order_id = orders[0].get('id')
-        if not order_id:
-            return None
-
-        detail = await client.get_order(user_token, int(order_id))
-        if not detail.success:
-            return None
-
-        return detail.data.get('data', {}).get('order') or {}
 
     async def _replace_cart_with_items(
         self,

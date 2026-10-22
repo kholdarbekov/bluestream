@@ -28,18 +28,22 @@ from business_app.services.reorder_reminders.facts import load_customer_for_user
 from business_app.services.reorder_reminders.messaging import ChannelResult
 from business_app.utils.timezone_utils import ensure_utc
 from shared import reorder_reminder_copy
+from shared.enums import SubscriptionStatus
 # `bot_webhook_fixture` is the `bot_webhook` recorder of the HTTP hop to the customer bot.
 from tests.integration.reorder_reminder_builders import (  # noqa: F401
     BOT_BLOCKED,
     add_order_lines,
     bot_webhook_fixture,
     captured_logs,
+    customer_headers,
     delivered_order,
     event_rows,
     link,
     make_episode,
     make_product,
     name_product,
+    subscription,
+    subscription_delivery,
 )
 
 pytestmark = pytest.mark.integration
@@ -290,6 +294,20 @@ def test_the_payload_names_the_recipient_not_the_episodes_account(db, telegram_c
     }
 
 
+def test_another_customers_newer_delivery_never_rides_on_her_reminder(db, telegram_customer, second_sample_user):
+    """Isolation: Bob is not linked to Alice. His one-off delivery is newer than her last one, and
+    the button and lines still name only her own order (`_recipient_order_lines`)."""
+    add_order_lines(
+        db, delivered_order(db, second_sample_user, LAST_DELIVERY + timedelta(days=2)), [(telegram_customer.pump, 7)]
+    )
+    customer, evaluation, cfg = _facts(telegram_customer.user.id)
+    assert evaluation.recipient.user_id == telegram_customer.user.id
+
+    payload = messaging.telegram_payload(telegram_customer.episode, customer, evaluation, 1, cfg, today=TODAY)
+
+    assert payload == _r1_payload(telegram_customer)
+
+
 def test_send_reminder_posts_r1_to_the_bot_under_its_stable_request_id(
     db, app, monkeypatch, telegram_customer, bot_webhook
 ):
@@ -390,3 +408,24 @@ def test_any_other_failure_is_retryable_and_blocks_nobody(db, telegram_customer,
     assert result == ChannelResult(ok=False, detail=detail, retryable=True)
     user = db.session.get(User, telegram_customer.user.id)
     assert (user.is_bot_active, user.telegram_blocked_at) == (True, None)
+
+
+def test_the_reminder_offers_the_order_reorder_info_names_not_a_later_subscription_delivery(
+    app, client, db, telegram_customer
+):
+    """One candidate rule (spec 2026-10-21 §3, R8). A delivery that her ended plan billed after her
+    usual order is never "your last order". The reminder's button and lines name the same order
+    GET /api/v1/orders/reorder-info names."""
+    user = telegram_customer.user
+    plan = subscription(db, user, status=SubscriptionStatus.CANCELLED)
+    add_order_lines(db, subscription_delivery(db, user, plan, LAST_DELIVERY + timedelta(days=1)),
+                    [(telegram_customer.pump, 9)])
+    customer, evaluation, cfg = _facts(user.id)
+
+    payload = messaging.telegram_payload(telegram_customer.episode, customer, evaluation, 1, cfg, today=TODAY)
+    info = client.get("/api/v1/orders/reorder-info", headers=customer_headers(app, user)).get_json()["data"]
+
+    assert (payload["reorder_order_id"], payload["items"]) == (
+        telegram_customer.last.id, _r1_payload(telegram_customer)["items"],
+    )
+    assert info["candidate"]["order_id"] == telegram_customer.last.id

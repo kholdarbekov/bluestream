@@ -409,7 +409,8 @@ class CartService:
         self, user_id: int, limit: int = 5, period_days: int = 90
     ) -> List[Dict[str, Any]]:
         """
-        Get quick reorder suggestions based on purchase history
+        Get quick reorder suggestions based on purchase history: the paid lines of DELIVERED
+        orders only (a free reward line is not something the customer buys).
 
         Args:
             user_id: User ID
@@ -434,7 +435,8 @@ class CartService:
             .filter(
                 Order.user_id == user_id,
                 Order.created_at >= cutoff_date,
-                Order.status.in_([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
+                Order.status == OrderStatus.DELIVERED,
+                OrderItem.is_reward_item.is_(False),
             )
             .group_by(OrderItem.product_id)
             .order_by(func.count(OrderItem.id).desc(), func.sum(OrderItem.quantity).desc())
@@ -647,6 +649,43 @@ class CartService:
         if cart:
             CartItem.query.filter_by(cart_id=cart.id).delete()
             db.session.commit()
+
+    def fill_from_order(self, user_id: int, order_id: int) -> Dict[str, Any]:
+        """Replace the user's cart with an order's reorderable (non-reward) lines.
+
+        The cart is always emptied first, so the result does not depend on what was in it (a
+        double tap gives the same cart). Lines whose product is inactive or cannot be covered by
+        stock are reported in `dropped` with a reason instead of failing the whole call.
+        Raises NotFoundError for an order that is not the user's.
+        """
+        from business_app.services.order_service import OrderService
+
+        order = OrderService().get_order(order_id, user_id=int(user_id))
+        wanted: Dict[int, int] = {}
+        for line in OrderService.reorderable_lines(order):
+            if line.quantity and line.quantity > 0:
+                wanted[line.product_id] = wanted.get(line.product_id, 0) + line.quantity
+
+        cart = self.get_cart_by_user_id(user_id)
+        if not cart:
+            cart = Cart(user_id=user_id)
+            db.session.add(cart)
+            db.session.flush()
+        CartItem.query.filter_by(cart_id=cart.id).delete()
+
+        added: List[Dict[str, int]] = []
+        dropped: List[Dict[str, Any]] = []
+        for product_id, quantity in wanted.items():
+            product = db.session.get(Product, product_id)
+            if product is None or not product.is_active:
+                dropped.append({"product_id": product_id, "quantity": quantity, "reason": "inactive"})
+            elif not self._check_product_quantity_availability(product, quantity)[0]:
+                dropped.append({"product_id": product_id, "quantity": quantity, "reason": "unavailable"})
+            else:
+                db.session.add(CartItem(cart_id=cart.id, product_id=product_id, quantity=quantity))
+                added.append({"product_id": product_id, "quantity": quantity})
+        db.session.commit()
+        return {"added": added, "dropped": dropped}
 
     @log_service_call(operation_type="cart_sync", track_performance=True)
     def sync_cart_from_local(self, user_id: int, local_cart_items: List[Dict[str, Any]]) -> Optional["Cart"]:

@@ -13,12 +13,14 @@ question — it would misroute the zero-address-checkout pin, which the bot DID
 ask for without ever entering the conversation. See
 `_route_address_location_entry` in bot.py.
 """
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from telegram import Update
 
 from handlers.profile import ADDRESS_TITLE
+from menu_keyboard import MENU_KEYBOARD_STATE_KEY
 
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, build_bot_harness
 
@@ -192,7 +194,10 @@ async def test_a_pin_while_the_concern_flow_is_armed_gets_the_order_prefix_and_a
     assert bot.telegram.of("sendMessage") != [], (
         "the pin must be acknowledged like any other concern message"
     )
-    assert bot.database.user["bot_state"] == "{}", (
+    left = json.loads(bot.database.user["bot_state"])
+    # The bottom keyboard's install marker, written by the Report tap: the screen, not a prompt.
+    left.pop(MENU_KEYBOARD_STATE_KEY, None)
+    assert left == {}, (
         "the concern flow must be disarmed after the pin, or the customer's "
         "next unrelated message gets wrongly acked under this order"
     )

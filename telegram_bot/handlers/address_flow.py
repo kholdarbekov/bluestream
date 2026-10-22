@@ -61,7 +61,7 @@ class RenderTarget(Protocol):
     text (`send_text`, with an OPTIONAL parse mode — street needs MARKDOWN_V2,
     most steps need none), text that falls back from Markdown to plain on a
     refusal (`send_markdown_or_plain`, mirroring
-    `profile.py::_reply_markdown_or_plain`, used where the live handler
+    `BaseHandler._reply_markdown_or_plain`, used where the live handler
     already accepts "lose the bold rather than lose the flow"), a location pin
     (`send_location`), and the one send that also has a side effect — arming
     the NEXT pin the customer shares to route back into this flow
@@ -434,7 +434,7 @@ def handle_input(field: str, value: str, data: dict) -> str | None:
     least surfaces in logs instead of vanishing into that catch-all.
 
     Stays pure on purpose: no I/O, no collaborators (`api_client`,
-    `get_auth_token`, `main_menu_for`, ...). `profile.py`'s text handlers
+    `get_auth_token`, `send_menu_keyboard`, ...). `profile.py`'s text handlers
     patch those by name on `handlers.profile` in tests; a call to one of
     them moved in here would make that patch silently stop applying.
     """

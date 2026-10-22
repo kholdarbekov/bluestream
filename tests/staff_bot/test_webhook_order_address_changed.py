@@ -319,15 +319,20 @@ async def test_an_open_navigate_screen_is_redrawn_with_the_new_coordinates(monke
 
 async def test_a_cash_prompt_at_the_door_is_left_alone(monkeypatch):
     """The control is the redraw test above: the same fresh row, the same borrowed card.
-    Only the screen differs, and a prompt at the door is never pulled away."""
+    Only the screen differs, and a prompt at the door is never pulled away. The prompt IS a
+    noted screen of this stop (`SCREEN_STATUS`, which an order cancel takes back); the
+    address-change redraw still leaves it alone."""
     async with _driver_hook(monkeypatch, card_state=True) as (harness, post, _server):
         driver, _detail = await open_the_stop(harness)
         await walk_to_the_door(harness, driver)
         await harness.send(driver.tap("staff_status_501_delivered"))  # the cash prompt
+        noted = (await route_card_state.load(DEFAULT_DRIVER_TELEGRAM_ID))["borrowed_screen"]
+        assert (noted["delivery_id"], noted["screen"]) == (501, route_card_state.SCREEN_STATUS)
         harness.desk.active = [_moved_row()]
         harness.telegram.reset()
         assert (await post(NEW))[0] == 200
         assert harness.telegram.of("editMessageText") == [] and len(harness.telegram.of("sendMessage")) == 1
+        assert (await route_card_state.load(DEFAULT_DRIVER_TELEGRAM_ID))["borrowed_screen"] == noted
 
 
 # --------------------------------------------------------------------------- #

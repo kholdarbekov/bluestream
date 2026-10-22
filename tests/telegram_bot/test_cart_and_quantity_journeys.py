@@ -40,7 +40,7 @@ from keyboards import ProductKeyboards
 from utils import format_price
 
 from shared.business_config import MIN_ORDER_AMOUNT
-from tests.telegram_bot.ptb_harness import backend_failure, build_bot_harness
+from tests.telegram_bot.ptb_harness import backend_failure, build_bot_harness, menu_already_installed
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -275,6 +275,7 @@ def cart(catalogue):
 async def bot(monkeypatch, cart):
     harness = await build_bot_harness(monkeypatch, translations=TRANSLATIONS)
     install_cart_backend(harness.backend, cart)
+    await menu_already_installed(harness)
     return harness
 
 
@@ -844,7 +845,7 @@ async def test_removing_the_last_line_leaves_an_empty_cart_screen_with_a_way_out
 
     emptied = bot.telegram.last_shown()
     assert emptied.text == t("telegram.cart_empty")
-    assert emptied.callback_data() == ["menu_products", "back_to_main"], (
+    assert emptied.callback_data() == ["menu_products"], (
         "an empty cart must offer exactly a way back to the shop and to the menu"
     )
     assert cart.lines == {}

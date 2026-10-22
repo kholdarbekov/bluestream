@@ -49,6 +49,7 @@ from tests.telegram_bot.test_cart_and_quantity_journeys import (
     build_catalogue,
     install_cart_backend,
 )
+from tests.telegram_bot.test_menu_label_routing import MENU_LABELS, MENU_LABEL_TRANSLATIONS
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -68,6 +69,7 @@ VERIFY_OTP = "/api/v1/auth/verify-phone"
 # the claim, "the customer was told the limit" is.
 TRANSLATIONS = {
     **CART_TRANSLATIONS,
+    **MENU_LABEL_TRANSLATIONS,
     ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli sonni yozib yuboring",
     ("uz", "telegram.products.typed_quantity_below_min"): (
         "Bu mahsulot uchun eng kam buyurtma — {min_qty} ta. "
@@ -500,8 +502,12 @@ async def test_a_phone_number_typed_on_the_screen_reaches_the_inbox(bot, user, c
         # The two ways off the screen that sit ON the live screen itself.
         lambda user: user.tap("checkout", message_id=QUANTITY_SCREEN_MESSAGE_ID),
         lambda user: user.tap(f"back_to_product_{WATER_ID}", message_id=QUANTITY_SCREEN_MESSAGE_ID),
+        lambda user: user.text(MENU_LABELS["telegram.menu.support"]["uz"]),
     ],
-    ids=["back", "main-menu", "cart", "/menu", "photo", "checkout-on-screen", "back-on-screen"],
+    ids=[
+        "back", "main-menu", "cart", "/menu", "photo", "checkout-on-screen", "back-on-screen",
+        "menu-label",
+    ],
 )
 async def test_once_the_customer_leaves_the_screen_a_number_is_a_message_again(
     bot, user, cart, leave

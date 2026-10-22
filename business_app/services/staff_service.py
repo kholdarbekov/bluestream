@@ -38,6 +38,7 @@ from business_app.utils.payment_projection import (
 )
 from business_app.utils.state_validators import (
     ACTIVE_ORDER_STATUSES,
+    DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES,
     DELIVERY_POOL_UNASSIGNED_STATES,
     assert_order_address_for_status,
     assert_order_creator_for_source,
@@ -1760,18 +1761,20 @@ class StaffService:
             ValidationError: If status transition is invalid
         """
         metadata = metadata or {}
-        if acting_driver_id is None:
-            delivery = Delivery.query.get(delivery_id)
-        else:
-            # Locked and re-read. A reschedule, reassign or return to the pool
-            # can commit between the driver drawing this card and tapping it.
-            # Each of them locks the Delivery first and moves
-            # `delivery_person_id`. Without the lock, a "Failed" tap that is in
-            # flight as a reschedule commits would write FAILED over the
-            # driverless row. Without `populate_existing`, the lock would be
-            # taken on a row whose already-loaded values are never refreshed
-            # (see OrderScheduleService.ensure_delivery_if_due).
-            delivery = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
+        # Locked and re-read, whoever calls. A reschedule, reassign or return to
+        # the pool can commit between the driver drawing this card and tapping
+        # it. Each of them locks the Delivery first and moves
+        # `delivery_person_id`. Without the lock, a "Failed" tap that is in
+        # flight as a reschedule commits would write FAILED over the driverless
+        # row. A customer's own cancel (`OrderService.cancel_order_as_customer`,
+        # allowed until pickup since 2026-10-21) also locks the Delivery first, so
+        # a pickup and a cancel queue on this row and each decides on what the
+        # other committed. The admin Delivery page already holds this lock from its
+        # own entry read; taking it again in the same transaction is a no-op. Without
+        # `populate_existing`, the lock would be taken on a row whose
+        # already-loaded values are never refreshed (see
+        # OrderScheduleService.ensure_delivery_if_due).
+        delivery = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
         if not delivery:
             raise NotFoundError("Delivery not found", error_code="STAFF_DELIVERY_NOT_FOUND")
 
@@ -2481,8 +2484,12 @@ class StaffService:
         else:  # month
             start_date = now - timedelta(days=30)
 
-        # Base query for the period
-        base_query = Delivery.query.filter(Delivery.delivery_person_id == user_id, Delivery.updated_at >= start_date)
+        # Base query for the period. A cancelled delivery is not one of the driver's.
+        base_query = Delivery.query.filter(
+            Delivery.delivery_person_id == user_id,
+            Delivery.updated_at >= start_date,
+            Delivery.status.notin_(DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES),
+        )
 
         total_deliveries = base_query.count()
         delivered_count = base_query.filter(Delivery.status == DeliveryStatus.DELIVERED).count()
@@ -2553,7 +2560,19 @@ class StaffService:
             NotFoundError: If order not found
             ValidationError: If order is not in a valid state for this transition
         """
-        order = Order.query.get(order_id)
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        # Locked and re-read before the `confirmed` check. A customer may cancel a confirmed
+        # order a driver has accepted (F5, amended 2026-10-21): an unlocked read taken before
+        # that cancel committed wrote PREPARING over it and queued a "being prepared" notice for
+        # a cancelled order. Under the lock it meets the cancel and is refused below.
+        # The ORDER only: this method writes the order and only reads the delivery. Taking the
+        # Delivery first and then waiting for the Order could deadlock against the
+        # Order-then-Delivery cancel cascade (admin, bulk, gateway and abandoned-order cancels);
+        # see spec §10 of docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md.
+        # Order alone meets neither the customer's cancel (Delivery, then Order) nor that cascade
+        # in a cycle, and the driver-counter sync below locks DeliveryPerson last on every path.
+        order = db.session.get(Order, order_id, with_for_update=True, populate_existing=True)
         if not order:
             raise NotFoundError("Order not found", error_code="STAFF_ORDER_NOT_FOUND")
 
@@ -2566,8 +2585,6 @@ class StaffService:
 
         # F18: a confirmed order whose delivery failed is waiting for a new date.
         # Refused before the write, so no "being prepared" notice is queued.
-        from business_app.services.order_schedule_service import OrderScheduleService
-
         OrderScheduleService.assert_can_advance(order)
 
         order.status = OrderStatus.PREPARING

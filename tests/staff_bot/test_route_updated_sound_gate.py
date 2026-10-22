@@ -142,6 +142,7 @@ def _wired_bot(next_message_id=100, chat_id=555):
     sent = MagicMock(chat_id=chat_id, message_id=next_message_id)
     bot.send_message = AsyncMock(return_value=sent)
     bot.edit_message_text = AsyncMock()
+    bot.edit_message_reply_markup = AsyncMock()
     bot.delete_message = AsyncMock()
     bot.pin_chat_message = AsyncMock()
     return bot
@@ -793,3 +794,356 @@ class TestMalformedTelegramId:
                    AsyncMock(return_value=True)):
             resp = asyncio.run(server.route_updated_handler(_request_with(payload)))
         assert resp.status == 400
+
+
+# --- an order cancel: the silent push names the stop that left the route ----
+#
+# Owner, 2026-10-22: when an order is cancelled the driver's pinned route card is refreshed with
+# no sound and no alert. The backend's push (`refresh_driver_route_card_task`) is the silent
+# route-updated payload plus the cancelled stop's `delivery_id`; it carries no materiality keys,
+# because nothing was re-solved. A borrowed card showing that very stop (its detail, Navigate or
+# status/at-door screen, `route_card_state.note_borrowed_screen`) gives way to the refreshed card.
+# On every outcome except BLOCKED the stop is then left behind: its snapshot is forgotten and only
+# its own at-door flow keys are cleared, which is narrower than the refused-tap
+# `clear_pending_flows`. A borrowed card showing anything else is BLOCKED and left alone, as for
+# every silent push, and so is everything the driver holds.
+
+CANCELLED_STOP = 11
+REMAINING_STOP = 10  # `_delivery_payload(1)`'s only row: the list after the cancel
+
+
+def _cancel_push():
+    """The backend's payload for a cancelled stop, key for key (`bot_webhook.notify_route_updated`
+    called by `refresh_driver_route_card_task`)."""
+    return {
+        "driver_id": 303, "telegram_id": 555, "timestamp": "2026-10-22T03:00:00+00:00",
+        "event_id": "route_updated:card-refresh-1", "sound": False, "trigger": "order_cancelled",
+        "delivery_id": CANCELLED_STOP,
+    }
+
+
+def _borrowed_card(screen_delivery_id, screen=route_card_state.SCREEN_STOP, screen_message_id=900):
+    """A card borrowed today. `screen` names the noted screen the way `note_borrowed_screen` stores
+    it; `screen_message_id` is the message that screen was drawn on (the card is message 900)."""
+    state = {
+        "chat_id": 555, "message_id": 900, "card_date": route_card.local_date_str(),
+        "view": route_card_state.VIEW_BORROWED, "content_sig": "x",
+    }
+    if screen_delivery_id is not None:
+        state["borrowed_screen"] = {
+            "delivery_id": screen_delivery_id, "screen": screen, "chat_id": 555,
+            "message_id": screen_message_id,
+        }
+    return state
+
+
+def _armed_at_door(delivery_id):
+    """The user_data an at-door cash prompt leaves for `delivery_id`: the snapshot, the pending
+    status (`initiate_status_change`) and the armed cash flow (`start_partial_cash_collection`)."""
+    return {
+        "authenticated": True,
+        "language": "en",
+        "current_delivery": {"delivery_id": delivery_id, "status": "arrived"},
+        "pending_status": {"delivery_id": delivery_id, "new_status": "delivered", "flow_address_id": None},
+        "pending_delivery_cash_flow": {"delivery_id": delivery_id, "flow_type": "partial"},
+    }
+
+
+@pytest.mark.unit
+class TestOrderCancelledPush:
+    @pytest.fixture(autouse=True)
+    def _reset_card_state(self, monkeypatch):
+        route_card_state.configure(_FakeRedis())
+        route_card_state._locks.clear()
+        monkeypatch.setattr(route_card, "_get_user_language", AsyncMock(return_value="en"))
+        self.alerts = []
+
+        async def send_head_change_alert(bot_app, *, telegram_id):
+            self.alerts.append(telegram_id)
+
+        monkeypatch.setattr(route_card, "send_head_change_alert", send_head_change_alert)
+        yield
+        route_card_state.configure(None)
+        route_card_state._locks.clear()
+
+    @staticmethod
+    def _server(bot, user_data):
+        server = _server_with_bot()
+        server.bot_app = _driver_bot_app(bot)
+        server.bot_app.user_data = user_data
+        return server
+
+    @staticmethod
+    def _post(server):
+        with patch('staff_bot.webhook_server.verify_webhook_signature',
+                   AsyncMock(return_value=True)):
+            return asyncio.run(server.route_updated_handler(_request_with(_cancel_push())))
+
+    @staticmethod
+    def _assert_card_redrawn_in_place(bot):
+        text, keyboard = route_card.build_view(_delivery_payload(1), "en", route_card_state.VIEW_NEXT)
+        bot.edit_message_text.assert_awaited_once_with(
+            chat_id=555, message_id=900, text=text, reply_markup=keyboard, parse_mode="HTML",
+        )
+        bot.send_message.assert_not_called()
+        bot.pin_chat_message.assert_not_called()
+
+    def test_the_cancel_push_edits_the_card_in_place_and_sends_nothing(self, monkeypatch):
+        """The card was showing the route: it is edited, nothing is sent, and the cancelled
+        stop is still left behind: a leftover snapshot of it is forgotten, so an old button of
+        that stop re-reads the active list and is refused instead of drawing a cash prompt."""
+        asyncio.run(route_card_state.save(555, {
+            "chat_id": 555, "message_id": 900, "card_date": route_card.local_date_str(),
+            "view": route_card_state.VIEW_NEXT, "content_sig": "stale-sig",
+        }))
+        bot = _wired_bot()
+        user_data = {555: {"current_delivery": {"delivery_id": CANCELLED_STOP, "status": "assigned"}}}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        bot.edit_message_reply_markup.assert_not_called()
+        assert self.alerts == []
+        assert user_data == {555: {}}
+
+    def test_a_refresh_that_could_not_render_still_leaves_the_cancelled_stop(self, monkeypatch):
+        """No valid token: nothing is redrawn, but the push was not BLOCKED, so the stop's
+        snapshot and its own flow still go. Only a BLOCKED push touches nothing."""
+        bot = _wired_bot()
+        user_data = {555: _armed_at_door(CANCELLED_STOP)}
+        server = self._server(bot, user_data)
+        server.bot_app.bot_data["token_manager"].get_valid_token = AsyncMock(return_value=None)
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        bot.edit_message_text.assert_not_called()
+        bot.send_message.assert_not_called()
+        assert user_data == {555: {"authenticated": True, "language": "en"}}
+
+    @pytest.mark.parametrize("screen", ["stop", "navigate", "status"])
+    def test_a_screen_of_the_cancelled_stop_gives_way_to_the_card(self, monkeypatch, screen):
+        """The stop's detail, its Navigate screen, or a status confirm / at-door prompt
+        (`initiate_status_change`): each is redrawn as the card, the borrow is released and its
+        note dropped, and the stop's snapshot is forgotten."""
+        noted = getattr(route_card_state, f"SCREEN_{screen.upper()}")
+        asyncio.run(route_card_state.save(555, _borrowed_card(CANCELLED_STOP, screen=noted)))
+        bot = _wired_bot()
+        user_data = {555: {"current_delivery": {"delivery_id": CANCELLED_STOP, "status": "assigned"},
+                           "authenticated": True}}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        bot.edit_message_reply_markup.assert_not_called()
+        assert self.alerts == []
+        state = asyncio.run(route_card_state.load(555))
+        assert state["view"] == route_card_state.VIEW_NEXT, "the borrow is released"
+        assert "borrowed_screen" not in state
+        assert user_data == {555: {"authenticated": True}}, "the cancelled stop's snapshot is forgotten"
+
+    def test_an_at_door_prompt_of_the_cancelled_stop_gives_way_and_its_flow_is_disarmed(self, monkeypatch):
+        """The driver is typing the cash for the stop that was just cancelled. The prompt gives
+        way, and the flow is left the way the backend's cancelled refusal leaves it
+        (`flow_state.clear_pending_flows`): the next number they type is not money for a
+        cancelled order. Session keys stay."""
+        asyncio.run(route_card_state.save(
+            555, _borrowed_card(CANCELLED_STOP, screen=route_card_state.SCREEN_STATUS)
+        ))
+        bot = _wired_bot()
+        user_data = {555: _armed_at_door(CANCELLED_STOP)}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        assert self.alerts == []
+        assert asyncio.run(route_card_state.load(555))["view"] == route_card_state.VIEW_NEXT
+        assert user_data == {555: {"authenticated": True, "language": "en"}}
+
+    def test_a_flow_armed_for_another_stop_survives_the_give_way(self, monkeypatch):
+        """The driver opened the cancelled stop's detail while a status flow of another stop was
+        still pending. The detail gives way and the cancelled stop's snapshot goes, but the other
+        stop's flow is not this stop's to clear."""
+        asyncio.run(route_card_state.save(555, _borrowed_card(CANCELLED_STOP)))
+        bot = _wired_bot()
+        other = _armed_at_door(REMAINING_STOP)
+        user_data = {555: {**other, "current_delivery": {"delivery_id": CANCELLED_STOP, "status": "assigned"}}}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        assert user_data == {555: {key: value for key, value in other.items() if key != "current_delivery"}}
+
+    def test_another_conversations_draft_survives_the_give_way(self, monkeypatch):
+        """A push is not a driver gesture: it clears the cancelled stop's own at-door flow and
+        nothing else. The transfer-confirm conversation the driver also has open keeps its
+        draft (the journey tests cover the active-flow mirror)."""
+        asyncio.run(route_card_state.save(
+            555, _borrowed_card(CANCELLED_STOP, screen=route_card_state.SCREEN_STATUS)
+        ))
+        bot = _wired_bot()
+        user_data = {555: {**_armed_at_door(CANCELLED_STOP), "pending_confirm_transfer_id": 77}}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        assert user_data == {555: {"authenticated": True, "language": "en", "pending_confirm_transfer_id": 77}}
+
+    def test_an_at_door_prompt_of_another_stop_keeps_its_screen_flow_and_snapshot(self, monkeypatch):
+        asyncio.run(route_card_state.save(
+            555, _borrowed_card(REMAINING_STOP, screen=route_card_state.SCREEN_STATUS)
+        ))
+        before = asyncio.run(route_card_state.load(555))
+        bot = _wired_bot()
+        user_data = {555: _armed_at_door(REMAINING_STOP)}
+        server = self._server(bot, user_data)
+        api_stub = _api_client_stub(_delivery_payload(1))
+        monkeypatch.setattr(route_card, "api_client", api_stub)
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        bot.edit_message_text.assert_not_called()
+        bot.edit_message_reply_markup.assert_not_called()
+        bot.send_message.assert_not_called()
+        api_stub.client.get_active_deliveries.assert_not_called()
+        assert asyncio.run(route_card_state.load(555)) == before
+        assert user_data == {555: _armed_at_door(REMAINING_STOP)}
+        assert self.alerts == []
+
+    def test_a_borrowed_screen_of_another_stop_is_left_alone(self, monkeypatch):
+        asyncio.run(route_card_state.save(555, _borrowed_card(REMAINING_STOP)))
+        before = asyncio.run(route_card_state.load(555))
+        bot = _wired_bot()
+        snapshot = {"delivery_id": REMAINING_STOP, "status": "assigned"}
+        user_data = {555: {"current_delivery": dict(snapshot)}}
+        server = self._server(bot, user_data)
+        api_stub = _api_client_stub(_delivery_payload(1))
+        monkeypatch.setattr(route_card, "api_client", api_stub)
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        bot.edit_message_text.assert_not_called()
+        bot.send_message.assert_not_called()
+        api_stub.client.get_active_deliveries.assert_not_called()
+        assert asyncio.run(route_card_state.load(555)) == before
+        assert user_data == {555: {"current_delivery": snapshot}}
+        assert self.alerts == []
+
+    def test_a_borrow_with_no_noted_screen_is_left_alone_with_everything_the_driver_holds(self, monkeypatch):
+        """A borrow from before screens were noted names no stop, so it is never yanked, and the
+        snapshot and the armed flow stay exactly as they are. The driver's next tap reaches the
+        backend, whose cancelled refusal clears them (`_handle_api_response_error`)."""
+        asyncio.run(route_card_state.save(555, _borrowed_card(None)))
+        before = asyncio.run(route_card_state.load(555))
+        bot = _wired_bot()
+        user_data = {555: _armed_at_door(CANCELLED_STOP)}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        bot.edit_message_text.assert_not_called()
+        bot.send_message.assert_not_called()
+        assert asyncio.run(route_card_state.load(555)) == before
+        assert user_data == {555: _armed_at_door(CANCELLED_STOP)}
+
+    def test_a_screen_of_the_cancelled_stop_on_another_message_loses_its_buttons(self, monkeypatch):
+        """The stop was opened from another message (the "Address changed" alert's Open stop).
+        The card is redrawn as always, and that message keeps its text but its live buttons
+        give way to the one Open-route-card button the head-change alert carries. Edits never
+        notify; nothing is sent."""
+        asyncio.run(route_card_state.save(555, _borrowed_card(CANCELLED_STOP, screen_message_id=950)))
+        bot = _wired_bot()
+        server = self._server(bot, {})
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        bot.edit_message_reply_markup.assert_awaited_once()
+        kwargs = bot.edit_message_reply_markup.await_args.kwargs
+        assert (kwargs["chat_id"], kwargs["message_id"]) == (555, 950)
+        markup = kwargs["reply_markup"]
+        assert [[button.callback_data for button in row] for row in markup.inline_keyboard] == [
+            ["staff_route_view_next"]
+        ]
+        assert markup == route_card.open_route_card_keyboard("en")
+        assert set(kwargs) == {"chat_id", "message_id", "reply_markup"}
+        assert self.alerts == []
+        state = asyncio.run(route_card_state.load(555))
+        assert state["view"] == route_card_state.VIEW_NEXT
+        assert "borrowed_screen" not in state
+
+    def test_a_refused_button_edit_on_the_other_message_never_fails_the_refresh(self, monkeypatch):
+        from telegram.error import BadRequest
+
+        asyncio.run(route_card_state.save(555, _borrowed_card(CANCELLED_STOP, screen_message_id=950)))
+        bot = _wired_bot()
+        bot.edit_message_reply_markup = AsyncMock(side_effect=BadRequest("Message to edit not found"))
+        user_data = {555: {"current_delivery": {"delivery_id": CANCELLED_STOP, "status": "assigned"}}}
+        server = self._server(bot, user_data)
+        monkeypatch.setattr(route_card, "api_client", _api_client_stub(_delivery_payload(1)))
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        self._assert_card_redrawn_in_place(bot)
+        bot.edit_message_reply_markup.assert_awaited_once()
+        assert asyncio.run(route_card_state.load(555))["view"] == route_card_state.VIEW_NEXT
+        assert user_data == {555: {}}
+
+    def test_a_tap_onto_another_screen_during_the_fetch_wins_the_race(self, monkeypatch):
+        """The authoritative check is the one made inside the card lock. The card shows the
+        cancelled stop when the push starts, and the driver opens another stop while the active
+        list is being fetched: the render must leave that new screen alone."""
+        asyncio.run(route_card_state.save(555, _borrowed_card(CANCELLED_STOP)))
+        bot = _wired_bot()
+        server = self._server(bot, {})
+
+        class _RacyClient:
+            async def __aenter__(self):
+                client = MagicMock()
+
+                async def _get_active_deliveries(token):
+                    await route_card_state.mark_borrowed(555)
+                    await route_card_state.note_borrowed_screen(
+                        555, delivery_id=REMAINING_STOP, screen=route_card_state.SCREEN_STOP,
+                        chat_id=555, message_id=900,
+                    )
+                    return MagicMock(success=True, data=_delivery_payload(1))
+
+                client.get_active_deliveries = AsyncMock(side_effect=_get_active_deliveries)
+                return client
+
+            async def __aexit__(self, *a):
+                return False
+
+        monkeypatch.setattr(route_card, "api_client", _RacyClient())
+
+        resp = self._post(server)
+
+        assert resp.status == 200
+        bot.edit_message_text.assert_not_called()
+        bot.send_message.assert_not_called()
+        state = asyncio.run(route_card_state.load(555))
+        assert state["view"] == route_card_state.VIEW_BORROWED
+        assert state["borrowed_screen"]["delivery_id"] == REMAINING_STOP

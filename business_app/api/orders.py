@@ -3,6 +3,7 @@ Orders API endpoints
 This file should be placed in business_app/api/orders.py
 """
 
+from flasgger import swag_from
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, UTC, timedelta
@@ -19,6 +20,7 @@ from business_app.utils.translations import get_translation
 from business_app.utils.payment_projection import is_settled_prepayment, order_is_resolved
 from business_app.serializers.order_serializers import (
     serialize_order,
+    serialize_reorder_info,
     serialize_order_delivery,
     serialize_delivery_slot,
     serialize_order_payment,
@@ -267,6 +269,28 @@ def get_quick_reorder_suggestions():
     except Exception as e:
         current_app.logger.error(f"Get quick reorder suggestions error: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
+
+
+@orders_bp.route("/reorder-info", methods=["GET"])
+@jwt_required()
+@handle_api_exception
+@swag_from(
+    {
+        "tags": ["Orders"],
+        "description": "The customer's reorder candidate and open order",
+        "security": [{"Bearer": []}],
+        "responses": {
+            "200": {"description": "data: {candidate, open_order}"},
+            "401": {"description": "Missing or invalid token"},
+        },
+    }
+)
+def get_reorder_info():
+    user_id = int(get_jwt_identity())
+    order_service = get_order_service()
+    return success_response(
+        data=serialize_reorder_info(order_service.reorder_candidate(user_id), order_service.open_order(user_id))
+    )
 
 
 @orders_bp.route("/statistics", methods=["GET"])

@@ -40,6 +40,9 @@ class BotState(BaseModel):
         'phone_otp',              # Awaiting the 6-digit phone-verification code
     ]] = None
 
+    # When the code's SMS was sent; the prompt dies after PHONE_OTP_EXPIRY.
+    phone_otp_armed_at: Optional[str] = None
+
     # Address-related state
     address_id: Optional[int] = Field(None, description="ID of address being edited")
 
@@ -50,6 +53,10 @@ class BotState(BaseModel):
     # customer does, and after 30 minutes (handlers/quantity_screen.py).
     # tests/telegram_bot/test_typed_quantity_journeys.py
     quantity_screen: Optional[dict] = None
+
+    # The bottom keyboard on the customer's screen: {'labels', 'language', 'loyalty'}.
+    # Written by menu_keyboard.send_menu_keyboard after Telegram accepts the send.
+    menu_keyboard: Optional[dict] = None
 
     class Config:
         extra = 'allow'  # Allow additional fields for forward compatibility

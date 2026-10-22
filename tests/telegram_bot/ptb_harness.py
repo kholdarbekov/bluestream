@@ -344,25 +344,37 @@ class BotHarness:
         answer yes for every string, including a button that does not exist —
         which is exactly how a wiring test goes quietly vacuous. Pass
         `include_catch_alls=True` only to assert on the middlewares themselves.
+
+        The flow exit (`flow_exit.FlowExitHandler`, group -3) is excluded the
+        same way: it claims every exit gesture (a menu label, /menu, a legacy
+        menu callback) and draws nothing, because the destination is drawn in
+        group 0. Counting it would keep a menu button looking wired after its
+        group-0 handler was deleted.
         """
+        from flow_exit import FlowExitHandler
+
         matched = []
         for group in sorted(self.application.handlers):
             for handler in self.application.handlers[group]:
                 if handler.check_update(update) in (None, False):
                     continue
-                if not include_catch_alls and _is_catch_all(handler):
+                if not include_catch_alls and (
+                    _is_catch_all(handler) or isinstance(handler, FlowExitHandler)
+                ):
                     continue
                 matched.append((group, handler))
         return matched
 
 
-async def build_bot_harness(monkeypatch, *, translations=None, database=None) -> BotHarness:
+async def build_bot_harness(
+    monkeypatch, *, translations=None, database=None, strict_entities=False
+) -> BotHarness:
     """Assemble the real customer bot against the three fake seams."""
     import api_client as api_client_module
     import database as database_module
     from telegram.ext import ApplicationBuilder
 
-    telegram = FakeTelegramTransport()
+    telegram = FakeTelegramTransport(strict_entities=strict_entities)
     backend = FakeBackend()
     db = database or FakeDatabase()
 
@@ -461,6 +473,24 @@ async def build_bot_harness(monkeypatch, *, translations=None, database=None) ->
 
     telegram.reset()
     return BotHarness(application, telegram, backend, db)
+
+
+async def menu_already_installed(bot: BotHarness, language: str = None) -> None:
+    """This customer already has the current keyboard; for journeys that are not about the lazy install.
+
+    Installed through the real `send_menu_keyboard`, so the marker it leaves is exactly the one
+    production leaves, and the lazy installer (`menu_keyboard.ensure_menu_keyboard_middleware`)
+    finds nothing to do on the journey's first tap.
+    """
+    from i18n import i18n
+    from menu_keyboard import installed_menu_labels, send_menu_keyboard
+
+    lang = language or await i18n.get_user_language(DEFAULT_USER_ID)
+    await send_menu_keyboard(
+        bot.application.bot, DEFAULT_CHAT_ID, DEFAULT_USER_ID, i18n.get('telegram.main_menu', lang), lang,
+    )
+    assert await installed_menu_labels(DEFAULT_USER_ID), "needs a registered customer with a phone"
+    bot.telegram.reset()
 
 
 async def _noop(*_args, **_kwargs):

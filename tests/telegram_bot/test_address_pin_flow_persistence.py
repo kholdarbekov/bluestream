@@ -22,13 +22,14 @@ exactly why a suite full of green single-handler tests shipped it.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
 # Imported at module (collection) level so `i18n`, `keyboards` and `config` are
 # cached in sys.modules as the BOT's versions before any string-path
 # monkeypatch below resolves them. See tests/telegram_bot/conftest.py.
+import menu_keyboard
 from handlers.profile import (
     ADDRESS_APARTMENT,
     ADDRESS_BUILDING,
@@ -123,7 +124,16 @@ def echo_i18n(monkeypatch):
 
 
 @pytest.fixture
-def api(monkeypatch, echo_i18n):
+def menu_send(monkeypatch):
+    """The bottom-keyboard sender, which reads the bot's own DB: replaced by a
+    signature-checking stand-in a test can read back."""
+    send = create_autospec(menu_keyboard.send_menu_keyboard)
+    monkeypatch.setattr("handlers.profile.send_menu_keyboard", send)
+    return send
+
+
+@pytest.fixture
+def api(monkeypatch, echo_i18n, menu_send):
     """Wire the recording API into handlers.profile and neuter the two other
     pieces of real I/O the flow reaches for (auth token, menu keyboard)."""
     recorder = RecordingAddressAPI()
@@ -137,7 +147,6 @@ def api(monkeypatch, echo_i18n):
 
     monkeypatch.setattr("handlers.profile.api_client", _Client())
     monkeypatch.setattr("handlers.profile.get_auth_token", AsyncMock(return_value="tok"))
-    monkeypatch.setattr("handlers.profile.main_menu_for", AsyncMock(return_value=None))
     return recorder
 
 
@@ -369,7 +378,7 @@ async def test_a_failed_create_at_the_title_step_still_saves_at_the_end(
 
     monkeypatch.setattr("handlers.profile.api_client", _Client())
     monkeypatch.setattr("handlers.profile.get_auth_token", AsyncMock(return_value="tok"))
-    monkeypatch.setattr("handlers.profile.main_menu_for", AsyncMock(return_value=None))
+    monkeypatch.setattr("handlers.profile.send_menu_keyboard", create_autospec(menu_keyboard.send_menu_keyboard))
 
     ctx = make_context()
     assert await handler.location_received(pin_update(), ctx) == ADDRESS_TITLE
@@ -433,7 +442,7 @@ async def test_the_address_conversation_registers_a_timeout_state():
     )
 
 
-async def test_the_timeout_handler_clears_the_flow_state(handler, api):
+async def test_the_timeout_handler_clears_the_flow_state(handler, api, menu_send):
     """Stale keys outlive the conversation that owned them: a leftover
     address_flow_origin='checkout' bounces a LATER, unrelated address save
     into checkout."""
@@ -446,9 +455,10 @@ async def test_the_timeout_handler_clears_the_flow_state(handler, api):
 
     assert "temp_address_data" not in ctx.user_data
     assert "address_flow_origin" not in ctx.user_data
-    assert update.message.reply_text.await_count == 1, (
-        "the customer must be told the flow expired"
-    )
+    assert menu_send.await_args.args == (
+        ctx.bot, update.effective_chat.id, update.effective_user.id,
+        "telegram.address.flow_timed_out_saved", "uz",
+    ), "the customer must be told the flow expired, with the menu put back"
 
 
 async def test_the_timeout_keeps_an_address_that_was_already_created(handler, api):

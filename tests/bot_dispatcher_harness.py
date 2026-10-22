@@ -16,6 +16,9 @@ What it provides:
 * :class:`TelegramCall` — one recorded Bot API call, with helpers that answer
   the question tests actually ask: what did the user SEE, and which buttons
   could they tap?
+* :func:`telegram_entity_error` — a port of tdlib's two Markdown parsers, so
+  a transport built with ``strict_entities=True`` refuses a message Telegram
+  would refuse (``Can't parse entities``) instead of accepting any text.
 * :class:`UpdateFactory` — real :class:`telegram.Update` objects, including the
   ``bot_command`` entity without which ``CommandHandler`` never matches.
 * :class:`FlaskBackend` — a bot's HTTP client answered by the REAL Flask app, for
@@ -49,6 +52,98 @@ def _is_catch_all(handler) -> bool:
     return False
 
 
+# Port of tdlib's parse_markdown / parse_markdown_v2 (td/telegram/MessageEntity.cpp). It
+# scans UTF-8 bytes, so offsets are byte offsets. One deliberate deviation: MarkdownV2 ">"
+# block quotes and "![" custom emoji are always refused here (stricter than Telegram; the
+# bot sends neither).
+_LEGACY_OPENERS = (b"_", b"*", b"`", b"[")
+_V2_RESERVED = b"_*[]()~`>#+-=|{}.!"
+# MarkdownV2 opening tokens, longest first; each entity closes with its own token (TextUrl with "]").
+_V2_OPENERS = ((b"```", "Pre"), (b"__", "Underline"), (b"||", "Spoiler"), (b"`", "Code"),
+               (b"_", "Italic"), (b"*", "Bold"), (b"~", "Strikethrough"), (b"[", "TextUrl"))
+_V2_CLOSERS = {"Pre": b"```", "Underline": b"__", "Spoiler": b"||", "Code": b"`",
+               "Italic": b"_", "Bold": b"*", "Strikethrough": b"~", "TextUrl": b"]"}
+
+
+def telegram_entity_error(text: str, parse_mode: Optional[str]) -> Optional[str]:
+    if parse_mode == "Markdown":
+        detail = _legacy_markdown_error(text.encode("utf-8"))
+    elif parse_mode == "MarkdownV2":
+        detail = _markdown_v2_error(text.encode("utf-8"))
+    else:
+        return None
+    return None if detail is None else f"Bad Request: can't parse entities: {detail}"
+
+
+def _legacy_markdown_error(data: bytes) -> Optional[str]:
+    i, size = 0, len(data)
+    while i < size:
+        c = data[i:i + 1]
+        if c == b"\\" and data[i + 1:i + 2] in _LEGACY_OPENERS:  # escapes count only OUTSIDE an entity
+            i += 2
+            continue
+        if c not in _LEGACY_OPENERS:
+            i += 1
+            continue
+        begin = i
+        closer = b"```" if data.startswith(b"```", i) else (b"]" if c == b"[" else c)
+        i += 3 if closer == b"```" else 1
+        while i < size and not data.startswith(closer, i):  # no nesting, no escapes: first closer wins
+            i += 1
+        if i >= size:
+            return f"Can't find end of the entity starting at byte offset {begin}"
+        i += len(closer)
+        if c == b"[" and data.startswith(b"(", i):  # [text](url); an unclosed url is not an error
+            end = data.find(b")", i)
+            i = size if end == -1 else end + 1
+    return None
+
+
+def _markdown_v2_error(data: bytes) -> Optional[str]:
+    stack: list[tuple[str, int]] = []  # open entities: (type, opener byte offset)
+    i, size = 0, len(data)
+    while i < size:
+        c, nxt = data[i:i + 1], data[i + 1:i + 2]
+        if c == b"\\" and nxt and 0 < nxt[0] <= 126:
+            i += 2
+            continue
+        top = stack[-1][0] if stack else None
+        if c not in (b"`" if top in ("Code", "Pre") else _V2_RESERVED):
+            i += 1
+            continue
+        if top and data.startswith(_V2_CLOSERS[top], i) and not (top == "Italic" and nxt == b"_"):
+            stack.pop()
+            i += len(_V2_CLOSERS[top])
+            if top == "TextUrl" and data.startswith(b"(", i):
+                url_begin = j = i + 1
+                while j < size and data[j:j + 1] != b")":
+                    j += 2 if data[j:j + 1] == b"\\" else 1
+                if j >= size:
+                    return f"Can't find end of a URL at byte offset {url_begin}"
+                i = j + 1
+            continue
+        match = next(((tok, kind) for tok, kind in _V2_OPENERS if data.startswith(tok, i)), None)
+        if match is None:
+            return f"Character '{c.decode()}' is reserved and must be escaped with the preceding '\\'"
+        stack.append((match[1], i))
+        i += len(match[0])
+    if stack:
+        kind, begin = stack[-1]
+        return f"Can't find end of {kind} entity at byte offset {begin}"
+    return None
+
+
+_ENTITY_ENDPOINTS = frozenset({"sendMessage", "editMessageText", "editMessageCaption"})
+_EDIT_ENDPOINTS = frozenset({"editMessageText", "editMessageCaption", "editMessageReplyMarkup"})
+
+
+def _reply_markup_of(params: dict) -> dict:
+    raw = params.get("reply_markup")
+    if raw is None:
+        return {}
+    return json.loads(raw) if isinstance(raw, str) else raw
+
+
 DEFAULT_USER_ID = 700100200
 DEFAULT_CHAT_ID = 700100200
 
@@ -59,6 +154,8 @@ class TelegramCall:
 
     method: str
     params: dict
+    # Description of the 4xx Telegram answered (scripted failure or strict-entity refusal).
+    refused: Optional[str] = None
 
     @property
     def text(self) -> str:
@@ -111,7 +208,10 @@ class FakeTelegramTransport(BaseRequest):
     project's production logs.
     """
 
-    def __init__(self):
+    def __init__(self, *, strict_entities: bool = False):
+        # When on, text/caption of send/edit calls is parsed like Telegram does and a
+        # malformed parse_mode message is refused with a 400.
+        self.strict_entities = strict_entities
         self.calls: list[TelegramCall] = []
         self._next_message_id = 5000
         # method -> callable(params) -> (status_code, payload_dict)
@@ -142,7 +242,8 @@ class FakeTelegramTransport(BaseRequest):
     async def do_request(self, url, method, request_data: RequestData = None, **_kwargs):
         endpoint = url.rsplit("/", 1)[-1]
         params = dict(request_data.parameters) if request_data is not None else {}
-        self.calls.append(TelegramCall(endpoint, params))
+        call = TelegramCall(endpoint, params)
+        self.calls.append(call)
 
         if method == "GET":
             # `File.download_as_bytearray` -> `BaseRequest.retrieve` is the ONE
@@ -155,7 +256,25 @@ class FakeTelegramTransport(BaseRequest):
         failure = self.failures.get(endpoint)
         if failure is not None:
             status, payload = failure(params)
+            if status >= 400:
+                call.refused = payload.get("description")
             return status, json.dumps(payload).encode("utf-8")
+
+        if endpoint in _EDIT_ENDPOINTS and "keyboard" in _reply_markup_of(params):
+            # Telegram always refuses an edit that carries a reply keyboard: only inline buttons can be edited.
+            error = "Bad Request: inline keyboard expected"
+            call.refused = error
+            body = {"ok": False, "error_code": 400, "description": error}
+            return 400, json.dumps(body).encode("utf-8")
+
+        if self.strict_entities and endpoint in _ENTITY_ENDPOINTS:
+            error = telegram_entity_error(
+                params.get("text", params.get("caption", "")), params.get("parse_mode")
+            )
+            if error is not None:
+                call.refused = error
+                body = {"ok": False, "error_code": 400, "description": error}
+                return 400, json.dumps(body).encode("utf-8")
 
         return 200, json.dumps({"ok": True, "result": self._result_for(endpoint, params)}).encode(
             "utf-8"
@@ -216,6 +335,11 @@ class FakeTelegramTransport(BaseRequest):
     def shown(self) -> list[TelegramCall]:
         """Everything the customer would actually see, in order."""
         return self.of("sendMessage", "sendPhoto", "editMessageText")
+
+    @property
+    def delivered(self) -> list[TelegramCall]:
+        """What the customer actually received: ``shown`` minus the refused calls."""
+        return [call for call in self.shown if call.refused is None]
 
     @property
     def visible_answers(self) -> list[TelegramCall]:

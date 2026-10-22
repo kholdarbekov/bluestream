@@ -126,7 +126,7 @@ class TestProductHandlerDeepFlows:
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(products_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(products_module.MenuKeyboards, "back_button", lambda _language, callback_data: ("back-kbd", callback_data))
         monkeypatch.setattr(
             products_module,
             "api_client",
@@ -139,7 +139,7 @@ class TestProductHandlerDeepFlows:
 
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.products.category_empty:en",
-            reply_markup="back-kbd",
+            reply_markup=("back-kbd", "back_to_categories"),
         )
         update.callback_query.answer.assert_awaited_once()
 
@@ -715,7 +715,7 @@ class TestLoyaltyHandlerDeepFlows:
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _language, callback_data: ("back-kbd", callback_data))
         monkeypatch.setattr(
             loyalty_module,
             "api_client",
@@ -726,7 +726,7 @@ class TestLoyaltyHandlerDeepFlows:
 
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.loyalty.points_history:en\n\ntelegram.loyalty.no_history:en",
-            reply_markup="back-kbd",
+            reply_markup=("back-kbd", "menu_loyalty"),
         )
         update.callback_query.answer.assert_awaited_once()
 
@@ -741,7 +741,7 @@ class TestLoyaltyHandlerDeepFlows:
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _language, callback_data: ("back-kbd", callback_data))
         monkeypatch.setattr(
             loyalty_module,
             "api_client",
@@ -762,7 +762,7 @@ class TestLoyaltyHandlerDeepFlows:
         monkeypatch.setattr(eligibility, "is_loyalty_eligible", AsyncMock(return_value=True))
         monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _language, callback_data: ("back-kbd", callback_data))
         monkeypatch.setattr(
             loyalty_module,
             "api_client",
@@ -958,4 +958,4 @@ class TestLoyaltyHistoryPagination:
     def test_single_page_has_no_arrows_but_keeps_back(self, monkeypatch):
         cbs = self._callbacks(self._nav(1, 1, monkeypatch))
         assert all("loyalty_history_page_" not in (c or "") for c in cbs)
-        assert "back_to_main" in cbs
+        assert "menu_loyalty" in cbs

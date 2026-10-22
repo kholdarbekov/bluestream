@@ -34,6 +34,7 @@ from business_app.utils.delivery_window import local_now
 from shared.enums import CorporateContractTrackingMode, OrderStatus
 from tests.integration.test_staff_sales_outlets_api import BOT_PAYLOAD, OUTLETS
 from tests.unit.test_outlet_dedupe import PIN
+from tests.integration.reorder_reminder_builders import add_order_lines, delivered_order, make_product
 from tests.integration.tier_discount_factory import seed_program, seed_tier
 from tests.unit.test_sales_agent_role import make_sales_agent_user
 
@@ -1452,3 +1453,29 @@ def test_the_line_ceiling_is_the_one_create_order_will_actually_enforce(
     assert placed.get_json()["error_code"] == "SALES_ORDER_QTY_INVALID"
     assert expected_details.items() <= placed.get_json()["details"].items()
     assert Order.query.filter_by(visit_id=visit_id).count() == 0
+
+
+def test_same_as_last_order_never_offers_the_free_bottle_quantity(
+    client, sales_agent_auth_headers, operator_auth_headers, flagged_product, sample_category, db
+):
+    """Spec 2026-10-21 §4. The store's newest delivery carried the counted SKU only as a free
+    reward bottle (the line `apply_reward_to_order` writes). `last_order_qty` is the last PAID
+    quantity, 6, not the free 1."""
+    outlet = _approved_outlet(client, sales_agent_auth_headers, operator_auth_headers)
+    owner = db.session.get(User, outlet["user_id"])
+    pump = make_product(db, sample_category, "Hand pump")
+    now = datetime.now(UTC)
+    add_order_lines(db, delivered_order(db, owner, now - timedelta(days=9)), [(flagged_product, 6)])
+    add_order_lines(db, delivered_order(db, owner, now - timedelta(days=2)), [(pump, 3)],
+                    reward_lines=[(flagged_product, 1)])
+    visit_id = _start(client, sales_agent_auth_headers, outlet["id"])["id"]
+    client.post(f"{VISITS}/{visit_id}/checkin", json={"skipped": True}, headers=sales_agent_auth_headers)
+
+    stock = client.post(
+        f"{VISITS}/{visit_id}/stock-check",
+        json={"items": [{"product_id": flagged_product.id, "on_hand_qty": 2}]},
+        headers=sales_agent_auth_headers,
+    )
+
+    assert stock.status_code == 200, stock.get_data(as_text=True)
+    assert stock.get_json()["data"]["items"][0]["last_order_qty"] == 6

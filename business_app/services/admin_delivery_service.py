@@ -146,11 +146,13 @@ class AdminDeliveryService:
     def update_delivery(delivery_id: int, payload: Dict[str, Any], actor_id: int) -> Dict[str, Any]:
         """Update delivery notes and/or status from the admin panel."""
         payload = payload or {}
-        delivery = Delivery.query.options(
-            joinedload(Delivery.order),
-            joinedload(Delivery.status_history).joinedload(DeliveryStatusHistory.changed_by_user),
-            joinedload(Delivery.delivery_person),
-        ).get(delivery_id)
+        # Locked and re-read before any branch decides: Picked up, Returned and a notes edit
+        # alike. A customer may cancel an order a driver has accepted (F5, amended 2026-10-21),
+        # and that cancel locks this row first too (Delivery, then Order). Read unlocked, a
+        # "Returned" whose read came before the cancel committed wrote `returned` over it. The
+        # Delivery alone: Postgres refuses FOR UPDATE on the nullable side of the eager outer
+        # joins this read used to carry, so the relationships load lazily instead.
+        delivery = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
         if not delivery:
             raise NotFoundError("Delivery not found")
 

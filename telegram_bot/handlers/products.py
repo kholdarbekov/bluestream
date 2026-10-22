@@ -46,6 +46,15 @@ def min_order_shortfall(subtotal: float) -> float:
     return max(0.0, float(MIN_ORDER_AMOUNT) - float(subtotal))
 
 
+def cart_is_empty(cart: dict) -> bool:
+    """The one "nothing to check out" rule: no lines, or a server subtotal of nothing.
+
+    Shared by the cart screen, Order water and the expired-checkout fallback. A line the
+    server dropped is still listed (at 0), so the lines alone do not decide it.
+    """
+    return not cart.get('cart_items') or float(cart.get('subtotal') or 0) <= 0
+
+
 class ProductHandlers(BaseHandler):
     """Product-related handlers"""
 
@@ -285,8 +294,8 @@ class ProductHandlers(BaseHandler):
           * Fetches active categories + Quick Order suggestions.
           * 0 categories → existing empty state (handled by the helper).
           * 1 category → skip the category picker and render that category's
-            products directly, with a single_category flag so "Back" goes to
-            the main menu instead of an empty category list.
+            products directly, with a single_category flag so the list carries
+            no Back row (the category list it would return to is skipped).
           * 2+ categories → render the category picker, prefixed by Quick
             Order suggestions when available.
         """
@@ -386,8 +395,9 @@ class ProductHandlers(BaseHandler):
 
         Shared by `category_handler` (user tapped a category), `products_menu`
         (single-category short-circuit) and `product_page_handler` (Previous /
-        Next). `single_category` controls the "Back" target on the product list
-        keyboard. `quick_suggestions` is only rendered in the single-category
+        Next). `single_category` drops the "Back" row from the product list
+        keyboard (the category list it would return to is skipped).
+        `quick_suggestions` is only rendered in the single-category
         case (otherwise the suggestions live above the category picker).
 
         `page` is passed in rather than read back out of `context.user_data`:
@@ -431,19 +441,21 @@ class ProductHandlers(BaseHandler):
         # Empty-category fallback
         if not products:
             text = i18n.get('telegram.products.category_empty', language)
+            # Back to the category list; a one-category shop skips that list, so no markup at all.
+            empty_markup = None if single_category else MenuKeyboards.back_button(language, 'back_to_categories')
             query = update.callback_query
             if query and query.message.photo:
                 # A photo cannot be edited to text, so the bubble is dropped and
                 # replaced. The drop is tidy-up; a refusal (past the 48h window,
                 # or already gone) must not cost the customer the answer.
                 await self._delete_callback_message(query)
-                await query.message.reply_text(text, reply_markup=MenuKeyboards.back_button(language))
+                await query.message.reply_text(text, reply_markup=empty_markup)
             elif query:
                 await self._edit_or_replace_callback_message(
-                    query, text, reply_markup=MenuKeyboards.back_button(language),
+                    query, text, reply_markup=empty_markup,
                 )
             else:
-                await update.message.reply_text(text=text, reply_markup=MenuKeyboards.back_button(language))
+                await update.message.reply_text(text=text, reply_markup=empty_markup)
             if query:
                 await self._ack(query)
             return
@@ -1358,12 +1370,10 @@ class ProductHandlers(BaseHandler):
             cart = cart_data.get('data', {}).get('cart') or {}
             cart_items = cart.get('cart_items', [])
 
-        cart_is_empty = None
         meets_minimum = True
 
         if not cart_items:
             cart_text = i18n.get('telegram.cart_empty', language)
-            cart_is_empty = True
         else:
             lines = [i18n.get('telegram.cart_title', language) + ":\n"]
             min_qty_violations = []
@@ -1415,7 +1425,6 @@ class ProductHandlers(BaseHandler):
                         'min_qty': min_qty,
                         'remaining': min_qty - quantity,
                     })
-            cart_is_empty = subtotal <= 0
             lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(subtotal)} UZS")
             # The cart is drawn before a method exists, so it states the catalogue (D5); say a
             # contract price will apply at checkout. Plain text here, like the rest of this screen.
@@ -1490,7 +1499,7 @@ class ProductHandlers(BaseHandler):
 
         keyboard = OrderKeyboards.cart_actions(
             language,
-            cart_is_empty,
+            cart_is_empty(cart),
             meets_minimum,
             edit_mode=edit_mode,
             cart_items=cart_items,

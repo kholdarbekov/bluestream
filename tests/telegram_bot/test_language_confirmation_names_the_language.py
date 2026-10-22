@@ -19,10 +19,11 @@ Reaching the regression means installing the copy and letting
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
+import menu_keyboard
 from handlers import language as language_module
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
 
@@ -68,7 +69,9 @@ def real_copy(monkeypatch):
     monkeypatch.setattr(
         language_module.config.localization, "supported_languages", ["uz", "ru", "en"], raising=False
     )
-    monkeypatch.setattr(language_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
+    monkeypatch.setattr(
+        language_module, "send_menu_keyboard", create_autospec(menu_keyboard.send_menu_keyboard)
+    )
     monkeypatch.setattr(language_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
     monkeypatch.setattr(language_module, "api_client", _NoopAPIContext())
 
@@ -82,7 +85,7 @@ class TestLanguageSwitchConfirmation:
         update = DummyUpdate(user_id=user_id)
         update.callback_query = DummyCallbackQuery(data=f"set_language_{code}")
         await handler.set_language(update, make_context())
-        return update.callback_query.edit_message_text.call_args.kwargs["text"]
+        return language_module.send_menu_keyboard.await_args.args[3]
 
     async def test_the_confirmation_names_the_language_just_chosen(self, real_copy):
         text = await self._switch_to("ru")

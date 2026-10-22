@@ -31,8 +31,9 @@ posted — input to the repost heuristic; see `note_echo_deleted` for why the
 position matters), last_alert_at (ISO),
 last_alert_message_id, borrowed_screen ({delivery_id, screen, chat_id,
 message_id}: which stop screen a borrow put on screen, for the "Address
-changed" redraw; see `note_borrowed_screen`). TTL 48h — deleteMessage only
-works within 48h, so older state is useless anyway (spec §6.3).
+changed" redraw and an order cancel's give-way; see `note_borrowed_screen`).
+TTL 48h — deleteMessage only works within 48h, so older state is useless
+anyway (spec §6.3).
 """
 import asyncio
 import json
@@ -48,6 +49,11 @@ VIEW_BORROWED = "borrowed"
 # stop detail and its Navigate screen. Every other borrowed screen is left alone.
 SCREEN_STOP = "stop"
 SCREEN_NAVIGATE = "navigate"
+# A stop's status-flow prompt: the confirm, failure reasons, at-door cash step, and
+# the follow-on amount, reason, note and bottle prompts
+# (`StatusUpdateHandler._note_status_screen`). The "Address changed" redraw leaves it
+# alone; an order cancel's route push takes it back, like the other two.
+SCREEN_STATUS = "status"
 STATE_TTL_SECONDS = 48 * 3600
 
 _redis = None
@@ -166,21 +172,29 @@ async def note_borrowed_screen(
 ) -> None:
     """Record which stop screen the borrowed card now shows (spec D8b).
 
-    Called by the stop detail (`SCREEN_STOP`) and Navigate (`SCREEN_NAVIGATE`)
-    right after they are drawn, with the message they were drawn on. The
-    "Address changed" alert reads it to redraw that one screen with the new
-    address (`address_change.rerender_borrowed_stop`); it is honoured only
-    while the card is still borrowed today, and the next `mark_borrowed`
-    forgets it.
+    Called by the stop detail (`SCREEN_STOP`), Navigate (`SCREEN_NAVIGATE`) and
+    a status tap's confirm or at-door prompt (`SCREEN_STATUS`) right after they
+    are drawn, with the message they were drawn on. The "Address changed" alert
+    reads it to redraw a stop or Navigate screen with the new address
+    (`address_change.rerender_borrowed_stop`), and an order cancel's route push
+    reads it to take back any screen of the cancelled stop
+    (`route_card.borrow_shows_stop`). It is honoured only while the card is
+    still borrowed today, and the next `mark_borrowed` forgets it. A status
+    flow's later prompts (amount, reason, note, bottles) never borrow again,
+    and some are NEW messages, so each re-notes the message it is on
+    (`StatusUpdateHandler._note_status_screen`).
 
     Noted only on a saved card whose view is borrowed: a note on a card no
     one borrowed would name a screen the card is not showing. No state (Redis
     down, or no card yet) is a silent no-op, like every writer here.
 
-    DEADLOCK CHECK: self-locks, the same shape as `mark_borrowed`, and its
-    callers are two of `mark_borrowed`'s: `view_active_delivery` and
-    `navigate_to_address`, after their own edit. Neither holds this lock or
-    enters `render_route_card`.
+    DEADLOCK CHECK: self-locks, the same shape as `mark_borrowed`. Its callers
+    are `view_active_delivery`, `navigate_to_address` and
+    `StatusUpdateHandler._note_status_screen`, which every status-flow prompt
+    calls (`initiate_status_change`, `execute_status_change`'s bottle prompt,
+    the partial and no-cash steps, `receive_cash_amount`'s note prompt, the
+    bottle prompt and the bottle count), each after its own edit or send.
+    None of them holds this lock or enters `render_route_card`.
     """
     async with get_lock(telegram_id):
         state = await load(telegram_id)

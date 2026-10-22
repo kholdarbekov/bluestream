@@ -340,6 +340,16 @@ def subscription(db, user: User, *, status):
     return plan
 
 
+def subscription_delivery(db, user: User, plan, when: datetime, *, address=None) -> Order:
+    """A DELIVERED order that `plan` billed. `subscription_id` and `is_subscription_order` are set
+    together, as `OrderService.create_order` writes them (order_service.py:302-303)."""
+    order = delivered_order(db, user, when, address=address)
+    order.subscription_id = plan.id
+    order.is_subscription_order = True
+    db.session.commit()
+    return order
+
+
 def outlet(
     db,
     customer: User,

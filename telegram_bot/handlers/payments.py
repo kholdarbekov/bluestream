@@ -166,7 +166,7 @@ class PaymentHandlers(BaseHandler):
                 amount=format_price(total_amount)
             )
 
-            keyboard = PaymentKeyboards.payment_link(payment_url, language)
+            keyboard = PaymentKeyboards.payment_link(payment_url, language, order_id)
 
             query = update.callback_query
             message_id = None

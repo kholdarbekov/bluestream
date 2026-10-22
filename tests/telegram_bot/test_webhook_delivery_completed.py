@@ -374,3 +374,41 @@ async def test_send_failure_also_releases_the_request_id_layer(ws):
     assert r2.status == 200
     assert json.loads(r2.body)["message"] == "Notification sent"
     assert ws.bot_app.bot.send_message.await_count == 2
+
+
+_ABSENT = object()
+_SUMMARY = {
+    "order_id": 1234, "order_number": "1234", "telegram_id": 55501,
+    "bottles_delivered": "4", "bottles_collected": "3", "balance": "5",
+}
+
+
+def _buttons(kwargs):
+    return [(b.text, b.callback_data) for row in kwargs["reply_markup"].inline_keyboard for b in row]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("sent", [5678, "5678", 5678.0])
+async def test_a_reorderable_delivery_offers_order_again_above_report(ws, sent):
+    resp = await ws.delivery_completed_handler(_make_request(dict(_SUMMARY, reorder_order_id=sent)))
+
+    assert resp.status == 200
+    assert _buttons(ws.bot_app.bot.send_message.await_args.kwargs) == [
+        ("telegram.reorder_reminder.btn_order|en", "reorder_5678"),
+        ("telegram.delivery_summary.report_button|en", "report_issue_1234"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("sent", [_ABSENT, None, 0, "abc", 1234.5, -5, True])
+async def test_without_a_reorderable_order_the_summary_keeps_only_report(ws, sent):
+    payload = dict(_SUMMARY) if sent is _ABSENT else dict(_SUMMARY, reorder_order_id=sent)
+
+    resp = await ws.delivery_completed_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert _buttons(ws.bot_app.bot.send_message.await_args.kwargs) == [
+        ("telegram.delivery_summary.report_button|en", "report_issue_1234"),
+    ]

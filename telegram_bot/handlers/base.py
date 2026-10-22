@@ -2,12 +2,14 @@
 Base handler class with shared error handling for Telegram bot handlers.
 """
 import logging
+from types import SimpleNamespace
 from typing import Any
 from telegram import Message, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from i18n import i18n
+from menu_keyboard import assert_editable_markup, send_menu_keyboard
 from database import db_manager, BotUserRepository
 from handlers.errors import (
     BotAPIError,
@@ -25,6 +27,25 @@ class BaseHandler:
 
     def __init__(self):
         self.user_repo = BotUserRepository(db_manager)
+
+    @staticmethod
+    def as_message_update(update: Update):
+        """A message-shaped view of a tap, so the next screen is a NEW message.
+
+        Handlers that render by replying (checkout, cart) edit the tapped message when they
+        see a callback query. Wrapping the tap hides the query, so the tapped message (a
+        reminder, the Products screen) is never edited or deleted. PTB 22.3 gives no
+        `effective_message` for an inline or inaccessible callback message; such an update is
+        returned unchanged. It acks nothing: the caller acks first.
+        """
+        message = update.effective_message
+        if message is None:
+            return update
+        return SimpleNamespace(
+            effective_user=update.effective_user,
+            callback_query=None,
+            message=message,
+        )
 
     async def _ack(self, query: Any, text: str | None = None, **kwargs) -> bool:
         """Dismiss the spinner on a tap — and never let that cost the work.
@@ -127,6 +148,51 @@ class BaseHandler:
             logger.info("Could not delete the callback message (cosmetic): %s", exc)
             return False
 
+    @staticmethod
+    def _is_entity_parse_error(exc: BaseException) -> bool:
+        """The one rule for "Telegram refused the markup".
+
+        Telegram words every such refusal "can't parse entities: ...". Any other
+        BadRequest (message too long, chat not found, bad button data, message
+        to edit not found) does not depend on ``parse_mode``, so a plain-text
+        retry would fail identically and must not be attempted.
+        """
+        return isinstance(exc, BadRequest) and "can't parse entities" in str(exc).lower()
+
+    @staticmethod
+    async def _reply_markdown_or_plain(
+        message,
+        text: str,
+        reply_markup=None,
+        *,
+        parse_mode: str | None = 'Markdown',
+    ) -> Message:
+        """Send `text` with `parse_mode`, falling back to plain text if Telegram can't parse it.
+
+        Escaping the interpolated geocoder string fixes the hazard we know
+        about; it cannot fix the one we do not. The cost of being wrong here is
+        total — a refused prompt used to end the conversation, leaving the
+        customer on a dead screen with no way to self-rescue, because
+        re-sharing the pin re-runs the same deterministic failure. Losing the
+        bold is a much smaller price than losing the flow.
+
+        Only a markup refusal is retried (``_is_entity_parse_error``); every
+        other BadRequest propagates, because a plain resend cannot cure it.
+        """
+        kwargs: dict[str, Any] = {}
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+        if parse_mode is not None:
+            kwargs["parse_mode"] = parse_mode
+        try:
+            return await message.reply_text(text=text, **kwargs)
+        except BadRequest as exc:
+            if parse_mode is None or not BaseHandler._is_entity_parse_error(exc):
+                raise
+            logger.warning("%s prompt refused (%s); resending as plain text", parse_mode, exc)
+            kwargs.pop("parse_mode")
+            return await message.reply_text(text=text, **kwargs)
+
     async def _edit_or_replace_callback_message(
         self,
         query: Any,
@@ -140,63 +206,83 @@ class BaseHandler:
         replacement — for callers that need to know which bubble holds the
         screen (the quantity screen records it so a typed number can replace
         it). Callers that do not care ignore it.
+
+        A refused-markup edit is retried once as plain text before anything is
+        replaced. A replacement is SENT before the old bubble is deleted, so a
+        send that fails leaves the old screen in place instead of nothing.
         """
+        assert_editable_markup(reply_markup)
         kwargs = {"text": text}
         if reply_markup is not None:
             kwargs["reply_markup"] = reply_markup
         if parse_mode is not None:
             kwargs["parse_mode"] = parse_mode
 
+        edit_exc: Exception
         try:
             edited = await query.edit_message_text(**kwargs)
             # `True` instead of a Message only for inline-mode messages.
             return edited if isinstance(edited, Message) else getattr(query, "message", None)
-        except BadRequest as exc:
-            reason = str(exc).lower()
-            if "message is not modified" in reason:
-                # The message already shows exactly this content; nothing to do.
-                return getattr(query, "message", None)
-            if "there is no text in the message" in reason:
-                # Expected for media (photo/caption) messages: replace below.
-                logger.info("Callback message has no editable text; replacing message: %s", exc)
-            else:
-                logger.warning("Failed to edit callback message text; falling back to replace message: %s", exc)
-            edit_exc = exc
         except Exception as exc:
-            logger.warning("Failed to edit callback message text; falling back to replace message: %s", exc)
             edit_exc = exc
+
+        if parse_mode is not None and self._is_entity_parse_error(edit_exc):
+            logger.warning(
+                "Telegram refused the %s markup; retrying the edit as plain text: %s", parse_mode, edit_exc
+            )
+            kwargs.pop("parse_mode")
+            parse_mode = None
+            try:
+                edited = await query.edit_message_text(**kwargs)
+                return edited if isinstance(edited, Message) else getattr(query, "message", None)
+            except Exception as exc:
+                edit_exc = exc
+
+        reason = str(edit_exc).lower()
+        if isinstance(edit_exc, BadRequest) and "message is not modified" in reason:
+            # The message already shows exactly this content; nothing to do.
+            return getattr(query, "message", None)
+        if isinstance(edit_exc, BadRequest) and "there is no text in the message" in reason:
+            # Expected for media (photo/caption) messages: replace below.
+            logger.info("Callback message has no editable text; replacing message: %s", edit_exc)
+        else:
+            logger.warning("Failed to edit callback message text; falling back to replace message: %s", edit_exc)
 
         message = getattr(query, "message", None)
         if not message:
             raise edit_exc
 
+        # Send first: if this raises, the old message is untouched.
+        sent = await self._reply_markdown_or_plain(message, text, reply_markup, parse_mode=parse_mode)
+
         try:
             await message.delete()
         except Exception as delete_exc:
-            logger.warning("Failed to delete callback message before fallback send: %s", delete_exc)
+            logger.warning("Failed to delete callback message after replacement send: %s", delete_exc)
 
-        return await message.reply_text(**kwargs)
+        return sent
 
     async def _ensure_loyalty_eligible(self, update, context, telegram_id, language) -> bool:
-        """Block loyalty actions for ineligible users: brief toast + main menu.
+        """Block loyalty actions for ineligible users: the notice, sent with the bottom menu.
+
+        The menu follows eligibility, so the keyboard that comes with the notice has no
+        Aqua Club button. Sent as a new message for a tap and a typed label alike: an
+        edit can never carry that keyboard.
 
         Returns True when the user may proceed, False when blocked (caller returns).
         """
         import eligibility
-        from keyboards import MenuKeyboards
 
         if await eligibility.is_loyalty_eligible(telegram_id):
             return True
 
         query = getattr(update, "callback_query", None)
-        toast = i18n.get('telegram.loyalty.not_available', language)
         if query is not None:
-            await self._ack(query, toast, show_alert=False)
-            await self._edit_or_replace_callback_message(
-                query,
-                text=i18n.get('telegram.main_menu', language),
-                reply_markup=MenuKeyboards.main_menu(language, show_loyalty=False),
-            )
+            await self._ack(query)
+        await send_menu_keyboard(
+            context.bot, update.effective_chat.id, telegram_id,
+            i18n.get('telegram.loyalty.not_available', language), language,
+        )
         return False
 
     async def _resolve_language(self, update: Update) -> str:

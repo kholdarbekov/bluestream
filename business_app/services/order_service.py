@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
 from flask import current_app
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -15,9 +15,10 @@ from business_app.utils.service_logging import log_service_call, log_business_ev
 
 logger = logging.getLogger(__name__)
 
-from business_app.models.order import Order, OrderItem  # noqa: E402
+from business_app.models.order import Order, OrderItem, is_free_reward_item  # noqa: E402
 from business_app.models.product import Product  # noqa: E402
 from business_app.utils.order_totals import compute_order_total  # noqa: E402
+from business_app.utils.order_timing import delivered_order_instants_select  # noqa: E402
 from business_app.models.subscription import Subscription  # noqa: E402
 from business_app.models.user import User, UserAddress  # noqa: E402
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError  # noqa: E402
@@ -50,7 +51,8 @@ if TYPE_CHECKING:
 
 from business_app.utils.state_validators import (  # noqa: E402
     ACTIVE_ORDER_STATUSES,
-    DELIVERY_DRIVERLESS_STATES,
+    DELIVERY_CUSTOMER_CANCELLABLE_STATES,
+    DELIVERY_WITH_DRIVER_STATES,
     assert_order_address_for_status,
     assert_order_creator_for_source,
 )
@@ -63,6 +65,8 @@ from business_app import db  # noqa: E402
 CUSTOMER_CANCEL_NOT_CANCELLABLE = "NOT_CANCELLABLE"
 CUSTOMER_CANCEL_AWAITING_NEW_DATE = "AWAITING_NEW_DATE"
 CUSTOMER_CANCEL_PAID = "PAID"
+# Since 2026-10-21: the driver has picked the order up, or it is out for delivery. The code
+# keeps its old name, which the customer bot and older builds already map.
 CUSTOMER_CANCEL_WITH_DRIVER = "WITH_DRIVER"
 
 # F6: an admin cancel or return names its reason. It is stored on the order's
@@ -298,7 +302,8 @@ class OrderService:
             delivery_address_id=delivery_address["delivery_address_id"],
             payment_method=payment_method,
             # A subscription-generated order is an ordinary order that happens to
-            # carry a subscription_id — nothing downstream may branch on origin.
+            # carry a subscription_id — nothing downstream may branch on origin. The one exception
+            # is `OrderService.can_reorder` (R8): a subscription order is never repeated by a reorder.
             subscription_id=subscription.id if subscription is not None else None,
             is_subscription_order=subscription is not None,
             delivery_date=order_data.get("delivery_date"),
@@ -890,6 +895,52 @@ class OrderService:
             is not None
         )
 
+    @staticmethod
+    def reorderable_lines(order: Order) -> List[OrderItem]:
+        """The lines a reorder copies: the order's paid lines in line order. A free reward line is
+        never copied -- the points that bought it were spent (or refunded) on that order."""
+        return sorted((i for i in order.order_items if not is_free_reward_item(i)), key=lambda i: i.id)
+
+    @staticmethod
+    def can_reorder(order: Order) -> bool:
+        """The one reorder rule (R8): a one-off order (never a subscription's) with a line to copy."""
+        return order.subscription_id is None and bool(OrderService.reorderable_lines(order))
+
+    @staticmethod
+    def reorder_candidate(user_id: int) -> Optional[Order]:
+        """The customer's newest delivered order that `can_reorder`, by the shared DELIVERED instant
+        (ties: the higher id). An order with no DELIVERED history row is never a candidate."""
+        delivered = delivered_order_instants_select().where(Order.user_id == int(user_id)).subquery()
+        newest_first = (
+            db.session.execute(
+                select(delivered.c.order_id).order_by(delivered.c.delivered_at.desc(), delivered.c.order_id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        for order_id in newest_first:
+            order = db.session.get(Order, order_id)
+            if OrderService.can_reorder(order):
+                return order
+        return None
+
+    @staticmethod
+    def open_order(user_id: int) -> Optional[Order]:
+        """The customer's newest order in an active status (R9), subscription orders included."""
+        return (
+            Order.query.filter(Order.user_id == int(user_id), Order.status.in_(ACTIVE_ORDER_STATUSES))
+            .order_by(Order.created_at.desc(), Order.id.desc())
+            .first()
+        )
+
+    @staticmethod
+    def reorder_address(order: Order) -> Optional[UserAddress]:
+        """The order's delivery address when it is one of the customer's own, otherwise None. A
+        defensive ownership check: a delivered order cannot lose its address (FK-refused delete,
+        ck_orders_address_required_after_pending), so only another account's address can fail it."""
+        address = order.delivery_address
+        return address if address is not None and address.user_id == order.user_id else None
+
     def submit_order_feedback_for_user(
         self,
         order_id: int,
@@ -1398,9 +1449,30 @@ class OrderService:
         The ONE answer. `serialize_order` publishes it as `can_customer_cancel`, the
         payment refusal routes' advice asks it, and `cancel_order_as_customer` enforces it
         on locked rows, so the Cancel a customer is shown and the write it sends cannot
-        disagree. The checks run in this order and the first match wins. Awaiting a new
-        date comes before the driver check because a `failed` delivery is outside
-        DELIVERY_DRIVERLESS_STATES, and WITH_DRIVER would otherwise swallow it.
+        disagree. The checks run in this order and the first match wins:
+
+        1. NOT_CANCELLABLE: the order is no longer active.
+        2. AWAITING_NEW_DATE: its delivery failed and it waits for a new date. Checked
+           before the delivery checks below. Past PENDING, a `failed` delivery would
+           otherwise fall to the generic leftover refusal (5). For a PENDING order (for
+           example one moved returned -> pending over a still-failed delivery), check 5
+           does not apply, so this check is the only thing that refuses it.
+        3. PAID: money is in.
+        4. WITH_DRIVER: the driver has picked the order up, or it is out for delivery
+           (F5, amended 2026-10-21). That is, the order is `out_for_delivery`, including
+           one an admin moved there by hand without a pickup, or its delivery is in
+           DELIVERY_WITH_DRIVER_STATES (picked up, in transit, arrived), whatever the
+           order's own status. A driver who has only accepted the stop (`assigned`) does
+           not block, and neither does `preparing`.
+        5. NOT_CANCELLABLE: past PENDING, a delivery row outside
+           DELIVERY_CUSTOMER_CANCELLABLE_STATES is a leftover final row (returned,
+           cancelled, delivered). It fails closed, with the generic refusal, because
+           nobody picked it up. A PENDING order keeps its old answer and stays
+           cancellable over such a row (controller ruling, 2026-10-21); the cancel
+           cascade leaves a final row as it is.
+
+        So there are three outcomes besides the first three checks: WITH_DRIVER, the
+        leftover NOT_CANCELLABLE, and None (cancellable).
 
         Reads `order.status`, `order.is_paid`, `order.payment` and `order.delivery` only.
         The customer order list eager-loads both relationships.
@@ -1416,12 +1488,17 @@ class OrderService:
         if order.is_paid or (payment is not None and payment.status in MONEY_HELD_PAYMENT_STATUSES):
             return CUSTOMER_CANCEL_PAID
         delivery = order.delivery
-        if order.status in (OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY) or (
-            order.status == OrderStatus.CONFIRMED
-            and delivery is not None
-            and delivery.status not in DELIVERY_DRIVERLESS_STATES
+        if order.status == OrderStatus.OUT_FOR_DELIVERY or (
+            delivery is not None and delivery.status in DELIVERY_WITH_DRIVER_STATES
         ):
             return CUSTOMER_CANCEL_WITH_DRIVER
+        if (
+            order.status != OrderStatus.PENDING
+            and delivery is not None
+            and delivery.status not in DELIVERY_CUSTOMER_CANCELLABLE_STATES
+        ):
+            # A leftover final row: fail closed, with the generic copy.
+            return CUSTOMER_CANCEL_NOT_CANCELLABLE
         return None
 
     def cancel_order_as_customer(self, order_id: int, user_id: int, reason: Optional[str] = None) -> Order:
@@ -1429,10 +1506,15 @@ class OrderService:
 
         The answer is decided on locked rows, taken in the codebase's documented order,
         Delivery first and then Order, the sequence `OrderScheduleService._apply_reschedule`
-        uses. A driver's accept (`DeliveryAssignmentService.assign_driver`) locks only the
-        Delivery. With an Order-only lock, an accept could commit between this check and the
-        cancel cascade, and the cascade would then cancel the delivery the driver had just
-        taken.
+        uses. A driver's Picked up tap (`StaffService.update_delivery_status`) locks the
+        Delivery and only then writes the order. With an Order-only lock, a pickup could commit
+        between this check and the cancel cascade, and the cascade would then cancel an order
+        already on its way. The other writers that can act on an accepted order lock before
+        they decide: the admin Delivery page on entry and
+        `DeliveryService.begin_delivery_in_transit` take the Delivery; "Mark preparing" and
+        bulk "process", which only read the delivery, take the Order alone. Whichever commits
+        first wins: a pickup that commits first is seen here and refused as WITH_DRIVER, and a
+        writer that comes after the cancel re-reads `cancelled` and meets its own refusal.
 
         The rule cannot live inside `cancel_order`. The store declining an agent order also
         passes the customer's `user_id`, and staff, Payme and the abandoned-order task must
@@ -1523,14 +1605,15 @@ class OrderService:
         if "tax_committee_unavailable" not in cancel_notes:
             raise ConflictError("This order is not eligible for cash retry")
 
-        if not cancelled.order_items:
+        lines = self.reorderable_lines(cancelled)
+        if not lines:
             raise ValidationError("Cancelled order has no items to retry")
         if not cancelled.delivery_address:
             raise ValidationError("Cancelled order has no delivery address")
 
         address = cancelled.delivery_address
         order_data = {
-            "items": [{"product_id": item.product_id, "quantity": item.quantity} for item in cancelled.order_items],
+            "items": [{"product_id": item.product_id, "quantity": item.quantity} for item in lines],
             "delivery_address": {
                 "delivery_address_id": address.id,
                 "street": address.street_address,
@@ -2342,17 +2425,22 @@ class OrderService:
         already being cancelled by the caller).
 
         Returns True if a delivery was cancelled (so the caller commits).
-        """
-        delivery = getattr(order, "delivery", None)
-        if delivery is None:
-            return False
 
-        status = delivery.status
-        if isinstance(status, str):
-            try:
-                status = DeliveryStatus(status)
-            except ValueError:
-                status = None
+        Decides on the delivery as the database has it. The admin, bulk and
+        system cancel paths hold only the Order here, so a driver's accept that
+        committed after this session first read the delivery would otherwise be
+        missed: no route drop, no counter sync and no card refresh for the
+        driver who now holds the stop. So the row is re-read fresh, unlocked,
+        and a final row (delivered, cancelled, failed, returned) is left as it
+        is with no lock taken: a FAILED stop that a reschedule holds (Delivery,
+        then Order) never waits on this cancel (Order, then Delivery). Only a
+        row this cancel will write is locked (`OrderScheduleService._lock_delivery`)
+        and decided on again, and its driver is read from that locked row. On
+        the customer path the Delivery is already locked in this transaction,
+        so the lock is a no-op there.
+        """
+        from business_app.models.delivery import Delivery
+        from business_app.services.order_schedule_service import OrderScheduleService
 
         terminal = {
             DeliveryStatus.DELIVERED,
@@ -2360,7 +2448,23 @@ class OrderService:
             DeliveryStatus.FAILED,
             DeliveryStatus.RETURNED,
         }
-        if status in terminal:
+
+        def _will_write(row) -> bool:
+            if row is None:
+                return False
+            status = row.status
+            if isinstance(status, str):
+                try:
+                    status = DeliveryStatus(status)
+                except ValueError:
+                    status = None
+            return status not in terminal
+
+        fresh = Delivery.query.filter_by(order_id=order.id).populate_existing().one_or_none()
+        if not _will_write(fresh):
+            return False
+        delivery = OrderScheduleService._lock_delivery(order.id)
+        if not _will_write(delivery):
             return False
 
         now = datetime.now(timezone.utc)
@@ -2383,6 +2487,7 @@ class OrderService:
         if driver_id:
             from business_app.services.route_optimization_service import RouteOptimizationService
             from business_app.services.staff_service import StaffService
+            from business_app.utils import route_card_refresh_dispatch
 
             StaffService.sync_active_delivery_counters([driver_id])
             # A cancelled stop is out of the driver's active set, so it must
@@ -2391,6 +2496,11 @@ class OrderService:
             # until some unrelated re-solve happens to rebuild the list. Same
             # membership rule the assignment SSOTs apply, at the other exit.
             RouteOptimizationService.drop_from_route(driver_id, delivery.id)
+            # Owner, 2026-10-22: the driver's pinned route card is refreshed
+            # silently, published once the commit that persists this cancel
+            # lands. Whatever drop_from_route answered: with no route row today
+            # it returns False, while the card still lists the stop.
+            route_card_refresh_dispatch.queue_route_card_refresh(driver_id, delivery.id)
 
         logger.info(f"Delivery {delivery.id} cancelled in cascade from order {order.id} cancellation")
         return True

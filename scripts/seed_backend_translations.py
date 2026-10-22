@@ -298,12 +298,13 @@ BACKEND_TRANSLATIONS = {
     # fills {bot_url} from COMPANY_TELEGRAM_BOT_URL. The customer bot shows its own
     # telegram.orders.cancel_refused.* copy, picked by the same reason_code. Never a
     # phone number: customers are sent to the bot chat.
+    # WITH_DRIVER: the driver has picked the order up (F5, amended 2026-10-21; owner-approved wording).
     'api.orders.cancel_refused.with_driver': {
-        'en': 'A driver has already taken your order, so it can\'t be cancelled here. '
-              'If you need to change it, message us in our Telegram bot: {bot_url}',
-        'uz': 'Buyurtmangizni haydovchi allaqachon olgan, shuning uchun uni bu yerda bekor qilib '
-              'bo\'lmaydi. Uni o\'zgartirish kerak bo\'lsa, Telegram botimizga yozing: {bot_url}',
-        'ru': 'Водитель уже взял ваш заказ, поэтому отменить его здесь нельзя. '
+        'en': 'The driver has already picked up your order and it\'s on its way, so it can\'t be '
+              'cancelled here. If you need to change it, message us in our Telegram bot: {bot_url}',
+        'uz': 'Haydovchi buyurtmangizni allaqachon olib ketdi, u yo\'lda, shuning uchun uni bu yerda '
+              'bekor qilib bo\'lmaydi. Uni o\'zgartirish kerak bo\'lsa, Telegram botimizga yozing: {bot_url}',
+        'ru': 'Водитель уже забрал ваш заказ, он в пути, поэтому отменить его здесь нельзя. '
               'Если нужно что-то изменить, напишите нам в Telegram-бот: {bot_url}'
     },
     # Never says a driver has the order: the delivery failed and a new date is being chosen.
@@ -4196,12 +4197,13 @@ BACKEND_TRANSLATIONS = {
     # variant per `reason_code` of POST /orders/<id>/cancel. The bot shows these instead
     # of the backend's web wording (api.orders.cancel_refused.*). They point to this
     # chat, whose free text lands in the admin Support Inbox, and never to a phone.
+    # WITH_DRIVER: the driver has picked the order up (F5, amended 2026-10-21; owner-approved wording).
     'telegram.orders.cancel_refused.with_driver': {
-        'en': 'A driver has already taken your order. If you need to change it, '
-              'write to us here in the chat.',
-        'uz': 'Buyurtmangizni haydovchi allaqachon olgan. Uni o\'zgartirish kerak bo\'lsa, '
+        'en': 'The driver has already picked up your order and it\'s on its way. '
+              'If you need to change it, write to us here in the chat.',
+        'uz': 'Haydovchi buyurtmangizni allaqachon olib ketdi, u yo\'lda. Uni o\'zgartirish kerak bo\'lsa, '
               'shu chatda bizga yozing.',
-        'ru': 'Водитель уже взял ваш заказ. Если нужно что-то изменить, '
+        'ru': 'Водитель уже забрал ваш заказ, он в пути. Если нужно что-то изменить, '
               'напишите нам здесь, в этом чате.'
     },
     # Never says a driver has the order: the delivery failed and a new date is being chosen.
@@ -4221,10 +4223,13 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Этот заказ уже оплачен, поэтому отменить его здесь нельзя. '
               'Напишите нам здесь, в этом чате.'
     },
+    # NOT_CANCELLABLE: next step added 2026-10-22 (owner-approved wording).
     'telegram.orders.cancel_refused.not_cancellable': {
-        'en': 'This order can no longer be cancelled.',
-        'uz': 'Bu buyurtmani endi bekor qilib bo\'lmaydi.',
-        'ru': 'Этот заказ больше нельзя отменить.'
+        'en': 'This order can no longer be cancelled. '
+              'If you have a question about it, write to us here in the chat.',
+        'uz': 'Bu buyurtmani endi bekor qilib bo\'lmaydi. Savolingiz bo\'lsa, shu chatda bizga yozing.',
+        'ru': 'Этот заказ больше нельзя отменить. '
+              'Если у вас есть вопрос, напишите нам здесь, в этом чате.'
     },
     'telegram.orders.tracking_title': {
         'en': 'Order Tracking',
@@ -4650,9 +4655,9 @@ BACKEND_TRANSLATIONS = {
     # Telegram Help/Support/Admin Messages (telegram.help/support/admin.*)
     # ============================================================================
     'telegram.help.command_hint': {
-        'en': '🆘 Help: Use /menu to see available options.',
-        'uz': '🆘 Yordam: Mavjud bo\'limlarni ko\'rish uchun /menu dan foydalaning.',
-        'ru': '🆘 Помощь: Используйте /menu, чтобы увидеть доступные разделы.'
+        'en': 'Choose a section with the buttons below 👇',
+        'uz': "Kerakli bo'limni pastdagi tugmalar orqali tanlang 👇",
+        'ru': 'Выберите нужный раздел кнопками внизу 👇'
     },
     'telegram.support.menu_coming_soon': {
         'en': '🆘 Support menu coming soon!',
@@ -5928,6 +5933,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'This product is no longer available. Please pick from the products list.',
         'uz': 'Bu mahsulot endi mavjud emas. Iltimos, mahsulotlar ro\'yxatidan tanlang.',
         'ru': 'Этот товар больше недоступен. Пожалуйста, выберите из списка товаров.'
+    },
+    'telegram.orders.open_order_notice': {
+        'uz': '📦 Sizda faol buyurtma bor: {order_number} — {status}.',
+        'ru': '📦 У вас уже есть активный заказ: {order_number} — {status}.',
+        'en': '📦 You already have an order in progress: {order_number} — {status}.'
     },
 
     # ============================================================================

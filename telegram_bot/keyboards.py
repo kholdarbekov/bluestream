@@ -186,9 +186,10 @@ class KeyboardBuilder:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def build_reply_keyboard(buttons: List[List[str]],
+    def build_reply_keyboard(buttons: List[List[Dict[str, str]]],
                            one_time: bool = False,
-                           resize: bool = True) -> ReplyKeyboardMarkup:
+                           resize: bool = True,
+                           is_persistent: bool = False) -> ReplyKeyboardMarkup:
         """Build reply keyboard from button texts"""
         keyboard = []
 
@@ -201,43 +202,54 @@ class KeyboardBuilder:
         return ReplyKeyboardMarkup(
             keyboard,
             one_time_keyboard=one_time,
-            resize_keyboard=resize
+            resize_keyboard=resize,
+            is_persistent=is_persistent,
         )
+
+
+# The customer's bottom-keyboard buttons, as translation keys in layout order.
+# Rendering (the keyboard itself), the flow exit and the label router in bot.py
+# all read this one tuple, so a label is recognised wherever it is drawn.
+MAIN_MENU_KEYS: tuple[str, ...] = (
+    "telegram.menu.products",
+    "telegram.menu.orders",
+    "telegram.cart_title",
+    "telegram.menu.subscriptions",
+    "telegram.menu.loyalty",
+    "telegram.menu.profile",
+    "telegram.menu.support",
+)
+
+
+# How many MAIN_MENU_KEYS go on each row of the bottom keyboard, top to bottom.
+_BOTTOM_MENU_ROW_SIZES: tuple[int, ...] = (1, 2, 2, 2)
 
 
 class MenuKeyboards:
     """Main menu keyboards"""
 
     @staticmethod
-    def main_menu(language: str = 'en', show_loyalty: bool = True) -> InlineKeyboardMarkup:
-        """Main menu keyboard. ``show_loyalty`` hides the loyalty button for
-        users not eligible for the loyalty program (ineligible entity users)."""
-        subs_loyalty_row = [
-            {'text': i18n.get('telegram.menu.subscriptions', language), 'callback_data': 'menu_subscriptions'},
-        ]
-        if show_loyalty:
-            subs_loyalty_row.append(
-                {'text': i18n.get('telegram.menu.loyalty', language), 'callback_data': 'menu_loyalty'}
-            )
+    def bottom_menu(language: str = 'en', show_loyalty: bool = True) -> ReplyKeyboardMarkup:
+        """The persistent bottom keyboard. Send it only through
+        ``menu_keyboard.send_menu_keyboard``, which is what keeps the install marker true."""
+        # Lazy: menu_keyboard imports this module.
+        from menu_keyboard import wanted_menu_labels
 
-        buttons = [
-            [{'text': i18n.get('telegram.menu.products', language), 'callback_data': 'menu_products'}],
-            [{'text': i18n.get('telegram.menu.orders', language), 'callback_data': 'menu_orders'}],
-            [{'text': i18n.get('telegram.cart_title', language), 'callback_data': 'cart_view'}],
-            subs_loyalty_row,
-            [
-                {'text': i18n.get('telegram.menu.profile', language), 'callback_data': 'menu_profile'},
-                {'text': i18n.get('telegram.menu.support', language), 'callback_data': 'menu_support'},
-            ],
-            [{'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}],
-        ]
-        return KeyboardBuilder.build_inline_keyboard(buttons)
+        labels = wanted_menu_labels(language, show_loyalty)
+        rows = []
+        start = 0
+        for size in _BOTTOM_MENU_ROW_SIZES:
+            row = [{'text': labels[key]} for key in MAIN_MENU_KEYS[start:start + size] if key in labels]
+            start += size
+            if row:
+                rows.append(row)
+        return KeyboardBuilder.build_reply_keyboard(rows, one_time=False, resize=True, is_persistent=True)
 
     @staticmethod
-    def back_button(language: str = 'en') -> InlineKeyboardMarkup:
-        """Simple back button"""
+    def back_button(language: str, callback_data: str) -> InlineKeyboardMarkup:
+        """One Back button to the screen's real parent. No default: nobody can mint `back_to_main`."""
         buttons = [
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': callback_data}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -333,10 +345,10 @@ class LanguageKeyboards:
         if language_row:
             buttons.append(language_row)
 
-        # Add back button on its own row
+        # Back goes to the screen this one opens from: My Profile
         buttons.append([{
             'text': i18n.get('telegram.back', current_language),
-            'callback_data': 'back_to_main'
+            'callback_data': 'menu_profile'
         }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -380,11 +392,6 @@ class ProductKeyboards:
 
             buttons.append(row)
 
-        # Add back button
-        buttons.append([{
-            'text': i18n.get('telegram.back', language),
-            'callback_data': 'back_to_main'
-        }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -447,13 +454,13 @@ class ProductKeyboards:
             if nav_row:
                 buttons.append(nav_row)
 
-        # Add back button — context-sensitive: when there's only one category
-        # the category list would be empty, so go to main menu instead.
-        back_callback = 'back_to_main' if single_category else 'back_to_categories'
-        buttons.append([{
-            'text': i18n.get('telegram.back', language),
-            'callback_data': back_callback,
-        }])
+        # Back returns to the category list. With a single category that list is skipped, so
+        # there is no Back row at all: the bottom keyboard is the way out.
+        if not single_category:
+            buttons.append([{
+                'text': i18n.get('telegram.back', language),
+                'callback_data': 'back_to_categories',
+            }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -628,8 +635,7 @@ class OrderKeyboards:
             buttons = [
                 [
                     {'text': i18n.get('telegram.cart.continue_shopping', language), 'callback_data': 'menu_products'}
-                ],
-                [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+                ]
             ]
         else:
             # Show checkout button only if minimum is met
@@ -639,8 +645,7 @@ class OrderKeyboards:
                     [
                         {'text': i18n.get('telegram.cart.clear', language), 'callback_data': 'cart_clear'},
                         {'text': i18n.get('telegram.cart.continue_shopping', language), 'callback_data': 'menu_products'}
-                    ],
-                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+                    ]
                 ]
             else:
                 # Minimum not met - show warning and no checkout button
@@ -648,8 +653,7 @@ class OrderKeyboards:
                     [{'text': '⚠️ ' + i18n.get('telegram.cart.add_more', language), 'callback_data': 'menu_products'}],
                     [
                         {'text': i18n.get('telegram.cart.clear', language), 'callback_data': 'cart_clear'},
-                    ],
-                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+                    ]
                 ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -786,6 +790,10 @@ class OrderKeyboards:
                 ])
 
         buttons.append([{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}])
+        buttons.append([
+            {'text': i18n.get('telegram.checkout.change_address', language),
+             'callback_data': 'checkout_change_address'},
+        ])
         # The address travels WITH the Back button. Without it the handler has
         # to read `selected_address_id` out of `context.user_data`, which a
         # deploy empties while this card stays tappable forever — the
@@ -836,11 +844,6 @@ class OrderKeyboards:
                 'text': f"{icon} Order #{order['order_number']} - {date}",
                 'callback_data': f"order_{order['id']}"
             }])
-
-        buttons.append([{
-            'text': i18n.get('telegram.back', language),
-            'callback_data': 'back_to_main'
-        }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -988,8 +991,7 @@ class SubscriptionKeyboards:
 
         buttons.extend([
             [{'text': i18n.get('telegram.subscription.create', language), 'callback_data': 'create_subscription'}],
-            [{'text': i18n.get('telegram.subscription.statistics', language), 'callback_data': 'subscription_statistics'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.subscription.statistics', language), 'callback_data': 'subscription_statistics'}]
         ])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1163,7 +1165,7 @@ class ProfileKeyboards:
             [
                 {'text': i18n.get('telegram.profile.my_bottles', language), 'callback_data': 'my_bottles'}
             ],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}]
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1185,18 +1187,35 @@ class ProfileKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def phone_request(language: str = 'en') -> ReplyKeyboardMarkup:
-        """Phone number request keyboard"""
-        button = KeyboardButton(
+    def phone_request(language: str = 'en', *, with_cancel: bool = False) -> ReplyKeyboardMarkup:
+        """Phone number request keyboard.
+
+        `with_cancel` adds a Cancel row, for a customer who already has the bottom menu
+        (Profile → Phone): it is their way back to it. Signup has no menu to go back to.
+        """
+        rows = [[KeyboardButton(
             text=i18n.get('telegram.profile.share_phone', language),
             request_contact=True
-        )
+        )]]
+        if with_cancel:
+            rows.append([KeyboardButton(i18n.get('telegram.cancel', language))])
 
         return ReplyKeyboardMarkup(
-            [[button]],
+            rows,
             one_time_keyboard=True,
             resize_keyboard=True
         )
+
+    @staticmethod
+    def phone_code_prompt(language: str = 'en') -> InlineKeyboardMarkup:
+        """The Cancel under the profile "verify phone" code prompt (spec 2026-10-21 §2).
+
+        `phone_otp_cancel` is this prompt's alone, and stays out of the `cancel_`
+        namespace other flows' handlers match on.
+        """
+        return KeyboardBuilder.build_inline_keyboard([[
+            {'text': i18n.get('telegram.cancel', language), 'callback_data': 'phone_otp_cancel'},
+        ]])
 
     @staticmethod
     def notification_settings(
@@ -1474,9 +1493,7 @@ class PaymentKeyboards:
         """Shown after successful payment"""
         buttons = [
             [{'text': i18n.get('telegram.payment.view_order', language),
-              'callback_data': f'order_{order_id}'}],
-            [{'text': i18n.get('telegram.payment.back_to_menu', language),
-              'callback_data': 'back_to_main'}]
+              'callback_data': f'order_{order_id}'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -1534,8 +1551,12 @@ class PaymentKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def payment_link(payment_url: str, language: str = 'en') -> InlineKeyboardMarkup:
-        """Payment link with Pay button and Back button"""
+    def payment_link(payment_url: str, language: str, order_id: int) -> InlineKeyboardMarkup:
+        """Payment link with Pay button and Back button.
+
+        Back opens that order's details (Pay now / Cancel). It cannot return to the
+        confirmation screen: ``confirm_order`` has already cleared the checkout state.
+        """
         buttons = [
             [InlineKeyboardButton(
                 text=i18n.get('telegram.payment.pay_btn', language),
@@ -1543,7 +1564,7 @@ class PaymentKeyboards:
             )],
             [InlineKeyboardButton(
                 text=i18n.get('telegram.back', language),
-                callback_data='back_to_order_confirm'
+                callback_data=f'order_{order_id}'
             )]
         ]
         return InlineKeyboardMarkup(buttons)
@@ -1574,3 +1595,43 @@ class ReorderReminderKeyboards:
             buttons.append([{'text': labels['later'], 'callback_data': f'rr_later_{episode_id}'}])
         buttons.append([{'text': labels['stop'], 'callback_data': f'rr_stop_{episode_id}'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
+
+
+class ReorderKeyboards:
+    """The notice shown when Order water / Order again meets an order already in progress."""
+
+    @staticmethod
+    def open_order_notice(language: str, order_id: int, continue_callback: str) -> InlineKeyboardMarkup:
+        """View the open order, or carry on (`continue_callback`): `reorder_go_<id>` repeats that order,
+        `order_water_go` starts a fresh one (cart or Products)."""
+        return KeyboardBuilder.build_inline_keyboard([
+            [{'text': i18n.get('telegram.payment.view_order', language), 'callback_data': f'order_{order_id}'}],
+            [{
+                'text': reorder_reminder_copy.order_label(i18n.renderer(language)),
+                'callback_data': continue_callback,
+            }],
+        ])
+
+
+class DeliverySummaryKeyboards:
+    """The buttons under the delivered-order summary (spec 2026-10-21 §3, R8)."""
+
+    @staticmethod
+    def summary(language: str, order_id: int, reorder_order_id: Optional[int]) -> InlineKeyboardMarkup:
+        """Order again above Report an issue.
+
+        `reorder_order_id` is the backend's published reorder candidate; None (subscription and
+        reward-only orders) drops Order again. `reorder_<id>` is the existing Quick Order flow and
+        sends checkout as a new message, so the summary and its Report button are never edited.
+        """
+        rows = []
+        if reorder_order_id is not None:
+            rows.append([{
+                'text': reorder_reminder_copy.order_label(i18n.renderer(language)),
+                'callback_data': f'reorder_{reorder_order_id}',
+            }])
+        rows.append([{
+            'text': i18n.get('telegram.delivery_summary.report_button', language),
+            'callback_data': f'report_issue_{order_id}',
+        }])
+        return KeyboardBuilder.build_inline_keyboard(rows)

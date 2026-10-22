@@ -17,12 +17,14 @@ up when it is not.
    the whole message — the same rejection that killed `location_received` for
    everyone living on such a street, fixed there on 2026-08-21 by escaping the
    DATA and leaving the copy's own `*bold*` alone.
-   On these screens it was not fixed, and `_edit_or_replace_callback_message`
-   cannot rescue it: its fallback re-sends with the SAME parse mode, so the
-   second attempt is refused for the same reason and the handler's
-   `except Exception` ends in a generic error toast. A customer whose street
-   name contains an underscore could not view, rename or delete their own
-   address.
+   On these screens it was not fixed. Until 2026-10-21
+   `_edit_or_replace_callback_message` could not rescue it: its fallback deleted
+   the screen and re-sent it with the SAME parse mode, the second attempt was
+   refused for the same reason, and the handler's `except Exception` ended in a
+   generic error toast. A customer whose street name contains an underscore
+   could not view, rename or delete their own address. It now retries a
+   refused-markup edit as plain text, so the screen survives with its
+   formatting lost, and escaping the values is still the fix.
 
 2. NAVIGATING AWAY IS NOT "FORGET EVERYTHING".
    These screens open on top of DB-backed prompts (`awaiting_input`), so each
@@ -53,6 +55,7 @@ import pytest
 # `config` resolve as the BOT's versions. See tests/telegram_bot/conftest.py.
 import utils as utils_module
 from handlers import profile as profile_module
+from menu_keyboard import MENU_KEYBOARD_STATE_KEY
 
 from tests.telegram_bot.ptb_harness import FakeDatabase, build_bot_harness
 
@@ -205,11 +208,11 @@ class MarkdownParser:
     """Answer `sendMessage`/`editMessageText` the way Telegram's parser does.
 
     Scripted rather than assumed because the interesting half of this bug is
-    what happens AFTER the rejection: `_edit_or_replace_callback_message`
-    retries by sending a new message with the same `parse_mode`, so a screen
-    that fails to parse fails TWICE and the handler's `except Exception` turns
-    it into a generic error toast. Only a transport that really refuses can
-    show that.
+    what happens AFTER the rejection. Until 2026-10-21
+    `_edit_or_replace_callback_message` deleted the screen and re-sent it with
+    the same `parse_mode`, so a screen that failed to parse failed TWICE and
+    ended in a generic error toast. It now retries the edit as plain text. Only
+    a transport that really refuses can show either.
 
     Records the exact params dict of each rejected call, because
     `transport.shown` records what the bot ATTEMPTED to show and a message
@@ -281,7 +284,12 @@ def support_posts(bot) -> list[dict]:
 
 
 def armed_state(bot) -> dict:
-    return json.loads(bot.database.user["bot_state"])
+    """The prompts armed in `bot_state`. The bottom keyboard's install marker is left out: it
+    describes the screen, not a prompt, and the first tap from a customer without it writes it
+    (spec 2026-10-21 §1)."""
+    state = json.loads(bot.database.user["bot_state"])
+    state.pop(MENU_KEYBOARD_STATE_KEY, None)
+    return state
 
 
 async def arm_the_concern_flow(bot, user):
@@ -442,21 +450,22 @@ async def test_browsing_the_profile_leaves_an_armed_concern_report_alone(
     """The defect `add_address` was fixed for, on the six screens that kept it.
 
     A customer taps "Report an issue" under a delivered order, then — before
-    typing — goes to check the address that delivery went to. Profile, then
-    Addresses, then the address itself, then its edit menu, then back to the
-    profile edit sub-menu. Every one of those handlers opened with
-    `update_user_state(user_id, {})`, so by the time they came back to type,
-    the report had been disarmed in silence and their complaint was filed as an
-    anonymous note against no order — or, if the concern prompt had already
-    scrolled away, not filed at all.
+    typing — goes to check the address that delivery went to. Addresses, then
+    the address itself, then its edit menu, then the profile edit sub-menu.
+    Every one of those handlers opened with `update_user_state(user_id, {})`,
+    so by the time they came back to type, the report had been disarmed in
+    silence and their complaint was filed as an anonymous note against no
+    order — or, if the concern prompt had already scrolled away, not filed at
+    all.
 
-    Arming is DB-backed precisely so it survives a detour.
+    Arming is DB-backed precisely so it survives a detour. My Profile itself
+    is an exit gesture (spec §2), and an exit cancels the report; that rule is
+    pinned in test_flow_exits.py.
     """
     await arm_the_concern_flow(bot, user)
     armed_before = armed_state(bot)
 
     for screen in (
-        "menu_profile",
         "manage_addresses",
         "view_address_901",
         "edit_address_901",

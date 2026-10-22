@@ -222,6 +222,73 @@ class TestGenerateDriverPerformanceReport:
         assert result["metrics"]["success_rate"] == 100.0
         assert result["metrics"]["average_rating"] == 5.0
 
+    def test_a_cancelled_delivery_is_not_one_of_the_drivers(self, db, delivery_driver, sample_order, sample_user):
+        """Owner, 2026-10-22: a cancel is not a driver outcome. A cancelled delivery that still
+        names the driver adds nothing; a failed one counts."""
+        now = datetime.now(timezone.utc)
+        db.session.add_all(
+            [
+                Delivery(
+                    order_id=sample_order.id,
+                    delivery_person_id=delivery_driver.id,
+                    status=DeliveryStatus.DELIVERED,
+                    scheduled_date=now - timedelta(hours=2),
+                    scheduled_time_slot="09:00-11:00",
+                    delivered_at=now,
+                    delivery_attempts=1,
+                ),
+                Delivery(
+                    order_id=_make_order(db, sample_user, order_number="ORD-RPT-FAILED").id,
+                    delivery_person_id=delivery_driver.id,
+                    status=DeliveryStatus.FAILED,
+                    scheduled_date=now - timedelta(hours=2),
+                    scheduled_time_slot="09:00-11:00",
+                    delivery_attempts=1,
+                ),
+                Delivery(
+                    order_id=_make_order(db, sample_user, order_number="ORD-RPT-CANCELLED").id,
+                    delivery_person_id=delivery_driver.id,
+                    status=DeliveryStatus.CANCELLED,
+                    scheduled_date=now - timedelta(hours=2),
+                    scheduled_time_slot="09:00-11:00",
+                    distance_km=7.0,
+                    delivery_attempts=1,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        _run = delivery_tasks.generate_driver_performance_report.run.__func__
+        start, end = (now - timedelta(days=7)).isoformat(), (now + timedelta(days=1)).isoformat()
+        result = _run(MagicMock(), delivery_driver.id, start, end)
+
+        assert result["metrics"]["total_deliveries"] == 2
+        assert result["metrics"]["successful_deliveries"] == 1
+        assert result["metrics"]["failed_deliveries"] == 1
+        assert result["metrics"]["success_rate"] == 50.0
+        assert result["metrics"]["total_distance_km"] == 0
+        assert result["metrics"]["total_attempts"] == 2
+
+    def test_a_driver_whose_only_delivery_was_cancelled_has_no_report(self, db, delivery_driver, sample_order):
+        now = datetime.now(timezone.utc)
+        db.session.add(
+            Delivery(
+                order_id=sample_order.id,
+                delivery_person_id=delivery_driver.id,
+                status=DeliveryStatus.CANCELLED,
+                scheduled_date=now - timedelta(hours=2),
+                scheduled_time_slot="09:00-11:00",
+                delivery_attempts=1,
+            )
+        )
+        db.session.commit()
+
+        _run = delivery_tasks.generate_driver_performance_report.run.__func__
+        start, end = (now - timedelta(days=7)).isoformat(), (now + timedelta(days=1)).isoformat()
+        result = _run(MagicMock(), delivery_driver.id, start, end)
+
+        assert result == {"success": False, "error": "No deliveries found for this period"}
+
 
 @pytest.mark.unit
 class TestDriverPerformanceMetricsStubReplacement:
@@ -280,6 +347,40 @@ class TestDriverPerformanceMetricsStubReplacement:
         db.session.add_all([delivery_1, delivery_2])
         db.session.commit()
 
+        # Owner, 2026-10-22: a cancel is not a driver outcome. The first driver also has a
+        # cancelled delivery, and a third driver has nothing but one: neither changes a figure.
+        third_driver = User(
+            email="driver3@example.com",
+            phone="+998901239931",
+            password_hash=hash_password("DriverPassword123!"),
+            first_name="Third",
+            last_name="Driver",
+            user_type=UserType.STAFF,
+            role=UserRole.DELIVERY_DRIVER,
+            is_verified=True,
+        )
+        db.session.add(third_driver)
+        db.session.commit()
+        db.session.add_all(
+            [
+                Delivery(
+                    order_id=_make_order(db, sample_user, order_number="ORD-DRV1-CANCELLED").id,
+                    delivery_person_id=delivery_driver.id,
+                    status=DeliveryStatus.CANCELLED,
+                    scheduled_date=now - timedelta(hours=2),
+                    scheduled_time_slot="09:00-11:00",
+                ),
+                Delivery(
+                    order_id=_make_order(db, sample_user, order_number="ORD-DRV3-CANCELLED").id,
+                    delivery_person_id=third_driver.id,
+                    status=DeliveryStatus.CANCELLED,
+                    scheduled_date=now - timedelta(hours=2),
+                    scheduled_time_slot="09:00-11:00",
+                ),
+            ]
+        )
+        db.session.commit()
+
         result = AnalyticsService()._get_driver_performance_metrics(now - timedelta(days=1), now + timedelta(days=1))
 
         assert result["total_drivers"] == 2
@@ -290,6 +391,7 @@ class TestDriverPerformanceMetricsStubReplacement:
         assert top["driver_name"] == delivery_driver.full_name
         assert top["successful_deliveries"] == 1
         assert top["total_deliveries"] == 1
+        assert third_driver.id not in {performer["driver_id"] for performer in result["top_performers"]}
 
 
 @pytest.mark.unit

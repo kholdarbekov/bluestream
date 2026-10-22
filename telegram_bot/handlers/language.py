@@ -5,9 +5,9 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from eligibility import main_menu_for
 from i18n import i18n
 from keyboards import LanguageKeyboards, MenuKeyboards
+from menu_keyboard import send_menu_keyboard
 from database import db_manager, BotUserRepository
 from utils import user_middleware, get_auth_token
 from api_client import api_client
@@ -182,12 +182,11 @@ class LanguageHandler:
             confirmation_text += f"✅ {now_using_text}\n\n"
             confirmation_text += f"{i18n.get('telegram.language.confirmation_message', language_code)}"
 
-            # Return to main menu with new language
-            keyboard = await main_menu_for(update.effective_user.id, language_code)
-
-            await query.edit_message_text(
-                text=confirmation_text,
-                reply_markup=keyboard
+            # A NEW message: only a plain send can carry the bottom keyboard, and it re-renders the
+            # labels in the new language. The language card is left as it was.
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, update.effective_user.id,
+                confirmation_text, language_code,
             )
 
             logger.info(f"User {user_id} changed language from {current_language} to {language_code}")

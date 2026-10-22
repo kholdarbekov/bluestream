@@ -9,9 +9,7 @@ from typing import Any, Dict, Optional
 from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
-from telegram.error import BadRequest
 
-from eligibility import main_menu_for
 from i18n import i18n
 from shared import reorder_reminder_copy
 from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
@@ -23,6 +21,7 @@ from shared.constants import (
     is_within_tashkent,
     WEB_LINK_START_PREFIX,
 )
+from shared.business_config import PHONE_OTP_EXPIRY
 from shared.enums import UserType
 from shared.user_names import greeting_name, joined_name
 from handlers.menu import main_menu_handler
@@ -50,15 +49,18 @@ from handlers.address_flow import (
 from handlers.conversation_states import WEB_LINK_CONFIRM
 from api_client import api_client
 from database import db_manager, BotUserRepository
+from flow_exit import ADDRESS_FLOW_KEYS, PHONE_FLOW_KEYS, PHONE_OTP_SENT_AT
+from menu_keyboard import is_menu_customer, send_menu_keyboard
 from utils import (
     user_middleware,
     validate_phone_number,
     normalize_phone_number,
     get_auth_token,
     otp_rate_limiter,
-    maybe_remove_stale_reply_keyboard,
     arm_location_request,
     user_cache,
+    otp_code_in,
+    is_stamp_stale,
 )
 from config import config
 from handlers.base import BaseHandler
@@ -77,6 +79,14 @@ ADDRESS_DETAIL_MAX_LENGTH = 20
 # would also throw away a concern report armed by handlers/support.py.
 _PROFILE_EDIT_PROMPTS = ('edit_profile_name', 'edit_profile_birthday')
 _ADDRESS_EDIT_PROMPTS = ('edit_address_title', 'edit_address_instructions')
+
+# Phone-code lifetime stamps (spec 2026-10-21 §2, "Phone-code steps"). A code is
+# good for `PHONE_OTP_EXPIRY` from the moment its SMS went out, wherever the
+# customer tapped since. `PHONE_OTP_ARMED_AT` is the durable `bot_state` companion
+# of `awaiting_input == 'phone_otp'`; `PHONE_OTP_SENT_AT` (from flow_exit, the
+# `user_data` key list's owner) is the `PHONE_VERIFY_OTP` step's in-memory copy,
+# which a flow exit carries into the durable prompt so leaving never extends it.
+PHONE_OTP_ARMED_AT = 'phone_otp_armed_at'
 
 # A web-only customer connecting this Telegram from /my-account (spec 2026-10-19
 # D5, D12, D15). The one-time token waits in `user_data` under the PENDING key,
@@ -110,9 +120,10 @@ def _markdown_copy(key: str, language: str, **data: Any) -> str:
     and Uzbek addresses really do carry ``_`` (building suffixes like "15_A"),
     ``[`` (geocoder annotations) and ``*``. Unescaped, one of those makes
     Telegram refuse the whole message with "can't parse entities"; the handler's
-    ``except Exception`` then turns a formatting problem into a dead screen, and
-    ``_edit_or_replace_callback_message`` cannot rescue it because its fallback
-    re-sends with the SAME parse mode.
+    ``except Exception`` then turns a formatting problem into a dead screen.
+    ``_edit_or_replace_callback_message`` now degrades a refused edit to plain
+    text (raw ``*`` showing), which is a backstop, not a fix: escaping the
+    values is still the fix.
 
     So: escape the VALUES, never the template. Escaping the rendered string
     instead (what ``district_selected`` does for MarkdownV2) would neuter the
@@ -494,8 +505,8 @@ class ProfileHandlers(BaseHandler):
             # Prompt user to share phone
             phone_prompt = i18n.get('telegram.phone.send_code_prompt', language)
 
-            # Send the prompt with reply keyboard
-            keyboard = ProfileKeyboards.phone_request(language)
+            # Send the prompt with reply keyboard; its Cancel row leads back to the menu.
+            keyboard = ProfileKeyboards.phone_request(language, with_cancel=True)
 
             if update.callback_query:
                 await self._ack(update.callback_query)
@@ -529,7 +540,7 @@ class ProfileHandlers(BaseHandler):
             if contact.user_id != user_id:
                 await update.message.reply_text(
                     i18n.get('telegram.phone.share_own_phone', language),
-                    reply_markup=ProfileKeyboards.phone_request(language)
+                    reply_markup=ProfileKeyboards.phone_request(language, with_cancel=True)
                 )
                 return PHONE_VERIFY_PHONE
 
@@ -537,7 +548,7 @@ class ProfileHandlers(BaseHandler):
             if not phone:
                 await update.message.reply_text(
                     i18n.get('telegram.phone.invalid_format', language),
-                    reply_markup=ProfileKeyboards.phone_request(language)
+                    reply_markup=ProfileKeyboards.phone_request(language, with_cancel=True)
                 )
                 return PHONE_VERIFY_PHONE
             logger.info(f"Phone contact received for user {user_id}: {phone}")
@@ -558,11 +569,10 @@ class ProfileHandlers(BaseHandler):
                     except Exception as api_error:
                         logger.warning(f"Failed to update phone via API: {api_error}")
 
-            # Remove the phone request keyboard and ask for name
+            # The menu replaces the phone request keyboard, then the name is asked for
             success_text = i18n.get('telegram.phone.phone_accepted', language)
-            await update.message.reply_text(
-                success_text,
-                reply_markup=ReplyKeyboardRemove()
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id, success_text, language
             )
 
             # Ask for full name
@@ -576,7 +586,7 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error in phone_verify_contact_received: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return await self._end_flow_with_menu(update, context)
 
     async def phone_verify_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle a typed phone number during the phone verification flow.
@@ -596,7 +606,7 @@ class ProfileHandlers(BaseHandler):
             if not await validate_phone_number(phone_text):
                 await update.message.reply_text(
                     i18n.get('telegram.phone.invalid_format', language),
-                    reply_markup=ProfileKeyboards.phone_request(language)
+                    reply_markup=ProfileKeyboards.phone_request(language, with_cancel=True)
                 )
                 return PHONE_VERIFY_PHONE
 
@@ -608,20 +618,20 @@ class ProfileHandlers(BaseHandler):
                 if not user_token:
                     await update.message.reply_text(
                         i18n.get('telegram.auth.failed_try_again', language),
-                        reply_markup=ProfileKeyboards.phone_request(language)
+                        reply_markup=ProfileKeyboards.phone_request(language, with_cancel=True)
                     )
                     return PHONE_VERIFY_PHONE
 
                 return await self._send_typed_phone_code(
                     update, context, client, user_token, phone, language,
-                    phone_state=PHONE_VERIFY_PHONE, code_state=PHONE_VERIFY_OTP,
+                    phone_state=PHONE_VERIFY_PHONE, code_state=PHONE_VERIFY_OTP, registered=True,
                 )
 
         except Exception as e:
             logger.error(f"Error in phone_verify_text_received: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return await self._end_flow_with_menu(update, context)
 
     async def phone_verify_otp_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Verify the code for a number typed in Profile → Phone (PHONE_VERIFY_OTP).
@@ -645,7 +655,7 @@ class ProfileHandlers(BaseHandler):
         )
 
     async def _send_typed_phone_code(self, update, context, client, user_token, phone, language,
-                                     *, phone_state, code_state):
+                                     *, phone_state, code_state, registered: bool):
         """Send the code for a TYPED number and move to the flow's code step.
 
         Shared by registration's typed branch (PHONE → REGISTER_OTP) and
@@ -653,6 +663,11 @@ class ProfileHandlers(BaseHandler):
         stages the number; nothing is saved until _receive_typed_phone_code's
         /verify-phone succeeds. A refusal keeps the customer on ``phone_state``
         with the share-contact keyboard, so they can try another number.
+
+        ``registered`` is True for Profile → Phone, whose customer has the bottom
+        menu: the share-contact keyboard keeps its Cancel row, and an accepted
+        number puts the menu back. Registration (False) has no menu yet, so an
+        accepted number only takes the share-contact keyboard down.
         """
         otp_response = await client.send_phone_verification(user_token, phone)
         if not otp_response.success:
@@ -668,15 +683,21 @@ class ProfileHandlers(BaseHandler):
                 )
             await update.message.reply_text(
                 refusal,
-                reply_markup=ProfileKeyboards.phone_request(language)
+                reply_markup=(
+                    ProfileKeyboards.phone_request(language, with_cancel=True) if registered
+                    else ProfileKeyboards.phone_request(language)
+                )
             )
             return phone_state
 
-        # Remove contact keyboard and ask for OTP
-        await update.message.reply_text(
-            i18n.get('telegram.phone.phone_accepted', language),
-            reply_markup=ReplyKeyboardRemove()
-        )
+        # Replace the contact keyboard, then ask for the code
+        accepted = i18n.get('telegram.phone.phone_accepted', language)
+        if registered:
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, update.effective_user.id, accepted, language
+            )
+        else:
+            await update.message.reply_text(accepted, reply_markup=ReplyKeyboardRemove())
 
         otp_data = otp_response.data.get('data', {}) if isinstance(otp_response.data, dict) else {}
         phone_masked = otp_data.get('phone_masked', phone)
@@ -694,6 +715,9 @@ class ProfileHandlers(BaseHandler):
         # in-conversation handler owns this path, so /cancel and /start behave
         # correctly during OTP entry and the global catch-all won't fire.
         context.user_data['pending_phone_verification'] = phone
+        # The code's lifetime starts now, not when the customer next taps away
+        # (`flow_exit.leave_all_flows` carries this into the durable prompt).
+        context.user_data[PHONE_OTP_SENT_AT] = datetime.now(timezone.utc).isoformat()
 
         logger.info(f"Phone verification OTP sent to {phone} for user {update.effective_user.id}")
         return code_state
@@ -742,15 +766,13 @@ class ProfileHandlers(BaseHandler):
 
             # Show success and main menu
             success_text = i18n.get('telegram.profile_updated', language)
-            keyboard = await main_menu_for(update.effective_user.id, language)
-
-            await update.message.reply_text(
-                text=success_text,
-                reply_markup=keyboard
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, update.effective_user.id, success_text, language
             )
 
-            # Clear pending phone from context
-            context.user_data.pop('pending_phone', None)
+            # The flow is done: drop every phone-flow key, the code's send stamp included.
+            for name in PHONE_FLOW_KEYS:
+                context.user_data.pop(name, None)
 
             logger.info(f"Phone verification flow completed for user {user_id}")
             return ConversationHandler.END
@@ -762,37 +784,21 @@ class ProfileHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def cancel_phone_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Cancel phone verification flow"""
+        """Cancel phone verification flow: one message, which puts the bottom menu back."""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            cancel_text = i18n.get('telegram.action_cancelled', language)
-            keyboard = await main_menu_for(update.effective_user.id, language)
-
             # Clear pending data
-            context.user_data.pop('pending_phone', None)
-            context.user_data.pop('pending_phone_verification', None)
+            for name in PHONE_FLOW_KEYS:
+                context.user_data.pop(name, None)
 
             if update.callback_query:
                 await self._ack(update.callback_query)
-                await update.callback_query.message.reply_text(
-                    text=i18n.get('telegram.action_cancelled_short', language),
-                    reply_markup=ReplyKeyboardRemove()
-                )
-                await update.callback_query.message.reply_text(
-                    text=cancel_text,
-                    reply_markup=keyboard
-                )
-            else:
-                await update.message.reply_text(
-                    text=i18n.get('telegram.action_cancelled_short', language),
-                    reply_markup=ReplyKeyboardRemove()
-                )
-                await update.message.reply_text(
-                    text=cancel_text,
-                    reply_markup=keyboard
-                )
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.action_cancelled', language), language,
+            )
 
             logger.info(f"Phone verification cancelled for user {user_id}")
             return ConversationHandler.END
@@ -800,6 +806,142 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error cancelling phone verification: {e}")
             return ConversationHandler.END
+
+    async def _end_flow_with_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """A flow step failed unexpectedly: say so, put the bottom menu back, end the flow.
+
+        The step may have left a phone or location keyboard on screen (one-time ones are
+        already gone), so ending in silence would leave the customer with a dead keyboard
+        or none at all. Best-effort: a failure here is logged and the flow still ends.
+        """
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.error_occurred', language), language,
+            )
+        except Exception as e:
+            logger.warning("Could not put the menu back after a failed flow step: %s", e)
+        return ConversationHandler.END
+
+    # --- Phone-code steps (spec 2026-10-21 §2) ---------------------------------
+    #
+    # A code typed within `PHONE_OTP_EXPIRY` of its SMS still verifies, even
+    # after the customer tapped elsewhere: an exit never disarms `phone_otp`
+    # (`flow_exit.PROMPTS_LEFT_BY_EXIT`). Text that is not a code ends the step
+    # and is routed like any other message, and after the lifetime the prompt
+    # is disarmed. tests/telegram_bot/test_phone_code_steps.py
+
+    async def arm_phone_otp(self, context, telegram_id: int, phone: str, *,
+                            prompted_update_id: Optional[int] = None,
+                            armed_at: Optional[str] = None) -> None:
+        """Arm the code prompt: the in-memory marker and its DURABLE TWIN.
+
+        `user_data` dies with the process, and the customer is reading this code
+        off an SMS that does not. Without the `bot_state` half, the digits they
+        type after a deploy fall through the router to `capture_support_message`
+        (silent by design) and a live one-time password lands unredacted in the
+        admin Support Inbox while the phone stays unverified.
+
+        `armed_at` is when the SMS was sent; it defaults to now, for a caller
+        that has just sent it.
+        """
+        context.user_data['awaiting_otp'] = True
+        context.user_data['pending_phone_verification'] = phone
+        if prompted_update_id is not None:
+            context.user_data['otp_prompted_update_id'] = prompted_update_id
+        await self.user_repo.arm_awaiting_input(
+            telegram_id, 'phone_otp',
+            pending_phone_verification=phone,
+            **{PHONE_OTP_ARMED_AT: armed_at or datetime.now(timezone.utc).isoformat()},
+        )
+
+    async def disarm_phone_otp(self, context, telegram_id: int) -> None:
+        """Drop both halves of the code prompt. The durable half is best-effort.
+
+        Leaving the `bot_state` row armed would be worse than the bug it fixes:
+        every later code-shaped message would be read as another verification
+        code. `disarm` names only `phone_otp`, so a newer prompt is left alone
+        and a half-finished `address_draft` is not collateral.
+        """
+        for name in PHONE_FLOW_KEYS:
+            context.user_data.pop(name, None)
+        try:
+            await self.user_repo.disarm(telegram_id, 'phone_otp')
+        except Exception as disarm_error:
+            logger.warning("Could not disarm the OTP prompt for %s: %s", telegram_id, disarm_error)
+
+    @staticmethod
+    def may_arm_phone_otp(state: dict) -> bool:
+        """True while no OTHER prompt holds `bot_state.awaiting_input`.
+
+        The code prompt is (re-)armed only into an empty slot or its own: a
+        prompt the customer opened after the code was sent is newer, and its
+        text is its own, so it is never overwritten.
+        """
+        return state.get('awaiting_input') in (None, 'phone_otp')
+
+    async def keep_code_answerable(self, context, telegram_id: int) -> None:
+        """The `PHONE_VERIFY_OTP` step is ending: keep its code answerable.
+
+        The SMS may still be on its way, so the step's code moves into the
+        durable `phone_otp` prompt the group-0 router answers, stamped with the
+        SMS's send time (`PHONE_OTP_SENT_AT`): ending the step never extends the
+        code's lifetime, and a code typed within it never lands in the Support
+        Inbox (spec §2, "Why"). Used by every way the step ends without a code:
+        non-code text (`end_phone_code_step`) and a flow exit
+        (`flow_exit.leave_all_flows`). Never overwrites a newer prompt.
+        """
+        phone = context.user_data.get('pending_phone_verification')
+        if not phone:
+            return
+        if not self.may_arm_phone_otp(await self.user_repo.get_user_state(telegram_id)):
+            return
+        await self.arm_phone_otp(context, telegram_id, phone, armed_at=context.user_data.get(PHONE_OTP_SENT_AT))
+
+    @staticmethod
+    def phone_code_expired(state: dict) -> bool:
+        """True once the durable prompt's code is past `PHONE_OTP_EXPIRY`.
+
+        A missing stamp reads as expired. The router stamps an unstamped
+        `phone_otp` prompt on first sight before asking, so a missing stamp
+        reaches here only when a newer prompt holds `awaiting_input`: the text
+        is that prompt's, never a code.
+        """
+        return is_stamp_stale(state.get(PHONE_OTP_ARMED_AT), PHONE_OTP_EXPIRY / 60)
+
+    async def cancel_phone_otp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The Cancel under the profile code prompt: disarm it and show the menu."""
+        query = update.callback_query
+        try:
+            await self._ack(query)
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            await self.disarm_phone_otp(context, user_id)
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.action_cancelled', language), language,
+            )
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="cancel_phone_otp")
+
+    async def end_phone_code_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """`PHONE_VERIFY_OTP` got text that is not a code: the step ends, silently.
+
+        Registered WITHOUT `_consumes`, so the same text walks on to the group-0
+        catch-all and is handled like any other message, instead of the old
+        endless "the code must be 6 digits" reply. The code itself stays
+        answerable for the rest of its lifetime (`keep_code_answerable`).
+        """
+        telegram_id = update.effective_user.id
+        try:
+            await self.keep_code_answerable(context, telegram_id)
+        except Exception as arm_error:
+            logger.warning("Could not keep the phone code answerable for %s: %s", telegram_id, arm_error)
+        for name in PHONE_FLOW_KEYS:
+            context.user_data.pop(name, None)
+        return ConversationHandler.END
 
     async def verify_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start phone verification flow for existing phone"""
@@ -853,23 +995,12 @@ class ProfileHandlers(BaseHandler):
                         )
                         await update.callback_query.message.reply_text(
                             verification_msg,
-                            parse_mode='Markdown'
+                            parse_mode='Markdown',
+                            reply_markup=ProfileKeyboards.phone_code_prompt(language),
                         )
 
-                        # Store awaiting OTP flag
-                        context.user_data['awaiting_otp'] = True
-                        context.user_data['pending_phone_verification'] = phone
-                        context.user_data['otp_prompted_update_id'] = update.update_id
-                        # DURABLE TWIN. `user_data` dies with the process, and the
-                        # customer is reading this code off an SMS that does not.
-                        # Without this the digits they type after a deploy fall
-                        # through the router to `capture_support_message` — silent
-                        # by design — and a live one-time password lands
-                        # unredacted in the admin Support Inbox while the phone
-                        # stays unverified.
-                        await self.user_repo.arm_awaiting_input(
-                            user_id, 'phone_otp', pending_phone_verification=phone,
-                        )
+                        # The SMS just went out, so the default stamp (now) is its send time.
+                        await self.arm_phone_otp(context, user_id, phone, prompted_update_id=update.update_id)
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
                     else:
@@ -994,10 +1125,9 @@ class ProfileHandlers(BaseHandler):
 
         # Existing row but phone never captured -> resume phone collection
         # instead of dropping the user at the main menu with no phone.
-        if not existing_user.get('phone'):
+        if not is_menu_customer(existing_user):
             language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
             keyboard = ProfileKeyboards.phone_request(language)
-            await maybe_remove_stale_reply_keyboard(update, context)
 
             await update.message.reply_text(
                 text=i18n.get('telegram.registration.share_contact_prompt', language),
@@ -1009,13 +1139,9 @@ class ProfileHandlers(BaseHandler):
         # Already registered, show main menu — honour the user's saved
         # language rather than the Telegram client locale.
         language = existing_user.get('preferred_language') or await i18n.get_user_language(user_id)
-        complete_text = i18n.get('telegram.welcome', language)
-        keyboard = await main_menu_for(update.effective_user.id, language)
-        await maybe_remove_stale_reply_keyboard(update, context)
-
-        await update.message.reply_text(
-            text=complete_text,
-            reply_markup=keyboard
+        await send_menu_keyboard(
+            context.bot, update.effective_chat.id, user_id,
+            i18n.get('telegram.main_menu', language), language,
         )
 
         return ConversationHandler.END
@@ -1114,23 +1240,19 @@ class ProfileHandlers(BaseHandler):
 
         A Telegram with its own account is pointed to this chat and the
         conversation ends, so its next message reaches the Support Inbox; the
-        main menu comes along only when that account has its phone (D15a).
+        bottom keyboard comes along only when that account has its phone (D15a):
+        `send_menu_keyboard` decides that from the account's row, so `existing`
+        only supplies the language.
         """
-        reply_markup = None
         if code == _WEB_LINK_HAS_ACCOUNT:
-            key = 'telegram.web_link.has_account'
-            if (existing or {}).get('phone'):
-                reply_markup = await main_menu_for(update.effective_user.id, language)
-        elif code in _WEB_LINK_DEAD_CODES:
-            key = 'telegram.web_link.expired'
-        else:
-            key = 'telegram.web_link.failed'
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, update.effective_user.id,
+                i18n.get('telegram.web_link.has_account', language), language,
+            )
+            return ConversationHandler.END
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=i18n.get(key, language),
-            reply_markup=reply_markup,
-        )
+        key = 'telegram.web_link.expired' if code in _WEB_LINK_DEAD_CODES else 'telegram.web_link.failed'
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=i18n.get(key, language))
         return ConversationHandler.END
 
     async def _retire_web_link_card(self, query, text: Optional[str] = None, **kwargs) -> None:
@@ -1334,13 +1456,12 @@ class ProfileHandlers(BaseHandler):
 
     async def _send_web_link_greeting(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int,
                                       telegram_id: int, greeting: dict) -> int:
-        """R5: "Connected, {name}!" with the main menu, in the website account's language."""
+        """R5: "Connected, {name}!" with the bottom keyboard, in the website account's language."""
         language = greeting['language']
         name = greeting['name'] or i18n.get('telegram.common.user_fallback', language)
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=i18n.get('telegram.web_link.connected', language, name=name),
-            reply_markup=await main_menu_for(telegram_id, language),
+        await send_menu_keyboard(
+            context.bot, chat_id, telegram_id,
+            i18n.get('telegram.web_link.connected', language, name=name), language,
         )
         return ConversationHandler.END
 
@@ -1356,9 +1477,9 @@ class ProfileHandlers(BaseHandler):
                 context, update.effective_chat.id, update.effective_user.id, greeting
             )
 
-        await update.message.reply_text(
-            text=i18n.get('telegram.registration_complete', language),
-            reply_markup=await main_menu_for(update.effective_user.id, language)
+        await send_menu_keyboard(
+            context.bot, update.effective_chat.id, update.effective_user.id,
+            i18n.get('telegram.registration_complete', language), language,
         )
         return ConversationHandler.END
 
@@ -1369,18 +1490,19 @@ class ProfileHandlers(BaseHandler):
         Telegram, is not active, may not be claimed by phone, or is one person
         across phones, which the merge itself would refuse. Mid-signup that is
         today's prompt for another number. After a web link (D12) this Telegram
-        already holds the customer's own account, so the customer is pointed to
-        this chat (R6) and greeted, never looped on the phone prompt.
+        already holds the customer's own account, which has no phone yet, so the
+        customer is asked for a phone again exactly as /start does for a
+        phoneless account (spec 2026-10-21 §1). The greeting is left waiting, so
+        an accepted number still ends in `_finish_signup`'s greeting; a
+        greeting without a phone would be a dead end.
         """
-        greeting = context.user_data.pop(WEB_LINK_GREETING_KEY, None)
+        greeting = context.user_data.get(WEB_LINK_GREETING_KEY)
         if greeting:
             await update.message.reply_text(
-                i18n.get('telegram.web_link.has_account', greeting['language']),
-                reply_markup=ReplyKeyboardRemove(),
+                i18n.get('telegram.registration.share_contact_prompt', greeting['language']),
+                reply_markup=ProfileKeyboards.phone_request(greeting['language']),
             )
-            return await self._send_web_link_greeting(
-                context, update.effective_chat.id, update.effective_user.id, greeting
-            )
+            return PHONE
 
         await update.message.reply_text(
             i18n.get('telegram.phone.already_linked_other_account', language),
@@ -1663,7 +1785,7 @@ class ProfileHandlers(BaseHandler):
                         # The code is captured in REGISTER_OTP (register_otp_received).
                         return await self._send_typed_phone_code(
                             update, context, client, user_token, phone, language,
-                            phone_state=PHONE, code_state=REGISTER_OTP,
+                            phone_state=PHONE, code_state=REGISTER_OTP, registered=False,
                         )
 
                     elif response.success and not response_data.get('available'):
@@ -1866,10 +1988,10 @@ class ProfileHandlers(BaseHandler):
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            otp = update.message.text.strip()
+            otp = otp_code_in(update.message.text)
 
             # Validate OTP format
-            if not otp.isdigit() or len(otp) != 6:
+            if otp is None:
                 await update.message.reply_text(
                     i18n.get('telegram.phone.enter_valid_6_digit_code', language)
                 )
@@ -1921,9 +2043,10 @@ class ProfileHandlers(BaseHandler):
                             is_entity=user_data.get('user_type') == UserType.ENTITY.value,
                         ) or i18n.get('telegram.common.user_fallback', language)
 
-                        await update.message.reply_text(
+                        await send_menu_keyboard(
+                            context.bot, update.effective_chat.id, update.effective_user.id,
                             i18n.get('telegram.phone.accounts_linked_success', language, name=name),
-                            reply_markup=await main_menu_for(update.effective_user.id, language)
+                            language,
                         )
 
                         logger.info(f"Account linking completed for user {user_id}")
@@ -1999,10 +2122,12 @@ class ProfileHandlers(BaseHandler):
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            otp = update.message.text.strip()
+            otp = otp_code_in(update.message.text)
 
-            # Validate OTP format (mirrors link_account_otp's 6-digit guard).
-            if not otp.isdigit() or len(otp) != 6:
+            # Validate OTP format. Only registration's REGISTER_OTP reaches this
+            # retry prompt: PHONE_VERIFY_OTP's state filter sends anything that is
+            # not a code to `end_phone_code_step` instead.
+            if otp is None:
                 await update.message.reply_text(
                     i18n.get('telegram.bot.otp.invalid_format', language)
                 )
@@ -2096,16 +2221,12 @@ class ProfileHandlers(BaseHandler):
             for key in (WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY):
                 context.user_data.pop(key, None)
 
-            cancel_text = i18n.get('telegram.action_cancelled', language)
-            keyboard = await main_menu_for(update.effective_user.id, language)
-
-            await update.message.reply_text(
-                text=i18n.get('telegram.action_cancelled_short', language),
-                reply_markup=ReplyKeyboardRemove()
-            )
-            await update.message.reply_text(
-                text=cancel_text,
-                reply_markup=keyboard
+            # One message. `send_menu_keyboard` takes the phone keyboard down for an
+            # account with no row or no phone, which is every registration state but
+            # a web-linked account that already has its number.
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.action_cancelled', language), language,
             )
 
             return ConversationHandler.END
@@ -2491,10 +2612,10 @@ class ProfileHandlers(BaseHandler):
 
             await self._persist_address_draft(update, context, 'title')
 
-            # Remove reply keyboard
-            await update.message.reply_text(
-                i18n.get('telegram.address.location_received', language),
-                reply_markup=ReplyKeyboardRemove()
+            # The menu replaces the location keyboard
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.address.location_received', language), language,
             )
 
             # Ask for address title with suggestions.
@@ -2526,7 +2647,7 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"CRITICAL ERROR in location_received: {e}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return await self._end_flow_with_menu(update, context)
 
     async def address_title_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address title typed as free text"""
@@ -2559,25 +2680,30 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
-    async def _clear_address_flow_keys(
+    async def clear_address_flow_keys(
         self, context: ContextTypes.DEFAULT_TYPE, telegram_id: int,
         *, touch_activity: bool = True,
     ) -> None:
         """Clear every key an address-creation flow may leave behind, both in
         `user_data` and in the durable twin now shadowing it.
 
+        Public because the flow exit (`flow_exit.leave_all_flows`, spec
+        2026-10-21 §2) runs it too: leaving the form for a menu label or a
+        command is a teardown like any other, and like the timeout it keeps an
+        address the pin step already saved (only Cancel discards one).
+
         `touch_activity=False` is for `address_flow_timeout` ONLY: a timeout
         fires on a synthetic PTB update, not a customer action, so clearing
         the draft there must not stamp `last_bot_interaction` (M1, final
         whole-branch review — see `BotUserRepository.clear_address_draft`'s
         docstring for the incident). Every other teardown (cancel,
-        cancel-text, a completed save) is a real customer action and keeps
-        the default.
+        cancel-text, a completed save, a flow exit) is a real customer action
+        and keeps the default.
 
-        One place for all five `user_data` keys so a future addition can
-        never again be forgotten at one of the flow's several teardown sites
-        the way `awaiting_location` originally was: it was armed by
-        `utils.arm_location_request` but only ever cleared by
+        One list for the `user_data` keys, `flow_exit.ADDRESS_FLOW_KEYS`, so a
+        future addition can never again be forgotten at one of the flow's
+        several teardown sites the way `awaiting_location` originally was: it
+        was armed by `utils.arm_location_request` but only ever cleared by
         `_route_address_location_entry` popping it off an ARRIVING pin
         (bot.py) — every path that ends the flow WITHOUT a pin (cancel,
         text-cancel, timeout, or a successful save) left it `True` forever,
@@ -2599,12 +2725,8 @@ class ProfileHandlers(BaseHandler):
         clearing the durable twin must not stop those, or surface as a crash
         on top of an otherwise-successful cancel/save.
         """
-        context.user_data.pop('temp_location', None)
-        context.user_data.pop('temp_address', None)
-        context.user_data.pop('temp_address_data', None)
-        context.user_data.pop('address_flow_origin', None)
-        context.user_data.pop('awaiting_location', None)
-        context.user_data.pop('awaiting_location_at', None)
+        for name in ADDRESS_FLOW_KEYS:
+            context.user_data.pop(name, None)
         try:
             await self.user_repo.clear_address_draft(telegram_id, touch_activity=touch_activity)
         except Exception as e:
@@ -2634,22 +2756,18 @@ class ProfileHandlers(BaseHandler):
             # step. Done BEFORE the temp data is popped — the id lives there.
             await self._discard_created_address(update, context)
 
-            keyboard = await main_menu_for(update.effective_user.id, language)
-
-            # Handle both message and callback query
+            # Handle both message and callback query. An edit carries no menu: the
+            # bottom keyboard is the way on (spec 2026-10-21 §1).
             if update.callback_query:
                 await self._ack(update.callback_query)
-                await self._edit_or_replace_callback_message(
-                    update.callback_query, cancel_text, reply_markup=keyboard
-                )
+                await self._edit_or_replace_callback_message(update.callback_query, cancel_text)
             else:
-                await update.message.reply_text(
-                    text=cancel_text,
-                    reply_markup=keyboard
+                await send_menu_keyboard(
+                    context.bot, update.effective_chat.id, user_id, cancel_text, language
                 )
 
             # Clear all temporary address data
-            await self._clear_address_flow_keys(context, user_id)
+            await self.clear_address_flow_keys(context, user_id)
 
             return ConversationHandler.END
 
@@ -2658,7 +2776,7 @@ class ProfileHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def cancel_address_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Cancel address adding from text button (removes ReplyKeyboard)"""
+        """Cancel address adding from the location keyboard's Cancel row: the menu replaces it."""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -2672,29 +2790,26 @@ class ProfileHandlers(BaseHandler):
             # row the pin flow created at the title step.
             await self._discard_created_address(update, context)
 
-            # First remove the reply keyboard
-            await update.message.reply_text(
-                i18n.get('telegram.action_cancelled_short', language),
-                reply_markup=ReplyKeyboardRemove()
-            )
-
             if origin == 'checkout':
                 # The customer has a full cart. Dropping them on the main menu
                 # makes them navigate back for no reason. Return to the CART,
                 # not to checkout — checkout would re-render the very
                 # zero-address prompt they just cancelled, which is a loop.
+                # The menu still replaces the location keyboard first.
                 from handlers.products import product_handlers
 
+                await send_menu_keyboard(
+                    context.bot, update.effective_chat.id, user_id,
+                    i18n.get('telegram.action_cancelled_short', language), language,
+                )
                 await product_handlers.show_cart(update, context)
             else:
-                keyboard = await main_menu_for(update.effective_user.id, language)
-                await update.message.reply_text(
-                    text=cancel_text,
-                    reply_markup=keyboard
+                await send_menu_keyboard(
+                    context.bot, update.effective_chat.id, user_id, cancel_text, language
                 )
 
             # Clear all temporary address data
-            await self._clear_address_flow_keys(context, user_id)
+            await self.clear_address_flow_keys(context, user_id)
 
             return ConversationHandler.END
 
@@ -2722,9 +2837,9 @@ class ProfileHandlers(BaseHandler):
             saved_address_id = addr_data.get('address_id')
 
             # touch_activity=False: this fires on a SYNTHETIC PTB update, not
-            # something the customer did — see `_clear_address_flow_keys`'s
+            # something the customer did — see `clear_address_flow_keys`'s
             # docstring (M1, final whole-branch review).
-            await self._clear_address_flow_keys(context, user_id, touch_activity=False)
+            await self.clear_address_flow_keys(context, user_id, touch_activity=False)
 
             logger.info(
                 f"Address flow timed out for user {user_id} "
@@ -2736,18 +2851,13 @@ class ProfileHandlers(BaseHandler):
                 else 'telegram.address.flow_timed_out',
                 language,
             )
-            keyboard = await main_menu_for(user_id, language)
 
             # A timeout arrives as a synthetic update carrying whatever the last
-            # real one was, so the reply target is derived rather than assumed.
-            if update.callback_query is not None and update.callback_query.message is not None:
-                await update.callback_query.message.reply_text(text, reply_markup=keyboard)
-            elif update.message is not None:
-                await update.message.reply_text(text, reply_markup=keyboard)
-            else:
-                await context.bot.send_message(
-                    chat_id=user_id, text=text, reply_markup=keyboard
-                )
+            # real one was, so its chat may be missing.
+            chat = update.effective_chat
+            await send_menu_keyboard(
+                context.bot, chat.id if chat is not None else user_id, user_id, text, language
+            )
 
         except Exception as e:
             logger.error(f"Error in address_flow_timeout: {e}")
@@ -2770,10 +2880,10 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['location_source'] = 'manual'
             await self._persist_address_draft(update, context, 'region')
 
-            # Remove reply keyboard
-            await update.message.reply_text(
-                i18n.get('telegram.address.manual_entry_started', language),
-                reply_markup=ReplyKeyboardRemove()
+            # The menu replaces the location keyboard
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.address.manual_entry_started', language), language,
             )
 
             # Show region selection (only Tashkent for now)
@@ -2791,7 +2901,7 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error in skip_location_sharing: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return ConversationHandler.END
+            return await self._end_flow_with_menu(update, context)
 
     async def region_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle region selection"""
@@ -2908,25 +3018,6 @@ class ProfileHandlers(BaseHandler):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-
-    @staticmethod
-    async def _reply_markdown_or_plain(message, text: str, reply_markup=None):
-        """Send `text` as Markdown, falling back to plain text if Telegram says no.
-
-        Escaping the interpolated geocoder string fixes the hazard we know
-        about; it cannot fix the one we do not. The cost of being wrong here is
-        total — a refused prompt used to end the conversation, leaving the
-        customer on a dead screen with no way to self-rescue, because
-        re-sharing the pin re-runs the same deterministic failure. Losing the
-        bold is a much smaller price than losing the flow.
-        """
-        try:
-            return await message.reply_text(
-                text, reply_markup=reply_markup, parse_mode='Markdown'
-            )
-        except BadRequest as e:
-            logger.warning(f"Markdown prompt refused ({e}); resending as plain text")
-            return await message.reply_text(text, reply_markup=reply_markup)
 
     @staticmethod
     def _build_address_payload(addr_data: Dict[str, Any], language: str) -> Dict[str, Any]:
@@ -3613,24 +3704,7 @@ class ProfileHandlers(BaseHandler):
         """Continue checkout flow after address is saved from checkout path."""
         from handlers.orders import order_handlers
 
-        callback_query = getattr(update, 'callback_query', None)
-        callback_message = callback_query.message if callback_query else None
-        # When a callback drove this flow, anchor the resumed update on the
-        # callback's message (the bubble that held the inline buttons) — that
-        # is what the user actually sees and what checkout should reply to.
-        # Fall back to update.message only for non-callback (text) entry points.
-        resume_message = callback_message or update.message
-
-        if resume_message is not None:
-            synthetic_update = SimpleNamespace(
-                effective_user=update.effective_user,
-                callback_query=None,
-                message=resume_message,
-            )
-            await order_handlers.checkout_handler(synthetic_update, context)
-            return
-
-        await order_handlers.checkout_handler(update, context)
+        await order_handlers.checkout_handler(self.as_message_update(update), context)
 
     async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
         """Finish the address flow: create the address, or complete the one the
@@ -3712,26 +3786,23 @@ class ProfileHandlers(BaseHandler):
             resume_checkout_after_save = context.user_data.get('address_flow_origin') == 'checkout'
 
             # Clear temp data
-            await self._clear_address_flow_keys(context, user_id)
+            await self.clear_address_flow_keys(context, user_id)
 
             if resume_checkout_after_save:
                 await self._resume_checkout_after_address(update, context)
                 return ConversationHandler.END
 
             success_text = i18n.get('telegram.address.saved_successfully', language)
-            keyboard = await main_menu_for(update.effective_user.id, language)
 
             if is_callback:
                 # A refused edit is a rendering problem: the address IS saved,
                 # and losing this confirmation sends the customer round the
-                # flow again and leaves them with a duplicate.
-                await self._edit_or_replace_callback_message(
-                    update.callback_query, success_text, reply_markup=keyboard
-                )
+                # flow again and leaves them with a duplicate. An edit carries
+                # no menu: the bottom keyboard is the way on.
+                await self._edit_or_replace_callback_message(update.callback_query, success_text)
             else:
-                await update.message.reply_text(
-                    text=success_text,
-                    reply_markup=keyboard
+                await send_menu_keyboard(
+                    context.bot, update.effective_chat.id, update.effective_user.id, success_text, language
                 )
 
             return ConversationHandler.END

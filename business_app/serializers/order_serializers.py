@@ -16,7 +16,7 @@ from business_app.utils.payment_projection import (
     order_is_payable_online,
     paid_amount,
 )
-from business_app.models.order import Order, OrderItem
+from business_app.models.order import Order, OrderItem, is_free_reward_item
 from business_app.serializers.types import MoneyFloat
 
 
@@ -406,17 +406,6 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         }
 
 
-def is_free_reward_item(order_item) -> bool:
-    """Whether an order item is a free loyalty-reward (free_product) line.
-
-    Free items in this system come only from a free_product reward redemption,
-    so a zero-priced line is treated as the reward item. Used by customer, bot
-    and admin serializers to render it as an additive "+N free" bonus rather
-    than a confusing duplicate product line.
-    """
-    return float(order_item.unit_price or 0) == 0 and float(order_item.total_price or 0) == 0
-
-
 # How many lines a COMPACT items summary shows before collapsing the rest
 # into "+N more". This used to be decided independently by each caller (3 in
 # the delivery rows, 5 in the admin order serializer, unlimited elsewhere), so
@@ -509,6 +498,38 @@ def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
             "total_price": float(order_item.total_price),
             "is_reward": is_free_reward_item(order_item),
         }
+
+
+def serialize_reorder_info(candidate: Optional[Order], open_order: Optional[Order]) -> Dict[str, Any]:
+    """The `data` of GET /orders/reorder-info: the order a reorder would repeat and the order
+    already open. `open_order.status` is the customer-facing `display_status`."""
+    from business_app.services.order_schedule_service import OrderScheduleService
+    from business_app.services.order_service import OrderService
+
+    candidate_data = None
+    if candidate is not None:
+        address = OrderService.reorder_address(candidate)
+        candidate_data = {
+            "order_id": candidate.id,
+            "order_number": candidate.order_number,
+            "items": [
+                {"product_id": line.product_id, "product_name": line.product.name, "quantity": line.quantity}
+                for line in OrderService.reorderable_lines(candidate)
+            ],
+            "address": (
+                {"id": address.id, "title": address.title, "full_address": address.full_address}
+                if address is not None
+                else None
+            ),
+        }
+    open_data = None
+    if open_order is not None:
+        open_data = {
+            "id": open_order.id,
+            "order_number": open_order.order_number,
+            "status": OrderScheduleService.customer_display_status(open_order),
+        }
+    return {"candidate": candidate_data, "open_order": open_data}
 
 
 def serialize_order_delivery(delivery) -> Dict[str, Any]:

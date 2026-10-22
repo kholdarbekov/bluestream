@@ -25,7 +25,7 @@ import asyncio
 import pathlib
 import re
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 
@@ -33,6 +33,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "telegram_bot"))
 
 import handlers.profile as profile_mod  # noqa: E402
+import menu_keyboard  # noqa: E402
 from handlers.profile import (  # noqa: E402
     ADDRESS_APARTMENT,
     ADDRESS_BUILDING,
@@ -221,7 +222,7 @@ def captured_save(monkeypatch):
     add_user_address = AsyncMock(return_value=MagicMock(success=True, data={}))
     monkeypatch.setattr(profile_mod, "api_client", _AsyncClient(add_user_address))
     monkeypatch.setattr(profile_mod, "get_auth_token", AsyncMock(return_value="tok"))
-    monkeypatch.setattr(profile_mod, "main_menu_for", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(profile_mod, "send_menu_keyboard", create_autospec(menu_keyboard.send_menu_keyboard))
     return add_user_address
 
 

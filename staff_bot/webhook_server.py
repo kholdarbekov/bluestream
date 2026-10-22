@@ -688,6 +688,51 @@ async def health_handler(_request):
     }, status=status_code)
 
 
+# The at-door flow's keys. Each carries the `delivery_id` of the stop it was armed for.
+_STOP_FLOW_KEYS = ('pending_status', 'pending_delivery_cash_flow')
+
+
+async def _leave_dropped_stop(bot_app, telegram_id: int, delivery_id: int) -> None:
+    """Leave a stop an order cancel took off the driver's list, as far as the driver's own
+    state goes: run for every outcome of the cancel push except BLOCKED.
+
+    - The `current_delivery` snapshot of that stop is forgotten (`address_change.held_snapshot`),
+      so an old button of the stop re-reads the active list and is refused as a stale card.
+    - That stop's own at-door flow is cleared: the `_STOP_FLOW_KEYS` naming it, and nothing
+      else. This is deliberately narrower than THE tap-path clean-up
+      (`flow_state.clear_pending_flows`, which the backend's cancelled refusal of a tap runs):
+      a push is not a gesture by the driver, so another conversation's draft (a transfer
+      confirm, a sales visit, a half-entered order) is not this push's to wipe.
+    - The active-flow mirror and the deferred offers (`flow_state.clear_and_drain`) go,
+      except that the marker is kept while any flow in `flow_state.ACTIVE_FLOW_MARKER_KEYS` is
+      still armed (for example another stop's at-door cash flow, a COD or bottle collection,
+      the reconciliation hand-off, a try-out pick-up); that flow owns the mirror, and its own
+      exit releases it. A flow outside that constant (a transfer confirm, a sales draft) never
+      arms the mirror, so it does not keep it.
+
+    BLOCKED (a screen of another stop, or a borrow that noted no screen) touches nothing:
+    whatever is on screen still works, and its next tap reaches the backend, whose
+    cancelled refusal clears it all.
+    """
+    from staff_bot.handlers.delivery import address_change
+
+    held = address_change.held_snapshot(bot_app, telegram_id, delivery_id)
+    if held is not None:
+        held.pop('current_delivery', None)
+    # `.get`, never `[]`: `user_data` creates an entry for any id it is indexed with.
+    user_data = bot_app.user_data.get(telegram_id)
+    if not user_data:
+        return
+    cleared = [
+        key for key in _STOP_FLOW_KEYS if (user_data.get(key) or {}).get('delivery_id') == delivery_id
+    ]
+    for key in cleared:
+        user_data.pop(key, None)
+    if not cleared or any(user_data.get(key) for key in flow_state.ACTIVE_FLOW_MARKER_KEYS):
+        return
+    await flow_state.clear_and_drain(telegram_id, bot_app.bot, language=user_data.get('language'))
+
+
 async def handle_route_updated_payload(server, data: dict) -> bool:
     """Apply one parsed `/internal/route-updated` payload.
 
@@ -734,6 +779,16 @@ async def handle_route_updated_payload(server, data: dict) -> bool:
     including genuine sounded ones -- for the full 24h dedup TTL during a
     Redis outage.
 
+    A silent push that names a `delivery_id` comes from an order cancel
+    (backend `refresh_driver_route_card_task`): that stop just left the
+    driver's list. A card borrowed by one of that stop's screens (detail,
+    Navigate, status confirm or at-door prompt) is drawn over instead of
+    skipped (`route_card.borrow_shows_stop`). Unless the push was BLOCKED
+    (`route_card.borrow_blocks_push`: a screen of another stop is open, or a borrow that
+    noted no screen), the stop is then left behind: its
+    snapshot forgotten and its own at-door flow cleared
+    (`_leave_dropped_stop`). Still no message.
+
     sound=True or missing (an older backend that predates the `sound` field
     keeps today's behaviour, fail-open toward sounding): Task 9's restyled,
     capped `route_card.send_head_change_alert` -- the ONLY sounded message
@@ -752,7 +807,19 @@ async def handle_route_updated_payload(server, data: dict) -> bool:
     event_id = data.get('event_id')
 
     if not data.get('sound', True):
-        return await route_card.update_card_for_driver(server.bot_app, telegram_id)
+        dropped = data.get('delivery_id')
+        if dropped is None:
+            return await route_card.update_card_for_driver(server.bot_app, telegram_id)
+        # An order cancel took this stop off the driver's list (owner, 2026-10-22): still no
+        # message, but a screen showing it gives way, and the stop is left behind unless a
+        # screen of another stop blocked the refresh.
+        dropped = int(dropped)
+        outcome = await route_card.refresh_card_from_webhook(
+            server.bot_app, telegram_id, dropped_delivery_id=dropped
+        )
+        if outcome is not route_card.RenderOutcome.BLOCKED:
+            await _leave_dropped_stop(server.bot_app, telegram_id, dropped)
+        return route_card.card_is_current(outcome)
 
     if await server._is_duplicate_event(event_id, f"route_updated:{telegram_id}:{driver_id}"):
         return False

@@ -22,6 +22,7 @@ from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
 from business_app.utils.local_windows import local_date, local_day_bounds
 from business_app.utils.order_timing import delivered_order_instants_select
+from business_app.utils.state_validators import DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import OrderStatus, DeliveryStatus, UserStatus, UserType, EntitySubtype
 from shared import business_config
@@ -1498,6 +1499,7 @@ class AnalyticsService:
         deliveries = Delivery.query.filter(
             Delivery.created_at.between(start_date, end_date),
             Delivery.delivery_person_id.isnot(None),
+            Delivery.status.notin_(DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES),
         ).all()
 
         deliveries_by_driver: Dict[int, List[Delivery]] = {}

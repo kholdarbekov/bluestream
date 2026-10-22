@@ -26,6 +26,8 @@ def _order(order_id=77, order_number="ORD-77"):
         order_number=order_number,
         user_id=1,
         delivery_address_id=5,
+        subscription_id=None,
+        order_items=[],
     )
 
 
@@ -68,6 +70,7 @@ def test_dispatch_sends_exact_payload_and_claims_key(db):
         "bottles_delivered": "4",
         "bottles_collected": "3",
         "balance": "1",
+        "reorder_order_id": None,
     }
     assert result["dispatched"] is True
     fake_redis.delete.assert_not_called()
@@ -227,3 +230,20 @@ def test_the_fabricated_summary_matches_the_real_order_bottle_summary(db, sample
     for key in ("expected_bottles", "bottles_delivered", "bottles_collected", "balance"):
         assert isinstance(real[key], Decimal), key
     assert isinstance(real["delivery_recorded"], bool)
+
+
+@pytest.mark.unit
+def test_a_failing_reorder_read_raises_before_the_key_is_claimed(db):
+    service = NotificationService()
+    fake_redis = MagicMock()
+
+    with patch(f"{MODULE}.redis_client", fake_redis), patch(
+        f"{MODULE}.BottleTrackingService.get_order_bottle_summary", return_value=_summary(recorded=True)
+    ), patch(
+        "business_app.services.order_service.OrderService.can_reorder", side_effect=RuntimeError("db down")
+    ), patch(f"{MODULE}.trigger_bot_webhook") as mock_webhook:
+        with pytest.raises(RuntimeError, match="db down"):
+            service._dispatch_bottle_delivery_summary(None, None, _order(order_id=104), _user())
+
+    fake_redis.set.assert_not_called()
+    mock_webhook.assert_not_called()

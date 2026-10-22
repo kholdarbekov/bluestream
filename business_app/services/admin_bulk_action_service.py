@@ -180,25 +180,34 @@ class AdminBulkActionService:
                         continue
 
                 elif action == "process":
-                    if order.status == OrderStatus.CONFIRMED:
-                        from business_app.services.order_schedule_service import OrderScheduleService
+                    from business_app.services.order_schedule_service import OrderScheduleService
 
-                        # F18: the one forward-move rule. A refusal is this arm's own
-                        # failed item, not the loop's except, which would log an
-                        # expected refusal as a crash.
+                    # Locked and re-read before the `confirmed` check: a customer may cancel a
+                    # confirmed order a driver has accepted (F5, amended 2026-10-21), and the read
+                    # above may predate that cancel's commit. The ORDER only: this arm writes the
+                    # order and only reads the delivery (F18), and a Delivery-then-Order lock could
+                    # deadlock against the Order-then-Delivery cancel cascade (spec §10 of
+                    # docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md).
+                    order = db.session.get(Order, order.id, with_for_update=True, populate_existing=True)
+                    # Both refusals are this arm's own failed item, not the loop's except, which
+                    # would log an expected refusal as a crash.
+                    refused = None
+                    if order.status != OrderStatus.CONFIRMED:
+                        refused = f"Cannot process order with status {order.status}"
+                    else:
+                        # F18: the one forward-move rule.
                         try:
                             OrderScheduleService.assert_can_advance(order)
                         except ValidationError as refusal:
-                            failed_count += 1
-                            errors.append({"order_id": order_id, "error": refusal.message})
-                            continue
-                        order.status = OrderStatus.PREPARING
-                    else:
+                            refused = refusal.message
+                    if refused is not None:
                         failed_count += 1
-                        errors.append(
-                            {"order_id": order_id, "error": f"Cannot process order with status {order.status}"}
-                        )
+                        errors.append({"order_id": order_id, "error": refused})
+                        # The refused item wrote nothing and earlier items have committed: end
+                        # its transaction now, which releases the Order lock it took.
+                        db.session.rollback()
                         continue
+                    order.status = OrderStatus.PREPARING
 
                 elif action == "mark_delivered":
                     if is_valid_order_transition(order.status, OrderStatus.DELIVERED):
@@ -442,6 +451,15 @@ class AdminBulkActionService:
                 db.session.commit()
                 success_count += 1
 
+            except ValidationError as refusal:
+                # An expected refusal (e.g. a start on a stop that is no longer assigned, or whose
+                # order was cancelled): a failed item, not a crash.
+                db.session.rollback()
+                failed_count += 1
+                errors.append({"delivery_id": delivery_id, "error": str(refusal)})
+                current_app.logger.warning(
+                    "Bulk delivery action '%s' refused for delivery_id=%s: %s", action, delivery_id, refusal
+                )
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1

@@ -14,15 +14,10 @@ never raises — it just draws a card with the facts missing:
   keys — so the only thing it can ever answer is "missing information, please
   try again", advice that cannot succeed on that card
 
-Four top-level callbacks reach it (``payment_*``, ``back_to_order_confirm``,
-``checkout_apply_reward_*``, ``checkout_remove_reward``), so any of them tapped
-on a card that outlived its process lands here.
-
-And it needs no deploy at all. ``confirm_order`` runs
-``context.user_data.clear()`` and THEN edits the same message into the payment
-card, whose Back is ``back_to_order_confirm`` — so a card/click customer reaches
-this screen on an already-empty ``user_data`` by tapping Back, and the ghost
-"Confirm your order" it draws is for an order that has already been placed.
+Three callbacks reach the guard (``payment_*``, ``checkout_apply_reward_*``,
+``checkout_remove_reward``), so any of them tapped on a card that outlived its
+process lands here. ``back_to_order_confirm`` now checks first and leaves for the
+cart or My orders (see test_payment_link_back.py).
 
 The screen has to refuse instead of drawing a card it cannot honour.
 ``confirm_order`` two methods away already reads the same two keys with
@@ -35,6 +30,7 @@ import pytest
 from tests.telegram_bot.test_checkout_journey_dispatcher import (  # noqa: F401
     add_address,
     bot,
+    deliberate_retap,
     fill_cart,
     reach_confirmation,
     shop,
@@ -74,7 +70,7 @@ async def test_the_confirmation_screen_refuses_rather_than_drawing_a_blank_card(
     user_data(bot).clear()
     bot.telegram.reset()
 
-    await bot.send(user.tap("back_to_order_confirm"))
+    await deliberate_retap(bot, user.tap("payment_cash"))
 
     offered = buttons(bot) if bot.telegram.shown else []
     assert "confirm_order" not in offered, (
@@ -92,7 +88,7 @@ async def test_the_customer_is_told_the_checkout_expired(bot, shop, user):
     user_data(bot).clear()
     bot.telegram.reset()
 
-    await bot.send(user.tap("back_to_order_confirm"))
+    await deliberate_retap(bot, user.tap("payment_cash"))
 
     said = [t for t in toasts(bot) if t] + shown(bot)
     assert said, "the customer was shown and told absolutely nothing"

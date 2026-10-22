@@ -190,7 +190,7 @@ async def test_solo_customer_screen_has_no_place_or_cluster_lines(monkeypatch):
     for key in ("place_total", "member_line", "cluster_total", "linked_account_line"):
         assert f"telegram.bottles.{key}" not in text
     # Exactly one History button (own address) + Back.
-    assert _callback_datas(kwargs["reply_markup"]) == ["bottle_history_5_1", "back_to_main"]
+    assert _callback_datas(kwargs["reply_markup"]) == ["bottle_history_5_1", "menu_profile"]
     assert "Alice Member" not in text
 
 
@@ -201,7 +201,7 @@ async def test_empty_bottles_shows_empty_state(monkeypatch):
 
     kwargs = _last_edit_kwargs(query)
     assert "telegram.bottles.no_balance" in kwargs["text"]
-    assert _callback_datas(kwargs["reply_markup"]) == ["back_to_main"]
+    assert _callback_datas(kwargs["reply_markup"]) == ["menu_profile"]
 
 
 @pytest.mark.unit
@@ -215,7 +215,7 @@ async def test_non_dict_balances_payload_falls_back_to_empty_state(monkeypatch):
     )
     kwargs = _last_edit_kwargs(query)
     assert "telegram.bottles.no_balance" in kwargs["text"]
-    assert _callback_datas(kwargs["reply_markup"]) == ["back_to_main"]
+    assert _callback_datas(kwargs["reply_markup"]) == ["menu_profile"]
 
 
 @pytest.mark.unit
@@ -299,7 +299,7 @@ async def test_grouped_linked_customer_sees_place_total_named_members_and_cluste
 
     # Both places are browsable; the sibling's button is disambiguated.
     datas = _callback_datas(kwargs["reply_markup"])
-    assert datas == ["bottle_history_5_1", "bottle_history_9_1", "back_to_main"]
+    assert datas == ["bottle_history_5_1", "bottle_history_9_1", "menu_profile"]
     labels = [
         btn.text for row in kwargs["reply_markup"].inline_keyboard for btn in row
     ]

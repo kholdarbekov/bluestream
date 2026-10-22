@@ -148,7 +148,10 @@ class BotUserRepository:
     # must not be wiped when an unrelated prompt ("Report an issue") is filed
     # and disarmed, nor wipe that prompt when the screen opens. Navigation
     # ends it instead (`handlers/quantity_screen.py`).
-    _PRESERVED_KEYS = ('address_draft', 'awaiting_location_at', 'quantity_screen')
+    # `menu_keyboard` records which bottom keyboard is on the customer's screen
+    # (`menu_keyboard.send_menu_keyboard`). It describes the screen, not a
+    # prompt, so no flow arms or disarms it.
+    _PRESERVED_KEYS = ('address_draft', 'awaiting_location_at', 'quantity_screen', 'menu_keyboard')
 
     async def clear_awaiting_input(self, telegram_id: int, *awaiting_inputs: str) -> bool:
         """Disarm ONLY the named prompts. Thin alias for `disarm` (see its
@@ -251,6 +254,15 @@ class BotUserRepository:
         await self.update_user_state(telegram_id, state, touch_activity=False)
         return True
 
+    async def remember_menu_keyboard(self, telegram_id: int, marker: dict) -> None:
+        """Record the bottom keyboard Telegram just accepted: a MERGE that touches no other key.
+
+        `touch_activity=False`: an install is the bot's doing, not something the customer did.
+        """
+        state = await self.get_user_state(telegram_id)
+        state['menu_keyboard'] = marker
+        await self.update_user_state(telegram_id, state, touch_activity=False)
+
     async def disarm(self, telegram_id: int, *owned: str) -> bool:
         """Disarm ONLY the named prompts, preserving `_PRESERVED_KEYS`.
 
@@ -294,6 +306,16 @@ class BotUserRepository:
         preserved = {k: state[k] for k in self._PRESERVED_KEYS if k in state}
         await self.update_user_state(telegram_id, preserved)
         return True
+
+    async def abandon_prompts(self, telegram_id: int, prompts: tuple[str, ...]) -> bool:
+        """The customer left: disarm whichever of `prompts` is armed, in one
+        read-modify-write (`flow_exit.leave_all_flows`, spec 2026-10-21 §2).
+
+        A prompt not in `prompts` (a live phone code, say) is left exactly as
+        it was, and `_PRESERVED_KEYS` survive, because this IS `disarm`: that
+        rule keeps living in one place. Returns whether anything changed.
+        """
+        return await self.disarm(telegram_id, *prompts)
 
     # --- Address-creation draft (SDD 2026-08-26-address-flow-bot-state, P2) --
     #
@@ -379,10 +401,10 @@ class BotUserRepository:
         """Remove `address_draft` and nothing else — a no-op write when there
         is nothing to remove.
 
-        Called from `ProfileHandlers._clear_address_flow_keys` at every
-        teardown of the creation flow (cancel, timeout, or a completed save)
-        so a finished or abandoned flow never leaves a stale draft for a
-        later phase to wrongly resume into.
+        Called from `ProfileHandlers.clear_address_flow_keys` at every
+        teardown of the creation flow (cancel, timeout, a completed save, or
+        a flow exit) so a finished or abandoned flow never leaves a stale
+        draft for a later phase to wrongly resume into.
 
         Returns before writing when no draft is present at all, matching
         `disarm`'s own promise two methods above this one. That guard alone

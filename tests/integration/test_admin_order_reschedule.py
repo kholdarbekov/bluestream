@@ -1372,6 +1372,8 @@ def test_each_reschedule_tells_exactly_the_people_it_affects(
                     "materiality": None,
                     "trigger": None,
                     "event_id": None,
+                    # Only an order cancel names the stop that left the route.
+                    "delivery_id": None,
                 }
             ]
             if driver_loses_stop

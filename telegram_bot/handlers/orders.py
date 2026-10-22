@@ -9,7 +9,7 @@ from telegram import Update, constants
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
-from eligibility import main_menu_for
+from address_text import address_block_markdown_v2, address_lines
 from i18n import i18n
 from keyboards import (
     OrderKeyboards, MenuKeyboards, ProfileKeyboards,
@@ -17,6 +17,7 @@ from keyboards import (
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
+from menu_keyboard import send_menu_keyboard
 from utils import (
     user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request,
     ORDER_STATUS_LABEL_KEYS,
@@ -24,7 +25,7 @@ from utils import (
 from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
 from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
-from handlers.products import min_order_shortfall, product_handlers
+from handlers.products import cart_is_empty, min_order_shortfall, product_handlers
 
 logger = logging.getLogger('handlers')
 
@@ -124,6 +125,15 @@ def _checkout_address_id(query_data) -> int | None:
     """
     tail = str(query_data or '').rsplit('_', 1)[-1]
     return int(tail) if tail.isdigit() and int(tail) else None
+
+
+def _checkout_is_live(user_data) -> bool:
+    """The one answer to "is this checkout still live".
+
+    True when both the chosen address and payment method are still in ``user_data``.
+    ``confirm_order`` clears them, and a restart empties them (no persistence).
+    """
+    return bool(user_data.get('selected_address_id') and user_data.get('selected_payment_method'))
 
 
 def _money(value) -> str:
@@ -474,21 +484,19 @@ class OrderHandlers(BaseHandler):
 
             if not orders:
                 no_orders_text = i18n.get('telegram.orders.no_orders', language)
-                keyboard = await main_menu_for(update.effective_user.id, language)
 
                 if update.callback_query:
                     # The shared helper is the SSOT for "Telegram refused the
                     # edit": it treats "message is not modified" as success and
                     # replaces a bubble it cannot edit. The hand-rolled copy
-                    # that used to live here only knew the first of those.
-                    await self._edit_or_replace_callback_message(
-                        update.callback_query, no_orders_text, reply_markup=keyboard,
-                    )
+                    # that used to live here only knew the first of those. An
+                    # edit carries no menu: the bottom keyboard is the way on.
+                    await self._edit_or_replace_callback_message(update.callback_query, no_orders_text)
                     await self._ack(update.callback_query)
                 else:
-                    await update.message.reply_text(
-                        text=no_orders_text,
-                        reply_markup=keyboard
+                    await send_menu_keyboard(
+                        context.bot, update.effective_chat.id, update.effective_user.id,
+                        no_orders_text, language,
                     )
                 return
 
@@ -585,7 +593,11 @@ class OrderHandlers(BaseHandler):
             # Add delivery info if available
             if order.get('delivery_address'):
                 # Make order delivery address title bold.
-                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \\- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
+                delivery_address = order['delivery_address']
+                details_text += (
+                    f"\n{escape_markdown(i18n.get('telegram.orders.delivery_info', language), version=2)}:\n"
+                    f"{address_block_markdown_v2(delivery_address.get('title') or unknown_text, delivery_address.get('full_address'))}"
+                )
 
             # Payability is the BACKEND's answer (`payment_info.is_payable`),
             # not a second reading of the status string — see `customer_may_pay`.
@@ -861,6 +873,12 @@ class OrderHandlers(BaseHandler):
 
     async def checkout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle checkout process"""
+        # Quick Order / reorder hand these over for exactly ONE checkout render,
+        # so they are consumed here, before any early return (auth error,
+        # addresses API error, no addresses) can strand them for the next,
+        # plain cart checkout.
+        quick_order_address_id = context.user_data.pop('quick_order_address_id', None)
+        checkout_source = context.user_data.pop('checkout_source', 'cart')
         try:
             user = await user_middleware(update)
             if not user:
@@ -925,23 +943,23 @@ class OrderHandlers(BaseHandler):
                     )
                 return
 
-            # Quick Order auto-selected an address (last order's or default).
-            # Read it before deciding whether to show a picker.
-            # Quick Order hands these over for exactly ONE checkout render, so
-            # they are consumed here — in the only place that reads them —
-            # rather than cleared by each caller. `cart_handler` used to do the
-            # clearing, but the cart's own button emits `checkout`, which bot.py
-            # routes straight here; that route bypassed the cleanup and let a
-            # Quick Order's address hijack the next cart checkout.
-            quick_order_address_id = context.user_data.pop('quick_order_address_id', None)
-            checkout_source = context.user_data.pop('checkout_source', 'cart')
-
-            # Quick Order semantics (per UX requirements):
-            #   * Use the implicit address (from prior order / default).
-            #   * If user has exactly 1 address total, skip confirmation
-            #     entirely and go straight to payment.
-            #   * If user has multiple addresses, show a confirmation card so
-            #     they can verify or change the auto-selected one.
+            # Two quick-order sources hand over an address:
+            #   * 'reorder' (Order water, Repeat last, Order again): the order's
+            #     own saved address goes straight to the payment picker, whatever
+            #     the address count; the customer reaches the others through
+            #     Change address on the confirmation screen. If that address is
+            #     no longer saved, the regular flow below runs: never another
+            #     address in its place.
+            #   * 'quick_order' (Your usual): the implicit address (prior order
+            #     / default). One address total skips the card; several show a
+            #     confirmation card so they can verify or change it.
+            if (
+                checkout_source == 'reorder'
+                and quick_order_address_id
+                and any(a.get('id') == quick_order_address_id for a in addresses)
+            ):
+                await self._show_payment_picker(update, context, quick_order_address_id)
+                return
             if checkout_source == 'quick_order' and quick_order_address_id:
                 # Pick the auto-selected address (preferring the implicit one
                 # if it still exists; otherwise fall back to the first).
@@ -1001,10 +1019,13 @@ class OrderHandlers(BaseHandler):
     async def checkout_change_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Leave the auto-selected address behind and show the full picker.
 
-        The Quick Order card names one address; this is how a customer reaches
-        the others. Dropping the Quick Order pick FIRST is load-bearing —
-        checkout_handler would otherwise consume it and re-render the very card
-        the customer is trying to escape.
+        The Your-usual card and the order confirmation screen both lead here;
+        each names one address and this is how a customer reaches the others.
+        It drops the handoff keys and re-enters ``checkout_handler``, which
+        shows the picker for several addresses or the card for one. Dropping
+        the handoff keys FIRST is load-bearing — checkout_handler would
+        otherwise consume them and re-render the very card the customer is
+        trying to escape.
         """
         try:
             context.user_data.pop('quick_order_address_id', None)
@@ -1036,11 +1057,11 @@ class OrderHandlers(BaseHandler):
         change to, and the button would dead-end on the same address.
         """
         title = address.get('title') or i18n.get('telegram.address.default_title', language)
-        full_address = address.get('full_address') or ''
         label = i18n.get('telegram.checkout.delivering_to', language)
-        address_text = f"{label}\n*{title}*"
-        if full_address:
-            address_text += f"\n{full_address}"
+        address_text = (
+            f"{escape_markdown(label, version=2)}\n"
+            f"{address_block_markdown_v2(title, address.get('full_address'))}"
+        )
         keyboard = OrderKeyboards.single_address_confirm(
             address, language, back_callback=back_callback, show_change=show_change,
         )
@@ -1048,13 +1069,13 @@ class OrderHandlers(BaseHandler):
         if update.callback_query:
             await self._edit_or_replace_callback_message(
                 update.callback_query, address_text,
-                reply_markup=keyboard, parse_mode='Markdown',
+                reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN_V2,
             )
             await self._ack(update.callback_query)
         else:
-            await update.message.reply_text(
-                text=address_text, reply_markup=keyboard,
-                parse_mode='Markdown',
+            await self._reply_markdown_or_plain(
+                update.message, address_text, keyboard,
+                parse_mode=constants.ParseMode.MARKDOWN_V2,
             )
 
     async def _lookup_address(self, update, context, address_id) -> dict:
@@ -1260,9 +1281,7 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('cart_edit_return', None)
 
             await self._edit_or_replace_callback_message(
-                query,
-                i18n.get('telegram.action_cancelled', language),
-                reply_markup=await main_menu_for(update.effective_user.id, language),
+                query, i18n.get('telegram.action_cancelled', language),
             )
             await self._ack(query, i18n.get('telegram.action_cancelled_short', language))
 
@@ -1281,7 +1300,7 @@ class OrderHandlers(BaseHandler):
             address_id = context.user_data.get('selected_address_id')
             payment_method = context.user_data.get('selected_payment_method')
 
-            if not address_id or not payment_method:
+            if not _checkout_is_live(context.user_data):
                 await self._ack(query, i18n.get('telegram.orders.missing_info', language))
                 return
 
@@ -1521,20 +1540,15 @@ class OrderHandlers(BaseHandler):
                     language=language,
                 )
 
-            keyboard = await main_menu_for(update.effective_user.id, language)
-
             # Render through the shared helper: it treats "message is not
             # modified" as success and REPLACES a bubble it cannot edit
             # ("message to edit not found" — both appear in this project's
             # production logs). A bare edit_message_text turned either of those
             # into the outer except and a generic `telegram.error_occurred`
             # toast, i.e. a placed order reported to the customer as a failure.
+            # An edit carries no menu: the bottom keyboard is the way on.
             try:
-                await self._edit_or_replace_callback_message(
-                    query,
-                    success_text,
-                    reply_markup=keyboard,
-                )
+                await self._edit_or_replace_callback_message(query, success_text)
                 await self._ack(query, i18n.get('telegram.orders.placed_success', language))
             except Exception as render_error:
                 # Telegram refused the edit AND the replacement (blocked bot,
@@ -1609,10 +1623,7 @@ class OrderHandlers(BaseHandler):
             success_text += MessageBuilder.build_order_summary(order, language)
             success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
 
-            keyboard = await main_menu_for(update.effective_user.id, language)
-            await self._edit_or_replace_callback_message(
-                query, success_text, reply_markup=keyboard,
-            )
+            await self._edit_or_replace_callback_message(query, success_text)
             await self._ack(query, i18n.get('telegram.orders.placed_success', language))
 
             logger.info(f"Order {order_id} rescued to cash for user {user_id}")
@@ -1635,18 +1646,15 @@ class OrderHandlers(BaseHandler):
         # possible answer is `confirm_order`'s own "missing information, please
         # try again" — advice that cannot succeed on that card.
         #
-        # Reachable four ways (payment_*, back_to_order_confirm,
-        # checkout_apply_reward_*, checkout_remove_reward) and, for the card
-        # rail, with no deploy at all: `confirm_order` calls
-        # `context.user_data.clear()` and then edits this message into the
-        # payment card, whose Back returns here — so the ghost confirmation is
-        # drawn for an order that has already been placed.
+        # Three callbacks reach it (payment_*, checkout_apply_reward_*,
+        # checkout_remove_reward), and `back_to_order_confirm` checks
+        # `_checkout_is_live` before it calls this screen.
         #
-        # Same two keys and the same seeded copy `confirm_order` already guards
-        # with, so there is one answer to "is this checkout still live", not two.
+        # `_checkout_is_live` is the one answer to "is this checkout still live",
+        # read here, in `confirm_order` and in `back_to_order_confirm`, with the
+        # same seeded copy.
         # tests/telegram_bot/test_checkout_screens_after_state_loss.py
-        if not (context.user_data.get('selected_address_id')
-                and context.user_data.get('selected_payment_method')):
+        if not _checkout_is_live(context.user_data):
             query = update.callback_query
             if query is not None:
                 await self._ack(
@@ -1765,8 +1773,10 @@ class OrderHandlers(BaseHandler):
         if address_id:
             address_title = context.user_data.get('selected_address_title', '')
             address_full = context.user_data.get('selected_address_full', '')
-            display_address = address_title if address_title else address_full
-            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: {display_address}\n\n"
+            confirmation_text += (
+                f"{i18n.get('telegram.delivery_address', language)}: "
+                f"{address_lines(address_title, address_full)}\n\n"
+            )
 
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
@@ -1869,14 +1879,39 @@ class OrderHandlers(BaseHandler):
         await self._ack(update.callback_query)
 
     async def back_to_order_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle back button from payment screen to order confirmation"""
+        """Return to the confirmation screen from cart-edit Done and the reward picker.
+
+        A checkout that is gone (restart, or a payment-link message sent before the
+        link's Back opened the order) leaves for the cart or My orders instead.
+        """
         try:
             # The user is back at the confirmation screen — editing is done.
             # Clear the flag so a subsequent cart tap renders normal (non-edit) mode.
             context.user_data.pop('cart_edit_return', None)
-            await self._show_order_confirmation(update, context)
+            if _checkout_is_live(context.user_data):
+                await self._show_order_confirmation(update, context)
+            else:
+                await self._leave_expired_checkout(update, context)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="back_to_order_confirm")
+
+    async def _leave_expired_checkout(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Take the customer to the cart (if it has items) or My orders; never an alert."""
+        user_id = update.effective_user.id
+        language = await i18n.get_user_language(user_id)
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            response = await client.get_cart(user_token)
+        cart = ((response.data or {}).get('data') or {}).get('cart') if response.success else None
+        if cart and not cart_is_empty(cart):
+            logger.info("Checkout state gone for %s: back_to_order_confirm opens the cart.", user_id)
+            await product_handlers.show_cart(update, context)
+        else:
+            logger.info("Checkout state gone for %s: back_to_order_confirm opens My orders.", user_id)
+            await self.orders_menu(update, context)
 
     async def edit_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Open the cart in edit mode from the order-confirmation 'Edit' button.
@@ -1909,11 +1944,6 @@ class OrderHandlers(BaseHandler):
         customer's phone. Production, 2026-09-03 14:26:31 — six seconds after a
         restart, one tap, ``KeyError: 'selected_address_id'``, and because
         ``_handle_error`` never edits the card the button stayed dead for good.
-
-        No deploy is needed either: ``confirm_order`` runs
-        ``context.user_data.clear()`` and then edits the same message into the
-        payment card, whose Back re-renders this confirmation screen — so the
-        card rail reaches a live Back button on empty ``user_data`` on its own.
 
         ``user_data`` stays as the fallback for a card minted before this
         release, and an id from neither source is answered rather than raised —

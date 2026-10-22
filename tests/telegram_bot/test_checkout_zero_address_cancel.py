@@ -18,12 +18,13 @@ Drives the real handler chain (`profile.cancel_address_text` ->
 `products.show_cart`); the only thing mocked is the API client underneath."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 from telegram import ReplyKeyboardRemove
 from telegram.ext import ConversationHandler
 
+import menu_keyboard
 from handlers.profile import ProfileHandlers
 
 from tests.telegram_bot.helpers import DummyUpdate, FakeAPIClientContext, make_context
@@ -51,7 +52,7 @@ async def test_cancel_at_zero_address_checkout_shows_cart_and_cleans_up(echo_i18
     Cancel button. Must not crash, must end with a usable keyboard (the
     cart), and must clear the leaked address-flow state."""
     handler = ProfileHandlers()
-    # `_clear_address_flow_keys` now also clears the durable `address_draft`
+    # `clear_address_flow_keys` now also clears the durable `address_draft`
     # twin (SDD 2026-08-26-address-flow-bot-state, Task 6); the real
     # BotUserRepository needs a connected pool this unit test never sets up.
     handler.user_repo = SimpleNamespace(clear_address_draft=AsyncMock())
@@ -74,11 +75,16 @@ async def test_cancel_at_zero_address_checkout_shows_cart_and_cleans_up(echo_i18
     fake_client = FakeAPIClientContext(get_cart=cart_response)
     monkeypatch.setattr("handlers.products.api_client", fake_client)
     monkeypatch.setattr("handlers.products.get_auth_token", AsyncMock(return_value="tok"))
+    send = create_autospec(menu_keyboard.send_menu_keyboard)
+    monkeypatch.setattr("handlers.profile.send_menu_keyboard", send)
 
     result = await handler.cancel_address_text(update, ctx)
 
     assert result == ConversationHandler.END
 
+    # The bottom keyboard replaces the location keyboard first; the cart follows it.
+    send.assert_awaited_once()
+    assert send.await_args.args[3] == "telegram.action_cancelled_short"
     calls = update.message.reply_text.await_args_list
     assert calls, "the customer must receive at least one reply"
 
@@ -109,16 +115,16 @@ async def test_cancel_outside_checkout_still_goes_to_main_menu(echo_i18n, monkey
     ctx.user_data["address_flow_origin"] = "profile"
     ctx.user_data["temp_address_data"] = {"latitude": 41.31, "longitude": 69.28}
 
-    monkeypatch.setattr(
-        "handlers.profile.main_menu_for", AsyncMock(return_value="main-menu-kbd")
-    )
+    send = create_autospec(menu_keyboard.send_menu_keyboard)
+    monkeypatch.setattr("handlers.profile.send_menu_keyboard", send)
     # If this test regressed into calling show_cart, it would blow up here.
     monkeypatch.setattr("handlers.products.api_client", None)
 
     result = await handler.cancel_address_text(update, ctx)
 
     assert result == ConversationHandler.END
-    calls = update.message.reply_text.await_args_list
-    assert calls[-1].kwargs.get("reply_markup") == "main-menu-kbd"
+    send.assert_awaited_once()
+    assert send.await_args.args[3] == "telegram.action_cancelled"
+    update.message.reply_text.assert_not_awaited()
     assert "address_flow_origin" not in ctx.user_data
     assert "temp_address_data" not in ctx.user_data

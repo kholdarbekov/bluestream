@@ -517,7 +517,7 @@ def test_solo_ungrouped_customer_renders_one_plain_row_and_no_place_furniture(
     assert screen.rows == ["• Home: <b>7</b>"]
     for key in ("place_total", "member_line", "cluster_total", "linked_account_line"):
         assert f"telegram.bottles.{key}" not in screen.text, key
-    assert screen.callbacks == [f"bottle_history_{home.id}_1", "back_to_main"]
+    assert screen.callbacks == [f"bottle_history_{home.id}_1", "menu_profile"]
     assert screen.kwargs["parse_mode"] == "HTML"
 
 
@@ -700,7 +700,7 @@ def test_linked_cluster_spanning_three_places_rows_labels_and_client_side_total(
         f"bottle_history_{office.id}_1",
         f"bottle_history_{home.id}_1",
         f"bottle_history_{dacha.id}_1",
-        "back_to_main",
+        "menu_profile",
     ]
 
 
@@ -730,7 +730,7 @@ def test_place_shared_between_two_linked_siblings_is_counted_exactly_once(
         assert [ln for ln in screen.lines if "cluster_total" in ln] == [
             "telegram.bottles.cluster_total 14"
         ]
-        assert screen.callbacks == [f"bottle_history_{own_addr.id}_1", "back_to_main"]
+        assert screen.callbacks == [f"bottle_history_{own_addr.id}_1", "menu_profile"]
 
 
 @pytest.mark.integration
@@ -815,7 +815,7 @@ def test_unlink_removes_the_siblings_places_and_the_footer(
     assert after.rows == ["• Home: <b>3</b>"]                # own number unchanged
     assert "cluster_total" not in after.text
     assert "Dacha" not in after.text and "AliceTwo" not in after.text
-    assert after.callbacks == [f"bottle_history_{home.id}_1", "back_to_main"]
+    assert after.callbacks == [f"bottle_history_{home.id}_1", "menu_profile"]
 
 
 # =========================================================================== #
@@ -840,7 +840,7 @@ def test_zero_balance_place_with_no_balance_row_at_all_is_listed(
     assert "telegram.bottles.no_balance" not in screen.text
     assert sorted(screen.rows) == ["• Home: <b>0</b>", "• Work: <b>3</b>"]
     assert sorted(screen.callbacks) == sorted(
-        [f"bottle_history_{home.id}_1", f"bottle_history_{work.id}_1", "back_to_main"]
+        [f"bottle_history_{home.id}_1", f"bottle_history_{work.id}_1", "menu_profile"]
     )
 
 
@@ -988,7 +988,7 @@ def test_empty_state_means_no_saved_addresses_and_only_that(
     assert "address" in seeded.lower(), seeded          # the copy is about ADDRESSES...
     assert "bottle activity" not in seeded.lower()      # ...not about bottle activity
     assert seeded in screen.text
-    assert screen.callbacks == ["back_to_main"]
+    assert screen.callbacks == ["menu_profile"]
     assert "•" not in screen.text
     assert stub.missing == []
 
@@ -1010,7 +1010,7 @@ def test_linked_cluster_owning_no_addresses_gets_the_empty_state_and_no_footer(
     assert screen.overview["balances"] == []
     assert "telegram.bottles.no_balance" in screen.text
     assert "cluster_total" not in screen.text
-    assert screen.callbacks == ["back_to_main"]
+    assert screen.callbacks == ["menu_profile"]
 
 
 # =========================================================================== #
@@ -1333,7 +1333,7 @@ def test_one_history_button_per_place_not_per_address(
     screen = screen_for(monkeypatch, client, app, a)
 
     assert len(screen.callbacks) == 3, screen.buttons
-    assert screen.callbacks[-1] == "back_to_main"
+    assert screen.callbacks[-1] == "menu_profile"
     grouped_ids = {a1.id, a2.id}
     grouped_buttons = [
         cb for cb in screen.callbacks
@@ -1565,7 +1565,7 @@ def test_repeated_taps_render_a_byte_identical_screen(
     # (missing) ORDER BY is visible here and not only on Postgres.
     assert renders[0].rows == ["• Same: <b>3</b>", "• Same: <b>3</b>"]
     assert renders[0].callbacks == [
-        f"bottle_history_{one.id}_1", f"bottle_history_{two.id}_1", "back_to_main"
+        f"bottle_history_{one.id}_1", f"bottle_history_{two.id}_1", "menu_profile"
     ], renders[0].callbacks
 
 
@@ -1737,7 +1737,7 @@ def test_a_twelve_place_screen_renders_every_row_and_a_correct_footer(
     assert len(rows) == 12
     assert len(screen.rows) == 12, screen.rows
     assert len([cb for cb in screen.callbacks if cb.startswith("bottle_history_")]) == 12
-    assert screen.callbacks[-1] == "back_to_main"
+    assert screen.callbacks[-1] == "menu_profile"
     assert [r["is_own"] for r in rows] == [True] * 6 + [False] * 6
     own_balances = [r["place_balance"] for r in rows[:6]]
     sib_balances = [r["place_balance"] for r in rows[6:]]
@@ -1907,10 +1907,10 @@ def test_malformed_or_legacy_payloads_never_crash_and_never_fabricate_numbers(
 
     if expect_empty:
         assert "telegram.bottles.no_balance" in screen.text
-        assert screen.callbacks == ["back_to_main"]
+        assert screen.callbacks == ["menu_profile"]
     else:
         assert screen.rows == ["• Home: <b>0</b>"], screen.rows
-        assert screen.callbacks == ["bottle_history_5_1", "back_to_main"]
+        assert screen.callbacks == ["bottle_history_5_1", "menu_profile"]
 
 
 # =========================================================================== #
@@ -2036,7 +2036,7 @@ def test_split_default_leaves_the_departing_customer_at_zero_and_still_listed(
         "telegram.bottles.place_total 9"
     ]
     assert after_b.rows == ["• Office: <b>0</b>"]
-    assert after_b.callbacks == [f"bottle_history_{b_addr.id}_1", "back_to_main"]
+    assert after_b.callbacks == [f"bottle_history_{b_addr.id}_1", "menu_profile"]
     assert all_bottles() == total_before
     # The departing customer's History button still opens (arm 1 of the gate).
     assert client.get(

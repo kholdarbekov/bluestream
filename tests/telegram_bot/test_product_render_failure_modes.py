@@ -24,7 +24,7 @@ rejections and assert on what the customer ends up looking at.
 
 import pytest
 
-from tests.telegram_bot.ptb_harness import build_bot_harness
+from tests.telegram_bot.ptb_harness import build_bot_harness, menu_already_installed
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -69,6 +69,7 @@ async def bot(monkeypatch):
         f"/api/v1/products/{PRODUCT_ID}",
         lambda call: {"data": {"product": PRODUCT}},
     )
+    await menu_already_installed(harness)
     return harness
 
 

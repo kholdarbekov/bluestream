@@ -73,6 +73,37 @@ DELIVERY_POOL_UNASSIGNED_STATES: FrozenSet[DeliveryStatus] = frozenset(
 DELIVERY_DRIVERLESS_STATES: FrozenSet[DeliveryStatus] = DELIVERY_POOL_UNASSIGNED_STATES | {DeliveryStatus.RESCHEDULED}
 
 
+# Delivery: nothing has left with a driver -- the driverless states above plus ASSIGNED, a
+# driver who accepted the stop but has not tapped Picked up. For an order past PENDING, the
+# customer's own cancel is allowed only while the delivery is absent or in this set (F5,
+# amended 2026-10-21, of docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md).
+# It is an allow-list, so a leftover final row (cancelled, delivered, returned) fails closed as
+# NOT_CANCELLABLE. A PENDING order keeps its old answer and stays cancellable over such a row
+# (controller ruling 2026-10-21). `OrderService.customer_cancel_block_code` is the one place
+# that decides. Its own set, because DELIVERY_DRIVERLESS_STATES is also the DB CHECK's and the
+# stranded monitor's.
+DELIVERY_CUSTOMER_CANCELLABLE_STATES: FrozenSet[DeliveryStatus] = DELIVERY_DRIVERLESS_STATES | {DeliveryStatus.ASSIGNED}
+
+
+# Delivery: the driver has tapped Picked up and the stop is under way. It only selects the
+# customer's WITH_DRIVER refusal ("the driver has picked it up, it's on its way"), so that copy
+# is shown only when it is true. Whether a cancel is refused at all, for orders past PENDING,
+# is still decided fail-closed by DELIVERY_CUSTOMER_CANCELLABLE_STATES above; see
+# `OrderService.customer_cancel_block_code`.
+DELIVERY_WITH_DRIVER_STATES: FrozenSet[DeliveryStatus] = frozenset(
+    {
+        DeliveryStatus.PICKED_UP,
+        DeliveryStatus.IN_TRANSIT,
+        DeliveryStatus.ARRIVED,
+    }
+)
+
+
+# Delivery: left out of a driver's stats (owner, 2026-10-22). A cancel is the customer's or an
+# admin's decision, not a driver outcome; FAILED stays counted, even when the order is cancelled later.
+DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES: FrozenSet[DeliveryStatus] = frozenset({DeliveryStatus.CANCELLED})
+
+
 # Orders considered "alive" — between placement and the order leaving the
 # board (delivered / cancelled / returned). A delivery can sit FAILED for
 # months after its order dies through a completely separate flow (the two are

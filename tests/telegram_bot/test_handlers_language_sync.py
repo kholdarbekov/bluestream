@@ -1,10 +1,11 @@
 """set_language must sync the language to BOTH the bot DB and the backend (Deliverable C8)."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
+import menu_keyboard
 from handlers import language as language_module
 from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
 
@@ -43,7 +44,8 @@ class TestLanguageBackendSync:
         monkeypatch.setattr(
             language_module.config.localization, "supported_languages", ["uz", "ru", "en"], raising=False
         )
-        monkeypatch.setattr(language_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
+        send = create_autospec(menu_keyboard.send_menu_keyboard)
+        monkeypatch.setattr(language_module, "send_menu_keyboard", send)
         monkeypatch.setattr(language_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
         monkeypatch.setattr(language_module, "api_client", _APIContext())
 
@@ -77,11 +79,19 @@ class TestLanguageBackendSync:
         monkeypatch.setattr(
             language_module.config.localization, "supported_languages", ["uz", "ru", "en"], raising=False
         )
-        monkeypatch.setattr(language_module, "main_menu_for", AsyncMock(return_value="menu-kbd"))
+        send = create_autospec(menu_keyboard.send_menu_keyboard)
+        monkeypatch.setattr(language_module, "send_menu_keyboard", send)
         monkeypatch.setattr(language_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
         monkeypatch.setattr(language_module, "api_client", _APIContext())
 
         # Must not raise: the bot-DB change still succeeds.
         await handler.set_language(update, context)
         handler.user_repo.update_user_language.assert_awaited_once_with(802, "ru")
-        update.callback_query.edit_message_text.assert_awaited_once()
+        send.assert_awaited_once_with(
+            context.bot, 802, 802,
+            "FLAG telegram.language.confirmation_title:ru\n\n"
+            "✅ telegram.language.now_using:ru\n\n"
+            "telegram.language.confirmation_message:ru",
+            "ru",
+        )
+        update.callback_query.edit_message_text.assert_not_awaited()

@@ -47,6 +47,7 @@ from tests.telegram_bot.ptb_harness import (
     backend_failure,
     build_bot_harness,
 )
+from tests.telegram_bot.test_menu_label_routing import MENU_LABEL_TRANSLATIONS
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -65,10 +66,6 @@ SUPPORT_MESSAGES = "/api/v1/support/messages"
 MY_PHONE_AS_TELEGRAM_SENDS_IT = "998901112233"   # Telegram often omits the '+'
 MY_PHONE_E164 = "+998901112233"
 OTHER_PHONE_E164 = "+998935554433"
-
-# `maybe_remove_stale_reply_keyboard` posts this word-joiner and deletes it
-# again; it is never something a customer reads.
-KEYBOARD_CLEANUP_FILLER = "⁠"
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +128,7 @@ TRANSLATIONS.update(_trilingual(
     "en|You are all set", "uz|Ro'yxatdan o'tdingiz", "ru|Регистрация завершена",
 ))
 TRANSLATIONS.update(_trilingual(
-    "telegram.welcome", "en|Welcome back", "uz|Yana xush kelibsiz", "ru|С возвращением",
+    "telegram.main_menu", "en|Main menu", "uz|Asosiy menyu", "ru|Главное меню",
 ))
 TRANSLATIONS.update(_trilingual(
     "telegram.registration.flow_timed_out",
@@ -139,6 +136,7 @@ TRANSLATIONS.update(_trilingual(
     "uz|Ro'yxatdan o'tish vaqti tugadi. Qaytadan boshlash uchun /start yuboring",
     "ru|Время регистрации истекло. Отправьте /start, чтобы начать заново",
 ))
+TRANSLATIONS.update(MENU_LABEL_TRANSLATIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -167,18 +165,28 @@ class RegistrationDatabase(FakeDatabase):
                 self.row["phone"] = args[0]
             elif "SET preferred_language" in query and args:
                 self.row["preferred_language"] = args[0]
+            elif "bot_state" in query and args:
+                self.row["bot_state"] = args[0]
         return "UPDATE 1"
+
+    def _is_mine(self, args):
+        """The users table's own key: one row belongs to one Telegram."""
+        return bool(self.row and args and str(args[0]) == str(self.row.get("telegram_id")))
 
     async def fetchone(self, query, *args):
         if "FROM users" in query:
-            return dict(self.row) if self.row else None
+            return dict(self.row) if self._is_mine(args) else None
         return None
 
     async def fetchval(self, query, *args):
         if "preferred_language" in query:
-            return (self.row or {}).get("preferred_language")
+            return self.row.get("preferred_language") if self._is_mine(args) else None
         if "loyalty" in query.lower():
             return True
+        if "bot_state" in query:
+            # As `FakeDatabase` does: the state `execute` wrote is the state read back, so the
+            # keyboard signup installs is recorded and the lazy installer has nothing to redo.
+            return self.row.get("bot_state") if self._is_mine(args) else None
         return None
 
 
@@ -297,7 +305,7 @@ def texts(bot):
     return [
         call.text
         for call in bot.telegram.shown
-        if call.text and call.text != KEYBOARD_CLEANUP_FILLER
+        if call.text
     ]
 
 
@@ -331,8 +339,6 @@ def keyboard_of(call):
 def has_contact_button(bot):
     """True when the LAST thing shown carries the request_contact keyboard."""
     for call in reversed(bot.telegram.shown):
-        if call.text == KEYBOARD_CLEANUP_FILLER:
-            continue
         for row in keyboard_of(call):
             for button in row:
                 if isinstance(button, dict) and button.get("request_contact"):
@@ -921,6 +927,10 @@ async def test_cancel_gets_the_customer_out_of_every_single_registration_state(m
         assert "Cancelled. Here is the menu" in texts(bot), (
             f"/cancel in state {expected_state} showed the customer nothing: {texts(bot)}"
         )
+        [cancelled] = [c for c in bot.telegram.shown if c.text == "Cancelled. Here is the menu"]
+        assert cancelled.reply_markup == {"remove_keyboard": True}, (
+            f"signup is unfinished in {expected_state}: no row or no phone, so never the menu keyboard"
+        )
 
 
 async def test_start_after_giving_up_resumes_at_the_phone_step_and_does_not_register_twice(
@@ -975,7 +985,7 @@ async def test_start_from_a_fully_registered_customer_shows_the_menu_and_registe
     await bot.send(user.command("/start"))
 
     assert state(bot) is None
-    assert "ru|С возвращением" in texts(bot), (
+    assert "ru|Главное меню" in texts(bot), (
         "the greeting must follow the SAVED language, not the Telegram client "
         "locale — a customer who chose Russian on a Uzbek phone gets Uzbek "
         "otherwise, on every single /start"
@@ -1063,7 +1073,7 @@ async def test_every_button_the_registration_flow_renders_is_claimed_by_some_han
         bot.telegram.reset()
         await bot.send(update)
 
-        shown = [c for c in bot.telegram.shown if c.text != KEYBOARD_CLEANUP_FILLER]
+        shown = list(bot.telegram.shown)
         assert shown, f"the bot showed nothing {where}"
 
         for data in shown[-1].callback_data():
@@ -1427,3 +1437,30 @@ async def test_the_link_greeting_names_the_customer_by_the_shared_rule(bot, user
     await bot.send(user.text("123456"))
 
     assert last_text(bot) == expected
+
+
+async def test_a_stale_menu_label_while_signup_waits_for_the_phone_gets_the_phone_prompt_again(bot, user):
+    """Review Focus 3: the account was deleted, the old keyboard is still on the
+    phone, and signup is parked at PHONE. Signup keeps the customer. The label is
+    neither a phone number nor an exit, so it gets the existing text-only re-prompt."""
+    assert await reach_phone_step(bot, user) == PHONE
+    bot.database.row = None
+    utils_module.user_cache.cache.clear()
+    bot.telegram.reset()
+
+    await bot.send(user.text("💧 Suv buyurtma berish"))
+
+    assert state(bot) == PHONE
+    assert last_text(bot) == "That is not a valid Uzbek mobile number"
+    assert posts(bot, CHECK_PHONE) == []
+    assert posts(bot, SUPPORT_MESSAGES) == []
+
+
+async def test_help_while_signup_waits_for_the_sms_code_leaves_the_code_answerable(bot, user):
+    """/help is an exit gesture, but signup's keys are never touched while it is open."""
+    assert await reach_register_otp_step(bot, user) == REGISTER_OTP
+
+    await bot.send(user.command("help"))
+
+    assert state(bot) == REGISTER_OTP
+    assert bot.application.user_data[DEFAULT_USER_ID]["pending_phone_verification"] == MY_PHONE_E164

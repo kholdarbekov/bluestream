@@ -2,14 +2,14 @@
 Main menu handler
 """
 import logging
-from telegram import Update
-from telegram.error import BadRequest
+from telegram import ReplyKeyboardRemove, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from eligibility import main_menu_for
+from database import BotUserRepository, db_manager
 from i18n import i18n
-from keyboards import MenuKeyboards
-from utils import maybe_remove_stale_reply_keyboard
+from menu_keyboard import is_menu_customer, send_menu_keyboard
+from utils import user_middleware
 
 logger = logging.getLogger('handlers')
 
@@ -26,45 +26,38 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Main menu requested by user {user_id}")
         language = await i18n.get_user_language(user_id)
-        await maybe_remove_stale_reply_keyboard(update, context)
 
         # Neutral, friendly greeting shown on every return to the menu.
         # (telegram.welcome — "registration complete" — is reserved for the
         # actual post-registration moment in profile.py.)
         menu_text = i18n.get('telegram.main_menu', language)
-        keyboard = await main_menu_for(update.effective_user.id, language)
 
         if update.callback_query:
-            # Edit when the tapped message HAS text; otherwise replace it.
-            #
-            # A one-category shop sends its product list as a PHOTO
-            # (`products.py` deletes the message and `send_photo`s the list), and
-            # a photo has no text to edit — Telegram answers 400 "there is no
-            # text in the message to edit". The `except` below only answers a
-            # generic error toast and sends nothing, so Back from that screen
-            # left the customer stranded on the one screen whose only way out
-            # had just failed.
-            #
-            # `BaseHandler._edit_or_replace_callback_message` is the same rule
-            # for handlers that have a `self`; this is a module-level function,
-            # so the fallback is spelled out here rather than reached for.
-            # tests/telegram_bot/test_menu_and_link_buttons_after_restart.py
+            # An old inline Back (the bottom keyboard is the menu now, spec 2026-10-21 §1). It only
+            # takes that bubble's buttons away; the text stays. A bubble Telegram no longer lets us
+            # edit (too old, or deleted) has nothing to strip, so that is logged and the tap answered.
             try:
-                await update.callback_query.edit_message_text(
-                    text=menu_text,
-                    reply_markup=keyboard
-                )
-            except BadRequest:
-                await update.callback_query.message.reply_text(
-                    text=menu_text,
-                    reply_markup=keyboard
-                )
+                await update.callback_query.edit_message_reply_markup(reply_markup=None)
+            except TelegramError as e:
+                logger.info(f"Back on a bubble that could not be edited: {e}")
             await update.callback_query.answer()
         else:
-            # Send new message
-            await update.message.reply_text(
-                text=menu_text,
-                reply_markup=keyboard
+            # /menu always installs the bottom keyboard again: the customer who types it may have
+            # cleared the chat, and the install marker cannot know. Only a customer with a phone
+            # gets it. The gate reads the LIVE row (as `send_menu_keyboard` does), never
+            # `user_middleware`'s cache: a phone saved by signup or OTP minutes ago must count.
+            row = await BotUserRepository(db_manager).get_user_by_telegram_id(user_id)
+            if not row:
+                await user_middleware(update)  # answers a chat without a row with the start prompt
+                return
+            if not is_menu_customer(row):
+                await update.message.reply_text(
+                    text=i18n.get('telegram.registration.start_command_prompt', language),
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                return
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id, menu_text, language
             )
 
         logger.info(f"Main menu displayed for user {user_id}")

@@ -214,7 +214,7 @@ class LoyaltyHandlers(BaseHandler):
         rows = []
         if nav:
             rows.append(nav)
-        rows.append([{"text": i18n.get("telegram.back", language), "callback_data": "back_to_main"}])
+        rows.append([{"text": i18n.get("telegram.back", language), "callback_data": "menu_loyalty"}])
         return rows
 
     async def loyalty_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -316,10 +316,6 @@ class LoyaltyHandlers(BaseHandler):
                     },
                 ])
 
-            keyboard_buttons.append([
-                {'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}
-            ])
-
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(keyboard_buttons)
 
@@ -369,7 +365,7 @@ class LoyaltyHandlers(BaseHandler):
 
             if not history:
                 history_text = f"{title}\n\n" + i18n.get('telegram.loyalty.no_history', language)
-                keyboard = MenuKeyboards.back_button(language)
+                keyboard = MenuKeyboards.back_button(language, 'menu_loyalty')
             else:
                 # Header shows the total + current page so users know there's more.
                 history_text = f"{title} ({total})\n"
@@ -445,7 +441,7 @@ class LoyaltyHandlers(BaseHandler):
                 f"{stats.get('points_earned_from_referrals', 0)}"
             )
 
-            keyboard = MenuKeyboards.back_button(language)
+            keyboard = MenuKeyboards.back_button(language, 'menu_loyalty')
             await query.edit_message_text(text=text, reply_markup=keyboard)
             await query.answer()
 

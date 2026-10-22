@@ -94,8 +94,9 @@ class TestTruncationRule:
 
 class TestItemShape:
     def test_flags_a_free_reward_line(self, db, sample_order, sample_category):
-        add_item(db, sample_order, make_product(db, sample_category, "Free Cup"),
-                 quantity=1, unit_price=Decimal("0.00"))
+        line = add_item(db, sample_order, make_product(db, sample_category, "Free Cup"),
+                        quantity=1, unit_price=Decimal("0.00"))
+        line.is_reward_item = True
         db.session.commit()
 
         summary = summarize_order_items(sample_order)

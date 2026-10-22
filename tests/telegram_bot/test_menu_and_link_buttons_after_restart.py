@@ -32,7 +32,7 @@ tap that never happened.
 
 import pytest
 
-from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, build_bot_harness
+from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, build_bot_harness, menu_already_installed
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -80,31 +80,16 @@ def shown(bot):
     return [c.text for c in bot.telegram.shown if c.text]
 
 
-async def test_back_to_the_menu_works_from_a_photo_message(bot, user):
-    """A one-category shop's product list is a PHOTO, and `edit_message_text`
-    cannot edit one. The Back button on it must still reach the menu."""
-    bot.telegram.fail(
-        "editMessageText",
-        "Bad Request: there is no text in the message to edit",
-    )
-    bot.telegram.reset()
+async def test_back_to_main_on_a_photo_message_takes_its_buttons_away(bot, user):
+    """A photo's buttons can be edited even though its text cannot, so an old Back on a one-category
+    shop's photo list drops its buttons and nothing else."""
+    await menu_already_installed(bot)
 
     await bot.send(user.tap("back_to_main"))
 
-    # The `except` in main_menu_handler answers with a generic error TOAST and
-    # sends no message, so the menu never arrives: the customer is stranded on
-    # a photo whose only way out just failed.
-    toasts = [
-        c.params.get("text") for c in bot.telegram.of("answerCallbackQuery")
-        if c.params.get("text")
-    ]
-    assert not any("error" in t.lower() for t in toasts), (
-        f"Back from a photo screen degraded to the generic error toast: {toasts}"
-    )
-    assert any("MAIN-MENU" in t for t in shown(bot)), (
-        f"Back from a photo screen never reached the menu; sent {shown(bot)}, "
-        f"toasts {toasts}"
-    )
+    assert [c.method for c in bot.telegram.calls if c.method != "answerCallbackQuery"] == ["editMessageReplyMarkup"]
+    toasts = [c.params.get("text") for c in answered(bot) if c.params.get("text")]
+    assert not any("error" in t.lower() for t in toasts), f"Back degraded to the generic error toast: {toasts}"
 
 
 async def test_the_loyalty_menu_always_answers_the_tap(bot, user):

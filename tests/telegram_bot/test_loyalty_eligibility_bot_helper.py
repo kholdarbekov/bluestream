@@ -7,10 +7,13 @@ Tests that:
 - LOYALTY_ELIGIBLE_SQL appears in the query
 - telegram_id is passed as the string "123"
 """
+from unittest.mock import create_autospec
+
 import pytest
 
 from database import BotUserRepository
 from shared.loyalty_eligibility import LOYALTY_ELIGIBLE_SQL
+from tests.telegram_bot.helpers import DummyCallbackQuery, DummyUpdate, make_context
 
 
 class _FakeDB:
@@ -64,23 +67,28 @@ class TestGetUserLoyaltyEligible:
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_ensure_loyalty_eligible_blocks_and_toasts(monkeypatch):
+async def test_ensure_loyalty_eligible_blocks_and_sends_the_notice_with_the_menu(monkeypatch):
     import eligibility
+    import menu_keyboard
+    from handlers import base as base_module
     from handlers.base import BaseHandler
+    from i18n import i18n
 
     async def _ineligible(_tid):
         return False
     monkeypatch.setattr(eligibility, "is_loyalty_eligible", _ineligible)
+    send = create_autospec(menu_keyboard.send_menu_keyboard)
+    monkeypatch.setattr(base_module, "send_menu_keyboard", send)
 
-    answered = {}
-    class _Query:
-        async def answer(self, text=None, show_alert=False):
-            answered["text"] = text
-        async def edit_message_text(self, **kw):
-            answered["edited"] = True
-    class _Update:
-        callback_query = _Query()
+    update = DummyUpdate()
+    update.callback_query = DummyCallbackQuery(data="menu_loyalty")
+    context = make_context()
 
-    ok = await BaseHandler()._ensure_loyalty_eligible(_Update(), {}, 123, "en")
+    ok = await BaseHandler()._ensure_loyalty_eligible(update, context, 123, "en")
+
     assert ok is False
-    assert "edited" in answered  # returned to a menu
+    update.callback_query.answer.assert_awaited_once_with()
+    send.assert_awaited_once_with(
+        context.bot, 1001, 123, i18n.get("telegram.loyalty.not_available", "en"), "en"
+    )
+    update.callback_query.edit_message_text.assert_not_awaited()

@@ -20,6 +20,10 @@ other:
    one they already had — despite ``checkout_handler``'s own comment promising
    they could "verify or change" it.
 
+   The Quick Order card in this file is ⭐ Your usual's. Reorders
+   (``checkout_source='reorder'``) skip it, and reach other addresses through
+   Change address on the confirmation screen.
+
 Two environment landmines this file works around, both of which silently make
 assertions meaningless rather than failing loudly:
 
@@ -49,7 +53,7 @@ from handlers.orders import order_handlers  # noqa: E402
 # The two prompts are told apart by their translation key, which the i18n stub
 # echoes verbatim: the picker lists every address, the card shows exactly one.
 PICKER_KEY = "telegram.orders.select_address"
-SINGLE_CARD_KEY = "telegram.checkout.delivering_to"
+SINGLE_CARD_TEXT = "telegram\\.checkout\\.delivering\\_to"  # the stub renders the key; the card escapes it for MarkdownV2
 
 HOME = {"id": 23, "title": "Home", "full_address": "Shaykhantahur, Aloqa dahasi 9", "is_default": False}
 TEMP = {"id": 54, "title": "temp", "full_address": "Zuhur-Palvana street 31", "is_default": False}
@@ -141,7 +145,7 @@ def test_a_cart_checkout_after_a_quick_order_shows_every_address(monkeypatch, re
     context = _context(checkout_source="quick_order", quick_order_address_id=23)
 
     asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), context))
-    assert SINGLE_CARD_KEY in _last_text(rendered), "the Quick Order itself should still confirm"
+    assert SINGLE_CARD_TEXT in _last_text(rendered), "the Quick Order itself should still confirm"
 
     # Second checkout — the customer went back to the cart. It must NOT inherit.
     asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), context))
@@ -180,7 +184,7 @@ def test_the_quick_order_card_offers_a_way_to_change_the_address(monkeypatch, re
 
     asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), context))
 
-    assert SINGLE_CARD_KEY in _last_text(rendered)
+    assert SINGLE_CARD_TEXT in _last_text(rendered)
     assert "checkout_change_address" in _last_callbacks(rendered)
 
 
@@ -190,8 +194,23 @@ def test_a_customer_with_one_address_is_not_offered_a_change_button(monkeypatch,
 
     asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), _context()))
 
-    assert SINGLE_CARD_KEY in _last_text(rendered)
+    assert SINGLE_CARD_TEXT in _last_text(rendered)
     assert "checkout_change_address" not in _last_callbacks(rendered)
+
+
+def test_a_reorder_with_several_addresses_goes_straight_to_payment(monkeypatch, rendered):
+    """Order water / Repeat last / Order again (spec §3): no 'Delivering to' card, whatever the count."""
+    _with_addresses(monkeypatch, [HOME, TEMP])
+    picker = AsyncMock()
+    monkeypatch.setattr(order_handlers, "_show_payment_picker", picker)
+    context = _context(checkout_source="reorder", quick_order_address_id=54)
+    update = _callback_update("checkout")
+
+    asyncio.run(order_handlers.checkout_handler(update, context))
+
+    picker.assert_awaited_once_with(update, context, 54)
+    assert rendered == []
+    assert "checkout_source" not in context.user_data
 
 
 def test_changing_the_address_lists_every_saved_address(monkeypatch, rendered):
@@ -228,3 +247,32 @@ def test_the_change_callback_is_registered_before_the_checkout_catch_all():
     catch_all_at = source.index('pattern="^checkout"')
 
     assert change_at < catch_all_at
+
+
+@pytest.mark.parametrize("source", ["reorder", "quick_order"])
+def test_an_aborted_checkout_leaves_no_handoff_for_the_next_one(monkeypatch, rendered, source):
+    """An early return (addresses API down) must not strand the handoff keys.
+
+    A later plain cart checkout would otherwise pay on the stale address, skipping
+    the address choice.
+    """
+    failing = _AsyncClient([])
+    failing.client.get_user_addresses = AsyncMock(return_value=MagicMock(success=False, error="down"))
+    monkeypatch.setattr(orders_mod, "api_client", failing)
+    monkeypatch.setattr(order_handlers, "_handle_api_error", AsyncMock())
+    context = _context(checkout_source=source, quick_order_address_id=54)
+
+    asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), context))
+
+    assert "checkout_source" not in context.user_data
+    assert "quick_order_address_id" not in context.user_data
+
+    _with_addresses(monkeypatch, [HOME, TEMP])
+    picker = AsyncMock()
+    monkeypatch.setattr(order_handlers, "_show_payment_picker", picker)
+
+    asyncio.run(order_handlers.checkout_handler(_callback_update("checkout"), context))
+
+    picker.assert_not_awaited()
+    assert "checkout_change_address" not in _last_callbacks(rendered)
+    assert {"address_23", "address_54"} <= set(_last_callbacks(rendered))

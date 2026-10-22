@@ -290,6 +290,16 @@ class OrderItem(db.Model):
         }
 
 
+def is_free_reward_item(order_item) -> bool:
+    """Whether an order item is a free loyalty-reward line.
+
+    The `order_items.is_reward_item` column is THE rule (spec 2026-10-21 §4, R11), the same one
+    fiscalization, rail pricing, pay rules, agent metrics and reorder reminders use. Price says
+    nothing about it: a 0 UZS contract line is not a reward. A transient row reads None -> False.
+    """
+    return bool(order_item.is_reward_item)
+
+
 class OrderStatusHistory(db.Model, TimestampMixin):
     """Track order status changes"""
 

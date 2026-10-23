@@ -335,6 +335,10 @@ class Shop:
         return self.cart_envelope()
 
     def _set_quantity(self, product_id, call):
+        # PUT is a SET that 404s on a line the cart does not hold
+        # (CartService.update_item_quantity), so a new line must be POSTed.
+        if product_id not in self.cart:
+            return backend_failure("Item not found in cart", status_code=404)
         self.cart[product_id] = int((call.data or {})["quantity"])
         return self.cart_envelope()
 
@@ -526,13 +530,15 @@ def assert_no_swallowed_crash(bot):
 async def fill_cart(bot, user, product_id=BOTTLE_19L, quantity=3):
     """Get the customer to a cart holding `quantity` of `product_id`.
 
-    Drives the real add-to-cart + quantity path rather than poking `shop.cart`,
-    so anything downstream is reacting to a cart the BOT built.
+    Drives the real product -> quantity screen -> Checkout path rather than
+    poking `shop.cart`, so anything downstream is reacting to a cart the BOT
+    built. Checkout is the screen's only cart write, and it opens checkout.
     """
-    await bot.send(user.tap(f"add_to_cart_{product_id}"))
+    await bot.send(user.tap(f"product_{product_id}"))
     minimum = PRODUCTS[product_id]["inventory"]["min_order_quantity"]
     if quantity != minimum:
         await bot.send(user.tap(f"qty_set_{product_id}_{quantity}"))
+    await bot.send(user.tap(f"buy_{product_id}_{quantity}"))
 
 
 async def reach_payment_picker(bot, user, address_id):
@@ -552,13 +558,14 @@ async def reach_confirmation(bot, user, address_id, payment="cash"):
 # ---------------------------------------------------------------------------
 
 
-async def test_browsing_a_category_and_opening_a_product_shows_its_price_and_an_add_button(
+async def test_browsing_a_category_and_opening_a_product_shows_its_price_and_a_checkout_button(
     bot, shop, user
 ):
     """The three-tap path every first order starts with. If the category tap
-    stops fetching that category — or the product card stops rendering the
-    add button — the shop is unusable and no green single-handler test would
-    say so, because each handler still "works" in isolation."""
+    stops fetching that category — or the product tap stops opening its
+    quantity screen with a Checkout button — the shop is unusable and no green
+    single-handler test would say so, because each handler still "works" in
+    isolation."""
     await bot.send(user.tap("menu_products"))
 
     categories_screen = bot.telegram.last_shown()
@@ -580,9 +587,10 @@ async def test_browsing_a_category_and_opening_a_product_shows_its_price_and_an_
     assert products_query.params == {"page": 1, "per_page": 6, "category_id": str(WATER)}
 
     await bot.send(user.tap(f"product_{BOTTLE_19L}"))
-    card = bot.telegram.last_shown()
-    assert card.callback_data() == [f"add_to_cart_{BOTTLE_19L}", f"category_{WATER}"]
-    assert "15,000" in card.text, "the customer must see the price before adding"
+    screen = bot.telegram.last_shown()
+    assert screen.callback_data()[-2:] == [f"buy_{BOTTLE_19L}_2", f"category_{WATER}"]
+    assert "15,000" in screen.text, "the customer must see the price before checking out"
+    assert backend_calls(bot, "POST", "/api/v1/cart/items") == []
     assert_no_swallowed_crash(bot)
 
 
@@ -609,85 +617,82 @@ async def test_a_one_category_shop_skips_the_picker_and_offers_no_back_row(
 # ---------------------------------------------------------------------------
 
 
-async def test_tapping_add_to_cart_twice_does_not_stack_two_minimum_quantities(
+async def test_checking_out_the_same_product_twice_never_stacks_two_lots(
     bot, shop, user
 ):
-    """`POST /cart/items` INCREMENTS server-side. A customer who taps Add,
-    goes Back to the product and taps Add again used to silently pay for two
-    minimum lots. The bot's guard is "read the cart first" — which lives in the
-    seam between get_cart and add_to_cart, not inside either."""
-    await bot.send(user.tap(f"add_to_cart_{BOTTLE_19L}"))
-    await bot.send(user.tap(f"back_to_product_{BOTTLE_19L}"))
-    await bot.send(user.tap(f"add_to_cart_{BOTTLE_19L}"))
+    """`POST /cart/items` INCREMENTS server-side. A customer who checks out a
+    product, comes back to it and checks out again must still hold the number
+    on screen, not two lots. The bot's guard is "read the cart first" — which
+    lives in the seam between get_cart and the write, not inside either."""
+    await bot.send(user.tap(f"product_{BOTTLE_19L}"))
+    await bot.send(user.tap(f"buy_{BOTTLE_19L}_2"))
+    await deliberate_retap(bot, user.tap(f"product_{BOTTLE_19L}"))
+    assert f"buy_{BOTTLE_19L}_2" in bot.telegram.last_shown().callback_data()
+    await deliberate_retap(bot, user.tap(f"buy_{BOTTLE_19L}_2"))
 
-    posted = [call.data for call in backend_calls(bot, "POST", "/api/v1/cart/items")]
-    assert posted == [{"product_id": BOTTLE_19L, "quantity": 2}], (
-        "the second Add must not post again; min_order_quantity is 2"
-    )
+    writes = [
+        (call.method, call.endpoint, call.data)
+        for call in bot.backend.calls
+        if call.method in {"POST", "PUT"} and call.endpoint.startswith("/api/v1/cart/items")
+    ]
+    assert writes == [
+        ("POST", "/api/v1/cart/items", {"product_id": BOTTLE_19L, "quantity": 2}),
+        ("PUT", f"/api/v1/cart/items/{BOTTLE_19L}", {"quantity": 2}),
+    ], "the second Checkout must SET the line, not post another lot"
     assert shop.cart == {BOTTLE_19L: 2}
 
 
-async def test_the_quantity_buttons_set_the_line_and_a_double_tap_lands_on_the_same_number(
+async def test_the_quantity_buttons_change_the_screen_and_checkout_writes_the_number_once(
     bot, shop, user
 ):
-    """Two things at once, because they are one decision: the +/- buttons must
-    SET (`PUT`) rather than add, and each step is measured from what the CART
-    holds. A fumbled double-tap is then absorbed by the dedup guard, and a
-    deliberate second tap adds exactly the one bottle it says it adds."""
-    await bot.send(user.tap(f"add_to_cart_{BOTTLE_19L}"))
+    """The quantity screen is a draft: ± and presets redraw it and write
+    nothing. A fumbled double-tap is absorbed by the dedup guard, and Checkout
+    writes the number on screen, once, as an absolute quantity."""
+    await bot.send(user.tap(f"product_{BOTTLE_19L}"))
     selector = bot.telegram.last_shown()
     assert f"qty_inc_{BOTTLE_19L}_2" in selector.callback_data()
-    assert "Quantity: 2" in selector.text and "30,000" in selector.text
+    assert "30,000" in selector.text
 
     await bot.send(user.tap(f"qty_inc_{BOTTLE_19L}_2"))
-    assert shop.cart == {BOTTLE_19L: 3}
+    assert f"buy_{BOTTLE_19L}_3" in bot.telegram.last_shown().callback_data()
 
-    # A fumbled double tap: the same stale button within the dedup window. The
+    # A fumbled double tap: the same button within the dedup window. The
     # guard is the FIRST defence and drops it before any handler runs.
+    shown_before = len(bot.telegram.shown)
     await bot.send(user.tap(f"qty_inc_{BOTTLE_19L}_2"))
-    assert shop.cart == {BOTTLE_19L: 3}, "a double tap must not become +2"
-
-    # The same button pressed again once the debounce has lapsed is not a
-    # fumble — it is a customer asking for one more bottle, and the button's
-    # own payload (2) is now stale. The step is measured from the SERVER cart,
-    # so it lands on 4. Measuring from the payload instead would "converge" on
-    # 3 — which reads as safe until the customer has picked 8 further up the
-    # chat, and the same stale button silently rewrites it to 3.
-    await deliberate_retap(bot, user.tap(f"qty_inc_{BOTTLE_19L}_2"))
-    assert shop.cart == {BOTTLE_19L: 4}, "a deliberate +1 must add exactly one"
+    assert len(bot.telegram.shown) == shown_before, "a double tap must not redraw the screen"
 
     await bot.send(user.tap(f"qty_set_{BOTTLE_19L}_12"))
-    assert shop.cart == {BOTTLE_19L: 12}
-
-    quantities = [
-        call.data["quantity"]
-        for call in bot.backend.calls
-        if call.method == "PUT" and call.endpoint == f"/api/v1/cart/items/{BOTTLE_19L}"
-    ]
-    assert quantities == [3, 4, 12], "every quantity write must be absolute, never a delta"
-
     final = bot.telegram.last_shown()
-    assert "Quantity: 12" in final.text
     assert "180,000" in final.text, "the running total must follow the quantity"
+    assert shop.cart == {}, "no quantity button writes the cart"
+
+    await bot.send(user.tap(f"buy_{BOTTLE_19L}_12"))
+
+    posted = [call.data for call in backend_calls(bot, "POST", "/api/v1/cart/items")]
+    assert posted == [{"product_id": BOTTLE_19L, "quantity": 12}]
+    assert backend_calls(bot, "PUT", f"/api/v1/cart/items/{BOTTLE_19L}") == []
+    assert shop.cart == {BOTTLE_19L: 12}
 
 
 async def test_the_minus_button_never_drops_below_the_products_own_minimum(
     bot, shop, user
 ):
     """`min_order_quantity` is a backend rule the bot mirrors. If − walks the
-    line below it the customer reaches a confirm screen the backend will
+    number below it the customer reaches a confirm screen the backend will
     reject, after choosing an address and a payment method."""
-    await bot.send(user.tap(f"add_to_cart_{BOTTLE_19L}"))
+    await bot.send(user.tap(f"product_{BOTTLE_19L}"))
     await bot.send(user.tap(f"qty_dec_{BOTTLE_19L}_2"))
 
-    written = [
-        call.data
-        for call in bot.backend.calls
-        if call.method == "PUT" and call.endpoint == f"/api/v1/cart/items/{BOTTLE_19L}"
-    ]
-    assert written == [{"quantity": 2}], "− must clamp to the minimum, not to 1"
+    screen = bot.telegram.last_shown()
+    assert f"buy_{BOTTLE_19L}_2" in screen.callback_data(), "− must clamp to the minimum, not to 1"
+    assert f"qty_dec_{BOTTLE_19L}_2" in screen.callback_data()
+
+    await bot.send(user.tap(f"buy_{BOTTLE_19L}_2"))
+
+    posted = [call.data for call in backend_calls(bot, "POST", "/api/v1/cart/items")]
+    assert posted == [{"product_id": BOTTLE_19L, "quantity": 2}]
     assert shop.cart == {BOTTLE_19L: 2}
-    assert "Quantity: 2" in bot.telegram.last_shown().text
 
 
 async def test_the_cart_screen_shows_the_servers_subtotal_not_a_client_side_sum(
@@ -1819,8 +1824,9 @@ async def test_every_button_the_checkout_journey_renders_is_claimed_by_a_handler
     journey = [
         (user.tap("menu_products"), "the category picker"),
         (user.tap(f"category_{WATER}"), "the product list"),
-        (user.tap(f"product_{BOTTLE_19L}"), "the product card"),
-        (user.tap(f"add_to_cart_{BOTTLE_19L}"), "the quantity selector"),
+        (user.tap(f"product_{BOTTLE_19L}"), "the quantity screen"),
+        (user.tap(f"qty_inc_{BOTTLE_19L}_2"), "the redrawn quantity screen"),
+        (user.tap(f"buy_{BOTTLE_19L}_3"), "the address confirmation after Checkout"),
         (user.tap("cart_view"), "the cart"),
         (user.tap("cart_checkout"), "the address confirmation"),
         (user.tap("address_900"), "the payment picker"),
@@ -1841,21 +1847,19 @@ async def test_every_button_the_checkout_journey_renders_is_claimed_by_a_handler
             )
 
 
-async def test_the_quantity_selectors_checkout_button_reaches_checkout_too(
+async def test_the_quantity_screens_checkout_button_reaches_checkout_too(
     bot, shop, user
 ):
     """There are TWO checkout doors with different callback data: the cart's
     `cart_checkout` (routed via `products.cart_handler`) and the quantity
-    selector's bare `checkout` (routed straight to `orders.checkout_handler`).
-    Only one of them is covered by the cart journey, and a customer who never
-    opens the cart uses the other."""
+    screen's `buy_<id>_<qty>` (`products.checkout_product`, which writes the
+    line first). Only one of them is covered by the cart journey, and a
+    customer who never opens the cart uses the other."""
     add_address(bot, 900, "Uy", "Chilonzor 15")
-    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await bot.send(user.tap(f"product_{BOTTLE_19L}"))
+    assert f"buy_{BOTTLE_19L}_2" in bot.telegram.last_shown().callback_data()
 
-    selector = bot.telegram.last_shown()
-    assert "checkout" in selector.callback_data()
-
-    await bot.send(user.tap("checkout"))
+    await bot.send(user.tap(f"buy_{BOTTLE_19L}_2"))
 
     confirmation = bot.telegram.last_shown()
     assert confirmation.callback_data() == [

@@ -6010,6 +6010,13 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Savatingiz buyurtma berishga tayyor!',
         'ru': 'Корзина готова к оформлению!'
     },
+    # The quantity screen's price line: the price of ONE item, so it is never read as the total
+    # shown under the quantity (owner 2026-10-22).
+    'telegram.products.unit_price_label': {
+        'en': 'Price: {price} UZS each',
+        'uz': 'Narxi: {price} UZS (1 dona)',
+        'ru': 'Цена: {price} UZS за 1 шт.'
+    },
     'telegram.products.min_order_quantity_label': {
         'en': 'Minimum order: {min_qty}',
         'uz': 'Minimal buyurtma: {min_qty}',
@@ -6028,7 +6035,7 @@ BACKEND_TRANSLATIONS = {
     # product's bounds (`_purchase_bounds`) cannot accept — nothing is written.
     'telegram.products.type_quantity_hint': {
         'en': '✏️ Or just type the number you need',
-        'uz': '✏️ Yoki kerakli sonni yozib yuboring',
+        'uz': '✏️ Yoki kerakli miqdorni yozing',
         'ru': '✏️ Или просто напишите нужное количество'
     },
     'telegram.products.typed_quantity_below_min': {

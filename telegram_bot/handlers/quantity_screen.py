@@ -11,7 +11,7 @@ Inbox.
 
 Every render of the screen records the bubble showing it. The window closes on
 anything else the customer does, so that a digit typed later can never move a
-cart line they are no longer looking at:
+cart line, or the number on a screen, they are no longer looking at:
 
 * any tap that is not on the live screen's own bubble — including a tap on an
   OLDER quantity bubble for another product (if that tap redraws its screen,
@@ -53,9 +53,10 @@ logger = logging.getLogger('handlers')
 # is a message to a person, not a cart edit.
 QUANTITY_SCREEN_WINDOW_MINUTES = 30
 
-# The quantity screen's own buttons (and "Add to cart", which opens one). A
-# tap on one of them keeps the window only when it lands on the live bubble.
-_SCREEN_CALLBACK_PREFIXES = ('qty_', 'add_to_cart_')
+# The quantity screen's own preset and ± buttons. A tap on one of them keeps
+# the window only when it lands on the live bubble. Its Checkout (`buy_`) is
+# leaving the screen, so it closes the window like any other tap.
+_SCREEN_CALLBACK_PREFIXES = ('qty_',)
 
 _user_repository = BotUserRepository(db_manager)
 

@@ -3,6 +3,7 @@ Order management handlers
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from telegram import Update, constants
@@ -12,7 +13,7 @@ from telegram.helpers import escape_markdown
 from address_text import address_block_markdown_v2, address_lines
 from i18n import i18n
 from keyboards import (
-    OrderKeyboards, MenuKeyboards, ProfileKeyboards,
+    OrderKeyboards, MenuKeyboards, ProfileKeyboards, ORDERS_PAGE_PATTERN,
     customer_may_pay, customer_may_cancel,
 )
 from api_client import api_client
@@ -34,6 +35,22 @@ logger = logging.getLogger('handlers')
 # keeps one shared workplace from pushing the orders menu past Telegram's
 # 4096-character message limit.
 _PLACE_ITEM_LIMIT = 10
+
+# My orders lists this many orders per page (owner 2026-10-22).
+ORDERS_PAGE_SIZE = 10
+# The page My orders last showed, for an order's Back button. The Application has no
+# persistence, so after a deploy Back opens page 1.
+_ORDERS_PAGE_KEY = 'orders_page'
+
+
+def _orders_page_to_show(query_data, user_data) -> int:
+    """A pager button's own page; Back from an order, the page last shown; anything else, page 1."""
+    match = re.match(ORDERS_PAGE_PATTERN, query_data or '')
+    if match:
+        return max(int(match.group(1)), 1)
+    if query_data == 'back_to_orders':
+        return user_data.get(_ORDERS_PAGE_KEY, 1)
+    return 1
 
 
 def _format_rate(value) -> str:
@@ -445,7 +462,7 @@ class OrderHandlers(BaseHandler):
         )
 
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show user's orders"""
+        """Show one page of the user's orders"""
         try:
             user = await user_middleware(update)
             if not user:
@@ -453,6 +470,7 @@ class OrderHandlers(BaseHandler):
 
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            page = _orders_page_to_show(getattr(update.callback_query, 'data', None), context.user_data)
 
             # Get user token
             async with api_client as client:
@@ -461,13 +479,21 @@ class OrderHandlers(BaseHandler):
                     await self._handle_auth_error(update, language)
                     return
 
-                # Get user orders
-                response = await client.get_user_orders(user_token)
+                response = await client.get_user_orders(user_token, page=page, per_page=ORDERS_PAGE_SIZE)
+                if response.success:
+                    last_page = (response.data.get('data', {}).get('pagination') or {}).get('pages') or 1
+                    if page > last_page:
+                        # A page past the end (a stale Next): the last page, never "no orders".
+                        page = last_page
+                        response = await client.get_user_orders(user_token, page=page, per_page=ORDERS_PAGE_SIZE)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-                orders = response.data.get('data', {}).get('orders', [])
+                payload = response.data.get('data', {})
+                orders = payload.get('orders', [])
+                pagination = payload.get('pagination') or {}
+                context.user_data[_ORDERS_PAGE_KEY] = page
 
                 # Wallet block (spec §7). Best-effort: the customer asked for
                 # their orders, so a failing/slow/misshapen summary must degrade
@@ -501,10 +527,15 @@ class OrderHandlers(BaseHandler):
                 return
 
             # Show orders list
-            orders_text = i18n.get('telegram.orders.your_orders', language, count=len(orders)) + "\n\n"
+            orders_text = i18n.get(
+                'telegram.orders.your_orders', language, count=pagination.get('total', len(orders)),
+            ) + "\n\n"
             if summary_lines:
                 orders_text += "\n".join(summary_lines)
-            keyboard = OrderKeyboards.order_list(orders, language)
+            keyboard = OrderKeyboards.order_list(
+                orders, language, page=page,
+                has_prev=bool(pagination.get('has_prev')), has_next=bool(pagination.get('has_next')),
+            )
 
             if update.callback_query:
                 await self._edit_or_replace_callback_message(
@@ -944,7 +975,7 @@ class OrderHandlers(BaseHandler):
                 return
 
             # Two quick-order sources hand over an address:
-            #   * 'reorder' (Order water, Repeat last, Order again): the order's
+            #   * 'reorder' (Repeat last, Order again): the order's
             #     own saved address goes straight to the payment picker, whatever
             #     the address count; the customer reaches the others through
             #     Change address on the confirmation screen. If that address is

@@ -285,21 +285,44 @@ OPEN_ORDER_DETAIL = {
 }
 
 
-async def test_order_water_with_items_in_the_cart_shows_the_cart(bot, shop, user):
-    shop.cart[BOTTLE_5L] = 4
+def pick(bot, prefix: str, suffix: str = "") -> str:
+    """The first button on the screen the customer is looking at whose data matches."""
+    shown = bot.telegram.last_shown().callback_data()
+    matches = [d for d in shown if d.startswith(prefix) and d.endswith(suffix)]
+    assert matches, f"no {prefix!r}...{suffix!r} button on {shown}"
+    return matches[0]
+
+
+async def test_order_water_with_items_in_the_cart_opens_products_and_the_quantity_screen_starts_at_the_cart(
+    bot, shop, user
+):
+    """Owner 2026-10-22: 💧 Order water always opens Products, never the cart or the payment picker.
+    Picking a product the cart already holds opens its quantity screen at the cart's quantity, and
+    adds nothing on top of it."""
+    shop.cart[BOTTLE_5L] = 10
     serve_reorder(bot, shop)
 
     await bot.send(user.text(uz("telegram.menu.products")))
 
-    cart = bot.telegram.last_shown()
-    assert cart.text.startswith(uz("telegram.cart_title") + ":")
-    assert "Aqua Element 5L x 4" in cart.text
+    products = bot.telegram.last_shown()
+    assert products.text == uz("telegram.menu.products")
+    assert products.callback_data()[0] == "quick_repeat_last"
+    assert backend_calls(bot, "GET", "/api/v1/cart") == []
+    assert not [t for t in bot.telegram.texts() if t.startswith(uz("telegram.cart_title") + ":")]
+
+    await bot.send(user.tap(pick(bot, "category_")))
+    await bot.send(user.tap(pick(bot, f"product_{BOTTLE_5L}")))
+
+    quantity_screen = bot.telegram.last_shown()
+    assert f"{uz('telegram.quantity')}: 10\n" in quantity_screen.text
+    assert f"buy_{BOTTLE_5L}_10" in quantity_screen.callback_data()
+    assert backend_calls(bot, "POST", "/api/v1/cart/items") == []
     assert fill_calls(bot) == []
-    assert shop.cart == {BOTTLE_5L: 4}
+    assert shop.cart == {BOTTLE_5L: 10}
 
 
 async def test_order_water_with_items_in_the_cart_and_an_open_order_says_so_first(bot, shop, user):
-    """R9: the notice comes first; continuing then shows the cart, as with no open order."""
+    """R9: the notice comes first; continuing then opens Products, as with no open order."""
     shop.cart[BOTTLE_5L] = 4
     serve_reorder(bot, shop, open_order=OPEN_ORDER)
 
@@ -308,40 +331,9 @@ async def test_order_water_with_items_in_the_cart_and_an_open_order_says_so_firs
 
     await bot.send(user.tap("order_water_go"))
 
-    cart = bot.telegram.last_shown()
-    assert cart.text.startswith(uz("telegram.cart_title") + ":") and "Aqua Element 5L x 4" in cart.text
+    assert bot.telegram.last_shown().text == uz("telegram.menu.products")
     assert fill_calls(bot) == [] and shop.cart == {BOTTLE_5L: 4}
-    assert len(backend_calls(bot, "GET", REORDER_INFO)) == 1  # the tap on Order water, none after
-
-
-async def test_order_water_never_fills_over_a_cart_it_could_not_read(bot, shop, user):
-    """Spec §3: an order in progress is never wiped by this button, even when the cart read fails."""
-    shop.cart[BOTTLE_5L] = 4
-    serve_reorder(bot, shop)
-    bot.backend.route("GET", "/api/v1/cart", lambda _call: backend_failure("HTTP 502", status_code=502))
-
-    await bot.send(user.text(uz("telegram.menu.products")))
-
-    assert bot.telegram.last_shown().text == uz("telegram.error.generic")
-    assert backend_calls(bot, "GET", REORDER_INFO) == []
-    assert fill_calls(bot) == []
-    assert shop.cart == {BOTTLE_5L: 4}
-
-
-async def test_a_cart_the_cart_screen_calls_empty_is_refilled(bot, shop, user):
-    """One rule for "the cart holds something": `products.cart_is_empty`, which the cart screen
-    already applies. A server-dropped line is listed at 0 and has nothing to check out."""
-    shop.cart[BOTTLE_5L] = 2
-    shop.line_total_overrides[BOTTLE_5L] = 0.0
-    shop.subtotal_override = 0.0
-    save_addresses(bot, HOME)
-    serve_reorder(bot, shop)
-
-    await bot.send(user.text(uz("telegram.menu.products")))
-
-    assert [c.endpoint for c in fill_calls(bot)] == [fill_path(CANDIDATE_ORDER_ID)]
-    assert shop.cart == {BOTTLE_19L: 3}
-    assert bot.telegram.last_shown().text.startswith(uz("telegram.orders.select_payment"))
+    assert backend_calls(bot, "GET", "/api/v1/cart") == []
 
 
 async def test_order_water_with_an_open_order_says_so_first(bot, shop, user):
@@ -406,31 +398,24 @@ async def test_continuing_past_the_notice_lets_the_customer_choose_product_quant
     save_addresses(bot, HOME, WORK)
     serve_reorder(bot, shop, open_order=OPEN_ORDER)
 
-    def pick(prefix: str, suffix: str = "") -> str:
-        shown = bot.telegram.last_shown().callback_data()
-        matches = [d for d in shown if d.startswith(prefix) and d.endswith(suffix)]
-        assert matches, f"no {prefix!r}...{suffix!r} button on {shown}"
-        return matches[0]
-
     await bot.send(user.text(uz("telegram.menu.products")))
     assert bot.telegram.last_shown().callback_data() == [f"order_{OPEN_ORDER_ID}", "order_water_go"]
     await bot.send(user.tap("order_water_go"))
 
-    await bot.send(user.tap(pick("category_")))
-    await bot.send(user.tap(pick(f"product_{BOTTLE_5L}")))
-    await bot.send(user.tap(pick("add_to_cart_")))
-    await bot.send(user.tap(pick(f"qty_set_{BOTTLE_5L}_", "_7")))
-    assert shop.cart == {BOTTLE_5L: 7}
+    await bot.send(user.tap(pick(bot, "category_")))
+    await bot.send(user.tap(pick(bot, f"product_{BOTTLE_5L}")))
+    await bot.send(user.tap(pick(bot, f"qty_set_{BOTTLE_5L}_", "_7")))
+    assert shop.cart == {}
 
-    # The quantity screen's own Checkout button.
-    assert "checkout" in bot.telegram.last_shown().callback_data()
-    await bot.send(user.tap(pick("checkout")))
+    # The quantity screen's own Checkout button puts the 7 in the cart.
+    await bot.send(user.tap(pick(bot, f"buy_{BOTTLE_5L}_7")))
+    assert shop.cart == {BOTTLE_5L: 7}
 
     address_step = bot.telegram.last_shown()
     assert address_step.text == uz("telegram.orders.select_address")
     assert {f"address_{HOME[0]}", f"address_{WORK[0]}"} <= set(address_step.callback_data())
 
-    await bot.send(user.tap(pick(f"address_{WORK[0]}")))
+    await bot.send(user.tap(pick(bot, f"address_{WORK[0]}")))
 
     assert bot.telegram.last_shown().text.startswith(uz("telegram.orders.select_payment"))
     (methods_query,) = backend_calls(bot, "GET", "/api/v1/payments/methods")
@@ -440,33 +425,22 @@ async def test_continuing_past_the_notice_lets_the_customer_choose_product_quant
     assert backend_calls(bot, "POST", "/api/v1/orders") == []
 
 
-async def test_continuing_past_the_notice_never_fills_over_a_cart_it_could_not_read(bot, shop, user):
-    shop.cart[BOTTLE_5L] = 4
-    serve_reorder(bot, shop, open_order=OPEN_ORDER)
-
-    await bot.send(user.text(uz("telegram.menu.products")))
-    notice = bot.telegram.last_shown()
-    assert notice.callback_data() == [f"order_{OPEN_ORDER_ID}", "order_water_go"]
-    reads_before = len(backend_calls(bot, "GET", REORDER_INFO))
-    bot.backend.route("GET", "/api/v1/cart", lambda _call: backend_failure("HTTP 502", status_code=502))
-    await bot.send(user.tap("order_water_go"))
-
-    assert bot.telegram.last_shown().text == uz("telegram.error.generic")
-    assert len(backend_calls(bot, "GET", REORDER_INFO)) == reads_before
-    assert fill_calls(bot) == []
-    assert shop.cart == {BOTTLE_5L: 4}
-
-
-async def test_order_water_with_a_candidate_goes_straight_to_payment(bot, shop, user):
+async def test_order_water_with_a_candidate_opens_products_with_repeat_last_on_top(bot, shop, user):
+    """Owner 2026-10-22: no refill and no jump to the payment picker. The last order stays one tap
+    away as Products' own 🔁 Repeat last row."""
     save_addresses(bot, HOME)
     serve_reorder(bot, shop)
 
     await bot.send(user.text(uz("telegram.menu.products")))
 
-    assert [c.endpoint for c in fill_calls(bot)] == [fill_path(CANDIDATE_ORDER_ID)]
-    picker = bot.telegram.last_shown()
-    assert picker.method == "sendMessage"
-    assert picker.text.startswith(uz("telegram.orders.select_payment"))
+    products = bot.telegram.last_shown()
+    assert products.text == uz("telegram.menu.products")
+    assert products.callback_data()[0] == "quick_repeat_last"
+    assert any(data.startswith("category_") for data in products.callback_data())
+    assert fill_calls(bot) == []
+    assert shop.cart == {}
+    assert not [t for t in bot.telegram.texts() if t.startswith(uz("telegram.orders.select_payment"))]
+    assert backend_calls(bot, "GET", "/api/v1/payments/methods") == []
 
 
 async def test_order_water_without_a_candidate_opens_products(bot, shop, user):
@@ -474,8 +448,9 @@ async def test_order_water_without_a_candidate_opens_products(bot, shop, user):
 
     await bot.send(user.text(uz("telegram.menu.products")))
 
-    # Only order_water reads the cart and then the reorder answer BEFORE Products asks for categories.
-    assert [c.endpoint for c in bot.backend.calls if c.method == "GET"][:2] == ["/api/v1/cart", REORDER_INFO]
+    # Order water reads only the reorder answer (for the open order) BEFORE Products asks for categories.
+    assert [c.endpoint for c in bot.backend.calls if c.method == "GET"][:1] == [REORDER_INFO]
+    assert backend_calls(bot, "GET", "/api/v1/cart") == []
     products = bot.telegram.last_shown()
     assert products.text == uz("telegram.menu.products")
     assert any(data.startswith("category_") for data in products.callback_data())
@@ -500,48 +475,11 @@ async def test_order_again_with_an_open_order_says_so_and_continues_with_its_own
     assert touched(bot, REMINDER_MESSAGE) == []
 
 
-async def test_two_order_water_taps_fill_once_and_never_place_an_order(bot, shop, user):
-    """Review Focus 2 as production runs it: per-chat serial updates (bot.py:494-522), so the
-    second tap reads the cart the first one filled, and shows it."""
-    save_addresses(bot, HOME)
-    serve_reorder(bot, shop)
-
-    await bot.send(user.text(uz("telegram.menu.products")))
-    await bot.send(user.text(uz("telegram.menu.products")))
-
-    assert [c.endpoint for c in fill_calls(bot)] == [fill_path(CANDIDATE_ORDER_ID)]
-    assert shop.cart == {BOTTLE_19L: 3}
-    assert backend_calls(bot, "POST", "/api/v1/cart/items") == []
-    assert backend_calls(bot, "POST", "/api/v1/orders") == []
-    picker, cart = bot.telegram.shown[-2:]
-    assert picker.text.startswith(uz("telegram.orders.select_payment"))
-    assert cart.text.startswith(uz("telegram.cart_title") + ":")
-
-
-async def test_two_order_water_taps_that_both_read_an_empty_cart_refill_the_same_order(bot, shop, user):
-    """Review Focus 2, worst case: both taps read the cart before either fill lands. Two fills of
-    the SAME order (each replaces the cart), never a doubled cart, two identical pickers, zero orders."""
-    save_addresses(bot, HOME)
-    serve_reorder(bot, shop)
-    bot.backend.route("GET", "/api/v1/cart", lambda _call: {"data": {"cart": {"cart_items": [], "subtotal": 0}}})
-
-    await bot.send(user.text(uz("telegram.menu.products")))
-    await bot.send(user.text(uz("telegram.menu.products")))
-
-    assert [c.endpoint for c in fill_calls(bot)] == [fill_path(CANDIDATE_ORDER_ID)] * 2
-    assert shop.cart == {BOTTLE_19L: 3}
-    assert backend_calls(bot, "POST", "/api/v1/cart/items") == []
-    assert backend_calls(bot, "POST", "/api/v1/orders") == []
-    pickers = [c for c in bot.telegram.shown if c.text.startswith(uz("telegram.orders.select_payment"))]
-    assert len(pickers) == 2
-    assert (pickers[0].text, pickers[0].callback_data()) == (pickers[1].text, pickers[1].callback_data())
-
-
-async def test_order_water_with_two_addresses_skips_the_card_and_confirms_the_full_address(bot, shop, user):
+async def test_repeat_last_with_two_addresses_skips_the_card_and_confirms_the_full_address(bot, shop, user):
     save_addresses(bot, HOME, WORK)
     serve_reorder(bot, shop)
 
-    await bot.send(user.text(uz("telegram.menu.products")))
+    await bot.send(user.tap("quick_repeat_last", message_id=PRODUCTS_MESSAGE))
 
     picker = bot.telegram.last_shown()
     assert picker.method == "sendMessage"
@@ -581,7 +519,7 @@ async def test_a_candidate_without_a_saved_address_runs_the_normal_checkout(
     save_addresses(bot, *saved)
     serve_reorder(bot, shop, candidate={**CANDIDATE, "address": candidate_address})
 
-    await bot.send(user.text(uz("telegram.menu.products")))
+    await bot.send(user.tap("quick_repeat_last", message_id=PRODUCTS_MESSAGE))
 
     assert bot.telegram.last_shown().text.startswith(uz(first_screen_key))
     assert backend_calls(bot, "GET", "/api/v1/payments/methods") == []

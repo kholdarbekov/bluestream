@@ -232,7 +232,7 @@ class BotUserRepository:
         prompt the customer armed before it, so it must not touch
         `awaiting_input`. `message_id` is the bubble that shows the screen, so
         the next typed number can replace it rather than leave two live
-        screens. Written on EVERY render (add, preset, ±, typed) so it always
+        screens. Written on EVERY render (open, preset, ±, typed) so it always
         names the latest one.
         """
         state = await self.get_user_state(telegram_id)

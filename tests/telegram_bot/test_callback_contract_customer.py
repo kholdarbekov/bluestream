@@ -659,21 +659,28 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         ),
     )
     add(
-        "ProductKeyboards.product_details(in category)",
-        ProductKeyboards.product_details(7, category_id=1, language=lang),
-    )
-    add(
-        "ProductKeyboards.product_details(no category)",
-        ProductKeyboards.product_details(7, category_id=None, language=lang),
-    )
-    add(
         "ProductKeyboards.product_list_for_subscription",
         ProductKeyboards.product_list_for_subscription(_PRODUCTS, lang),
     )
     add(
-        "ProductKeyboards.quantity_selector",
+        "ProductKeyboards.quantity_selector(in category)",
         ProductKeyboards.quantity_selector(
-            7, current_quantity=3, language=lang, min_order_qty=2, max_quantity=40
+            7, current_quantity=3, language=lang, min_order_qty=2, max_quantity=40,
+            orderable=True, back_callback="category_1",
+        ),
+    )
+    add(
+        "ProductKeyboards.quantity_selector(no category)",
+        ProductKeyboards.quantity_selector(
+            7, current_quantity=3, language=lang, min_order_qty=2, max_quantity=40,
+            orderable=True, back_callback="menu_products",
+        ),
+    )
+    add(
+        "ProductKeyboards.quantity_selector(sold out)",
+        ProductKeyboards.quantity_selector(
+            7, current_quantity=2, language=lang, min_order_qty=2, max_quantity=0,
+            orderable=False, back_callback="category_1",
         ),
     )
 
@@ -736,7 +743,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         ),
     )
     add(
-        "OrderKeyboards.order_list",
+        "OrderKeyboards.order_list(middle page)",
         OrderKeyboards.order_list(
             [
                 {
@@ -747,6 +754,9 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
                 }
             ],
             lang,
+            page=2,
+            has_prev=True,
+            has_next=True,
         ),
     )
     for status in ("pending", "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"):
@@ -1054,9 +1064,9 @@ async def test_the_subscription_quantity_back_button_is_owned_by_the_subscriptio
     ``SubscriptionKeyboards.quantity_selector`` (rendered by
     ``SubscriptionHandlers._show_quantity_selector``) emits
     ``back_to_product_selection``. No conversation state claimed it, so it fell
-    through to the group-0 ``^back_to_product_`` handler —
-    ``ProductHandlers.product_details`` — which does
-    ``int(query.data.split('_')[3])`` and got ``int('selection')``. "Claimed by
+    through to the group-0 ``^back_to_product_`` handler (then the product
+    details card, now ``ProductHandlers.open_quantity_screen``), which read the
+    product id as an integer and got ``int('selection')``. "Claimed by
     some handler" was therefore not the same as "wired".
 
     WHAT THE FIX GUARANTEES: the group-0 pattern says what it means
@@ -1099,7 +1109,7 @@ async def test_the_product_back_button_pattern_only_accepts_a_product_id(bot, us
     """The root cause, asserted where it lives.
 
     ``^back_to_product_`` was a prefix claim over a namespace the product menu
-    does not own. ``ProductHandlers.product_details`` reads segment 3 as an
+    does not own. ``ProductHandlers.open_quantity_screen`` reads the trailing
     integer, so the pattern is only honest as ``^back_to_product_\\d+$`` — and
     once it says that, a same-prefix button from another feature can never be
     stolen again, with or without a handler of its own.
@@ -1111,8 +1121,8 @@ async def test_the_product_back_button_pattern_only_accepts_a_product_id(bot, us
         and handler.pattern is not None
         and _compiled(handler).match("back_to_product_7")
     }
-    assert "ProductHandlers.product_details" in owners, (
-        "the real Back-to-product button (a numeric product id) lost its handler"
+    assert "ProductHandlers.open_quantity_screen" in owners, (
+        "the Back-to-product button on quantity screens drawn before 2026-10-22 lost its handler"
     )
 
     thieves = {

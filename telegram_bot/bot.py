@@ -78,7 +78,7 @@ from utils import (
     error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale,
     otp_code_in, OtpShapedFilter,
 )
-from keyboards import MenuKeyboards, PRODUCT_PAGE_PATTERN
+from keyboards import BUY_PATTERN, MenuKeyboards, ORDERS_PAGE_PATTERN, PRODUCT_PAGE_PATTERN
 from menu_keyboard import MENU_INSTALLER_GROUP, ensure_menu_keyboard_middleware, send_menu_keyboard
 from menu_tap import MenuTapFilter
 from flow_exit import (
@@ -597,16 +597,17 @@ class WaterBusinessBot:
             # callback is decided in exactly one place. Registered BEFORE
             # `^product_` only for readability — the two cannot overlap.
             CallbackQueryHandler(product_handlers.product_page_handler, pattern=PRODUCT_PAGE_PATTERN),
-            CallbackQueryHandler(product_handlers.product_details, pattern="^product_"),
-            # `\d+` is load-bearing, not tidiness: `product_details` reads
-            # segment 3 as an integer, so a bare `^back_to_product_` prefix
-            # claimed a namespace this handler cannot parse. The subscription
-            # quantity screen's `back_to_product_selection` landed here and
-            # died inside `int('selection')` — and it landed here even once a
-            # conversation claimed it, because PTB walks EVERY group.
-            CallbackQueryHandler(product_handlers.product_details, pattern=r"^back_to_product_\d+$"),
-            CallbackQueryHandler(product_handlers.add_to_cart, pattern="^add_to_cart_"),
+            # A product tap opens its quantity screen; there is no details card
+            # (owner 2026-10-22). `add_to_cart_<id>` and `back_to_product_<id>`
+            # are the buttons of cards and screens drawn before that, still in
+            # customers' chats. `\d+` is load-bearing, not tidiness: the handler
+            # reads the trailing integer, and the subscription quantity screen's
+            # `back_to_product_selection` must never land here (PTB walks EVERY group).
+            CallbackQueryHandler(product_handlers.open_quantity_screen, pattern=r"^product_\d+$"),
+            CallbackQueryHandler(product_handlers.open_quantity_screen, pattern=r"^add_to_cart_\d+$"),
+            CallbackQueryHandler(product_handlers.open_quantity_screen, pattern=r"^back_to_product_\d+$"),
             CallbackQueryHandler(product_handlers.quantity_handler, pattern="^qty_"),
+            CallbackQueryHandler(product_handlers.checkout_product, pattern=BUY_PATTERN),
             CallbackQueryHandler(product_handlers.cart_handler, pattern="^cart_"),
             CallbackQueryHandler(product_handlers.show_cart, pattern="^back_to_cart$"),
 
@@ -620,6 +621,7 @@ class WaterBusinessBot:
 
             # Order callbacks
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^menu_orders$"),
+            CallbackQueryHandler(order_handlers.orders_menu, pattern=ORDERS_PAGE_PATTERN),
             CallbackQueryHandler(order_handlers.order_details, pattern="^order_"),
             # Reward-in-checkout handlers MUST precede the broad "^checkout" catch-all
             # below, or it would swallow these checkout_* callbacks.

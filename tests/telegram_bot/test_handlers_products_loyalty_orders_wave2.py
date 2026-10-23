@@ -147,7 +147,7 @@ class TestProductHandlerWave2:
         await handler.cart_handler(update, context)
         checkout.assert_awaited_once_with(update, context)
 
-    async def test_quantity_handler_calls_api_error_for_cart_update_failure(self, monkeypatch):
+    async def test_quantity_handler_calls_api_error_when_the_product_lookup_fails(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler._handle_api_error = AsyncMock()
         update = DummyUpdate()
@@ -158,12 +158,11 @@ class TestProductHandlerWave2:
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(products_module, "api_client", FakeAPIClientContext(
-            get_product=_resp(success=True, data={"data": {"product": {"name": "Water", "pricing": {"base_price": 20000}}}}),
-            update_cart_item=_resp(success=False, error="update failed"),
+            get_product=_resp(success=False, error="lookup failed"),
         ))
 
         await handler.quantity_handler(update, context)
-        handler._handle_api_error.assert_awaited_once_with(update, "update failed", "en")
+        handler._handle_api_error.assert_awaited_once_with(update, "lookup failed", "en")
 
     async def test_quantity_handler_prefers_current_price_over_base_price(self, monkeypatch):
         handler = products_module.ProductHandlers()
@@ -183,6 +182,8 @@ class TestProductHandlerWave2:
                     success=True,
                     data={"data": {"product": {"name": "Water", "pricing": {"base_price": 20000, "current_price": 14000}}}},
                 ),
+                # The cart holds the product, so the +1 is written to its line.
+                get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": [{"product_id": 9, "quantity": 1}]}}}),
                 update_cart_item=_resp(success=True),
             ),
         )
@@ -193,22 +194,23 @@ class TestProductHandlerWave2:
         assert "28,000 UZS" in text
         assert "40,000 UZS" not in text
 
-    async def test_format_product_details_prefers_current_price(self, monkeypatch):
+    async def test_quantity_screen_prices_from_current_price(self, monkeypatch):
         handler = products_module.ProductHandlers()
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
 
-        details = handler._format_product_details(
+        text = handler._format_quantity_step_text(
             {
                 "name": "Water",
                 "pricing": {"base_price": 20000, "current_price": 15000},
                 "inventory": {"stock_quantity": 5},
                 "specifications": {"volume": 19, "volume_unit": "L"},
             },
+            2,
             "en",
         )
 
-        assert "15,000" in details
-        assert "20,000" not in details
+        assert "2 × 15,000 = 30,000 UZS" in text
+        assert "20,000" not in text
 
     async def test_show_cart_empty_cart(self, monkeypatch):
         handler = products_module.ProductHandlers()

@@ -614,10 +614,11 @@ async def test_a_too_old_ack_does_not_stop_the_dedup_middleware_dropping_a_dupli
     """
     reject(dedup_bot, "answerCallbackQuery", "Bad Request: query is too old")
 
-    await dedup_bot.send(user.tap("add_to_cart_7"))
-    await dedup_bot.send(user.tap("add_to_cart_7"))
+    # ✅ Checkout on the quantity screen: the button that writes the cart.
+    await dedup_bot.send(user.tap("buy_7_1"))
+    await dedup_bot.send(user.tap("buy_7_1"))
 
-    assert len(backend_calls(dedup_bot, "GET", "/api/v1/products/7")) == 1, (
+    assert len(backend_calls(dedup_bot, "GET", "/api/v1/cart")) == 1, (
         "the duplicate must still be stopped before the handler runs"
     )
     assert dedup_bot.cart["cart_items"] == [{"product_id": 7, "quantity": 1}]
@@ -867,7 +868,7 @@ async def test_setup_handlers_installs_the_dedup_guard_production_runs(bot, user
     )
 
 
-async def test_an_impatient_double_tap_on_add_to_cart_runs_the_handler_once(
+async def test_an_impatient_double_tap_on_checkout_runs_the_handler_once(
     dedup_bot, user
 ):
     """The bot acks inline taps at the END of the handler, so the spinner stays
@@ -879,10 +880,10 @@ async def test_an_impatient_double_tap_on_add_to_cart_runs_the_handler_once(
     Measured at the BACKEND, because "the handler ran once" is only meaningful
     as "the backend was told once".
     """
-    await dedup_bot.send(user.tap("add_to_cart_7"))
-    await dedup_bot.send(user.tap("add_to_cart_7"))
+    await dedup_bot.send(user.tap("buy_7_1"))
+    await dedup_bot.send(user.tap("buy_7_1"))
 
-    assert len(backend_calls(dedup_bot, "GET", "/api/v1/products/7")) == 1, (
+    assert len(backend_calls(dedup_bot, "GET", "/api/v1/cart")) == 1, (
         "the second tap reached the handler"
     )
     posts = backend_calls(dedup_bot, "POST", "/api/v1/cart/items")
@@ -919,14 +920,14 @@ async def test_two_different_buttons_tapped_in_the_same_second_are_both_processe
     inside two seconds. Widening the key to "any callback from this user"
     would make the bot feel broken for exactly the people who use it most.
     """
-    await dedup_bot.send(user.tap("add_to_cart_7"))
+    await dedup_bot.send(user.tap("product_7"))
     await dedup_bot.send(user.tap("qty_inc_7_1"))
 
     assert len(backend_calls(dedup_bot, "GET", "/api/v1/products/7")) == 2, (
         "the second, DIFFERENT button must reach its handler"
     )
-    assert dedup_bot.cart["cart_items"] == [{"product_id": 7, "quantity": 2}], (
-        "the +1 really ran: the cart went 1 -> 2"
+    assert "buy_7_2" in dedup_bot.telegram.last_shown().callback_data(), (
+        "the +1 really ran: the screen went 1 -> 2"
     )
 
 

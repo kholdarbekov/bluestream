@@ -160,6 +160,25 @@ def parse_product_page_callback(data: Any) -> Optional[Tuple[str, int, bool]]:
     return match.group(1), int(match.group(2)), match.group(3) is not None
 
 
+# My orders' pager: the pattern `bot.py` registers and `OrderHandlers.orders_menu` reads the page
+# back with. `OrderKeyboards.order_list` renders it.
+ORDERS_PAGE_PATTERN = r"^orders_page_(\d+)$"
+
+
+def orders_page_callback(page: int) -> str:
+    return f"orders_page_{page}"
+
+
+# The quantity screen's Checkout. The screen is a draft the cart has not seen, so the product and
+# the number on screen ride on the button. `bot.py` registers the pattern and
+# `ProductHandlers.checkout_product` reads it back.
+BUY_PATTERN = r"^buy_(\d+)_(\d+)$"
+
+
+def buy_callback(product_id: int, quantity: int) -> str:
+    return f"buy_{product_id}_{quantity}"
+
+
 class KeyboardBuilder:
     """Helper class for building keyboards"""
 
@@ -465,19 +484,6 @@ class ProductKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def product_details(product_id: int, category_id: Optional[int] = None, language: str = 'en') -> InlineKeyboardMarkup:
-        """Product details keyboard"""
-        # Determine back button action
-        back_callback = f'category_{category_id}' if category_id else 'menu_products'
-
-        buttons = [
-            [{'text': i18n.get('telegram.product.add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}]
-        ]
-
-        return KeyboardBuilder.build_inline_keyboard(buttons)
-
-    @staticmethod
     def product_list_for_subscription(products: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Product list keyboard for subscription creation"""
         buttons = []
@@ -533,47 +539,52 @@ class ProductKeyboards:
     @staticmethod
     def quantity_selector(product_id: int, current_quantity: int = 1,
                          language: str = 'en', *, min_order_qty: int,
-                         max_quantity: int) -> InlineKeyboardMarkup:
+                         max_quantity: int, orderable: bool,
+                         back_callback: str) -> InlineKeyboardMarkup:
         """Quantity selection keyboard with offset-based presets + fine-tune row.
 
         Layout:
             [ +3 ] [ +6 ] [ +10 ] [ +13 ] [ +18 ]   (preset jumps from min)
             [ −1 ]     {qty}     [ +1 ]              (fine-tune)
-            [ Checkout ]
+            [ Checkout ]                             (puts {qty} in the cart)
             [ Back ]
 
-        ``min_order_qty`` and ``max_quantity`` are the purchase bounds the
-        caller resolved (``ProductHandlers._purchase_bounds``) and are REQUIRED:
-        a default here would be a second, silent opinion about what the customer
-        may order, and the sold-out case is precisely where the default would be
-        wrong. The preset row disappears when nothing above the floor is
-        orderable.
+        ``min_order_qty``, ``max_quantity`` and ``orderable`` are the purchase
+        bounds the caller resolved (``ProductHandlers._purchase_bounds`` /
+        ``_is_orderable``) and are REQUIRED: a default here would be a second,
+        silent opinion about what the customer may order, and the sold-out case
+        is precisely where the default would be wrong. A product nothing of
+        which is orderable gets Back alone.
         """
         buttons: List[List[Dict[str, str]]] = []
 
-        presets = ProductKeyboards._build_quantity_presets(min_order_qty, max_quantity)
-        if presets:
-            preset_row = []
-            for value in presets:
-                # Show the absolute target quantity (e.g. "5", "8", "12")
-                # rather than an offset — customers think in terms of how
-                # many they want, not deltas from a hidden floor.
-                preset_row.append({
-                    'text': str(value),
-                    'callback_data': f'qty_set_{product_id}_{value}'
-                })
-            buttons.append(preset_row)
+        if orderable:
+            presets = ProductKeyboards._build_quantity_presets(min_order_qty, max_quantity)
+            if presets:
+                preset_row = []
+                for value in presets:
+                    # Show the absolute target quantity (e.g. "5", "8", "12")
+                    # rather than an offset — customers think in terms of how
+                    # many they want, not deltas from a hidden floor.
+                    preset_row.append({
+                        'text': str(value),
+                        'callback_data': f'qty_set_{product_id}_{value}'
+                    })
+                buttons.append(preset_row)
 
-        # Fine-tune row — explicit -1/+1 with a labelled center button so the
-        # number is unambiguously "the current quantity" and not a third action.
-        qty_label = i18n.get('telegram.quantity', language)
-        buttons.append([
-            {'text': '−1', 'callback_data': f'qty_dec_{product_id}_{current_quantity}'},
-            {'text': f'{qty_label}: {current_quantity}', 'callback_data': 'qty_current'},
-            {'text': '+1', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
-        ])
-        buttons.append([{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'checkout'}])
-        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'back_to_product_{product_id}'}])
+            # Fine-tune row — explicit -1/+1 with a labelled center button so the
+            # number is unambiguously "the current quantity" and not a third action.
+            qty_label = i18n.get('telegram.quantity', language)
+            buttons.append([
+                {'text': '−1', 'callback_data': f'qty_dec_{product_id}_{current_quantity}'},
+                {'text': f'{qty_label}: {current_quantity}', 'callback_data': 'qty_current'},
+                {'text': '+1', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
+            ])
+            buttons.append([{
+                'text': i18n.get('telegram.cart.checkout', language),
+                'callback_data': buy_callback(product_id, current_quantity),
+            }])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -830,8 +841,10 @@ class OrderKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def order_list(orders: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """Order list keyboard"""
+    def order_list(orders: List[Dict], language: str = 'en', *, page: int = 1,
+                   has_prev: bool = False, has_next: bool = False) -> InlineKeyboardMarkup:
+        """One page of the order list, then Previous / Next where the backend's pagination
+        (`has_prev` / `has_next`) says there is another page."""
         buttons = []
 
         for order in orders:
@@ -844,6 +857,20 @@ class OrderKeyboards:
                 'text': f"{icon} Order #{order['order_number']} - {date}",
                 'callback_data': f"order_{order['id']}"
             }])
+
+        nav_row = []
+        if has_prev:
+            nav_row.append({
+                'text': i18n.get('telegram.pagination.previous', language),
+                'callback_data': orders_page_callback(page - 1),
+            })
+        if has_next:
+            nav_row.append({
+                'text': i18n.get('telegram.pagination.next', language),
+                'callback_data': orders_page_callback(page + 1),
+            })
+        if nav_row:
+            buttons.append(nav_row)
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -1603,7 +1630,7 @@ class ReorderKeyboards:
     @staticmethod
     def open_order_notice(language: str, order_id: int, continue_callback: str) -> InlineKeyboardMarkup:
         """View the open order, or carry on (`continue_callback`): `reorder_go_<id>` repeats that order,
-        `order_water_go` starts a fresh one (cart or Products)."""
+        `order_water_go` starts a fresh one (Products)."""
         return KeyboardBuilder.build_inline_keyboard([
             [{'text': i18n.get('telegram.payment.view_order', language), 'callback_data': f'order_{order_id}'}],
             [{

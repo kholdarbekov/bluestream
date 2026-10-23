@@ -2,17 +2,25 @@
 
 WHY THIS FILE EXISTS
 --------------------
-``test_handlers_add_to_cart_idempotent.py`` and ``test_cart_edit_mode.py`` both
-call handler coroutines directly with a hand-rolled ``DummyUpdate``. That proves
-each handler behaves when it is CALLED. It cannot prove any of the things the
-cart actually breaks on:
+``test_cart_edit_mode.py`` calls handler coroutines directly with a hand-rolled
+``DummyUpdate``. That proves each handler behaves when it is CALLED. It cannot
+prove any of the things the cart actually breaks on:
 
 * whether the ``callback_data`` a keyboard rendered is registered at all,
-* what the SECOND tap of the same button does (the dedup middleware and the
-  idempotent entry point are two different defences and only one of them is
-  wired in production's ``initialize()``),
+* what the SECOND tap of the same button does (the dedup middleware and
+  Checkout reading the cart before it writes are two different defences, and
+  only the second one is still standing once the debounce window has passed),
 * what the customer is left looking at when a cart write fails,
 * whether the money on the screen is the money the server will charge.
+
+THE QUANTITY SCREEN IS A DRAFT (owner 2026-10-22)
+-------------------------------------------------
+There is no product card and no "Add to cart" step any more. A product tap
+opens its quantity screen at the quantity the cart already holds (else the
+product minimum) and writes NOTHING; presets and ± only redraw the screen. The
+one cart write is ✅ Checkout (``buy_<id>_<qty>``): it reads the cart, PUTs the
+line if the product is already there, POSTs it otherwise, and hands over to
+checkout. So every "what reached the cart" assertion below is made at Checkout.
 
 Every update below goes in through ``Application.process_update``. The only
 fakes are the three harness seams: Telegram's transport, ``_make_request``, and
@@ -65,6 +73,8 @@ SPORT_NAME = "Aqua Sport 0.5 l"
 
 WATER_MIN_QTY = 2  # deliberately > 1: proves "the product's minimum", not "one"
 
+WATER_CATEGORY = 1  # the quantity screen's Back goes to `category_<id>`
+
 
 def build_catalogue() -> dict:
     """Fresh per test — several tests mutate stock mid-journey."""
@@ -74,7 +84,7 @@ def build_catalogue() -> dict:
             "name": WATER_NAME,
             "current_price": WATER_UNIT_PRICE,
             "description": "Tabiiy ichimlik suvi",
-            "category": {"id": 1, "name": "Suv"},
+            "category": {"id": WATER_CATEGORY, "name": "Suv"},
             "inventory": {"min_order_quantity": WATER_MIN_QTY, "stock_quantity": 40},
             "specifications": {"volume": 18.9, "volume_unit": "l"},
         },
@@ -83,7 +93,7 @@ def build_catalogue() -> dict:
             "name": SPORT_NAME,
             "current_price": SPORT_UNIT_PRICE,
             "description": "Sport suvi",
-            "category": {"id": 1, "name": "Suv"},
+            "category": {"id": WATER_CATEGORY, "name": "Suv"},
             "inventory": {"min_order_quantity": 1, "stock_quantity": 12},
             "specifications": {"volume": 0.5, "volume_unit": "l"},
         },
@@ -245,6 +255,8 @@ TRANSLATIONS = {
     ("uz", "telegram.total"): "Jami",
     ("ru", "telegram.total"): "Итого",
     ("uz", "telegram.products.min_order_quantity_label"): "Eng kam miqdor: {min_qty}",
+    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} UZS (1 dona)",
+    ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli miqdorni yozing",
     ("uz", "telegram.products.cart_cleared"): "Savat tozalandi",
     ("uz", "telegram.products.out_of_stock"): "Tugagan",
     ("uz", "telegram.products.invalid_action"): "Noto'g'ri amal",
@@ -297,6 +309,21 @@ def api_calls(bot, method: str, endpoint: str) -> list:
     ]
 
 
+def cart_writes(bot) -> list[tuple]:
+    """Every write that reached a cart line, as ``(method, endpoint, body)``, in order."""
+    return [
+        (call.method, call.endpoint, call.data)
+        for call in bot.backend.calls
+        if call.method in {"POST", "PUT", "DELETE"}
+        and call.endpoint.startswith("/api/v1/cart/items")
+    ]
+
+
+def checkout_reads(bot) -> list:
+    """The address read that opens checkout — ``checkout_handler``'s first backend call."""
+    return api_calls(bot, "GET", "/api/v1/auth/addresses")
+
+
 def toasts(bot) -> list[str]:
     """Every ``answerCallbackQuery`` that carried visible text."""
     return [
@@ -335,9 +362,9 @@ async def deliberate_retap(bot, update):
     return await bot.send(update)
 
 
-async def open_quantity_selector(bot, user, product_id=WATER_ID):
-    """Tap 'Add to cart' on the product-details screen."""
-    await bot.send(user.tap(f"add_to_cart_{product_id}"))
+async def open_quantity_screen(bot, user, product_id=WATER_ID, message_id=None):
+    """Tap the product in a product list: its quantity screen opens, nothing is written."""
+    await bot.send(user.tap(f"product_{product_id}", message_id=message_id))
     return bot.telegram.last_shown()
 
 
@@ -356,33 +383,43 @@ async def open_cart_in_edit_mode(bot, user):
 # ---------------------------------------------------------------------------
 
 
-async def test_tapping_add_to_cart_twice_writes_one_line_at_the_product_minimum(
+async def test_checking_out_the_same_product_twice_never_stacks_two_lots(
     bot, user, cart
 ):
-    """A hesitant customer taps 'Add to cart', goes back, taps it again.
+    """A hesitant customer checks a product out, goes back to the shop, opens
+    the same product again and checks out again.
 
-    ``POST /cart/items`` is an INCREMENT on the backend, so if the entry point
-    stops being idempotent the line silently grows by ``min_order_quantity``
-    per tap and the customer is charged for bottles they never asked for. That
-    is prod triage 2026-06-27 (user 267) verbatim; this drives it through the
-    dispatcher so the guard is exercised on the real update path, not on a
-    hand-built one.
+    ``POST /cart/items`` is an INCREMENT on the backend, so if the write ever
+    stopped reading the cart first, the line would silently grow by another
+    lot per Checkout and the customer would be charged for bottles they never
+    asked for. That is prod triage 2026-06-27 (user 267) verbatim — then it was
+    the 'Add to cart' tap, now Checkout is the screen's only write, so the
+    guard lives there. Driven through the dispatcher so it is exercised on the
+    real update path, not on a hand-built one.
     """
-    await open_quantity_selector(bot, user)
-    # Back to the product card, then add again — the exact loop from the trace.
-    await deliberate_retap(bot, user.tap(f"back_to_product_{WATER_ID}"))
-    await open_quantity_selector(bot, user)
+    first = await open_quantity_screen(bot, user)
+    checkout = f"buy_{WATER_ID}_{WATER_MIN_QTY}"
+    assert checkout in first.callback_data()
+    assert cart_writes(bot) == [], "opening the screen must write nothing"
 
-    adds = api_calls(bot, "POST", "/api/v1/cart/items")
-    assert [call.data for call in adds] == [
-        {"product_id": WATER_ID, "quantity": WATER_MIN_QTY}
-    ], "the second tap must not post a second increment"
+    await bot.send(user.tap(checkout))
+
+    # Back in the shop, the same product again: the screen opens at what the
+    # cart now holds, and opening it still writes nothing.
+    await deliberate_retap(bot, user.tap(f"product_{WATER_ID}"))
+    reopened = bot.telegram.last_shown()
+    assert f"{t('telegram.quantity')}: {WATER_MIN_QTY}\n" in reopened.text
+    assert checkout in reopened.callback_data()
+    assert len(cart_writes(bot)) == 1
+
+    await deliberate_retap(bot, user.tap(checkout))
+
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": WATER_MIN_QTY}),
+        ("PUT", f"/api/v1/cart/items/{WATER_ID}", {"quantity": WATER_MIN_QTY}),
+    ], "the second Checkout must SET the line, not post a second increment"
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
-
-    # ...and the customer is looking at the quantity they actually have.
-    shown = bot.telegram.last_shown()
-    assert f"{t('telegram.quantity')}: {WATER_MIN_QTY}" in shown.text
-    assert f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}" in shown.callback_data()
+    assert len(checkout_reads(bot)) == 2, "both Checkouts must go on to checkout"
 
 
 async def test_a_double_tap_inside_the_dedup_window_never_reaches_the_cart(
@@ -390,22 +427,25 @@ async def test_a_double_tap_inside_the_dedup_window_never_reaches_the_cart(
 ):
     """Telegram keeps the button spinner up for the whole handler, so people
     tap again. With ``PerChatSerialUpdateProcessor`` the second tap queues and
-    runs against a message the first tap already deleted, producing the
-    'Message to edit not found' / 'Message to delete not found' warning pair in
-    production and a second quantity selector for the customer.
+    runs after the first one has finished — on Checkout, that is a second cart
+    write and a second checkout screen for one intended tap.
 
     The middleware must stop the duplicate before ANY handler runs, and must
     still answer it so the spinner clears. It must also be a debounce, not a
     ban: once the window passes, a deliberate re-tap has to work again.
     """
+    await open_quantity_screen(bot, user)
+    checkout = f"buy_{WATER_ID}_{WATER_MIN_QTY}"
 
-    await bot.send(user.tap(f"add_to_cart_{WATER_ID}"))
-    assert api_calls(bot, "POST", "/api/v1/cart/items"), "first tap must go through"
+    await bot.send(user.tap(checkout))
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": WATER_MIN_QTY}),
+    ], "first tap must go through"
 
     calls_after_first_tap = len(bot.backend.calls)
     bot.telegram.reset()
 
-    await bot.send(user.tap(f"add_to_cart_{WATER_ID}"))
+    await bot.send(user.tap(checkout))
 
     assert len(bot.backend.calls) == calls_after_first_tap, (
         "the duplicate tap reached the backend — no handler may see it at all"
@@ -417,125 +457,164 @@ async def test_a_double_tap_inside_the_dedup_window_never_reaches_the_cart(
         "the drop is silent to the customer; a toast would look like an error"
     )
 
-    # The window passes; the customer genuinely wants the screen again.
+    # The window passes; the customer genuinely taps Checkout again.
     expire_dedup_window()
     bot.telegram.reset()
-    await bot.send(user.tap(f"add_to_cart_{WATER_ID}"))
+    await bot.send(user.tap(checkout))
 
-    assert bot.telegram.shown, "a deliberate re-tap after the window must render"
+    assert bot.telegram.shown, "a deliberate re-tap after the window must reach checkout"
+    assert cart_writes(bot)[1:] == [
+        ("PUT", f"/api/v1/cart/items/{WATER_ID}", {"quantity": WATER_MIN_QTY}),
+    ]
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY, (
-        "and it still must not increment — dedup is the second line of defence, "
+        "and it still must not stack — dedup is the second line of defence, "
         "not the only one"
     )
 
 
 # ---------------------------------------------------------------------------
-# The quantity selector
+# The quantity screen (a draft until Checkout)
 # ---------------------------------------------------------------------------
 
 
-async def test_a_preset_jump_writes_the_absolute_quantity_the_button_shows(
+async def test_a_preset_redraws_the_screen_at_its_number_and_checkout_writes_exactly_that(
     bot, user, cart
 ):
     """The presets are labelled with absolute quantities ('8'), so tapping '8'
-    must leave exactly 8 in the cart. If the write ever became relative the
-    label and the cart would disagree and the customer would only find out on
-    the confirmation screen.
+    must put the screen on exactly 8 — and Checkout from there must leave
+    exactly 8 in the cart. If the preset ever became relative, or the Checkout
+    button kept an older number, the label and the cart would disagree and
+    the customer would only find out on the confirmation screen.
     """
-    selector = await open_quantity_selector(bot, user)
+    screen = await open_quantity_screen(bot, user)
 
     target = WATER_MIN_QTY + ProductKeyboards.QUANTITY_PRESET_OFFSETS[1]
-    assert f"qty_set_{WATER_ID}_{target}" in selector.callback_data(), (
+    preset = f"qty_set_{WATER_ID}_{target}"
+    assert preset in screen.callback_data(), (
         "the preset this test taps must be a button the customer can actually see"
     )
 
     bot.telegram.reset()
-    await bot.send(user.tap(f"qty_set_{WATER_ID}_{target}"))
+    await bot.send(user.tap(preset))
 
-    writes = api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}")
-    assert [call.data for call in writes] == [{"quantity": target}]
-    assert cart.quantity_of(WATER_ID) == target
+    assert cart_writes(bot) == [], "a preset moves the screen, never the cart"
+    assert cart.lines == {}
 
     shown = bot.telegram.last_shown()
-    assert f"{t('telegram.quantity')}: {target}" in shown.text
-    # NOTE: this line is the selector's own `unit_price * quantity` preview, and
-    # `unit_price` is the contract-blind `current_price` baked by
-    # `Product.calculate_price`. It is pinned here as CURRENT behaviour, not
-    # endorsed: it is a smaller instance of the same show-vs-charge split the
-    # cart screen was fixed for. Nothing is posted from it.
-    assert (
-        f"{t('telegram.total')}: {format_price(WATER_UNIT_PRICE * target)} UZS"
-        in shown.text
-    )
-    # The re-rendered fine-tune row must carry the NEW quantity, or the next
-    # +1 would step from a stale number.
-    assert f"qty_inc_{WATER_ID}_{target}" in shown.callback_data()
-    assert f"qty_dec_{WATER_ID}_{target}" in shown.callback_data()
+    # NOTE: the total line is the screen's own `unit × quantity` preview from
+    # the product's catalogue price. Nothing is posted from it — Checkout
+    # sends a QUANTITY — and a contract customer is told their price applies
+    # at checkout (`contract_price_at_checkout`), which this product is not.
+    assert shown.text == "\n".join([
+        f"🛒 {WATER_NAME}",
+        f"💰 {t('telegram.products.unit_price_label', price=format_price(WATER_UNIT_PRICE))}",
+        f"ℹ️ {t('telegram.products.min_order_quantity_label', min_qty=WATER_MIN_QTY)}",
+        "",
+        f"{t('telegram.quantity')}: {target}",
+        f"{t('telegram.total')}: {target} × {format_price(WATER_UNIT_PRICE)}"
+        f" = {format_price(WATER_UNIT_PRICE * target)} UZS",
+        "",
+        t("telegram.products.type_quantity_hint"),
+    ])
+    # The redrawn fine-tune row AND the Checkout button must carry the NEW
+    # quantity, or the next +1 would step from a stale number and Checkout
+    # would write one.
+    assert shown.callback_data() == [
+        *(
+            f"qty_set_{WATER_ID}_{WATER_MIN_QTY + offset}"
+            for offset in ProductKeyboards.QUANTITY_PRESET_OFFSETS
+        ),
+        f"qty_dec_{WATER_ID}_{target}",
+        "qty_current",
+        f"qty_inc_{WATER_ID}_{target}",
+        f"buy_{WATER_ID}_{target}",
+        f"category_{WATER_CATEGORY}",
+    ]
+    labels = dict(zip(shown.callback_data(), shown.button_labels()))
+    assert labels[f"buy_{WATER_ID}_{target}"] == t("telegram.cart.checkout")
+
+    await bot.send(user.tap(f"buy_{WATER_ID}_{target}"))
+
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": target}),
+    ]
+    assert cart.quantity_of(WATER_ID) == target
 
 
-async def test_the_minus_button_never_takes_a_line_below_the_product_minimum(
+async def test_the_minus_button_never_takes_the_screen_below_the_product_minimum(
     bot, user, cart
 ):
-    """Water is sold in twos. Holding '−1' down must clamp at 2 — it must never
-    write 1 (which the backend rejects, stranding the customer on a cart it
-    refuses to check out) and never write 0 (which is not how a line is
-    removed; only 'Remove' does that).
+    """Water is sold in twos. Holding '−1' down must clamp at 2 — the screen
+    must never offer 1 (which the backend rejects, stranding the customer on a
+    cart it refuses to check out), and Checkout from the clamped screen must
+    write 2. '−1' is never a way to remove anything: it writes nothing at all.
     """
-    await open_quantity_selector(bot, user)
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    await open_quantity_screen(bot, user)
 
+    minus = f"qty_dec_{WATER_ID}_{WATER_MIN_QTY}"
     for _ in range(3):
-        selector = bot.telegram.last_shown()
-        minus = f"qty_dec_{WATER_ID}_{WATER_MIN_QTY}"
-        assert minus in selector.callback_data()
+        screen = bot.telegram.last_shown()
+        assert minus in screen.callback_data(), "'−1' stepped below the floor"
         await deliberate_retap(bot, user.tap(minus))
 
-    written = [
-        call.data["quantity"]
-        for call in api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}")
+    clamped = bot.telegram.last_shown()
+    assert f"{t('telegram.quantity')}: {WATER_MIN_QTY}\n" in clamped.text
+    assert f"buy_{WATER_ID}_{WATER_MIN_QTY}" in clamped.callback_data()
+    assert cart_writes(bot) == [], "'−1' must never write"
+
+    await bot.send(user.tap(f"buy_{WATER_ID}_{WATER_MIN_QTY}"))
+
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": WATER_MIN_QTY}),
     ]
-    assert written == [WATER_MIN_QTY] * 3, f"'−1' wrote below the floor: {written}"
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
-    assert api_calls(bot, "DELETE", f"/api/v1/cart/items/{WATER_ID}") == [], (
-        "decrementing must never remove the line behind the customer's back"
-    )
 
 
-async def test_a_stale_plus_button_steps_from_the_quantity_the_customer_chose(
+async def test_a_stale_bubbles_plus_steps_from_its_own_number_and_takes_nothing_from_the_cart(
     bot, user, cart
 ):
-    """A '+1' scrolled back to in the chat must add one to what the cart HOLDS.
+    """Each quantity bubble in the chat is its own draft.
 
-    ``quantity_handler`` used to take its base from the CALLBACK PAYLOAD
-    (``qty_inc_{pid}_{qty}``), so a '+1' button from a message further up the
-    chat wrote ``payload_qty + 1`` over whatever the cart really held: a
-    customer who picked 8, scrolled up and tapped the old '+1' silently dropped
-    to 3 and only found out at the confirmation screen.
-
-    The base now comes from the SERVER cart, exactly as
-    ``_handle_cart_item_action`` already did for the edit-mode ± buttons — one
-    rule, one expression, both surfaces.
+    This test used to pin "a stale '+1' steps from what the CART holds": when
+    ± wrote the cart, a '+1' scrolled back to from an older bubble overwrote a
+    customer's 8 with 3 and they only found out at the confirmation screen.
+    Now ± writes nothing, so the old bubble's '+1' steps from the number THAT
+    bubble shows, visibly, on that bubble — and the cart only ever receives
+    the number on the bubble whose Checkout the customer tapped.
     """
-    first_render = await open_quantity_selector(bot, user)
+    old_bubble, new_bubble = 301, 302
+
+    first_render = await open_quantity_screen(bot, user, message_id=old_bubble)
     stale_plus = f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}"
     assert stale_plus in first_render.callback_data()
 
+    # Further down the chat the customer opens the product again and picks 8.
+    await deliberate_retap(bot, user.tap(f"product_{WATER_ID}", message_id=new_bubble))
     target = WATER_MIN_QTY + ProductKeyboards.QUANTITY_PRESET_OFFSETS[1]
-    await bot.send(user.tap(f"qty_set_{WATER_ID}_{target}"))
-    assert cart.quantity_of(WATER_ID) == target
+    await bot.send(user.tap(f"qty_set_{WATER_ID}_{target}", message_id=new_bubble))
+    assert f"buy_{WATER_ID}_{target}" in bot.telegram.last_shown().callback_data()
 
-    await bot.send(user.tap(stale_plus))
+    # Then scrolls up and taps the OLD bubble's '+1'.
+    bot.telegram.reset()
+    await bot.send(user.tap(stale_plus, message_id=old_bubble))
 
-    assert cart.quantity_of(WATER_ID) == target + 1, (
-        "the stale button must step from the cart, not from its own payload"
+    redrawn = bot.telegram.last_shown()
+    assert int(redrawn.params["message_id"]) == old_bubble, (
+        "the stale tap must redraw its own bubble, not the one showing 8"
     )
-    written = [
-        call.data["quantity"]
-        for call in api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}")
+    assert f"{t('telegram.quantity')}: {WATER_MIN_QTY + 1}\n" in redrawn.text
+    assert f"buy_{WATER_ID}_{WATER_MIN_QTY + 1}" in redrawn.callback_data()
+    assert cart_writes(bot) == [] and cart.lines == {}, (
+        "a ± tap is a draft: the stale tap must not reach the cart"
+    )
+
+    # Checkout on the bubble showing 8 writes 8: the stale tap took nothing from it.
+    await bot.send(user.tap(f"buy_{WATER_ID}_{target}", message_id=new_bubble))
+
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": target}),
     ]
-    assert written == [target, target + 1], (
-        f"the stale tap wrote a quantity nobody chose: {written}"
-    )
+    assert cart.quantity_of(WATER_ID) == target
 
 
 async def test_tapping_the_quantity_display_cell_writes_nothing(bot, user, cart):
@@ -543,14 +622,14 @@ async def test_tapping_the_quantity_display_cell_writes_nothing(bot, user, cart)
     still routes through the broad ``^qty_`` pattern. If it ever stopped being
     a no-op, every customer who taps the number would move their own order.
     """
-    await open_quantity_selector(bot, user)
+    await open_quantity_screen(bot, user)
     calls_before = len(bot.backend.calls)
     bot.telegram.reset()
 
     await bot.send(user.tap("qty_current"))
 
     assert len(bot.backend.calls) == calls_before
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    assert cart.lines == {}
     assert [call.method for call in bot.telegram.calls] == ["answerCallbackQuery"], (
         "the spinner must be dismissed, and nothing else may happen"
     )
@@ -561,101 +640,106 @@ async def test_tapping_the_quantity_display_cell_writes_nothing(bot, user, cart)
 # ---------------------------------------------------------------------------
 
 
-async def test_a_product_that_sells_out_before_the_tap_shows_the_servers_refusal(
+async def test_a_product_that_sells_out_before_checkout_shows_the_servers_refusal(
     bot, user, cart, catalogue
 ):
-    """The product card was rendered while stock was 40. By the time the
-    customer taps 'Add to cart' the last bottle is gone.
+    """The quantity screen was drawn while stock was 40. By the time the
+    customer taps ✅ Checkout the last bottle is gone.
 
-    The bot has NO client-side stock gate on this path — ``add_to_cart`` never
-    looks at ``stock_quantity`` — so the server's rejection is the only thing
+    Checkout has NO client-side stock gate — ``checkout_product`` reads the
+    cart, never the product — so the server's rejection is the only thing
     standing between the customer and a line that cannot be delivered. It must
-    reach them as text, and nothing may be written.
+    reach them as text, nothing may be written, and checkout must not open.
     """
+    await open_quantity_screen(bot, user)
     catalogue[WATER_ID]["inventory"]["stock_quantity"] = 0
     bot.backend.route(
         "POST",
         "/api/v1/cart/items",
         lambda call: backend_failure("Mahsulot sotuvda yo'q", status_code=409),
     )
+    bot.telegram.reset()
 
-    await bot.send(user.tap(f"add_to_cart_{WATER_ID}"))
+    await bot.send(user.tap(f"buy_{WATER_ID}_{WATER_MIN_QTY}"))
 
-    assert api_calls(bot, "POST", "/api/v1/cart/items"), (
-        "the bot has no stock gate of its own — it must still ask the server"
-    )
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": WATER_MIN_QTY}),
+    ], "Checkout has no stock gate of its own — it must still ask the server"
     assert cart.quantity_of(WATER_ID) is None, "nothing may land in the cart"
     assert toasts(bot) == ["❌ Mahsulot sotuvda yo'q"]
     assert bot.telegram.shown == [], (
-        "a refused add must not open the quantity selector — that screen would "
-        "claim the customer owns bottles the server just refused them"
+        "a refused Checkout must not move on — the next screen would be "
+        "checking out bottles the server just refused"
     )
+    assert checkout_reads(bot) == []
 
 
-async def test_a_sold_out_line_is_refused_by_the_selector_before_it_asks(
+async def test_a_sold_out_product_is_refused_on_plus_and_the_screen_is_not_redrawn(
     bot, user, cart, catalogue
 ):
-    """Same shelf, one screen later: the line is already in the cart when the
-    product sells out, and the customer taps '+1'.
+    """The line is already in the cart, its screen is open, the product sells
+    out, and the customer taps '+1'.
 
     ``quantity_handler`` used to clamp to stock only when
     ``stock_quantity > 0`` — so at ZERO stock the clamp switched itself off,
-    ``upper`` fell back to MAX_QUANTITY (99) and the bot asked the backend for
-    one more of something it could see there were none of. Zero is a real
-    ceiling of zero: nothing is orderable, so nothing is written and the
-    customer is told the product is out of stock.
-
-    The screen must not be re-rendered either — re-rendering would show a
-    quantity the cart does not hold.
+    ``upper`` fell back to MAX_QUANTITY (99) and the bot offered one more of
+    something it could see there were none of. Zero is a real ceiling of zero:
+    nothing is orderable, so the customer is told the product is out of stock,
+    and neither the cart nor the screen moves.
     """
-    await open_quantity_selector(bot, user)
+    cart.set(WATER_ID, WATER_MIN_QTY)
+    await open_quantity_screen(bot, user)
     catalogue[WATER_ID]["inventory"]["stock_quantity"] = 0
+    calls_before = len(bot.backend.calls)
     bot.telegram.reset()
 
     await bot.send(user.tap(f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}"))
 
-    assert api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}") == [], (
-        "the bot must not ask for stock it can see is not there"
-    )
+    assert [(call.method, call.endpoint) for call in bot.backend.calls[calls_before:]] == [
+        ("GET", f"/api/v1/products/{WATER_ID}"),
+    ], "a ± tap reads the product and nothing else: no cart read, no cart write"
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY, "the cart must not move"
     assert toasts(bot) == [t("telegram.products.out_of_stock")]
     assert bot.telegram.shown == [], (
-        "no re-render: the screen must keep showing the quantity that is real"
+        "no re-render: the screen must not step to a quantity that does not exist"
     )
 
 
-async def test_a_sold_out_product_offers_no_preset_the_customer_could_tap(
+async def test_a_sold_out_product_offers_nothing_the_customer_could_tap(
     bot, user, cart, catalogue
 ):
     """A screen may not offer water that does not exist.
 
-    ``quantity_handler`` refuses every one of these taps (the test above), but a
-    refusal the customer only meets AFTER tapping is not the same as not being
-    offered. The keyboard used to decide the ceiling for itself —
+    ``quantity_handler`` refuses ± on a sold-out product (the test above), but
+    a refusal the customer only meets AFTER tapping is not the same as not
+    being offered. The keyboard used to decide the ceiling for itself —
     ``stock_quantity is not None and stock_quantity > 0`` — which is the same
     "zero disables the ceiling" bug the handler was fixed for, one layer up: at
     zero stock it fell back to MAX_QUANTITY and rendered '5', '8', '12', '15',
     '20' for a sold-out product.
 
     The bound now comes from the ONE place that resolves it, so a product with
-    nothing orderable renders nothing to order.
+    nothing orderable renders nothing to order: no presets, no ±, no Checkout.
     """
-    await open_quantity_selector(bot, user)
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    screen = await open_quantity_screen(bot, user)
+    assert any(data.startswith("qty_set_") for data in screen.callback_data())
 
-    # The last bottles go while the customer is on the product card.
+    # The last bottles go while the customer is looking at it.
     catalogue[WATER_ID]["inventory"]["stock_quantity"] = 0
 
-    await deliberate_retap(bot, user.tap(f"back_to_product_{WATER_ID}"))
-    await deliberate_retap(bot, user.tap(f"add_to_cart_{WATER_ID}"))
+    await deliberate_retap(bot, user.tap(f"product_{WATER_ID}"))
 
-    selector = bot.telegram.last_shown()
-    presets = [
-        data for data in selector.callback_data() if data.startswith("qty_set_")
-    ]
-    assert presets == [], (
-        f"a sold-out product still offered preset quantities: {presets}"
+    sold_out = bot.telegram.last_shown()
+    assert sold_out.callback_data() == [f"category_{WATER_CATEGORY}"], (
+        f"a sold-out product still offered something to order: {sold_out.callback_data()}"
     )
+    assert sold_out.text == "\n".join([
+        f"🛒 {WATER_NAME}",
+        f"💰 {t('telegram.products.unit_price_label', price=format_price(WATER_UNIT_PRICE))}",
+        "",
+        f"❌ {t('telegram.products.out_of_stock')}",
+    ])
+    assert cart_writes(bot) == []
 
 
 async def test_the_presets_stop_at_the_last_quantity_that_is_actually_there(
@@ -665,15 +749,15 @@ async def test_the_presets_stop_at_the_last_quantity_that_is_actually_there(
 
     Six bottles left and a product minimum of 2: '+3' (5) is orderable, '+6' (8)
     is not. The keyboard must not offer 8 — and the one it does offer must be a
-    quantity ``quantity_handler`` will accept, which is the whole point of the
-    two agreeing.
+    quantity ``quantity_handler`` will accept and Checkout will write, which is
+    the whole point of the two agreeing.
     """
     catalogue[WATER_ID]["inventory"]["stock_quantity"] = 6
 
-    selector = await open_quantity_selector(bot, user)
+    screen = await open_quantity_screen(bot, user)
     presets = [
         int(data.rsplit("_", 1)[-1])
-        for data in selector.callback_data()
+        for data in screen.callback_data()
         if data.startswith("qty_set_")
     ]
     assert presets == [WATER_MIN_QTY + ProductKeyboards.QUANTITY_PRESET_OFFSETS[0]], (
@@ -682,39 +766,57 @@ async def test_the_presets_stop_at_the_last_quantity_that_is_actually_there(
 
     # …and the surviving preset is honoured, not clamped away.
     await bot.send(user.tap(f"qty_set_{WATER_ID}_{presets[0]}"))
+    checkout = f"buy_{WATER_ID}_{presets[0]}"
+    assert checkout in bot.telegram.last_shown().callback_data()
+
+    await bot.send(user.tap(checkout))
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": presets[0]}),
+    ]
     assert cart.quantity_of(WATER_ID) == presets[0]
 
 
-async def test_a_stock_figure_that_lies_still_reports_the_servers_refusal_on_plus(
+async def test_a_stock_figure_that_lies_still_reports_the_servers_refusal_on_checkout(
     bot, user, cart
 ):
     """The bot's stock figure is a snapshot: another customer can take the last
-    bottle between the render and the tap, and the catalogue the bot just read
+    bottles between the render and the tap, and the catalogue the bot just read
     will still say 40.
 
-    So the local ceiling is a courtesy, never the authority. When the server
-    refuses the write anyway, its reason has to reach the customer AND the
-    screen must not be re-rendered — re-rendering would show a quantity the
-    server never accepted.
+    So the local ceiling is a courtesy, never the authority. The screen lets
+    the customer step a product their cart does not hold yet up to 3; when the
+    server refuses that write at Checkout, its reason has to reach the
+    customer, the cart must stay as it was, and checkout must not open on a
+    quantity the server never accepted. (A product the cart already holds is
+    written on the tap itself; test_quantity_screen_journeys.py covers that
+    refusal.)
     """
-    await open_quantity_selector(bot, user)
+    await open_quantity_screen(bot, user)
+    await bot.send(user.tap(f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}"))
+    more = WATER_MIN_QTY + 1
+    checkout = f"buy_{WATER_ID}_{more}"
+    assert checkout in bot.telegram.last_shown().callback_data(), (
+        "stock said 40 — the screen offers one more"
+    )
+
     bot.backend.route(
-        "PUT",
-        f"/api/v1/cart/items/{WATER_ID}",
+        "POST",
+        "/api/v1/cart/items",
         lambda call: backend_failure("Omborda yetarli mahsulot yo'q", status_code=409),
     )
     bot.telegram.reset()
 
-    await bot.send(user.tap(f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}"))
+    await bot.send(user.tap(checkout))
 
-    assert api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}"), (
-        "stock said 40 — the bot must still ask, and let the server decide"
-    )
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY, "the cart must not move"
+    assert cart_writes(bot) == [
+        ("POST", "/api/v1/cart/items", {"product_id": WATER_ID, "quantity": more}),
+    ], "stock said 40 — the bot must still ask, and let the server decide"
+    assert cart.lines == {}, "the cart must not move"
     assert toasts(bot) == ["❌ Omborda yetarli mahsulot yo'q"]
     assert bot.telegram.shown == [], (
-        "no re-render: the screen must keep showing the quantity that is real"
+        "nothing may be drawn: not checkout, and not a screen claiming the write landed"
     )
+    assert checkout_reads(bot) == []
 
 
 async def test_a_failing_product_lookup_tells_the_customer_why_plus_did_nothing(
@@ -729,62 +831,79 @@ async def test_a_failing_product_lookup_tells_the_customer_why_plus_did_nothing(
     change. The customer tapped '+1' repeatedly and the bot pretended nothing
     had happened.
 
-    ``add_to_cart`` on the very same payload calls ``_handle_api_error`` and
-    toasts the reason; this handler now does the same, and still writes nothing.
+    ``open_quantity_screen`` on the very same product read calls
+    ``_handle_api_error`` and toasts the reason; this handler does the same,
+    and still touches nothing.
     """
-    await open_quantity_selector(bot, user)
+    await open_quantity_screen(bot, user)
     bot.backend.route(
         "GET",
         f"/api/v1/products/{WATER_ID}",
         lambda call: backend_failure("Mahsulot topilmadi", status_code=404),
     )
+    calls_before = len(bot.backend.calls)
     bot.telegram.reset()
 
     await bot.send(user.tap(f"qty_inc_{WATER_ID}_{WATER_MIN_QTY}"))
 
-    assert api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}") == []
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    assert [(call.method, call.endpoint) for call in bot.backend.calls[calls_before:]] == [
+        ("GET", f"/api/v1/products/{WATER_ID}"),
+    ]
+    assert cart.lines == {}
     assert toasts(bot) == ["❌ Mahsulot topilmadi"]
     assert [call.method for call in bot.telegram.calls] == ["answerCallbackQuery"], (
         "the reason is a toast; re-rendering would claim a change that did not happen"
     )
 
 
-async def test_a_failing_cart_read_stops_add_to_cart_instead_of_stacking_a_line(
+async def test_an_unreadable_cart_opens_no_screen_and_lets_checkout_write_nothing(
     bot, user, cart
 ):
     """An unreadable cart is UNKNOWN, not empty.
 
-    The idempotency guard was ``if existing_qty:``, and ``existing_qty`` was
-    ``None`` both when the product was absent from the cart AND when
+    The old idempotency guard was ``if existing_qty:``, and ``existing_qty``
+    was ``None`` both when the product was absent from the cart AND when
     ``GET /cart`` FAILED. A transient read error therefore re-armed the exact
     accumulation bug the guard was written for (prod 2026-06-27, user 267): the
-    customer already has 2, the read 500s, the tap POSTs another 2 — and
+    customer already has 2, the read 500s, the write POSTs another 2 — and
     ``POST /cart/items`` is an INCREMENT, so they are billed for 4.
 
-    The read failure is now surfaced instead, and nothing is written on a guess.
+    Both places that read the cart now surface the failure instead of
+    guessing: Checkout writes nothing (it cannot choose between PUT and POST),
+    and opening the screen shows no screen (its starting number would be a
+    guess the customer might confirm).
     """
-    await open_quantity_selector(bot, user)
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    cart.set(WATER_ID, WATER_MIN_QTY)
+    screen = await open_quantity_screen(bot, user)
+    checkout = f"buy_{WATER_ID}_{WATER_MIN_QTY}"
+    assert checkout in screen.callback_data()
 
     bot.backend.route(
         "GET",
         "/api/v1/cart",
         lambda call: backend_failure("Savatni o'qib bo'lmadi", status_code=500),
     )
+    bot.telegram.reset()
 
-    await deliberate_retap(bot, user.tap(f"back_to_product_{WATER_ID}"))
-    await deliberate_retap(bot, user.tap(f"add_to_cart_{WATER_ID}"))
+    # Checkout from the screen already on display.
+    await bot.send(user.tap(checkout))
 
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY, (
-        "a failed cart read was treated as an empty cart and doubled the line"
+    assert cart_writes(bot) == [], (
+        "a failed cart read was treated as an empty cart and written on a guess"
     )
-    assert len(api_calls(bot, "POST", "/api/v1/cart/items")) == 1, (
-        "only the first, readable open may write"
-    )
-    assert toasts(bot)[-1] == "❌ Savatni o'qib bo'lmadi", (
+    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    assert toasts(bot) == ["❌ Savatni o'qib bo'lmadi"], (
         "the customer must be told why the tap did nothing"
     )
+    assert bot.telegram.shown == [] and checkout_reads(bot) == []
+
+    # Opening the product again: no screen at a guessed number.
+    await deliberate_retap(bot, user.tap(f"product_{WATER_ID}"))
+
+    assert toasts(bot) == ["❌ Savatni o'qib bo'lmadi"] * 2
+    assert bot.telegram.shown == []
+    assert cart_writes(bot) == []
+    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
 
 
 # ---------------------------------------------------------------------------
@@ -1144,8 +1263,8 @@ async def test_every_button_the_cart_and_quantity_screens_render_is_claimed(
     screens.append(("the cart summary", bot.telegram.last_shown()))
     await deliberate_retap(bot, user.tap("edit_order"))
     screens.append(("the cart in edit mode", bot.telegram.last_shown()))
-    await deliberate_retap(bot, user.tap(f"add_to_cart_{WATER_ID}"))
-    screens.append(("the quantity selector", bot.telegram.last_shown()))
+    await deliberate_retap(bot, user.tap(f"product_{WATER_ID}"))
+    screens.append(("the quantity screen", bot.telegram.last_shown()))
 
     for where, screen in screens:
         assert screen.callback_data(), f"{where} rendered no buttons at all"

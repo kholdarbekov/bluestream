@@ -168,29 +168,23 @@ class QuickOrderHandlers(BaseHandler):
     async def order_water(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """The bottom-menu "Order water" row: an open order first (R9), then the cart, then a refill."""
-        await self._order_water(update, context, fresh_order=False)
+        """The bottom-menu "Order water" row: an open order first (R9), then Products."""
+        await self._order_water(update, context, check_open=True)
 
     async def order_water_continue(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """The open-order notice's "Order again" button (`order_water_go`): a FRESH order, never a repeat.
-
-        The cart if it holds something, else Products, where the customer picks product, quantity and
-        (at checkout) address. No open-order check, no reorder-info read, no refill.
-        """
-        await self._order_water(update, context, fresh_order=True)
+        """The open-order notice's "Order again" button (`order_water_go`): Products, never a repeat."""
+        await self._order_water(update, context, check_open=False)
 
     async def _order_water(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, fresh_order: bool
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, check_open: bool
     ) -> None:
-        """Order water: notice -> cart -> Products -> refill-and-checkout (spec §3, R9).
+        """Order water: notice -> Products (spec §3, R9; amended 2026-10-22).
 
-        `fresh_order` is the notice's "Order again" tap (amended 2026-10-22): skip the notice and the
-        refill, so the flow is only cart -> Products and the customer chooses everything.
-
-        A cart that cannot be read stops the flow: nothing is ever filled over a cart we could
-        not see. The refill replaces the cart, so only an empty one (`cart_is_empty`) is refilled.
+        Never the cart and never a refill: the customer picks the product, and its quantity screen
+        opens at whatever the cart already holds (`ProductHandlers.add_to_cart`). Products' own
+        "Repeat last" row is the one-tap way to copy the last order.
         """
         screen = self.as_message_update(update)
         try:
@@ -199,48 +193,26 @@ class QuickOrderHandlers(BaseHandler):
             if not user:
                 return
 
-            language = await i18n.get_user_language(update.effective_user.id)
+            if check_open:
+                language = await i18n.get_user_language(update.effective_user.id)
+                async with api_client as client:
+                    user_token = await get_auth_token(screen, context, client)
+                    if not user_token:
+                        await self._handle_auth_error(screen, language)
+                        return
+                    info = await self._reorder_info(client, user_token)
 
-            async with api_client as client:
-                user_token = await get_auth_token(screen, context, client)
-                if not user_token:
-                    await self._handle_auth_error(screen, language)
-                    return
-
-                cart_response = await client.get_cart(user_token)
-                if not cart_response.success:
-                    logger.warning("Order water: cart read failed: %s", cart_response.error)
-                    await self._reply_error(screen, i18n.get('telegram.error.generic', language))
-                    return
-                cart = ((cart_response.data or {}).get('data') or {}).get('cart') or {}
-
-                info = {} if fresh_order else await self._reorder_info(client, user_token)
                 if info is None:
                     await self._reply_error(screen, i18n.get('telegram.error.generic', language))
                     return
-
                 open_order = info.get('open_order')
                 if open_order:
                     await self._send_open_order_notice(screen, open_order, 'order_water_go', language)
                     return
 
-                # Local imports: products.py imports this module at load time.
-                from handlers import product_handlers
-                from handlers.products import cart_is_empty
-
-                if not cart_is_empty(cart):
-                    await product_handlers.show_cart(screen, context)
-                    return
-
-                candidate = info.get('candidate')
-                if not candidate:
-                    await product_handlers.products_menu(screen, context)
-                    return
-
-                await self._fill_and_open_checkout(
-                    screen, context, client, user_token,
-                    candidate['order_id'], self._address_id(candidate), language,
-                )
+            # Local import: products.py imports this module at load time.
+            from handlers import product_handlers
+            await product_handlers.products_menu(screen, context)
 
         except Exception as e:
             await self._handle_error(screen, exc=e, operation="order_water")
@@ -388,7 +360,7 @@ class QuickOrderHandlers(BaseHandler):
     ) -> None:
         """Tag the checkout context so downstream handlers can branch.
 
-        ``source='reorder'`` (Order water, Repeat last, Order again) goes
+        ``source='reorder'`` (Repeat last, Order again) goes
         straight to the payment picker on a saved address, whatever the address
         count. ``'quick_order'`` (Your usual) keeps the "Delivering to" card,
         whose Back button opens the products menu instead of the cart.

@@ -25,13 +25,14 @@ LANGUAGES = ("en", "uz", "ru")
 # `_typed_quantity_refusal` and `_format_quantity_step_text`). Written by hand.
 BOT_KEYS = {
     "telegram.products.type_quantity_hint": set(),
+    "telegram.products.unit_price_label": {"price"},
     "telegram.products.typed_quantity_below_min": {"min_qty"},
     "telegram.products.typed_quantity_above_max": {"max_qty"},
     "telegram.products.typed_quantity_not_whole": {"min_qty", "max_qty"},
 }
 
 _RENDERING_MODULE = Path(__file__).resolve().parents[2] / "telegram_bot" / "handlers" / "products.py"
-_KEY_IN_SOURCE = re.compile(r"telegram\.products\.(?:type_quantity_hint|typed_quantity_[a-z_]+)")
+_KEY_IN_SOURCE = re.compile(r"telegram\.products\.(?:type_quantity_hint|unit_price_label|typed_quantity_[a-z_]+)")
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 

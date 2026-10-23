@@ -10,23 +10,27 @@ minimum. Nothing on screen changed, so they kept typing.
 
 What a typed message on that screen now means:
 
-* a whole number inside the product's bounds SETS the line to it (the same
-  absolute write a preset button makes) and a fresh screen replaces the old;
+* a whole number inside the product's bounds redraws the screen at it (exactly
+  what a preset button does) and the fresh screen replaces the old. The screen
+  is a DRAFT (owner 2026-10-22): typing neither reads nor writes the cart. Its
+  ✅ Checkout button (``buy_<product>_<n>``) carries the number, and tapping it
+  is the one cart write;
 * 0, below the minimum, above stock or the per-item cap: refused with the limit,
-  nothing written;
+  the screen left as it was;
 * "2.5", "-3", "+5": a hint to type a whole number;
 * anything else: the Support Inbox, exactly as before.
 
 A number only counts while the quantity screen is the last thing the customer
-touched: any other tap (including one on an OLDER quantity bubble), a command,
-or any message that is not a quantity closes the window, and it expires after
-30 minutes. The window lives in ``users.bot_state`` so a deploy cannot reopen
-the old bug.
+touched: any other tap (including one on an OLDER quantity bubble, and its own
+Checkout), a command, or any message that is not a quantity closes the window,
+and it expires after 30 minutes. The window lives in ``users.bot_state`` so a
+deploy cannot reopen the old bug.
 
 Every update goes in through ``Application.process_update`` against the three
 harness seams (Telegram's transport, ``_make_request``, the bot's SQL). The
 backend cart is ``ServerCart``: POST increments, PUT sets — the semantics the
-2026-06-27 accumulation bug came from.
+2026-06-27 accumulation bug came from, and the reason Checkout reads the cart
+before it writes.
 """
 
 import hashlib
@@ -48,6 +52,7 @@ from tests.telegram_bot.test_cart_and_quantity_journeys import (
     api_calls,
     build_catalogue,
     install_cart_backend,
+    toasts,
 )
 from tests.telegram_bot.test_menu_label_routing import MENU_LABELS, MENU_LABEL_TRANSLATIONS
 
@@ -70,7 +75,8 @@ VERIFY_OTP = "/api/v1/auth/verify-phone"
 TRANSLATIONS = {
     **CART_TRANSLATIONS,
     **MENU_LABEL_TRANSLATIONS,
-    ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli sonni yozib yuboring",
+    ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli miqdorni yozing",
+    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} UZS (1 dona)",
     ("uz", "telegram.products.typed_quantity_below_min"): (
         "Bu mahsulot uchun eng kam buyurtma — {min_qty} ta. "
         "{min_qty} yoki undan ko'p son yozing."
@@ -150,29 +156,46 @@ def user(bot, request):
 # Readers and journeys
 # ---------------------------------------------------------------------------
 
-QUANTITY_SCREEN_MESSAGE_ID = 321  # the bubble the customer tapped "Add to cart" on
+# The product-list bubble the customer tapped the product on. With no product
+# photo the screen is drawn on that same bubble, in place.
+QUANTITY_SCREEN_MESSAGE_ID = 321
+
+# The screen's Back: the product's category list (build_catalogue's category).
+SCREEN_BACK = f"category_{build_catalogue()[WATER_ID]['category']['id']}"
 
 
 async def open_quantity_screen(bot, user, product_id=WATER_ID, message_id=QUANTITY_SCREEN_MESSAGE_ID):
-    """Tap 'Add to cart' on the product card (message 321 unless told otherwise)."""
-    await bot.send(user.tap(f"add_to_cart_{product_id}", message_id=message_id))
+    """Tap the product in the list (message 321 unless told otherwise).
+
+    That is how a customer opens the screen now: no details card, no "Add to
+    cart". Opening reads the product and the cart (to start at the quantity
+    already there) and writes nothing.
+    """
+    await bot.send(user.tap(f"product_{product_id}", message_id=message_id))
     screen = bot.telegram.last_shown()
-    # Start every assertion from "after the screen opened": opening it already
-    # POSTed the line at the product minimum, which is add_to_cart's business.
+    # Start every assertion from "after the screen opened", so the reads the
+    # opening made are not mistaken for the typed number's.
     bot.telegram.reset()
     bot.backend.calls.clear()
     return screen
 
 
+async def tap_checkout(bot, user):
+    """Tap ✅ Checkout on the screen just drawn: the newest bubble, and the
+    button exactly as that screen rendered it."""
+    [buy] = [data for data in bot.telegram.last_shown().callback_data() if data.startswith("buy_")]
+    await bot.send(user.tap(buy, message_id=bot.telegram._next_message_id))
+
+
 def photo_tap(user, callback_data: str, message_id: int) -> Update:
-    """A tap on a PHOTO bubble — the product card of every product with a
-    picture, and therefore the usual way into the quantity screen.
-    ``UpdateFactory.tap`` only builds text bubbles."""
+    """A tap on a PHOTO bubble — a product list shown with a picture, or the
+    quantity screen of every product that has one. ``UpdateFactory.tap`` only
+    builds text bubbles."""
     update = user.tap(callback_data, message_id=message_id).to_dict()
     message = update["callback_query"]["message"]
     del message["text"]
     message["photo"] = [{"file_id": "card", "file_unique_id": "u-card", "width": 640, "height": 640}]
-    message["caption"] = "product card"
+    message["caption"] = "a photo bubble"
     return Update.de_json(update, user.bot)
 
 
@@ -197,6 +220,29 @@ def cart_writes(bot, product_id=WATER_ID) -> list:
         if (call.method == "PUT" and call.endpoint == f"/api/v1/cart/items/{product_id}")
         or (call.method == "POST" and call.endpoint == "/api/v1/cart/items")
         or (call.method == "DELETE" and call.endpoint == f"/api/v1/cart/items/{product_id}")
+    ]
+
+
+def cart_calls(bot) -> list:
+    """Every cart call at all, reads included, as (method, endpoint)."""
+    return [
+        (call.method, call.endpoint)
+        for call in bot.backend.calls
+        if call.endpoint.startswith("/api/v1/cart")
+    ]
+
+
+def checkout_buttons(bot) -> list[str]:
+    """The ✅ Checkout button of every screen drawn, in order.
+
+    Typing changes only the draft on screen, so this — the number each screen
+    would put in the cart — is what a typed number moves. An empty list means
+    the number was not taken as a quantity at all."""
+    return [
+        data
+        for call in bot.telegram.of("sendMessage", "sendPhoto", "editMessageText", "editMessageCaption")
+        for data in call.callback_data()
+        if data.startswith("buy_")
     ]
 
 
@@ -232,45 +278,77 @@ def restart(bot, user):
 
 
 # ---------------------------------------------------------------------------
-# The number is written
+# The number is shown, and Checkout writes it
 # ---------------------------------------------------------------------------
 
 
-async def test_a_typed_number_sets_the_line_to_exactly_that_number(bot, user, cart):
-    """The whole feature. If the write became relative (a POST increment), the
-    customer who typed 7 would get 2 + 7 = 9 bottles; if it went nowhere, their
-    7 would sit in the Support Inbox while the cart held 2."""
+async def test_a_typed_number_redraws_the_screen_at_exactly_that_number(bot, user, cart):
+    """The whole feature. If the number went nowhere, the customer's 7 would sit
+    in the Support Inbox while the screen still offered 2. The cart does not
+    hold this product, so the screen is a draft: the 7 lands on it — and on its
+    Checkout button — and the cart is only read, to learn that."""
     await open_quantity_screen(bot, user)
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+
+    await bot.send(user.text("7"))
+
+    assert cart_calls(bot) == [("GET", "/api/v1/cart")], "a product not in the cart is a draft"
+    assert cart.lines == {}
+    assert support_posts(bot) == [], "a quantity is not a support ticket"
+
+    screen = bot.telegram.last_shown()
+    assert screen.method == "sendMessage", "the refreshed screen goes BELOW the customer's 7"
+    assert screen.text == "\n".join([
+        f"🛒 {WATER_NAME}",
+        f"💰 {t('telegram.products.unit_price_label', price='15,000')}",
+        f"ℹ️ {t('telegram.products.min_order_quantity_label', min_qty=WATER_MIN_QTY)}",
+        "",
+        f"{t('telegram.quantity')}: 7",
+        f"{t('telegram.total')}: 7 × 15,000 = 105,000 UZS",  # hand-computed
+        "",
+        t("telegram.products.type_quantity_hint"),
+    ])
+    # The ± row steps from the NEW quantity, or the next tap would undo the 7;
+    # Checkout carries it, because Checkout is what writes it.
+    assert f"qty_inc_{WATER_ID}_7" in screen.callback_data()
+    assert f"qty_dec_{WATER_ID}_7" in screen.callback_data()
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
+    # One live screen: the one they typed under replaces the one they typed at.
+    assert deleted_message_ids(bot) == [QUANTITY_SCREEN_MESSAGE_ID]
+
+
+async def test_a_typed_number_sets_a_line_the_cart_already_holds_to_exactly_that_number(bot, user, cart):
+    """The cart already holds 2, so the screen opens at 2; the customer types 7
+    (owner 2026-10-23: a product in the cart changes at once). If the write
+    became relative (a POST increment), they would get 2 + 7 = 9 bottles.
+    Checkout then confirms the same 7 and opens checkout."""
+    cart.set(WATER_ID, WATER_MIN_QTY)
+    await open_quantity_screen(bot, user)
 
     await bot.send(user.text("7"))
 
     assert cart_writes(bot) == [("PUT", {"quantity": 7})]
     assert cart.quantity_of(WATER_ID) == 7
-    assert support_posts(bot) == [], "a quantity is not a support ticket"
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
 
-    screen = bot.telegram.last_shown()
-    assert screen.method == "sendMessage", "the refreshed screen goes BELOW the customer's 7"
-    assert f"{t('telegram.quantity')}: 7" in screen.text
-    assert "Jami: 105,000 UZS" in screen.text  # 7 × 15,000, hand-computed
-    # The ± row steps from the NEW quantity, or the next tap would undo the 7.
-    assert f"qty_inc_{WATER_ID}_7" in screen.callback_data()
-    assert f"qty_dec_{WATER_ID}_7" in screen.callback_data()
-    # One live screen: the one they typed under replaces the one they typed at.
-    assert deleted_message_ids(bot) == [QUANTITY_SCREEN_MESSAGE_ID]
+    await tap_checkout(bot, user)
+
+    assert cart_writes(bot) == [("PUT", {"quantity": 7}), ("PUT", {"quantity": 7})]
+    assert cart.quantity_of(WATER_ID) == 7
+    assert len(api_calls(bot, "GET", "/api/v1/auth/addresses")) == 1, "then checkout opens"
 
 
 @pytest.mark.parametrize(
     "typed",
     ["7 ta", "7 dona", "7 шт", "x7", "\u04457", "7\ufe0f\u20e3", "\uff17", "\u0667"],
 )
-async def test_the_ways_customers_write_seven_all_set_seven(bot, user, cart, typed):
+async def test_the_ways_customers_write_seven_all_show_seven(bot, user, cart, typed):
     await open_quantity_screen(bot, user)
 
     await bot.send(user.text(typed))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
-    assert cart.quantity_of(WATER_ID) == 7
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
+    assert f"{t('telegram.quantity')}: 7\n" in bot.telegram.last_shown().text
+    assert cart_writes(bot) == []
 
 
 async def test_typing_again_replaces_the_screen_the_first_number_drew(bot, user, cart):
@@ -284,18 +362,23 @@ async def test_typing_again_replaces_the_screen_the_first_number_drew(bot, user,
 
     await bot.send(user.text("9"))
 
-    assert cart.quantity_of(WATER_ID) == 9
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_9"]
     assert deleted_message_ids(bot) == [screen_drawn_by_the_seven]
 
 
-async def test_a_line_that_left_the_cart_is_added_back_at_the_typed_number(bot, user, cart):
-    """The screen is still up but the line is gone (removed on the website, say).
-    PUT on a missing line is a backend 404, so the only honest write is a POST —
-    and it is safe only because the bot READ the cart first and saw nothing."""
+async def test_a_line_that_left_the_cart_is_added_back_at_checkout_at_the_typed_number(
+    bot, user, cart
+):
+    """The screen opened at the 2 in the cart, then the line went (removed on
+    the website, say) while the customer typed 7. PUT on a missing line is a
+    backend 404, so the only honest write is a POST — and it is safe only
+    because Checkout READ the cart first and saw nothing."""
+    cart.set(WATER_ID, WATER_MIN_QTY)
     await open_quantity_screen(bot, user)
     cart.remove(WATER_ID)
-
     await bot.send(user.text("7"))
+
+    await tap_checkout(bot, user)
 
     assert cart_writes(bot) == [("POST", {"product_id": WATER_ID, "quantity": 7})]
     assert cart.quantity_of(WATER_ID) == 7
@@ -309,7 +392,7 @@ async def test_a_typed_number_still_lands_after_a_deploy(bot, user, cart):
 
     await bot.send(user.text("7"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
     assert support_posts(bot) == []
 
 
@@ -317,7 +400,7 @@ async def test_a_photo_screen_is_redrawn_as_a_photo(bot, user, cart, catalogue):
     """Most products have a picture, and the quantity screen shows it. Answering
     a typed number with a bare text screen would make the product vanish."""
     catalogue[WATER_ID]["image_url"] = "https://cdn.example.com/water.jpg"
-    await bot.send(user.tap(f"add_to_cart_{WATER_ID}", message_id=QUANTITY_SCREEN_MESSAGE_ID))
+    await bot.send(user.tap(f"product_{WATER_ID}", message_id=QUANTITY_SCREEN_MESSAGE_ID))
     first_photo_screen = bot.telegram._next_message_id
     bot.telegram.reset()
 
@@ -337,15 +420,15 @@ async def test_a_photo_screen_is_redrawn_as_a_photo(bot, user, cart, catalogue):
 
 @pytest.mark.parametrize("typed", ["1", "0"])
 async def test_a_number_below_the_minimum_is_refused_with_the_minimum(bot, user, cart, typed):
-    """Water is sold in twos. Writing 1 would strand the customer on a cart the
-    backend refuses at checkout; writing 0 is a PUT the backend treats as
-    REMOVE. Neither may reach it."""
+    """Water is sold in twos. Showing 1 would put a Checkout on screen for a
+    cart the backend refuses at checkout; 0 written at Checkout is a PUT the
+    backend treats as REMOVE. Neither may reach the screen."""
     await open_quantity_screen(bot, user)
 
     await bot.send(user.text(typed))
 
-    assert cart_writes(bot) == []
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    assert checkout_buttons(bot) == []
+    assert deleted_message_ids(bot) == [], "the screen at 2 stays the live one"
     assert replies(bot) == [t("telegram.products.typed_quantity_below_min", min_qty=2)]
     assert support_posts(bot) == []
 
@@ -356,7 +439,8 @@ async def test_after_a_refusal_the_customer_can_simply_type_again(bot, user, car
 
     await bot.send(user.text("3"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 3})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_3"]
+    assert deleted_message_ids(bot) == [QUANTITY_SCREEN_MESSAGE_ID]
 
 
 async def test_a_number_above_the_stock_is_refused_with_what_is_left(bot, user, cart):
@@ -364,7 +448,7 @@ async def test_a_number_above_the_stock_is_refused_with_what_is_left(bot, user, 
 
     await bot.send(user.text("41"))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert replies(bot) == [t("telegram.products.typed_quantity_above_max", max_qty=WATER_STOCK)]
 
 
@@ -374,7 +458,7 @@ async def test_the_top_of_the_range_is_accepted(bot, user, cart):
 
     await bot.send(user.text("40"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 40})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_40"]
 
 
 async def test_an_untracked_product_is_capped_at_the_per_item_maximum(bot, user, cart, catalogue):
@@ -385,7 +469,7 @@ async def test_an_untracked_product_is_capped_at_the_per_item_maximum(bot, user,
 
     await bot.send(user.text(str(MAX_QUANTITY_PER_ITEM + 1)))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert replies(bot) == [
         t("telegram.products.typed_quantity_above_max", max_qty=MAX_QUANTITY_PER_ITEM)
     ]
@@ -397,7 +481,7 @@ async def test_a_number_that_is_not_a_whole_count_gets_a_hint(bot, user, cart, t
 
     await bot.send(user.text(typed))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert replies(bot) == [
         t("telegram.products.typed_quantity_not_whole", min_qty=2, max_qty=WATER_STOCK)
     ]
@@ -413,15 +497,20 @@ async def test_a_product_that_sold_out_since_the_screen_opened_is_refused(
     await bot.send(user.text("7"))
     await bot.send(user.text("7"))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert replies(bot) == [t("telegram.products.out_of_stock")] * 2, (
         "every number typed at a sold-out screen is answered, never filed as support"
     )
 
 
-async def test_a_backend_refusal_is_shown_and_the_cart_is_left_alone(bot, user, cart):
+async def test_a_backend_refusal_of_a_typed_number_is_shown_and_the_cart_is_left_alone(
+    bot, user, cart
+):
     """The bot's ceiling reads raw stock; the backend also subtracts other
-    customers' reservations. Its refusal must reach the customer."""
+    customers' reservations. So a 7 the screen accepted can still be refused
+    when it is written to a line the cart holds, and that refusal must reach
+    the customer — whose screen keeps showing the 2 the cart still holds."""
+    cart.set(WATER_ID, WATER_MIN_QTY)
     await open_quantity_screen(bot, user)
     refusal = f"Product {WATER_ID} ({WATER_NAME}): Only 5 available (reserved: 35), requested 7"
     bot.backend.route(
@@ -432,16 +521,23 @@ async def test_a_backend_refusal_is_shown_and_the_cart_is_left_alone(bot, user, 
 
     await bot.send(user.text("7"))
 
+    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
     assert replies(bot) == [f"❌ {refusal}"]
+    assert checkout_buttons(bot) == [], "no screen may show the 7 the cart refused"
+    assert deleted_message_ids(bot) == [], "the screen showing the real 2 stays"
 
 
-async def test_an_unreadable_cart_writes_nothing(bot, user, cart):
-    """The typed write is a PUT when the line exists and a POST (an INCREMENT)
-    when it does not, so which one is right depends on reading the cart. An
-    unreadable cart is UNKNOWN, never empty: treating a 500 as "not in the
-    cart" would POST 7 onto the 2 already there — the 2026-06-27 accumulation
-    bug, 9 bottles for a customer who typed 7."""
+async def test_an_unreadable_cart_stops_the_typed_number_and_checkout_alike(
+    bot, user, cart
+):
+    """Which write is right — a SET for a line the cart holds, nothing (a
+    draft) or a POST at Checkout for one it does not — depends on reading the
+    cart. An unreadable cart is UNKNOWN, never empty: a draft redraw would show
+    a 7 the cart may not hold, and a Checkout POST of 7 onto the 2 already
+    there is the 2026-06-27 accumulation bug, 9 bottles for a customer who
+    typed 7."""
+    cart.set(WATER_ID, WATER_MIN_QTY)
     await open_quantity_screen(bot, user)
     bot.backend.route(
         "GET", "/api/v1/cart", lambda _c: backend_failure("Cart unavailable", status_code=500),
@@ -449,9 +545,14 @@ async def test_an_unreadable_cart_writes_nothing(bot, user, cart):
 
     await bot.send(user.text("7"))
 
+    assert replies(bot) == ["❌ Cart unavailable"]
+    assert checkout_buttons(bot) == []
+
+    await bot.send(user.tap(f"buy_{WATER_ID}_{WATER_MIN_QTY}", message_id=QUANTITY_SCREEN_MESSAGE_ID))
+
     assert cart_writes(bot) == []
     assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
-    assert replies(bot) == ["❌ Cart unavailable"]
+    assert toasts(bot) == ["❌ Cart unavailable"]
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +566,7 @@ async def test_words_typed_on_the_screen_reach_the_inbox_and_end_the_typing_wind
     """Once the customer is talking to a person, a bare number that follows is
     most likely an answer to that person ("which apartment?" — "12"), and an
     operator reply reaches the chat without any update the bot could see. So
-    words close the window: the 12 goes to the inbox, not into the cart."""
+    words close the window: the 12 goes to the inbox, not onto the screen."""
     question = "Salom, suv bugun keladimi?"
     await open_quantity_screen(bot, user)
 
@@ -477,7 +578,7 @@ async def test_words_typed_on_the_screen_reach_the_inbox_and_end_the_typing_wind
         {"content": "12", "message_type": "text"},
     ]
     assert bot.telegram.shown == [], "the inbox capture stays silent"
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
 
 
 async def test_a_phone_number_typed_on_the_screen_reaches_the_inbox(bot, user, cart):
@@ -488,32 +589,32 @@ async def test_a_phone_number_typed_on_the_screen_reaches_the_inbox(bot, user, c
     await bot.send(user.text("+998901234567"))
 
     assert support_posts(bot) == [{"content": "+998901234567", "message_type": "text"}]
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
 
 
 @pytest.mark.parametrize(
     "leave",
     [
-        lambda user: user.tap(f"back_to_product_{WATER_ID}"),
+        lambda user: user.tap(SCREEN_BACK),
         lambda user: user.tap("back_to_main"),
         lambda user: user.tap("cart_view"),
         lambda user: user.command("menu"),
         lambda user: user.photo(),
         # The two ways off the screen that sit ON the live screen itself.
-        lambda user: user.tap("checkout", message_id=QUANTITY_SCREEN_MESSAGE_ID),
-        lambda user: user.tap(f"back_to_product_{WATER_ID}", message_id=QUANTITY_SCREEN_MESSAGE_ID),
+        lambda user: user.tap(f"buy_{WATER_ID}_{WATER_MIN_QTY}", message_id=QUANTITY_SCREEN_MESSAGE_ID),
+        lambda user: user.tap(SCREEN_BACK, message_id=QUANTITY_SCREEN_MESSAGE_ID),
         lambda user: user.text(MENU_LABELS["telegram.menu.support"]["uz"]),
     ],
     ids=[
-        "back", "main-menu", "cart", "/menu", "photo", "checkout-on-screen", "back-on-screen",
-        "menu-label",
+        "category-list", "main-menu", "cart", "/menu", "photo", "checkout-on-screen",
+        "back-on-screen", "menu-label",
     ],
 )
 async def test_once_the_customer_leaves_the_screen_a_number_is_a_message_again(
     bot, user, cart, leave
 ):
-    """A digit typed later, somewhere else, must never move a cart line the
-    customer is no longer looking at."""
+    """A digit typed later, somewhere else, must never change the number on a
+    screen the customer is no longer looking at — and then be checked out."""
     await open_quantity_screen(bot, user)
     await bot.send(leave(user))
     bot.telegram.reset()
@@ -521,6 +622,7 @@ async def test_once_the_customer_leaves_the_screen_a_number_is_a_message_again(
 
     await bot.send(user.text("7"))
 
+    assert checkout_buttons(bot) == []
     assert cart_writes(bot) == []
     assert support_posts(bot) == [{"content": "7", "message_type": "text"}]
 
@@ -536,7 +638,7 @@ async def test_the_screen_stops_listening_after_thirty_minutes(bot, user, cart):
 
     await bot.send(user.text("7"))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert support_posts(bot) == [{"content": "7", "message_type": "text"}]
 
 
@@ -571,22 +673,24 @@ async def test_tapping_the_quantity_label_on_an_older_screen_ends_the_typing_win
     await bot.send(user.tap("qty_current", message_id=SPORT_SCREEN_MESSAGE_ID))
     await bot.send(user.text("4"))
 
-    assert cart_writes(bot, WATER_ID) == []
-    assert cart_writes(bot, SPORT_ID) == []
+    assert checkout_buttons(bot) == []
     assert support_posts(bot) == [{"content": "4", "message_type": "text"}]
 
 
-async def test_a_failed_add_to_cart_on_another_card_ends_the_typing_window(bot, user, cart):
+async def test_a_product_whose_screen_cannot_open_ends_the_typing_window(bot, user, cart):
+    """Tapping Sport while Water's screen is live, with the cart unreadable:
+    Sport's screen is refused (its starting number would be a guess), and the
+    window must not stay aimed at Water — the customer's "4" was for Sport."""
     await open_quantity_screen(bot, user)
     bot.backend.route(
-        "POST", "/api/v1/cart/items", lambda _c: backend_failure("Server error", status_code=500),
+        "GET", "/api/v1/cart", lambda _c: backend_failure("Cart unavailable", status_code=500),
     )
 
-    await bot.send(user.tap(f"add_to_cart_{SPORT_ID}", message_id=500))
+    await bot.send(user.tap(f"product_{SPORT_ID}", message_id=500))
     await bot.send(user.text("4"))
 
-    assert api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}") == []
-    assert cart.quantity_of(WATER_ID) == WATER_MIN_QTY
+    assert toasts(bot) == ["❌ Cart unavailable"]
+    assert bot.telegram.shown == [], "no screen for Sport, no redraw of Water"
     assert support_posts(bot) == [{"content": "4", "message_type": "text"}]
 
 
@@ -596,15 +700,14 @@ async def test_a_redrawn_older_screen_takes_the_typed_number(bot, user, cart):
     await bot.send(user.tap(f"qty_inc_{SPORT_ID}_1", message_id=SPORT_SCREEN_MESSAGE_ID))
     await bot.send(user.text("4"))
 
-    assert api_calls(bot, "PUT", f"/api/v1/cart/items/{WATER_ID}") == []
-    assert [c.data for c in api_calls(bot, "PUT", f"/api/v1/cart/items/{SPORT_ID}")] == [
-        {"quantity": 2}, {"quantity": 4},
-    ]
-    assert cart.quantity_of(SPORT_ID) == 4
+    # The + redrew Sport at 2 on its own bubble; the 4 replaced that bubble.
+    assert checkout_buttons(bot) == [f"buy_{SPORT_ID}_2", f"buy_{SPORT_ID}_4"]
     assert deleted_message_ids(bot) == [SPORT_SCREEN_MESSAGE_ID]
+    assert cart_writes(bot, WATER_ID) == []
+    assert cart_writes(bot, SPORT_ID) == []
 
 
-async def test_a_number_replied_to_an_older_screen_is_not_written_to_the_live_one(
+async def test_a_number_replied_to_an_older_screen_does_not_change_the_live_one(
     bot, user, cart
 ):
     """Swipe-replying "4" to Sport's old screen means Sport. The window only
@@ -613,7 +716,7 @@ async def test_a_number_replied_to_an_older_screen_is_not_written_to_the_live_on
 
     await bot.send(reply(user, "4", to_message_id=SPORT_SCREEN_MESSAGE_ID))
 
-    assert cart_writes(bot, WATER_ID) == []
+    assert checkout_buttons(bot) == []
     assert support_posts(bot) == [{"content": "4", "message_type": "text"}]
 
 
@@ -622,7 +725,7 @@ async def test_a_number_replied_to_the_live_screen_is_its_quantity(bot, user, ca
 
     await bot.send(reply(user, "7", to_message_id=QUANTITY_SCREEN_MESSAGE_ID))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
 
 
 async def test_a_forwarded_number_is_not_a_quantity(bot, user, cart):
@@ -631,7 +734,7 @@ async def test_a_forwarded_number_is_not_a_quantity(bot, user, cart):
 
     await bot.send(user.forwarded_text("5"))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
 
 
 async def test_tapping_the_live_screens_quantity_label_keeps_the_window(bot, user, cart):
@@ -642,26 +745,29 @@ async def test_tapping_the_live_screens_quantity_label_keeps_the_window(bot, use
     await bot.send(user.tap("qty_current", message_id=QUANTITY_SCREEN_MESSAGE_ID))
     await bot.send(user.text("7"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
     assert support_posts(bot) == []
 
 
 async def test_a_tap_on_a_photo_screen_keeps_the_window_on_that_bubble(bot, user, cart, catalogue):
-    """The usual production path: the product card is a photo, 'Add to cart'
-    edits its caption in place, and a later ± edits it again. The window must
-    name that same bubble, so the typed number replaces it."""
+    """The usual production path: the product has a picture, so tapping it in
+    the list sends its screen as a NEW photo (the list's own photo is never
+    re-captioned), and a later ± edits that photo's caption in place. The
+    window must name that same bubble, so the typed number replaces it."""
     catalogue[WATER_ID]["image_url"] = "https://cdn.example.com/water.jpg"
-    await bot.send(photo_tap(user, f"add_to_cart_{WATER_ID}", QUANTITY_SCREEN_MESSAGE_ID))
-    await bot.send(photo_tap(user, f"qty_inc_{WATER_ID}_2", QUANTITY_SCREEN_MESSAGE_ID))
+    await bot.send(photo_tap(user, f"product_{WATER_ID}", QUANTITY_SCREEN_MESSAGE_ID))
+    photo_screen = bot.telegram._next_message_id  # the photo just sent
+    await bot.send(photo_tap(user, f"qty_inc_{WATER_ID}_2", photo_screen))
+    assert deleted_message_ids(bot) == [QUANTITY_SCREEN_MESSAGE_ID]
     assert [int(c.params["message_id"]) for c in bot.telegram.of("editMessageCaption")] == [
-        QUANTITY_SCREEN_MESSAGE_ID, QUANTITY_SCREEN_MESSAGE_ID,
+        photo_screen,
     ]
     bot.telegram.reset()
 
     await bot.send(user.text("7"))
 
-    assert cart.quantity_of(WATER_ID) == 7
-    assert deleted_message_ids(bot) == [QUANTITY_SCREEN_MESSAGE_ID]
+    assert deleted_message_ids(bot) == [photo_screen]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
     assert f"{t('telegram.quantity')}: 7" in bot.telegram.of("sendPhoto")[0].params["caption"]
 
 
@@ -682,7 +788,7 @@ async def test_the_newest_screen_takes_the_number_and_an_older_issue_report_the_
     await bot.send(user.text("7"))
     await bot.send(user.text("Suv loyqa keldi"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
     assert support_posts(bot) == [
         {"content": f"[Order #{ORDER_NUMBER}] Suv loyqa keldi", "message_type": "text"}
     ]
@@ -694,7 +800,7 @@ async def test_an_issue_report_opened_after_the_screen_takes_the_number(bot, use
 
     await bot.send(user.text("7"))
 
-    assert cart_writes(bot) == []
+    assert checkout_buttons(bot) == []
     assert support_posts(bot) == [
         {"content": f"[Order #{ORDER_NUMBER}] 7", "message_type": "text"}
     ]
@@ -711,7 +817,7 @@ async def test_a_verification_code_is_never_read_as_a_quantity(bot, user, cart):
     await bot.send(user.text("7"))
     await bot.send(user.text("123456"))
 
-    assert cart_writes(bot) == [("PUT", {"quantity": 7})]
+    assert checkout_buttons(bot) == [f"buy_{WATER_ID}_7"]
     verifications = api_calls(bot, "POST", VERIFY_OTP)
     assert len(verifications) == 1
     assert "123456" in json.dumps(verifications[0].data)

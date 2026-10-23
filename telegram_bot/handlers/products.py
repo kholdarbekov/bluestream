@@ -3,6 +3,7 @@ Product browsing and shopping cart handlers
 """
 import logging
 import json
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse, urlunparse
@@ -16,7 +17,7 @@ from telegram.helpers import escape_markdown
 
 from i18n import i18n
 from keyboards import (
-    ProductKeyboards, MenuKeyboards, OrderKeyboards, parse_product_page_callback,
+    BUY_PATTERN, ProductKeyboards, MenuKeyboards, OrderKeyboards, parse_product_page_callback,
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
@@ -49,7 +50,7 @@ def min_order_shortfall(subtotal: float) -> float:
 def cart_is_empty(cart: dict) -> bool:
     """The one "nothing to check out" rule: no lines, or a server subtotal of nothing.
 
-    Shared by the cart screen, Order water and the expired-checkout fallback. A line the
+    Shared by the cart screen and the expired-checkout fallback. A line the
     server dropped is still listed (at 0), so the lines alone do not decide it.
     """
     return not cart.get('cart_items') or float(cart.get('subtotal') or 0) <= 0
@@ -121,6 +122,22 @@ class ProductHandlers(BaseHandler):
             error = getattr(response, 'error', None) or i18n.get('telegram.error_occurred', language)
             return None, error
         return (self._quantity_in_cart_payload(response, product_id) or 0), None
+
+    @staticmethod
+    async def _update_line_in_cart(client, user_token: str, product_id: int, quantity: int,
+                                   in_cart: int) -> Optional[str]:
+        """Set the cart line to ``quantity`` when the cart already holds the product.
+
+        The quantity screen's live half (owner 2026-10-23): a preset, ± or typed
+        number changes a product the cart holds at once, while a product it does
+        not hold stays a draft until ✅ Checkout (`checkout_product`). ``in_cart``
+        is `_read_cart_quantity`'s answer, never a guess. A PUT is a SET, so a
+        repeat cannot stack. Returns the error to show, or None.
+        """
+        if not in_cart:
+            return None
+        write = await client.update_cart_item(user_token, product_id, quantity=quantity)
+        return None if write.success else write.error
 
     # ------------------------------------------------------------------
     # The ± rule, in ONE place.
@@ -569,129 +586,50 @@ class ProductHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="product_page_handler")
 
-    async def product_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show product details"""
+    async def open_quantity_screen(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """A product tap: that product's quantity screen, with no details card in between.
+
+        It opens at the quantity the cart already holds, or else at the product
+        minimum, and writes nothing. Its buttons then change a product the cart
+        holds at once, and keep any other product a draft until ✅ Checkout
+        (`_update_line_in_cart`, `checkout_product`). An unreadable cart opens
+        nothing, because the number on screen would then be a guess the
+        customer might confirm.
+
+        Also answers `add_to_cart_<id>` and `back_to_product_<id>`: the buttons of
+        product cards and quantity screens drawn before the card was removed
+        (owner 2026-10-22), which stay in customers' chats.
+        """
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
+            product_id = int(query.data.rsplit('_', 1)[1])
 
-            # Extract product ID
-            if 'back_to_product_' in query.data:
-                product_id = int(query.data.split('_')[3])  # back_to_product_{id}
-            else:
-                product_id = int(query.data.split('_')[1])  # product_{id}
-
-            # Get user token
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
 
-                # Get product details
                 response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-
                 product = response.data['data']['product']
 
-            # Get category ID for back button
-            category_id = product.get('category', {}).get('id')
+                in_cart, cart_error = await self._read_cart_quantity(client, user_token, product_id, language)
+                if cart_error:
+                    await self._handle_api_error(update, cart_error, language)
+                    return
 
-            # Format product details
-            details_text = self._format_product_details(product, language)
-            keyboard = ProductKeyboards.product_details(product_id, category_id, language)
-
-            # Get product image (supports media.images, media.image_urls, images, image_url)
-            image_url = self._extract_product_image_url(product)
-
-            if image_url:
-                should_send_direct_url = not self._is_private_image_url(image_url)
-                if should_send_direct_url:
-                    try:
-                        await query.message.delete()
-                        await context.bot.send_photo(
-                            chat_id=user_id,
-                            photo=image_url,
-                            caption=details_text,
-                            reply_markup=keyboard,
-                            parse_mode=constants.ParseMode.MARKDOWN_V2
-                        )
-                    except Exception as img_error:
-                        logger.warning(f"Failed to send product image by URL ({image_url}): {img_error}")
-                        should_send_direct_url = False
-
-                if not should_send_direct_url:
-                    # Download image via backend-accessible URL and upload bytes.
-                    # This covers localhost/internal/relative URLs that Telegram cannot fetch directly.
-                    fetch_url = self._build_internal_fetch_url(image_url)
-                    downloaded_image = await self._download_image_bytes(fetch_url) if fetch_url else None
-
-                    # Always replace the previous message to keep navigation tidy:
-                    # whether we send a photo or fall back to a text message, delete
-                    # the message that hosted the button the user just clicked first.
-                    try:
-                        await query.message.delete()
-                    except Exception:
-                        pass
-
-                    if downloaded_image:
-                        try:
-                            await context.bot.send_photo(
-                                chat_id=user_id,
-                                photo=downloaded_image,
-                                caption=details_text,
-                                reply_markup=keyboard,
-                                parse_mode=constants.ParseMode.MARKDOWN_V2
-                            )
-                        except Exception as upload_error:
-                            logger.error(f"Failed to upload downloaded product image: {upload_error}")
-                            try:
-                                await context.bot.send_message(
-                                    chat_id=user_id,
-                                    text=details_text,
-                                    reply_markup=keyboard,
-                                    parse_mode=constants.ParseMode.MARKDOWN_V2
-                                )
-                            except Exception as e:
-                                logger.warning(f"Failed to send fallback product detail message: {e}")
-                    else:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=user_id,
-                                text=details_text,
-                                reply_markup=keyboard,
-                                parse_mode=constants.ParseMode.MARKDOWN_V2
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to send fallback product detail message: {e}")
-            else:
-                if query.message.photo:
-                    # Same delete-and-resend as the category list, and the same
-                    # rule: the drop is tidy-up and may be refused (48h window,
-                    # already gone) without costing the customer the product.
-                    await self._delete_callback_message(query)
-                    await query.message.reply_text(
-                        text=details_text,
-                        reply_markup=keyboard,
-                        parse_mode=constants.ParseMode.MARKDOWN_V2
-                    )
-                else:
-                    await self._edit_or_replace_callback_message(
-                        query,
-                        details_text,
-                        reply_markup=keyboard,
-                        parse_mode=constants.ParseMode.MARKDOWN_V2,
-                    )
-
+            min_order_qty, _upper = self._purchase_bounds(product)
+            await self._render_quantity_step(
+                update, context, product_id, product, in_cart or min_order_qty, language, fresh=True,
+            )
             await self._ack(query)
 
-            logger.info(f"Product {product_id} details shown to user {user_id}")
-
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="product_details")
+            await self._handle_error(update, exc=e, operation="open_quantity_screen")
 
     def _format_quantity_step_text(
         self, product: Dict[str, Any], quantity: int, language: str,
@@ -699,24 +637,38 @@ class ProductHandlers(BaseHandler):
         """Build the body text shown above the quantity selector.
 
         Used as either an inline message body or as a photo caption depending on
-        whether we have a product image available.
+        whether we have a product image available. The price line is the price
+        of ONE item and the total line shows its arithmetic, so the two are
+        never mistaken for each other (owner 2026-10-22).
         """
         unit_price = self._get_effective_unit_price(product)
         min_order_qty, _upper = self._purchase_bounds(product)
-        text = (
-            f"🛒 {product['name']}\n\n"
-            f"{i18n.get('telegram.quantity', language)}: {quantity}\n"
-            f"{i18n.get('telegram.total', language)}: {format_price(unit_price * quantity)} UZS"
+        lines = [
+            f"🛒 {product['name']}",
+            f"💰 {i18n.get('telegram.products.unit_price_label', language, price=format_price(unit_price))}",
+        ]
+        hint = self._contract_price_hint(
+            bool((product.get('pricing') or {}).get('contract_price_at_checkout')), language, markdown_v2=False
         )
+        if hint:
+            lines.append(hint)
+        if not self._is_orderable(product):
+            # No quantity, total or typing hint: none of them could be ordered.
+            lines += ["", f"❌ {i18n.get('telegram.products.out_of_stock', language)}"]
+            return "\n".join(lines)
         if min_order_qty > 1:
-            text += (
-                f"\nℹ️ {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
+            lines.append(
+                f"ℹ️ {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
             )
-        if self._is_orderable(product):
-            # Only when a number could be accepted: inviting a typed quantity
-            # on a sold-out screen promises what the next message refuses.
-            text += f"\n\n{i18n.get('telegram.products.type_quantity_hint', language)}"
-        return text
+        lines += [
+            "",
+            f"{i18n.get('telegram.quantity', language)}: {quantity}",
+            f"{i18n.get('telegram.total', language)}: "
+            f"{quantity} × {format_price(unit_price)} = {format_price(unit_price * quantity)} UZS",
+            "",
+            i18n.get('telegram.products.type_quantity_hint', language),
+        ]
+        return "\n".join(lines)
 
     async def _render_quantity_step(
         self,
@@ -728,14 +680,17 @@ class ProductHandlers(BaseHandler):
         language: str,
         *,
         replaces_message_id: Optional[int] = None,
+        fresh: bool = False,
     ) -> None:
         """Render the quantity selector with the product image shown.
 
         Strategy for a TAP (callback query):
-          * If the current callback bubble is already a photo, edit its caption
-            and keyboard in place (cheap, no re-upload).
-          * If it's a text bubble and a product image is available, delete and
-            re-send as a photo so the user sees what they're ordering.
+          * If the tap is on the screen's own photo bubble, edit its caption
+            and keyboard in place (cheap, no re-upload). ``fresh`` is a screen
+            opened from ANOTHER bubble (a product list), whose photo is the
+            category's, so it never takes this path.
+          * If a product image is available, or the bubble is a photo, delete
+            and re-send so the user sees what they're ordering.
           * Otherwise fall back to editing text in place.
 
         For a TYPED number (no callback query) the customer's message now sits
@@ -745,24 +700,26 @@ class ProductHandlers(BaseHandler):
 
         Every render records the bubble as the screen a typed number answers
         (``BotUserRepository.remember_quantity_screen``). One place, so no
-        entry point — add, preset, ±, typed — can leave the window pointing at
+        entry point — open, preset, ±, typed — can leave the window pointing at
         a screen that is no longer there.
 
-        The product image is fetched via the same helpers used by
-        `product_details` so private/internal URLs are downloaded server-side
-        before being uploaded to Telegram. ``product_id`` is passed explicitly
-        rather than read from the product dict so callers (which parse it from
-        the callback) can stay the single source of truth.
+        Private/internal image URLs are downloaded server-side before being
+        uploaded to Telegram. ``product_id`` is passed explicitly rather than
+        read from the product dict so callers (which parse it from the
+        callback) can stay the single source of truth.
         """
         # The SAME bounds the tap handlers enforce decide what this screen may
         # offer, so a preset button can never be a promise the next tap breaks.
         min_order_qty, max_quantity = self._purchase_bounds(product)
+        category_id = (product.get('category') or {}).get('id')
 
         text = self._format_quantity_step_text(product, quantity, language)
         keyboard = ProductKeyboards.quantity_selector(
             product_id, quantity, language,
             min_order_qty=min_order_qty,
             max_quantity=max_quantity,
+            orderable=self._is_orderable(product),
+            back_callback=f'category_{category_id}' if category_id else 'menu_products',
         )
         # Private chat: the customer's id IS the chat id (the send target this
         # screen has always used).
@@ -785,7 +742,9 @@ class ProductHandlers(BaseHandler):
                         # the new screen below is what matters.
                         logger.info(f"Could not delete the previous quantity screen: {e}")
         else:
-            shown = await self._redraw_quantity_screen(query, context, chat_id, product, text, keyboard)
+            shown = await self._redraw_quantity_screen(
+                query, context, chat_id, product, text, keyboard, fresh=fresh,
+            )
             shown_message_id = getattr(shown, 'message_id', None)
 
         try:
@@ -800,20 +759,21 @@ class ProductHandlers(BaseHandler):
             logger.warning(f"Could not record the quantity screen for typed input: {e}")
 
     async def _redraw_quantity_screen(self, query, context, chat_id: int, product: Dict[str, Any],
-                                      text: str, keyboard: InlineKeyboardMarkup) -> Optional[Message]:
+                                      text: str, keyboard: InlineKeyboardMarkup, *,
+                                      fresh: bool) -> Optional[Message]:
         """The tap half of `_render_quantity_step`; returns the bubble now showing it."""
         message = query.message
         is_photo_message = bool(getattr(message, 'photo', None))
 
-        # Fast path: already a photo bubble — edit caption only.
-        if is_photo_message:
+        # Fast path: the screen's own photo bubble — edit caption only.
+        if is_photo_message and not fresh:
             try:
                 edited = await query.edit_message_caption(caption=text, reply_markup=keyboard)
                 return edited if isinstance(edited, Message) else message
             except Exception as e:
                 logger.warning(f"edit_message_caption failed, falling back to resend: {e}")
 
-        if self._extract_product_image_url(product):
+        if is_photo_message or self._extract_product_image_url(product):
             try:
                 await message.delete()
             except Exception:
@@ -828,7 +788,7 @@ class ProductHandlers(BaseHandler):
         """Send the quantity screen as a NEW message: the product photo when one
         can be delivered, plain text otherwise. None when nothing could be sent.
 
-        Uses the same private/public image logic as product_details.
+        Private/internal image URLs are downloaded and uploaded as bytes.
         """
         async def _send_with_photo(photo: Any) -> Optional[Message]:
             try:
@@ -862,76 +822,52 @@ class ProductHandlers(BaseHandler):
             logger.warning(f"Quantity step text fallback failed: {e}")
             return None
 
-    async def add_to_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show quantity selector (with product image) for adding to cart."""
+    async def checkout_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """✅ Checkout on the quantity screen: the number on screen goes into the cart, then checkout.
+
+        The only way a product the cart does not hold yet gets into it from this
+        screen (owner 2026-10-22). The button carries the product and the number
+        it showed (`keyboards.buy_callback`), and that number REPLACES any
+        earlier quantity of the product.
+
+        POST /cart/items is an INCREMENT and PUT is a SET that 404s on a missing
+        line, so which write is right depends on the SERVER cart, never on a
+        guess (the 2026-06-27 accumulation bug): an unreadable cart writes nothing.
+        """
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
+            product_id, quantity = (int(part) for part in re.match(BUY_PATTERN, query.data).groups())
+            if quantity < 1:
+                # No rendered button carries 0, and the backend reads a PUT of 0
+                # as "remove the line", which no Checkout means.
+                await self._ack(query, i18n.get('telegram.products.invalid_action', language))
+                return
 
-            # Extract product ID
-            product_id = int(query.data.split('_')[3])  # add_to_cart_{product_id}
-
-            # Get product details for quantity selector
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
 
-                response = await client.get_product(user_token, product_id, language=language)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-                product = response.data['data']['product']
-
-                # Default add-to-cart quantity to the product's minimum so users
-                # don't immediately fall foul of the per-product purchase rule.
-                # The floor comes from the same resolver every other surface
-                # uses; this path deliberately does NOT apply its ceiling — the
-                # server owns the sold-out decision on a first add (there is no
-                # local snapshot old enough to trust against a live shelf).
-                min_order_qty, _upper = self._purchase_bounds(product)
-
-                # Idempotent entry point. POST /cart/items is an INCREMENT on the
-                # backend (cart_item.quantity += quantity), so tapping "Add to
-                # cart" repeatedly (e.g. add -> back to product -> add again)
-                # used to silently pile on min_order_qty each time and inflate the
-                # order total. Only add when the product isn't in the cart yet;
-                # otherwise just re-open the selector at the existing quantity and
-                # let the +/- and preset buttons (which SET) adjust from there.
-                existing_qty, cart_error = await self._read_cart_quantity(
-                    client, user_token, product_id, language
-                )
+                in_cart, cart_error = await self._read_cart_quantity(client, user_token, product_id, language)
                 if cart_error:
-                    # We cannot tell whether the line is already there, and the
-                    # write below is an INCREMENT — guessing "empty" is what
-                    # doubles the customer's order. Say why and stop.
                     await self._handle_api_error(update, cart_error, language)
                     return
-
-                if existing_qty:
-                    current_qty = existing_qty
+                if in_cart:
+                    write = await client.update_cart_item(user_token, product_id, quantity=quantity)
                 else:
-                    add_response = await client.add_to_cart(
-                        user_token,
-                        product_id,
-                        quantity=min_order_qty,
-                    )
-                    if not add_response.success:
-                        await self._handle_api_error(update, add_response.error, language)
-                        return
-                    current_qty = (
-                        self._quantity_in_cart_payload(add_response, product_id)
-                        or min_order_qty
-                    )
+                    write = await client.add_to_cart(user_token, product_id, quantity=quantity)
+                if not write.success:
+                    await self._handle_api_error(update, write.error, language)
+                    return
 
-            await self._render_quantity_step(update, context, product_id, product, current_qty, language)
-            await self._ack(query)
+            # Local import: orders.py imports this module at load time.
+            from handlers.orders import order_handlers
+            await order_handlers.checkout_handler(update, context)
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="add_to_cart")
+            await self._handle_error(update, exc=e, operation="checkout_product")
 
     async def quantity_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle quantity adjustments: +1/-1 fine-tune and preset jumps."""
@@ -967,63 +903,46 @@ class ProductHandlers(BaseHandler):
             # Get product for price calculation and the per-product purchase minimum.
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
                 response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
-                    # This used to be `if response.success:` with no else, so a
-                    # deactivated product (or any API hiccup) fell through to a
-                    # bare answer(): the spinner stopped, the number never moved
-                    # and nothing told the customer why. `add_to_cart` toasts the
-                    # reason on this very payload; so does this.
+                    # A deactivated product (or any API hiccup) says why rather than
+                    # leaving the customer with a spinner and a number that never moves.
                     await self._handle_api_error(update, response.error, language)
                     return
 
                 product = response.data['data']['product']
                 bounds = await self._purchase_bounds_or_refuse(update, product, language)
                 if bounds is None:
-                    return  # sold out — nothing to write, customer already told
+                    return  # sold out — customer already told
                 min_order_qty, upper = bounds
 
-                if action == 'set':
-                    # A preset button says "make it exactly N": the payload IS
-                    # the customer's choice, so it is the right base.
-                    desired = payload_qty
-                else:
-                    # ± steps from what the CART holds, not from the number
-                    # baked into the button. A '+1' further up the chat carries
-                    # a stale quantity, and stepping from it rewrites whatever
-                    # the customer has chosen since (pick 8, scroll up, tap the
-                    # old '+1', silently drop to 3). This is the same read
-                    # `_handle_cart_item_action` does for the edit-mode ± row.
-                    current_qty, cart_error = await self._read_cart_quantity(
-                        client, user_token, product_id, language
-                    )
-                    if cart_error:
-                        # Unreadable ≠ empty: falling back to zero here would
-                        # shrink the line. The button's own number is the last
-                        # thing the customer was shown, and the write below is a
-                        # SET (not an increment), so it cannot accumulate.
-                        logger.warning(
-                            "Cart read failed during quantity %s for product %s; "
-                            "stepping from the callback quantity instead: %s",
-                            action, product_id, cart_error,
-                        )
-                        current_qty = payload_qty
-                    desired = current_qty + 1 if action == 'inc' else current_qty - 1
-
-                new_qty = self._clamp_quantity(desired, min_order_qty, upper)
-
-                # Update cart via API
-                update_response = await client.update_cart_item(
-                    user_token,
-                    product_id,
-                    quantity=new_qty,
-                )
-                if not update_response.success:
-                    await self._handle_api_error(update, update_response.error, language)
+                in_cart, cart_error = await self._read_cart_quantity(client, user_token, product_id, language)
+                if cart_error:
+                    await self._handle_api_error(update, cart_error, language)
                     return
 
-                await self._render_quantity_step(update, context, product_id, product, new_qty, language)
+                if action == 'set':
+                    # A preset says "make it exactly N": its payload IS the choice.
+                    desired = payload_qty
+                else:
+                    # ± steps from what the CART holds when it holds the product:
+                    # a '+1' further up the chat carries a stale number, and
+                    # stepping from it would rewrite whatever the customer chose
+                    # since. A product not in the cart steps from this bubble's
+                    # own number, the draft it shows.
+                    base = in_cart or payload_qty
+                    desired = base + 1 if action == 'inc' else base - 1
+                new_qty = self._clamp_quantity(desired, min_order_qty, upper)
 
+                write_error = await self._update_line_in_cart(client, user_token, product_id, new_qty, in_cart)
+                if write_error:
+                    await self._handle_api_error(update, write_error, language)
+                    return
+
+            await self._render_quantity_step(update, context, product_id, product, new_qty, language)
             await self._ack(query)
 
         except Exception as e:
@@ -1038,14 +957,13 @@ class ProductHandlers(BaseHandler):
         read as a quantity (`parse_typed_quantity`). The caller then routes it
         exactly as before, which for words means the Support Inbox.
 
-        Returns True once the message is answered: the line SET to the number,
-        or a reply saying why not. The write mirrors a preset button — an
-        absolute quantity, inside `_purchase_bounds`, read from
-        ``GET /products/<id>`` (a cart line's product payload has no
-        ``inventory`` block, so its minimum would read as 1). Out-of-range
-        numbers are refused with the limit rather than clamped: the customer
-        typed a number, and silently writing a different one would be a
-        surprise on the confirmation screen.
+        Returns True once the message is answered: the screen redrawn at the
+        number, or a reply saying why not. Like a preset button it sets the cart
+        line when the cart holds the product, and otherwise changes only the
+        draft on screen (`_update_line_in_cart`). The bounds come from
+        ``GET /products/<id>``. Out-of-range numbers are refused with the limit
+        rather than clamped: the customer typed a number, and silently showing a
+        different one would be a surprise.
         """
         screen = live_quantity_screen(user_state)
         if screen is None:
@@ -1075,30 +993,20 @@ class ProductHandlers(BaseHandler):
                 if refusal:
                     await update.message.reply_text(refusal)
                     return True
-                quantity = typed.value
 
-                # POST /cart/items is an INCREMENT and PUT is a SET that 404s on
-                # a missing line, so which write is right depends on the SERVER
-                # cart — never on a guess (the 2026-06-27 accumulation bug).
-                in_cart, cart_error = await self._read_cart_quantity(
-                    client, user_token, product_id, language
-                )
+                in_cart, cart_error = await self._read_cart_quantity(client, user_token, product_id, language)
                 if cart_error:
                     await self._handle_api_error(update, cart_error, language)
                     return True
-                if in_cart:
-                    write = await client.update_cart_item(user_token, product_id, quantity=quantity)
-                else:
-                    # The line left the cart since the screen was drawn (removed
-                    # on the website, say); the read proved it is absent, so an
-                    # increment from nothing is exactly the number typed.
-                    write = await client.add_to_cart(user_token, product_id, quantity=quantity)
-                if not write.success:
-                    await self._handle_api_error(update, write.error, language)
+                write_error = await self._update_line_in_cart(
+                    client, user_token, product_id, typed.value, in_cart,
+                )
+                if write_error:
+                    await self._handle_api_error(update, write_error, language)
                     return True
 
             await self._render_quantity_step(
-                update, context, product_id, product, quantity, language,
+                update, context, product_id, product, typed.value, language,
                 replaces_message_id=screen.get('message_id'),
             )
         except Exception as e:
@@ -1108,7 +1016,7 @@ class ProductHandlers(BaseHandler):
     @staticmethod
     def _typed_quantity_refusal(typed: TypedQuantity, min_order_qty: int, upper: int,
                                 language: str) -> Optional[str]:
-        """Why a typed quantity cannot be written, or None when it can."""
+        """Why a typed quantity cannot be shown on the screen, or None when it can."""
         if typed.value is None:
             return i18n.get(
                 'telegram.products.typed_quantity_not_whole', language,
@@ -1305,44 +1213,6 @@ class ProductHandlers(BaseHandler):
         if hint:
             formatted_lines.append(hint)
         return "\n\n".join(formatted_lines)
-
-    def _format_product_details(self, product: Dict, language: str) -> str:
-        """Format single product details"""
-        price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
-        stock_status = i18n.get(
-            'telegram.products.in_stock' if self._is_orderable(product)
-            else 'telegram.products.out_of_stock',
-            language,
-        )
-
-        details = [
-            f"🏷️ *{escape_markdown(product['name'], version=2)}*",
-            f"💰 {i18n.get('telegram.price', language)}: {price_str} UZS",
-            f"📦 {i18n.get('telegram.products.volume_label', language)}: {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}",
-            f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
-        ]
-        hint = self._contract_price_hint(
-            bool((product.get('pricing') or {}).get('contract_price_at_checkout')), language, markdown_v2=True
-        )
-        if hint:
-            details.insert(2, hint)  # straight under the price line
-
-        min_order_qty, _upper = self._purchase_bounds(product)
-        if min_order_qty > 1:
-            details.append(
-                f"📐 {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
-            )
-
-        if product.get('description'):
-            details.append(f"📝 {escape_markdown(product['description'], version=2)}")
-
-        if product.get('category'):
-            details.append(
-                f"📂 {i18n.get('telegram.products.category_label', language)}: "
-                f"{escape_markdown(product['category'].get('name', 'N/A'), version=2)}"
-            )
-
-        return "\n\n".join(details)
 
     async def show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE, edit_mode: bool = False):
         """Show shopping cart contents.

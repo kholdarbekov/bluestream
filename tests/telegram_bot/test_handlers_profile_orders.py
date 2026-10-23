@@ -791,7 +791,7 @@ class TestOrderHandlerFlows:
             "api_client",
             FakeAPIClientContext(get_user_orders=_resp(success=True, data=orders_payload)),
         )
-        monkeypatch.setattr(orders_module.OrderKeyboards, "order_list", lambda _orders, _lang: "orders-kbd")
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_list", lambda _orders, _lang, **_pages: "orders-kbd")
 
         await handler.orders_menu(update, context)
 

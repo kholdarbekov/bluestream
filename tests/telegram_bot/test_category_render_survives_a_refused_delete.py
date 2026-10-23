@@ -204,32 +204,32 @@ async def test_a_delete_that_succeeds_is_still_used(handler, monkeypatch):
     update.callback_query.message.reply_text.assert_awaited_once()
 
 
-async def test_a_refused_delete_still_shows_the_customer_the_product_details(
+async def test_a_refused_delete_still_shows_the_customer_the_quantity_screen(
     handler, monkeypatch
 ):
     """The same defect one screen over.
 
-    `product_details` renders through the identical delete-and-resend when the
-    bubble is a photo (products.py, the `if query.message.photo:` branch). It was
-    the last unguarded `delete()` on a callback path in either bot — every other
-    one already sat inside a try/except. A customer tapping a product on a
-    message older than 48h hit exactly the category failure.
+    A product tap opens its quantity screen FRESH (products.py,
+    `_redraw_quantity_screen(fresh=True)`): the photo bubble it was tapped on is
+    the category's, so it is dropped and the screen is sent new. A customer
+    tapping a product on a message older than 48h must still get the screen.
     """
     api = _CatalogueAPI()
-
-    async def _get_product(*_args, **_kwargs):
-        return _Response(data={"data": {"product": PRODUCTS[0]}})
-
-    api.get_product = _get_product
+    api.get_product = AsyncMock(return_value=_Response(data={"data": {"product": PRODUCTS[0]}}))
+    api.get_cart = AsyncMock(return_value=_Response(data={"data": {"cart": {"cart_items": []}}}))
     _install_api(monkeypatch, api)
+    # Recording the typing window is the bot's own SQL, not what is under test.
+    handler.user_repo = AsyncMock()
 
     update = _photo_tap(
         delete_error=BadRequest("Message can't be deleted for everyone")
     )
     update.callback_query.data = f"product_{PRODUCTS[0]['id']}"
     handler._handle_error = AsyncMock()
+    context = make_context()
 
-    await handler.product_details(update, make_context())
+    await handler.open_quantity_screen(update, context)
 
     handler._handle_error.assert_not_awaited()
-    update.callback_query.message.reply_text.assert_awaited_once()
+    context.bot.send_message.assert_awaited_once()
+    assert context.bot.send_message.await_args.kwargs["text"].startswith("🛒 Aqua Element 18.9 l\n")

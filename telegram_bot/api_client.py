@@ -732,9 +732,10 @@ class BusinessAPIClient:
         return await self._make_request('POST', '/api/v1/orders',
                                        user_token=user_token, data=order_data)
 
-    async def get_user_orders(self, user_token: str, status: Optional[str] = None) -> APIResponse:
-        """Get user's orders"""
-        params = {}
+    async def get_user_orders(self, user_token: str, *, page: int, per_page: int,
+                              status: Optional[str] = None) -> APIResponse:
+        """One page of the user's orders, newest first, with the backend's `pagination` block."""
+        params = {'page': page, 'per_page': per_page}
         if status:
             params['status'] = status
 

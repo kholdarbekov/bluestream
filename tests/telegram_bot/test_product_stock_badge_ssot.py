@@ -8,7 +8,9 @@ biting: zero stock is a REAL ceiling of zero, not "unknown". Two surfaces that
 answer the very same question in words rather than in numbers never moved:
 
 * ``_format_products_list`` painted its badge from ``stock_quantity > 0``,
-* ``_format_product_details`` picked ``in_stock`` / ``out_of_stock`` the same way.
+* ``_format_product_details`` picked ``in_stock`` / ``out_of_stock`` the same way
+  (that card is gone since 2026-10-22; a product tap opens the quantity screen,
+  whose ``_format_quantity_step_text`` asks the same resolver).
 
 With ``stock_quantity = 1`` and ``min_order_quantity = 2`` both said IN STOCK
 while nothing at all was orderable: the customer taps the product, taps "Add to
@@ -168,32 +170,31 @@ async def test_product_list_badge_says_out_of_stock_when_stock_is_below_the_mini
     )
 
 
-async def test_product_details_say_out_of_stock_when_stock_is_below_the_minimum(
+async def test_the_quantity_screen_says_out_of_stock_when_stock_is_below_the_minimum(
     bot, user
 ):
-    """Same lie one tap deeper: the details card printed "In stock".
+    """Same lie one tap deeper: the old details card printed "In stock".
 
-    The customer reads the word, taps "Add to cart" and gets the out-of-stock
-    toast that ``_purchase_bounds_or_refuse`` raises — two screens, two answers,
-    one product.
+    The screen a product tap opens must say "out of stock" and offer nothing to
+    order, rather than a Checkout the server is going to refuse.
     """
     await bot.send(user.tap(f"product_{SCARCE_ID}"))
 
-    text = shown_text(bot)
-    assert f"{t('telegram.products.stock_label')}: {t('telegram.products.out_of_stock')}" in text, (
-        "the details card still calls an unorderable product available:\n" + text
+    call = bot.telegram.last_shown()
+    assert f"❌ {t('telegram.products.out_of_stock')}" in shown_text(bot), (
+        "the quantity screen calls an unorderable product available:\n" + shown_text(bot)
     )
-    assert t("telegram.products.in_stock") not in text
+    assert not [data for data in call.callback_data() if data.startswith(("buy_", "qty_"))]
 
 
-async def test_product_details_still_say_in_stock_when_the_minimum_is_reachable(
+async def test_the_quantity_screen_offers_checkout_when_the_minimum_is_reachable(
     bot, user
 ):
-    """Positive control for the details card."""
+    """Positive control for the quantity screen."""
     await bot.send(user.tap(f"product_{PLENTIFUL_ID}"))
 
-    text = shown_text(bot)
-    assert f"{t('telegram.products.stock_label')}: {t('telegram.products.in_stock')}" in text
+    assert t("telegram.products.out_of_stock") not in shown_text(bot)
+    assert any(data.startswith(f"buy_{PLENTIFUL_ID}_") for data in bot.telegram.last_shown().callback_data())
 
 
 async def test_the_badge_and_the_quantity_write_agree_on_the_same_product(bot, user):
@@ -301,7 +302,7 @@ def test_the_orderability_word_comes_from_the_resolver_not_from_the_field():
 
     for renderer in (
         ProductHandlers._format_products_list,
-        ProductHandlers._format_product_details,
+        ProductHandlers._format_quantity_step_text,
     ):
         source = inspect.getsource(renderer)
         assert "_is_orderable" in source, (

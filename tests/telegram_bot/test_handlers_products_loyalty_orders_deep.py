@@ -171,6 +171,8 @@ class TestProductHandlerDeepFlows:
             "api_client",
             FakeAPIClientContext(
                 get_product=_resp(success=True, data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}}),
+                # The cart holds the product, so the +1 is written to its line.
+                get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": [{"product_id": 9, "quantity": 1}]}}}),
                 update_cart_item=_resp(success=True),
             ),
         )
@@ -180,11 +182,11 @@ class TestProductHandlerDeepFlows:
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
 
-    async def test_add_to_cart_calls_api_error_handler_on_failure(self, monkeypatch):
+    async def test_checkout_product_calls_api_error_handler_when_the_write_fails(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler._handle_api_error = AsyncMock()
         update = DummyUpdate()
-        update.callback_query = DummyCallbackQuery(data="add_to_cart_9")
+        update.callback_query = DummyCallbackQuery(data="buy_9_2")
         context = make_context()
 
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
@@ -194,23 +196,21 @@ class TestProductHandlerDeepFlows:
             products_module,
             "api_client",
             FakeAPIClientContext(
-                get_product=_resp(success=True, data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}}),
                 get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": []}}}),
                 add_to_cart=_resp(success=False, error="cart failed"),
             ),
         )
 
-        await handler.add_to_cart(update, context)
+        await handler.checkout_product(update, context)
         handler._handle_api_error.assert_awaited_once_with(update, "cart failed", "en")
 
-    async def test_add_to_cart_replaces_photo_message_when_editing_text_fails(self, monkeypatch):
+    async def test_a_product_tapped_on_a_photo_bubble_gets_a_fresh_quantity_screen(self, monkeypatch):
+        """The photo is the category's: it is dropped, never caption-edited, and the screen is sent new."""
         handler = products_module.ProductHandlers()
         update = DummyUpdate()
-        update.callback_query = DummyCallbackQuery(data="add_to_cart_9")
-        update.callback_query.edit_message_text = AsyncMock(
-            side_effect=RuntimeError("There is no text in the message to edit")
-        )
+        update.callback_query = DummyCallbackQuery(data="product_9")
         update.callback_query.message.photo = [object()]
+        update.callback_query.edit_message_caption = AsyncMock()
         context = make_context()
 
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
@@ -226,19 +226,18 @@ class TestProductHandlerDeepFlows:
                     data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}},
                 ),
                 get_cart=_resp(success=True, data={"data": {"cart": {"cart_items": []}}}),
-                add_to_cart=_resp(
-                    success=True,
-                    data={"data": {"cart": {"cart_items": [{"product_id": 9, "quantity": 2}]}}},
-                ),
             ),
         )
 
-        await handler.add_to_cart(update, context)
+        await handler.open_quantity_screen(update, context)
 
+        update.callback_query.edit_message_caption.assert_not_awaited()
         update.callback_query.message.delete.assert_awaited_once()
-        update.callback_query.message.reply_text.assert_awaited_once_with(
+        context.bot.send_message.assert_awaited_once_with(
+            chat_id=update.effective_user.id,
             text=(
-                "🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.total:en: 30,000 UZS"
+                "🛒 Water\n💰 telegram.products.unit_price_label:en\n"
+                "\ntelegram.quantity:en: 1\ntelegram.total:en: 1 × 15,000 = 15,000 UZS"
                 # An orderable product invites a typed quantity.
                 "\n\ntelegram.products.type_quantity_hint:en"
             ),
@@ -246,7 +245,7 @@ class TestProductHandlerDeepFlows:
         )
         update.callback_query.answer.assert_awaited_once()
 
-    async def test_product_details_handles_malformed_callback_data(self, monkeypatch):
+    async def test_open_quantity_screen_handles_malformed_callback_data(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler._handle_error = AsyncMock()
         update = DummyUpdate()
@@ -255,12 +254,12 @@ class TestProductHandlerDeepFlows:
 
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
 
-        await handler.product_details(update, context)
+        await handler.open_quantity_screen(update, context)
         handler._handle_error.assert_awaited_once()
         assert handler._handle_error.await_args.args == (update,)
         kwargs = handler._handle_error.await_args.kwargs
         assert isinstance(kwargs.get("exc"), ValueError)
-        assert kwargs.get("operation") == "product_details"
+        assert kwargs.get("operation") == "open_quantity_screen"
 
 
 @pytest.mark.unit

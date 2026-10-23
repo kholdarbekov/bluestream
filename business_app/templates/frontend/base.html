@@ -112,10 +112,16 @@
     <script type="application/ld+json">{{ product_group_schema | tojson }}</script>
     {% endif %}
 
+    {# ---- Preloader cap. script.js lifts .loader-wrap only on window `load`, which waits for every
+        image, font and analytics script; on a slow link that is a minute of spinner over a page
+        that is already rendered. This fade ends it 3.5 s after first paint whatever is still
+        loading. Inline, not in custom-base.css: static CSS is unversioned and cached for 4 h. ---- #}
     <style>
       .nav-badge{display:inline-block;margin-left:6px;padding:1px 7px;font-size:10px;font-weight:700;
         line-height:1.7;border-radius:10px;background:#ffb703;color:#023047;vertical-align:middle;
         text-transform:uppercase;letter-spacing:.3px;}
+      .loader-wrap{animation:loader-wrap-cap .5s ease 3s forwards;}
+      @keyframes loader-wrap-cap{to{opacity:0;visibility:hidden;}}
     </style>
 
     {% block extra_meta %}{% endblock %}

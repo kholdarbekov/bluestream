@@ -611,17 +611,24 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
+        # The quote's prepaid block (owner 2026-10-23), the server's figures for THIS cash order.
+        estimate = served_estimate(cart_data, payment_method="cash")
+        estimate["data"]["cod_prepayment"] = {
+            "available_balance": 40000.0, "applied": 24000.0, "payable_after": 0.0, "balance_after": 16000.0,
+        }
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(
             get_cart=_resp(success=True, data=cart_data),
-            estimate_cart=_resp(success=True, data=served_estimate(cart_data, payment_method="cash")),
+            estimate_cart=_resp(success=True, data=estimate),
         ))
 
         await handler._show_order_confirmation(update, context)
 
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
-        assert "telegram.orders.cod_prepaid_balance:en" in text
-        assert "telegram.orders.cod_prepaid_auto_applied:en" in text
-        assert "telegram.orders.cod_estimated_payable:en" in text
+        assert "telegram.orders.estimate_prepaid_line:en" in text
+        assert "<b>telegram.orders.estimate_payable:en</b>" in text
+        assert text.endswith("\n\ntelegram.orders.estimate_prepaid_balance_after:en")
+        # The cart's discount-blind prepaid figures are never read again.
+        assert "cod_prepaid_auto_applied" not in text and "cod_estimated_payable" not in text
 
     async def test_show_order_confirmation_shows_discount_reward(self, monkeypatch):
         from utils import format_price

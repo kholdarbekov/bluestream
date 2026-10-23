@@ -768,7 +768,11 @@ class OrderKeyboards:
         ``has_reward`` toggles the loyalty-reward row: an "Apply reward" button
         when none is selected, or "Change"/"Remove" buttons when one is. The row
         is only shown once the order meets the minimum (it's part of placing the
-        order, not fixing the cart).
+        order, not fixing the cart). "Apply reward" shares its row with Edit;
+        Change/Remove fill theirs, so Edit gets its own.
+
+        There is no Change address button (owner 2026-10-23): Back reaches the
+        payment picker, whose Back reaches the address step in every flow.
         """
         if meets_minimum:
             primary_row = [
@@ -785,26 +789,25 @@ class OrderKeyboards:
             ]
 
         buttons = [primary_row]
+        edit_button = {'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}
 
-        if meets_minimum and show_reward:
-            if has_reward:
-                buttons.append([
-                    {'text': '🎁 ' + i18n.get('telegram.loyalty.change_reward', language),
-                     'callback_data': 'checkout_choose_reward'},
-                    {'text': '🗑 ' + i18n.get('telegram.loyalty.remove_reward', language),
-                     'callback_data': 'checkout_remove_reward'},
-                ])
-            else:
-                buttons.append([
-                    {'text': '🎁 ' + i18n.get('telegram.loyalty.apply_reward', language),
-                     'callback_data': 'checkout_choose_reward'},
-                ])
+        if meets_minimum and show_reward and has_reward:
+            buttons.append([
+                {'text': '🎁 ' + i18n.get('telegram.loyalty.change_reward', language),
+                 'callback_data': 'checkout_choose_reward'},
+                {'text': '🗑 ' + i18n.get('telegram.loyalty.remove_reward', language),
+                 'callback_data': 'checkout_remove_reward'},
+            ])
+            buttons.append([edit_button])
+        elif meets_minimum and show_reward:
+            buttons.append([
+                {'text': '🎁 ' + i18n.get('telegram.loyalty.apply_reward', language),
+                 'callback_data': 'checkout_choose_reward'},
+                edit_button,
+            ])
+        else:
+            buttons.append([edit_button])
 
-        buttons.append([{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}])
-        buttons.append([
-            {'text': i18n.get('telegram.checkout.change_address', language),
-             'callback_data': 'checkout_change_address'},
-        ])
         # The address travels WITH the Back button. Without it the handler has
         # to read `selected_address_id` out of `context.user_data`, which a
         # deploy empties while this card stays tappable forever — the

@@ -28,6 +28,7 @@ What it provides:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
@@ -70,9 +71,40 @@ def telegram_entity_error(text: str, parse_mode: Optional[str]) -> Optional[str]
         detail = _legacy_markdown_error(text.encode("utf-8"))
     elif parse_mode == "MarkdownV2":
         detail = _markdown_v2_error(text.encode("utf-8"))
+    elif parse_mode == "HTML":
+        detail = _html_error(text)
     else:
         return None
     return None if detail is None else f"Bad Request: can't parse entities: {detail}"
+
+
+# tdlib's parse_html, as far as the bots use it: every "<" opens or closes a supported tag, and the
+# tags nest. An address or product name carrying an unescaped "<" is refused exactly like this.
+_HTML_TAGS = frozenset({
+    "a", "b", "blockquote", "code", "del", "em", "i", "ins", "pre", "s", "span", "strike",
+    "strong", "tg-emoji", "tg-spoiler", "u",
+})
+_HTML_TAG = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>")
+
+
+def _html_error(text: str) -> Optional[str]:
+    open_tags: list[str] = []
+    position = text.find("<")
+    while position >= 0:
+        offset = len(text[:position].encode("utf-8"))
+        tag = _HTML_TAG.match(text, position)
+        if tag is None or tag.group(2).lower() not in _HTML_TAGS:
+            return f"Unsupported start tag at byte offset {offset}"
+        closing, name = tag.group(1) == "/", tag.group(2).lower()
+        if closing:
+            if not open_tags or open_tags.pop() != name:
+                return f'Unmatched end tag at byte offset {offset}, expected "</{name}>"'
+        else:
+            open_tags.append(name)
+        position = text.find("<", tag.end())
+    if open_tags:
+        return f'Can\'t find end tag corresponding to start tag "{open_tags[-1]}"'
+    return None
 
 
 def _legacy_markdown_error(data: bytes) -> Optional[str]:

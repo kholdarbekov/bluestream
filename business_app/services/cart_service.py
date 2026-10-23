@@ -332,6 +332,36 @@ class CartService:
                 "minimum_order_amount": self.min_order_amount,
                 "cart_item_count": len(validated_items),
             },
+            "cod_prepayment": self._cod_prepayment_quote(user_id, final_total) if on_cod else None,
+        }
+
+    @staticmethod
+    def _prepaid_split(balance: float, payable: float) -> Tuple[float, float]:
+        """``(applied, payable_after)``: what a prepaid balance takes off ``payable``.
+
+        Order creation reserves ``min(balance, outstanding)`` on a cash order
+        (`CashCollectionService.reserve_customer_prepaid_credit_for_payment`);
+        this is that rule, said once for the cart summary and the quote.
+        """
+        applied = min(balance, payable)
+        return applied, max(0.0, payable - applied)
+
+    def _cod_prepayment_quote(self, user_id: int, payable: float) -> Dict[str, float]:
+        """What the customer's prepaid balance does to THIS cash quote.
+
+        The bot's confirm screen states it as a deduction under the discounts,
+        the amount left to pay at the door, and the balance left after. Only a
+        cash quote carries it: the balance is spendable on cash orders only.
+        """
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        balance = float(CashCollectionService().get_customer_prepaid_balance(user_id))
+        applied, payable_after = self._prepaid_split(balance, payable)
+        return {
+            "available_balance": balance,
+            "applied": applied,
+            "payable_after": payable_after,
+            "balance_after": balance - applied,
         }
 
     @log_service_call(operation_type="promo_validate", track_performance=True)
@@ -556,14 +586,13 @@ class CartService:
         from business_app.services.cash_collection_service import CashCollectionService
 
         prepaid_balance = float(CashCollectionService().get_customer_prepaid_balance(user_id))
-        potential_applied_amount = min(prepaid_balance, float(cart_payload.get("estimated_total") or 0))
+        potential_applied_amount, payable_after = self._prepaid_split(
+            prepaid_balance, float(cart_payload.get("estimated_total") or 0)
+        )
         cart_payload["cod_prepayment"] = {
             "available_balance": prepaid_balance,
             "potential_applied_amount": potential_applied_amount,
-            "estimated_payable_after_prepayment": max(
-                0.0,
-                float(cart_payload.get("estimated_total") or 0) - potential_applied_amount,
-            ),
+            "estimated_payable_after_prepayment": payable_after,
         }
         return cart_payload
 

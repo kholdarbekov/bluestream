@@ -609,45 +609,33 @@ async def test_a_failed_quote_shows_no_money_rather_than_a_guessed_one(
 async def test_the_cod_prepayment_block_agrees_with_the_tier_discounted_to_pay_line(
     app, db, monkeypatch, tiered_contract_customer, sample_product, stocked_cart,
 ):
-    """F2: the COD-prepayment block must not show a SECOND, contradictory
-    "what you pay" figure below the tier-discounted "To pay" line.
+    """F2: the screen must not show a SECOND, contradictory "what you pay" figure.
 
     ``cart['cod_prepayment']`` (``CartService.get_cart_summary``) prices its
     ``estimated_payable_after_prepayment`` off ``estimated_total``, which is
-    computed with every discount — the tier discount included — zeroed. The
-    handler must derive the prepayment lines from the SAME quote
-    (``estimate['pricing']['final_total']``) the "To pay" line above them
-    already reads, not from that discount-blind server field.
+    computed with every discount — the tier discount included — zeroed. Since
+    2026-10-23 the screen reads the prepaid deduction and "To pay" from the
+    QUOTE's own ``cod_prepayment`` block, priced off the same tier-discounted
+    ``final_total``; the discount-blind cart figure must never reach it.
     """
-    from business_app.models.payment import CashCollectionEvent
-    from shared.enums import CashCollectionSource
-
     user_id = tiered_contract_customer.id
     balance = Decimal("5000.00")
-    db.session.add(
-        CashCollectionEvent(
-            customer_id=user_id,
-            amount=balance,
-            currency="UZS",
-            source=CashCollectionSource.DELIVERY_COMPLETION,
-            unapplied_amount=balance,
-            occurred_at=datetime.now(UTC),
-        )
-    )
-    db.session.commit()
+    _give_prepaid_balance(db, user_id, balance)
 
     cart = _served_cart(user_id)
     assert float(cart["cod_prepayment"]["available_balance"]) == float(balance)
 
     estimate = _served_estimate(user_id, sample_product.id, QUANTITY, "cash")
     pricing = estimate["pricing"]
+    prepaid = estimate["cod_prepayment"]
     assert pricing["tier_discount"] > 0, "the fixture must actually discount"
+    assert prepaid["applied"] == float(balance)
+    assert prepaid["applied"] + prepaid["payable_after"] == pricing["final_total"], (
+        "the quote's prepaid split must be taken off the tier-discounted total"
+    )
 
-    # The wrong (discount-blind) figure the OLD code trusted, and the correct
-    # one derived off the SAME quote the "To pay" line shows.
     wrong_payable = float(cart["cod_prepayment"]["estimated_payable_after_prepayment"])
-    correct_payable = max(0.0, float(pricing["final_total"]) - min(float(balance), float(pricing["final_total"])))
-    assert wrong_payable != correct_payable, (
+    assert wrong_payable != prepaid["payable_after"], (
         "fixture must actually create the divergence (tier_discount otherwise "
         "washes out of both figures)"
     )
@@ -656,9 +644,101 @@ async def test_the_cod_prepayment_block_agrees_with_the_tier_discounted_to_pay_l
 
     from utils import format_price
 
-    assert format_price(pricing["final_total"]) in screen, screen
-    assert format_price(correct_payable) in screen, screen
+    assert f"telegram.orders.estimate_prepaid_line:en(amount={format_price(prepaid['applied'])})" in screen
+    assert f"amount={format_price(prepaid['payable_after'])}" in screen, screen
     assert format_price(wrong_payable) not in screen, (
         "the discount-blind cart['cod_prepayment'] figure reached the screen "
         f"anyway -- two contradictory 'what you pay' numbers on one card: {screen!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The prepaid balance, published by the quote (owner 2026-10-23)
+#
+# The confirm screen states what the customer's prepaid balance does to a CASH
+# order: the deduction, what is left to pay at the door, and the balance left
+# after. Those figures are the server's, on the same quote as "To pay" — order
+# creation reserves min(balance, outstanding) on a cash order and nothing on
+# any other rail (`CashCollectionService.reserve_customer_prepaid_credit_for_payment`).
+# ---------------------------------------------------------------------------
+
+
+def _give_prepaid_balance(db, user_id, amount):
+    from business_app.models.payment import CashCollectionEvent
+    from shared.enums import CashCollectionSource
+
+    db.session.add(
+        CashCollectionEvent(
+            customer_id=user_id,
+            amount=amount,
+            currency="UZS",
+            source=CashCollectionSource.DELIVERY_COMPLETION,
+            unapplied_amount=amount,
+            occurred_at=datetime.now(UTC),
+        )
+    )
+    db.session.commit()
+
+
+def _post_estimate(client, user_id, product_id, payment_method):
+    """`POST /api/v1/orders/cart/estimate` with the body the bot's `estimate_cart` sends."""
+    from flask_jwt_extended import create_access_token
+
+    token = create_access_token(identity=str(user_id))
+    response = client.post(
+        "/api/v1/orders/cart/estimate",
+        json={
+            "items": [{"product_id": product_id, "quantity": QUANTITY}],
+            "delivery_address_id": None,
+            "payment_method": payment_method,
+            "reward_id": None,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.get_json()
+    return response.get_json()["data"]
+
+
+CONTRACT_TOTAL = float(CONTRACT_PRICE) * QUANTITY  # 27 000: no tier, no fee on this fixture
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "balance, expected",
+    [
+        # The balance covers the order: nothing to pay at the door, 23 000 left.
+        (Decimal("50000.00"), {"available_balance": 50000.0, "applied": 27000.0,
+                               "payable_after": 0.0, "balance_after": 23000.0}),
+        # It covers part: 5 000 off, 22 000 at the door, nothing left.
+        (Decimal("5000.00"), {"available_balance": 5000.0, "applied": 5000.0,
+                              "payable_after": 22000.0, "balance_after": 0.0}),
+        # No balance: the whole total at the door.
+        (None, {"available_balance": 0.0, "applied": 0.0,
+                "payable_after": 27000.0, "balance_after": 0.0}),
+    ],
+    ids=["covers-the-order", "covers-part", "no-balance"],
+)
+def test_a_cash_quote_publishes_what_the_prepaid_balance_does_to_it(
+    app, db, client, contract_customer, sample_product, stocked_cart, balance, expected,
+):
+    if balance is not None:
+        _give_prepaid_balance(db, contract_customer.id, balance)
+
+    estimate = _post_estimate(client, contract_customer.id, sample_product.id, "cash")
+
+    assert estimate["pricing"]["final_total"] == CONTRACT_TOTAL, "fixture sanity: 9 000 × 3"
+    assert estimate["cod_prepayment"] == expected
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("payment_method", ["card", "business_account"])
+def test_a_quote_on_any_other_rail_publishes_no_prepaid_deduction(
+    app, db, client, contract_customer, sample_product, stocked_cart, payment_method,
+):
+    """The balance is spendable on cash orders only; a card quote that showed it
+    would promise a deduction order creation never makes."""
+    _give_prepaid_balance(db, contract_customer.id, Decimal("50000.00"))
+
+    estimate = _post_estimate(client, contract_customer.id, sample_product.id, payment_method)
+
+    assert estimate["cod_prepayment"] is None

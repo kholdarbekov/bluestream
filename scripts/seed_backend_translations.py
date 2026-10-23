@@ -4503,6 +4503,18 @@ BACKEND_TRANSLATIONS = {
     # two lines above (telegram.orders.payment_info), so repeating it here in
     # a parenthetical read as redundant on the confirmation screen; the owner's
     # screenshot review asked for the icon alone to tie the two lines together.
+    # The confirm screen's prepaid balance (owner 2026-10-23): a deduction under the discounts,
+    # and what is left of the balance after the order. Same term as telegram.orders.cod_prepaid_balance.
+    'telegram.orders.estimate_prepaid_line': {
+        'en': 'Prepaid balance — −{amount} UZS',
+        'uz': 'Oldindan to\'langan qoldiq — −{amount} UZS',
+        'ru': 'Предоплаченный остаток — −{amount} UZS'
+    },
+    'telegram.orders.estimate_prepaid_balance_after': {
+        'en': '💳 Prepaid balance after this order: {amount} UZS',
+        'uz': '💳 Ushbu buyurtmadan so\'ng oldindan to\'langan qoldiq: {amount} UZS',
+        'ru': '💳 Предоплаченный остаток после этого заказа: {amount} UZS'
+    },
     'telegram.orders.estimate_payable': {
         'en': '{icon} To pay: {amount} UZS',
         'uz': '{icon} To\'lash: {amount} UZS',
@@ -6034,7 +6046,7 @@ BACKEND_TRANSLATIONS = {
     # shown on the screen itself; the three refusals answer a number the
     # product's bounds (`_purchase_bounds`) cannot accept — nothing is written.
     'telegram.products.type_quantity_hint': {
-        'en': '✏️ Or just type the number you need',
+        'en': '✏️ Or just type the quantity you need',
         'uz': '✏️ Yoki kerakli miqdorni yozing',
         'ru': '✏️ Или просто напишите нужное количество'
     },

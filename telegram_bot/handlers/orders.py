@@ -2,9 +2,11 @@
 Order management handlers
 """
 import asyncio
+import html
 import logging
 import re
 from datetime import datetime, timezone
+from functools import partial
 from typing import Dict, Any, List
 from telegram import Update, constants
 from telegram.ext import ContextTypes
@@ -295,6 +297,7 @@ class OrderHandlers(BaseHandler):
     @staticmethod
     def _build_estimate_block(
         estimate: Dict[str, Any], payment_method: str, language: str, *, neutral: bool = False,
+        as_html: bool = False,
     ) -> str:
         """The one money block both checkout screens render.
 
@@ -313,6 +316,15 @@ class OrderHandlers(BaseHandler):
         cash BUTTON instead (`_show_payment_picker` decorates it there, off the
         SAME quote), so restating it in the message body would be one fact
         shown twice, and worse, pre-assumes the rail before it is chosen.
+
+        The confirm screen's shape (owner 2026-10-23) reads as one sum: the
+        lines, the discounts, then the prepaid balance as a deduction, and "To
+        pay" is what is left at the door. The quote's `cod_prepayment` block
+        (cash only, `CartService._cod_prepayment_quote`) supplies the deduction,
+        the amount to pay and the balance left after the order.
+
+        ``as_html=True`` renders for a ``parse_mode='HTML'`` screen: every line
+        is escaped and the "To pay" line is bold.
         """
         pricing = (estimate or {}).get('pricing') or {}
         if not pricing:
@@ -357,18 +369,39 @@ class OrderHandlers(BaseHandler):
                 amount=format_price(delivery_fee),
             ))
 
+        prepayment = (estimate.get('cod_prepayment') or {}) if not neutral else {}
+        prepaid_applied = float(prepayment.get('applied') or 0)
+        if prepaid_applied > 0:
+            lines.append(i18n.get(
+                'telegram.orders.estimate_prepaid_line', language,
+                amount=format_price(prepaid_applied),
+            ))
+
+        if as_html:
+            lines = [html.escape(line, quote=False) for line in lines]
         lines.append("────────────────")
         if neutral:
-            lines.append(i18n.get(
+            total_line = i18n.get(
                 'telegram.orders.estimate_neutral_total', language,
                 amount=format_price(float(pricing.get('total_before_discount') or 0)),
-            ))
+            )
+            lines.append(html.escape(total_line, quote=False) if as_html else total_line)
         else:
-            lines.append(i18n.get(
+            payable_line = i18n.get(
                 'telegram.orders.estimate_payable', language,
                 icon=_PAYABLE_ICONS.get(payment_method, '💳'),
-                amount=format_price(float(pricing.get('final_total') or 0)),
-            ))
+                amount=format_price(float(
+                    prepayment['payable_after'] if prepaid_applied > 0 else pricing.get('final_total') or 0
+                )),
+            )
+            lines.append(f"<b>{html.escape(payable_line, quote=False)}</b>" if as_html else payable_line)
+            balance_after = float(prepayment.get('balance_after') or 0)
+            if prepaid_applied > 0 and balance_after > 0:
+                balance_line = i18n.get(
+                    'telegram.orders.estimate_prepaid_balance_after', language,
+                    amount=format_price(balance_after),
+                )
+                lines += ["", html.escape(balance_line, quote=False) if as_html else balance_line]
             # The cash-savings motivator ("pay cash and save N") used to render
             # here on the CARD confirm screen, off `pricing['cod_savings']`.
             # Owner screenshot review: it now lives on the picker's cash
@@ -1699,8 +1732,11 @@ class OrderHandlers(BaseHandler):
             )
             return
 
-        # Build confirmation message
-        confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
+        # Sent as HTML (owner 2026-10-23: a bold title and labels), so every
+        # value below is escaped: an address or product name with "<" or "&"
+        # would otherwise make Telegram refuse the whole screen.
+        esc = partial(html.escape, quote=False)
+        confirmation_text = f"<b>{esc(i18n.get('telegram.orders.confirmation_title', language))}</b>\n\n"
 
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0.0
@@ -1805,15 +1841,18 @@ class OrderHandlers(BaseHandler):
             address_title = context.user_data.get('selected_address_title', '')
             address_full = context.user_data.get('selected_address_full', '')
             confirmation_text += (
-                f"{i18n.get('telegram.delivery_address', language)}: "
-                f"{address_lines(address_title, address_full)}\n\n"
+                f"<b>{esc(i18n.get('telegram.delivery_address', language))}:</b> "
+                f"{esc(address_lines(address_title, address_full))}\n\n"
             )
 
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
             payment_method_label = self._payment_method_label(payment_method, language)
-            confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method_label}\n\n"
+            confirmation_text += (
+                f"<b>{esc(i18n.get('telegram.orders.payment_info', language))}:</b> "
+                f"{esc(payment_method_label)}\n\n"
+            )
 
         # Selected reward — NAMED here, PRICED by the server. The arithmetic that
         # used to live here mirrored the backend rule with Python's banker's
@@ -1825,48 +1864,15 @@ class OrderHandlers(BaseHandler):
             if selected_reward.get('reward_type') == 'free_product':
                 free_qty = int(selected_reward.get('free_product_quantity') or 1)
                 free_suffix = i18n.get('telegram.loyalty.free_suffix', language)
-                confirmation_text += f"🎁 {reward_label}: {reward_name} ({free_qty}× {free_suffix})\n\n"
+                confirmation_text += esc(f"🎁 {reward_label}: {reward_name} ({free_qty}× {free_suffix})") + "\n\n"
             else:
-                confirmation_text += f"🎁 {reward_label}: {reward_name}\n\n"
+                confirmation_text += esc(f"🎁 {reward_label}: {reward_name}") + "\n\n"
 
         # The money. The delivery fee used to be hardcoded to 0 here; it is now
         # whatever `_calculate_delivery_fee` said for THIS address and date.
-        confirmation_text += self._build_estimate_block(estimate, payment_method, language)
-
-        if payment_method == 'cash':
-            cod_prepayment = cart.get('cod_prepayment') or {}
-            available_balance = float(cod_prepayment.get('available_balance') or 0)
-            if available_balance > 0:
-                # THE SAME QUOTE THE "To pay" LINE JUST SHOWED. `cart['cod_
-                # prepayment']` is CartService.get_cart_summary's figure, priced
-                # off `estimated_total` with every discount -- INCLUDING the
-                # tier discount -- zeroed (that call has no rail/reward
-                # context). Falling back to it here rendered an undiscounted
-                # "payable after prepayment" directly beneath a
-                # tier-discounted "To pay", two numbers apart by exactly the
-                # tier discount. `estimate['pricing']['final_total']` is the
-                # SAME server quote `_build_estimate_block` just rendered
-                # above; deriving off it instead keeps both lines one number.
-                estimate_pricing = (estimate or {}).get('pricing') or {}
-                payable_before_prepayment = float(estimate_pricing.get('final_total') or cart_total_amount)
-                potential_applied = min(available_balance, payable_before_prepayment)
-                payable_after = max(0.0, payable_before_prepayment - potential_applied)
-                confirmation_text += "\n\n"
-                confirmation_text += i18n.get(
-                    'telegram.orders.cod_prepaid_balance',
-                    language,
-                    available_balance=format_price(available_balance),
-                ) + "\n"
-                confirmation_text += i18n.get(
-                    'telegram.orders.cod_prepaid_auto_applied',
-                    language,
-                    potential_applied=format_price(potential_applied),
-                ) + "\n"
-                confirmation_text += i18n.get(
-                    'telegram.orders.cod_estimated_payable',
-                    language,
-                    payable_after=format_price(payable_after),
-                )
+        # The prepaid balance is part of it: a deduction above "To pay" and the
+        # balance left after, both from the quote's `cod_prepayment` block.
+        confirmation_text += self._build_estimate_block(estimate, payment_method, language, as_html=True)
 
         # Block confirm if per-product or order-level minimum isn't met.
         # MIN_ORDER_AMOUNT comes from shared.business_config (same env-driven SSOT
@@ -1881,18 +1887,18 @@ class OrderHandlers(BaseHandler):
         if not meets_minimum:
             confirmation_text += "\n\n────────────────\n"
             if not amount_met:
-                confirmation_text += "⚠️ " + i18n.get(
+                confirmation_text += "⚠️ " + esc(i18n.get(
                     'telegram.cart_min_order_warning', language,
                     min_amount=format_price(MIN_ORDER_AMOUNT),
                     remaining=format_price(shortfall),
-                ) + "\n"
+                )) + "\n"
             for v in min_qty_violations:
-                confirmation_text += "⚠️ " + i18n.get(
+                confirmation_text += "⚠️ " + esc(i18n.get(
                     'telegram.cart_min_qty_warning', language,
                     product_name=v['name'],
                     min_qty=v['min_qty'],
                     remaining=v['remaining'],
-                ) + "\n"
+                )) + "\n"
 
         import eligibility
         show_reward = await eligibility.is_loyalty_eligible(update.effective_user.id)
@@ -1905,7 +1911,7 @@ class OrderHandlers(BaseHandler):
         )
 
         await self._edit_or_replace_callback_message(
-            update.callback_query, confirmation_text, reply_markup=keyboard,
+            update.callback_query, confirmation_text, reply_markup=keyboard, parse_mode='HTML',
         )
         await self._ack(update.callback_query)
 

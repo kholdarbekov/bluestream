@@ -215,6 +215,10 @@ class Shop:
         # discounting tier without standing up the whole loyalty schema — the
         # SHAPE is what the bot is being driven against here.
         self.estimate_pricing: dict = {}
+        # The quote's `cod_prepayment` block (`CartService._cod_prepayment_quote`)
+        # as the server would answer it. Served on a CASH quote only, like the
+        # server: the prepaid balance is spendable on cash orders only.
+        self.estimate_cod_prepayment: dict | None = None
         # payment_method -> the 4xx BODY the server refuses that method's quote
         # with. Keyed by method because the picker quotes the SAME endpoint with
         # no method first: a contract price can sink one method's basket below
@@ -397,6 +401,11 @@ class Shop:
                     for item in cart["cart_items"]
                 ],
                 "pricing": pricing,
+                "cod_prepayment": (
+                    self.estimate_cod_prepayment
+                    if (call.data or {}).get("payment_method") == "cash"
+                    else None
+                ),
             }
         }
 
@@ -1713,7 +1722,7 @@ async def test_switching_language_mid_checkout_renders_the_next_screen_in_the_ne
 
     await bot.send(user.tap("payment_cash"))
     confirmation = bot.telegram.last_shown()
-    assert confirmation.text.startswith("Подтвердите заказ")
+    assert confirmation.text.startswith("<b>Подтвердите заказ")
     assert "Наличные" in confirmation.text
     assert "Naqd pul" not in confirmation.text, "uz copy leaked into a ru screen"
 

@@ -79,9 +79,16 @@ def test_markdown_v2_entities_close_and_an_unclosed_one_is_named():
     )
 
 
-def test_html_and_plain_text_are_never_parsed_here():
-    assert telegram_entity_error("<b>x", "HTML") is None
+def test_plain_text_is_never_parsed_here():
     assert telegram_entity_error(INCIDENT_TEXT, None) is None
+
+
+def test_html_is_refused_where_telegram_refuses_it():
+    """The confirm screen is HTML (2026-10-23): a raw "<" from an address must fail here as it would live."""
+    assert telegram_entity_error("<b>x</b> &lt;2&gt; &amp; co", "HTML") is None
+    assert telegram_entity_error("<b>x", "HTML") is not None
+    assert telegram_entity_error("Uy <2>", "HTML") is not None
+    assert telegram_entity_error("<b><i>x</b></i>", "HTML") is not None
 
 
 def _bot(transport):

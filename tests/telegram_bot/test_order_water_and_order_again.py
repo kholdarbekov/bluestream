@@ -475,7 +475,7 @@ async def test_order_again_with_an_open_order_says_so_and_continues_with_its_own
     assert touched(bot, REMINDER_MESSAGE) == []
 
 
-async def test_repeat_last_with_two_addresses_skips_the_card_and_confirms_the_full_address(bot, shop, user):
+async def test_repeat_last_with_two_addresses_skips_the_card_and_back_twice_reaches_the_address_step(bot, shop, user):
     save_addresses(bot, HOME, WORK)
     serve_reorder(bot, shop)
 
@@ -490,13 +490,18 @@ async def test_repeat_last_with_two_addresses_skips_the_card_and_confirms_the_fu
     await bot.send(user.tap("payment_cash"))
 
     confirmation = bot.telegram.last_shown()
-    assert confirmation.text.startswith(uz("telegram.orders.confirmation_title"))
-    assert f"{uz('telegram.delivery_address')}: Uy\nChilonzor 9-kvartal, 15-uy\n\n" in confirmation.text
-    assert confirmation.params.get("parse_mode") is None
-    buttons = dict(zip(confirmation.button_labels(), confirmation.callback_data()))
-    assert buttons[uz("telegram.checkout.change_address")] == "checkout_change_address"
+    assert confirmation.text.startswith(f"<b>{uz('telegram.orders.confirmation_title')}</b>")
+    assert f"<b>{uz('telegram.delivery_address')}:</b> Uy\nChilonzor 9-kvartal, 15-uy\n\n" in confirmation.text
+    assert confirmation.params.get("parse_mode") == "HTML"
+    assert "checkout_change_address" not in confirmation.callback_data()
 
-    await bot.send(user.tap(buttons[uz("telegram.checkout.change_address")]))
+    # Owner 2026-10-23: no Change address button. Back reaches the payment picker, and its Back
+    # reaches the address step, even though this checkout skipped that step on the way in.
+    back = dict(zip(confirmation.button_labels(), confirmation.callback_data()))[uz("telegram.back")]
+    await bot.send(user.tap(back))
+    picker_again = bot.telegram.last_shown()
+    assert picker_again.text.startswith(uz("telegram.orders.select_payment"))
+    await bot.send(user.tap(dict(zip(picker_again.button_labels(), picker_again.callback_data()))[uz("telegram.back")]))
 
     address_picker = bot.telegram.last_shown()
     assert address_picker.text == uz("telegram.orders.select_address")

@@ -131,27 +131,9 @@ _SCANNED_TREES = ("telegram_bot", "staff_bot")
 
 _LEDGER: Dict[Tuple[str, str, str], str] = {
     # -- telegram_bot: checkout confirmation -------------------------------
-    (
-        "telegram_bot/handlers/orders.py",
-        "OrderHandlers._show_order_confirmation",
-        "payable_before_prepayment - potential_applied",
-    ): (
-        "ONE-DECISION (shared expression). Sweep #30, corrected by F1-F4 fix "
-        "wave item F2 (2026-08-27): both operands now derive from "
-        "`estimate['pricing']['final_total']`, the SAME server quote "
-        "`_build_estimate_block` renders as \"To pay\" immediately above -- "
-        "not `cart['cod_prepayment']`, whose `potential_applied_amount` / "
-        "`estimated_payable_after_prepayment` CartService.get_cart_summary "
-        "prices off `estimated_total` with every discount (including the "
-        "tier discount) zeroed. The old verdict called this 'a fallback of a "
-        "published figure' and 'advisory copy' -- true of the arithmetic, "
-        "but the figure it was a fallback OF was wrong: it showed an "
-        "undiscounted 'payable after prepayment' beneath a tier-discounted "
-        "'To pay' line, two numbers apart by exactly the tier discount. "
-        "Still advisory copy -- nothing is posted from this screen, the "
-        "actual auto-apply happens server-side at order creation -- but now "
-        "off the correct number."
-    ),
+    # (`_show_order_confirmation`'s "payable_before_prepayment - potential_applied"
+    # is gone since 2026-10-23: the quote publishes `cod_prepayment` and the
+    # screen only reads it.)
     (
         "telegram_bot/handlers/orders.py",
         "OrderHandlers._build_cod_prepayment_brief",

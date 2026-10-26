@@ -71,7 +71,7 @@ ARTICLE = {
 
 <p><strong>Считайте стоимость литра, а не бутыли.</strong> 18,9-литровая бутыль почти всегда выгоднее на литр, чем 10-литровая, а та — выгоднее набора ПЭТ-бутылок из супермаркета. Если у поставщика разница на литр между 19 л и 10 л минимальна, это повод спросить почему.</p>
 
-<p><strong>Оценивайте логику скидок по подписке.</strong> Подписка должна быть выгоднее разовой покупки — это плата за предсказуемость для оператора. Если «подписка» лишь синоним «доставлять каждую неделю по обычному прайсу», это не подписка, а напоминание.</p>
+<p><strong>Оценивайте, что именно делает подписка.</strong> Хорошая подписка ценна предсказуемостью: оператор сам оформляет каждый заказ по графику (автозаказ), доставка остаётся бесплатной, а бонусы лояльности продолжают копиться. Если «подписка» лишь напоминание, после которого заказ всё равно нужно оформлять вручную, это не подписка.</p>
 
 <p><strong>Депозит за тару — не цена воды.</strong> Если в чеке заложен возвратный депозит за поликарбонатную бутыль, он возвращается при возврате тары. Не путайте его с ценой содержимого. У части операторов депозит вообще отсутствует, потому что тара остаётся на учёте поставщика.</p>
 
@@ -269,7 +269,7 @@ ARTICLE = {
 
 <p><strong>Bir butil emas, bir litr narxini hisoblang.</strong> 18,9 litrli butil deyarli har doim bir litr boʻyicha 10 litrlikdan, u esa supermarketdagi PET-shisha toʻplamidan arzonroq tushadi. Agar yetkazib beruvchining 19 litr va 10 litr orasidagi farqi minimal boʻlsa — sababini soʻrang.</p>
 
-<p><strong>Obuna chegirmalari mantigʻini baholang.</strong> Obuna bir martalik xariddan arzonroq boʻlishi kerak — bu operator uchun bashorat qilinadigan rejaning qiymati. Agar «obuna» faqat «har hafta odatdagi narxda yetkazib berish» degani boʻlsa, bu obuna emas, eslatma.</p>
+<p><strong>Obuna aslida nima qilishini baholang.</strong> Yaxshi obuna bashoratlilik bilan qadrli: operator har bir buyurtmani jadval boʻyicha oʻzi rasmiylashtiradi (avtobuyurtma), yetkazib berish bepul qoladi, sodiqlik bonuslari esa toʻplanaveradi. Agar «obuna» faqat eslatma boʻlib, buyurtmani baribir qoʻlda rasmiylashtirishga toʻgʻri kelsa, bu obuna emas.</p>
 
 <p><strong>Idish depoziti — suv narxi emas.</strong> Agar chekda polikarbonat butil uchun qaytariladigan depozit boʻlsa, u idishni qaytarganda qaytariladi. Buni mahsulot narxi bilan adashtirmang. Baʼzi operatorlarda depozit umuman yoʻq.</p>
 
@@ -467,7 +467,7 @@ ARTICLE = {
 
 <p><strong>Compare per-litre cost, not per-bottle.</strong> A 18.9-litre bottle is almost always cheaper per litre than a 10-litre bottle, which is almost always cheaper than a basket of supermarket PET bottles. If a provider's per-litre gap between 19 L and 10 L is suspiciously small, ask why.</p>
 
-<p><strong>Read the subscription discount logic.</strong> A subscription should be cheaper than ad-hoc orders — that is the operator's reward for predictability. If "subscription" simply means "deliver every week at the regular price", it is a reminder, not a subscription.</p>
+<p><strong>Check what the subscription actually does.</strong> A good subscription earns its place through predictability: the operator places each order for you on schedule (auto-order), delivery stays free and loyalty rewards keep accruing. If "subscription" is only a reminder after which you still have to place the order by hand, it is not a subscription.</p>
 
 <p><strong>The bottle deposit is not the price of water.</strong> Where a returnable polycarbonate bottle has a deposit, that amount is refunded when you return the bottle. Do not confuse it with the cost of the contents. Some operators run no deposit at all because they keep the bottle on their own asset register.</p>
 

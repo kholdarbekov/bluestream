@@ -45,3 +45,15 @@ def test_llms_txt_does_not_qualify_the_tier_discount_by_payment_rail():
             f"the loyalty section names {rail_term!r}, which re-qualifies the tier "
             "discount by payment rail — see this test's docstring before changing it"
         )
+
+
+@pytest.mark.unit
+def test_llms_txt_names_the_channel_the_tier_discount_is_a_perk_of():
+    """The tier discount is a perk of ordering in the bot / on the website.
+    The channel is a plain benefit clause - not a payment-rail qualifier."""
+    import business_app
+
+    text = (Path(business_app.__file__).parent / "static" / "llms.txt").read_text(encoding="utf-8")
+    section = text.split("## Aqua Club loyalty programme", 1)[1].split("\n## ", 1)[0]
+    assert "Telegram bot" in section
+    assert "website" in section

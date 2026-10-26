@@ -3,6 +3,7 @@ subscription_id. See docs/superpowers/specs/2026-07-10-subscription-order-parity
 """
 
 from datetime import datetime, timedelta, timezone
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -10,15 +11,17 @@ import pytest
 
 from business_app.models.order import Order
 from business_app.models.payment import Payment
-from business_app.models.subscription import Subscription, SubscriptionItem
+from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
 from business_app.models.user import UserAddress
 from business_app.serializers.subscription_serializers import (
     AdminCreateSubscriptionRequest,
     CreateSubscriptionRequest,
 )
+from business_app.services import subscription_notices
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.order_service import OrderService
 from business_app.services.subscription_service import SubscriptionService
+from business_app.tasks.subscription_tasks import send_subscription_notice_task
 from business_app.utils.exceptions import ValidationError
 from shared.enums import (
     CashCollectionSource,
@@ -174,15 +177,14 @@ def sample_subscription(db, sample_user, sample_product, user_address):
         user_id=sample_user.id,
         name="Weekly Water",
         status=SubscriptionStatus.ACTIVE,
-        billing_cycle=SubscriptionFrequency.WEEKLY,
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         delivery_address_id=user_address.id,
         payment_method=PaymentMethod.CASH,
         auto_renew=True,
         discount_percentage=10.0,
         billing_amount=Decimal("0.00"),
         start_date=datetime.now(timezone.utc),
-        next_billing_date=datetime.now(timezone.utc) - timedelta(minutes=1),
+        next_delivery_date=local_date(),
     )
     db.session.add(subscription)
     db.session.flush()
@@ -308,7 +310,7 @@ class TestPersonalCardTransferOnSubscriptionOrder:
         self, app, db, sample_user, admin_user, sample_product, user_address, sample_subscription
     ):
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             assert result["success"] is True
 
             order = Order.query.get(result["order_id"])
@@ -338,7 +340,7 @@ class TestSubscriptionBillingCollapse:
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
 
             payments = Payment.query.filter_by(order_id=order.id).all()
@@ -350,7 +352,7 @@ class TestSubscriptionBillingCollapse:
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
             # Re-query rather than db.session.refresh(sample_subscription): this
             # `with app.app_context()` pushes a second, distinct Flask app context,
@@ -369,19 +371,19 @@ class TestSubscriptionBillingCollapse:
         # Regression: total_amount_billed was never incremented, so the
         # "total savings" calculation always read zero.
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
             refreshed = Subscription.query.get(sample_subscription.id)
             assert Decimal(refreshed.total_amount_billed) == Decimal(order.total_amount)
 
     def test_counters_advance(self, app, db, sample_user, sample_product, user_address, sample_subscription):
         with app.app_context():
-            before = sample_subscription.next_billing_date
-            SubscriptionService().process_subscription_billing(sample_subscription.id)
+            before = sample_subscription.next_delivery_date
+            SubscriptionService().create_next_order(sample_subscription.id)
             refreshed = Subscription.query.get(sample_subscription.id)
             assert refreshed.total_orders_generated == 1
-            assert refreshed.last_billing_date is not None
-            assert refreshed.next_billing_date > before
+            assert refreshed.last_delivery_date == before
+            assert refreshed.next_delivery_date == before + timedelta(weeks=1)
 
 
 def test_auto_charge_dead_code_is_gone():
@@ -397,24 +399,25 @@ class TestBillingIdempotency:
     ):
         with app.app_context():
             service = SubscriptionService()
-            result = service.process_subscription_billing(sample_subscription.id)
+            result = service.create_next_order(sample_subscription.id)
             assert result["success"] is True
 
-            # Simulate the crash window: the order committed, the counters did
-            # not. Mutate a session-local row rather than the `sample_subscription`
+            # Simulate the crash window: the order committed, the clock did not
+            # advance. Mutate a session-local row rather than the `sample_subscription`
             # fixture object directly — that object was loaded under a different
             # Flask-SQLAlchemy session (see the `db.session.refresh` gotcha
             # elsewhere in this file) and assigning to it here is silently
             # inert: `db.session.commit()` has nothing of the fixture's in its
             # unit of work to flush, so the row in the DB is untouched and the
             # test would "pass" against the un-fixed guard too.
+            order = Order.query.get(result["order_id"])
             subscription = Subscription.query.get(sample_subscription.id)
-            subscription.last_billing_date = None
+            subscription.next_delivery_date = order.delivery_date
             db.session.commit()
 
-            retry = service.process_subscription_billing(sample_subscription.id)
+            retry = service.create_next_order(sample_subscription.id)
             assert retry.get("skipped") is True
-            assert retry["reason"] == "already_billed_this_cycle"
+            assert retry["reason"] == "already_created"
             assert Order.query.filter_by(subscription_id=sample_subscription.id).count() == 1
 
     def test_a_cancelled_order_this_cycle_does_not_trigger_a_rebill(
@@ -422,20 +425,17 @@ class TestBillingIdempotency:
     ):
         # An abandoned click order cancelled by cancel_abandoned_orders must not
         # cause an immediate replacement — the customer waits for the next cycle.
+        # The clock moved one cycle when the order was created, so the next run
+        # has nothing due (spec 2026-10-23 §4.3).
         with app.app_context():
             service = SubscriptionService()
-            result = service.process_subscription_billing(sample_subscription.id)
+            result = service.create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
             order.status = OrderStatus.CANCELLED
-
-            # See the comment in the test above: mutate the session-local row,
-            # not the fixture object, or the reset never reaches the database.
-            subscription = Subscription.query.get(sample_subscription.id)
-            subscription.last_billing_date = None
             db.session.commit()
 
-            retry = service.process_subscription_billing(sample_subscription.id)
-            assert retry.get("skipped") is True
+            retry = service.create_next_order(sample_subscription.id)
+            assert (retry.get("skipped"), retry["reason"]) == (True, "not_due")
             assert Order.query.filter_by(subscription_id=sample_subscription.id).count() == 1
 
 
@@ -453,7 +453,7 @@ class TestCodDebtBlock:
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
         with app.app_context(), self._block_cod():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
 
             assert result["success"] is False
             assert result["skipped"] is True
@@ -465,7 +465,7 @@ class TestCodDebtBlock:
     ):
         with app.app_context(), self._block_cod():
             before_failures = sample_subscription.failed_payment_count or 0
-            SubscriptionService().process_subscription_billing(sample_subscription.id)
+            SubscriptionService().create_next_order(sample_subscription.id)
 
             # Re-query rather than db.session.refresh(sample_subscription): this
             # `with app.app_context()` pushes a second, distinct Flask app context,
@@ -478,47 +478,54 @@ class TestCodDebtBlock:
             assert refreshed.status is SubscriptionStatus.ACTIVE
             assert (refreshed.failed_payment_count or 0) == before_failures
 
-    def test_cod_block_advances_next_billing_date(
+    def test_cod_block_skips_that_delivery_and_moves_the_clock_one_cycle(
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
+        """Never back-dated, never retried daily (spec 2026-10-23 §2.8): the next delivery is a week on."""
         with app.app_context(), self._block_cod():
-            before = sample_subscription.next_billing_date
-            SubscriptionService().process_subscription_billing(sample_subscription.id)
+            before = sample_subscription.next_delivery_date
+            SubscriptionService().create_next_order(sample_subscription.id)
             refreshed = Subscription.query.get(sample_subscription.id)
-            assert refreshed.next_billing_date > before
+            assert refreshed.next_delivery_date == before + timedelta(weeks=1)
 
     def test_cod_block_notifies_the_customer(
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
-        with app.app_context(), self._block_cod(), patch(
-            "business_app.services.notification_service.NotificationService.send_notification"
-        ) as send:
-            SubscriptionService().process_subscription_billing(sample_subscription.id)
+        """The skip is recorded with its reason and handed to the notice task after the commit (spec
+        2026-10-23 §2.8, §9); the task sends it (tests/integration/test_subscription_order_notice.py)."""
+        with app.app_context(), self._block_cod(), patch.object(send_subscription_notice_task, "delay") as publish:
+            skipped = sample_subscription.next_delivery_date
+            SubscriptionService().create_next_order(sample_subscription.id)
 
-            send.assert_called_once()
-            args, kwargs = send.call_args
-            assert args[0] == sample_user.id
-            assert args[1] == "subscription_billing_skipped_cod_debt"
-            assert kwargs["template_data"]["subscription_name"] == sample_subscription.name
+            [log] = SubscriptionLog.query.filter_by(
+                subscription_id=sample_subscription.id, action=subscription_notices.DELIVERY_SKIPPED
+            ).all()
+            assert log.extra_data == {
+                "skipped_by": "system",
+                "reason_code": subscription_notices.SKIP_COD_DEBT_LIMIT,
+                "skipped_dates": [skipped.isoformat()],
+                "next_delivery_date": (skipped + timedelta(weeks=1)).isoformat(),
+                "detail": "Customer has reached the maximum number of active cash on delivery debts.",
+            }
+            publish.assert_called_once_with(log.id)
 
     def test_cod_block_still_skips_and_advances_date_when_notification_raises(
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
         # The notification is best-effort: a failure in the notify step must
-        # not roll back or skip the already-committed next_billing_date advance.
-        with app.app_context(), self._block_cod(), patch(
-            "business_app.services.notification_service.NotificationService.send_notification",
-            side_effect=RuntimeError("notification backend is down"),
+        # not roll back or skip the already-committed clock advance.
+        with app.app_context(), self._block_cod(), patch.object(
+            send_subscription_notice_task, "delay", side_effect=RuntimeError("broker is down")
         ):
-            before = sample_subscription.next_billing_date
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            before = sample_subscription.next_delivery_date
+            result = SubscriptionService().create_next_order(sample_subscription.id)
 
             assert result["success"] is False
             assert result["skipped"] is True
             assert result["reason"] == "cod_debt_limit"
 
             refreshed = Subscription.query.get(sample_subscription.id)
-            assert refreshed.next_billing_date > before
+            assert refreshed.next_delivery_date == before + timedelta(weeks=1)
             assert refreshed.status is SubscriptionStatus.ACTIVE
             assert Order.query.filter_by(subscription_id=sample_subscription.id).count() == 0
 
@@ -536,8 +543,7 @@ class TestSubscriptionPaymentMethodValidation:
         with app.app_context():
             request_data = CreateSubscriptionRequest(
                 name="Bad Sub",
-                billing_cycle="weekly",
-                delivery_frequency="weekly",
+                frequency="weekly",
                 delivery_address_id=user_address.id,
                 payment_method=bad,
                 items=[{"product_id": sample_product.id, "quantity": 1}],
@@ -549,8 +555,7 @@ class TestSubscriptionPaymentMethodValidation:
         with app.app_context():
             request_data = CreateSubscriptionRequest(
                 name="Card Sub",
-                billing_cycle="weekly",
-                delivery_frequency="weekly",
+                frequency="weekly",
                 delivery_address_id=user_address.id,
                 payment_method="card",
                 items=[{"product_id": sample_product.id, "quantity": 1}],
@@ -568,8 +573,7 @@ class TestSubscriptionPaymentMethodValidation:
             request_data = AdminCreateSubscriptionRequest(
                 user_id=sample_user.id,
                 name="Admin Bad Sub",
-                billing_cycle="weekly",
-                delivery_frequency="weekly",
+                frequency="weekly",
                 delivery_address_id=user_address.id,
                 payment_method="loyalty_points",
                 items=[{"product_id": sample_product.id, "quantity": 1}],
@@ -614,8 +618,7 @@ def test_subscription_preview_no_longer_advertises_a_trial(app, db, sample_user,
     with app.app_context():
         preview = SubscriptionService().calculate_subscription_preview(
             user_id=sample_user.id,
-            billing_cycle="weekly",
-            delivery_frequency="weekly",
+            frequency="weekly",
             items=[{"product_id": sample_product.id, "quantity": 1}],
         )
         assert "trial_days" not in preview
@@ -626,7 +629,7 @@ class TestSubscriptionBillingDeliveryNotes:
     def test_address_delivery_instructions_land_on_order_delivery_notes(
         self, app, db, sample_user, sample_product, user_address, sample_subscription
     ):
-        """process_subscription_billing's order_data built a dead
+        """create_next_order's order_data (then process_subscription_billing's) built a dead
         'delivery_instructions' key that create_order never read (it reads
         'delivery_notes'). Give the address a real instruction string so a
         None -> None pass would not make this vacuously true."""
@@ -639,6 +642,6 @@ class TestSubscriptionBillingDeliveryNotes:
             address.delivery_instructions = "Leave at the gate"
             db.session.commit()
 
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
             assert order.delivery_notes == "Leave at the gate"

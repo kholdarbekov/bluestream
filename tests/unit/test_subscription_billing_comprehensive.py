@@ -3,11 +3,11 @@ notification after the Subscription model field divergence was fixed.
 
 Background (prod incident): SubscriptionService and NotificationService were
 written against an OLD model schema. The real ``Subscription`` model exposes:
-    name, billing_cycle, billing_amount, next_billing_date, last_billing_date,
+    name, frequency, billing_amount, next_delivery_date, last_delivery_date,
     delivery_address_id + delivery_address (UserAddress) relationship,
     total_orders_generated, pause_start_date, pause_end_date, resume_date.
 The code referenced phantom fields:
-    plan.name, frequency, total_amount, billing_cycle_count, last_order_id,
+    plan.name, total_amount, billing_cycle_count, last_order_id,
     pause_until, resumed_at, delivery_address_street.
 On SQLite (the old test DB) setting a phantom attribute silently no-ops, and
 reading one that the model never defines raises AttributeError only when the
@@ -36,6 +36,7 @@ from business_app.models.user import UserAddress
 from business_app.services.notification_service import NotificationService
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.local_windows import local_date
 from shared.enums import (
     OrderStatus,
     PaymentMethod,
@@ -70,10 +71,10 @@ def _make_subscription(
     *,
     status=SubscriptionStatus.ACTIVE,
     number,
-    billing_cycle=SubscriptionFrequency.WEEKLY,
+    frequency=SubscriptionFrequency.WEEKLY,
     billing_amount=Decimal("50000.00"),
-    next_billing_date=None,
-    last_billing_date=None,
+    next_delivery_date=None,
+    last_delivery_date=None,
     total_orders_generated=0,
     payment_method=PaymentMethod.CARD,
 ):
@@ -82,11 +83,10 @@ def _make_subscription(
         user_id=user.id,
         status=status,
         name="Standard Weekly",
-        billing_cycle=billing_cycle,
+        frequency=frequency,
         billing_amount=billing_amount,
-        next_billing_date=next_billing_date or (datetime.now(UTC) + timedelta(days=7)),
-        last_billing_date=last_billing_date,
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        next_delivery_date=next_delivery_date or (local_date() + timedelta(days=7)),
+        last_delivery_date=last_delivery_date,
         delivery_address_id=addr.id,
         payment_method=payment_method,
         start_date=datetime.now(UTC),
@@ -157,10 +157,12 @@ def _real_order_factory(user_id):
 
 
 # ===========================================================================
-# process_subscription_billing
+# create_next_order (was process_subscription_billing). These rows' next delivery
+# is a week out, so the calls below are the admin's "Create next order now"
+# (`due_only=False`) unless a test says otherwise.
 # ===========================================================================
 @pytest.mark.unit
-class TestProcessSubscriptionBilling:
+class TestCreateNextOrder:
     def test_due_active_subscription_creates_order_with_address_from_fk(
         self, app, db, sample_user, sample_product
     ):
@@ -172,6 +174,7 @@ class TestProcessSubscriptionBilling:
             sub = _make_subscription(db, sample_user, addr, number="SUB-B1")
             _add_item(db, sub, sample_product, quantity=3)
             db.session.commit()
+            due = sub.next_delivery_date
 
             captured = {}
 
@@ -184,10 +187,11 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _capture_create_order
                 payment_cls.return_value.create_payment.return_value = MagicMock(id=1)
 
-                result = SubscriptionService().process_subscription_billing(sub.id)
+                result = SubscriptionService().create_next_order(sub.id, due_only=False)
 
             # create_order received the subscription owner + an order_data dict
             # whose delivery_address is built from the UserAddress relationship.
@@ -201,26 +205,28 @@ class TestProcessSubscriptionBilling:
             assert da["latitude"] == 41.311
             assert da["longitude"] == 69.279
 
-            # Result: success + float amount + ISO next_billing_date.
+            # Dated for the next delivery, no window (no slot), and the clock moves one cycle.
+            assert od["delivery_date"] == due
+            assert (od["delivery_window_start"], od["delivery_window_end"]) == (None, None)
             assert result["success"] is True
             assert result["amount"] == 50000.0
             assert isinstance(result["amount"], float)
-            assert isinstance(result["next_billing_date"], str)
+            assert result["next_delivery_date"] == (od["delivery_date"] + timedelta(weeks=1)).isoformat()
 
     def test_billing_advances_counters_and_dates_on_real_row(
         self, app, db, sample_user, sample_product
     ):
         """Assert the PERSISTED column values after billing: total_orders_generated
-        increments, last_billing_date set, next_billing_date moved forward."""
+        increments, last_delivery_date set, next_delivery_date moved one cycle."""
         with app.app_context():
             addr = _make_address(db, sample_user)
-            old_next = datetime.now(UTC)
+            old_next = local_date()  # due today
             sub = _make_subscription(
                 db,
                 sample_user,
                 addr,
                 number="SUB-B2",
-                next_billing_date=old_next,
+                next_delivery_date=old_next,
                 total_orders_generated=4,
             )
             _add_item(db, sub, sample_product)
@@ -230,19 +236,21 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _real_order_factory(
                     sample_user.id
                 )
                 payment_cls.return_value.create_payment.return_value = MagicMock(id=1)
 
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id)
 
             refreshed = Subscription.query.get(sub.id)
             # total_orders_generated (NOT phantom billing_cycle_count) advanced.
             assert refreshed.total_orders_generated == 5
-            assert refreshed.last_billing_date is not None
-            # WEEKLY → next billing moves forward by ~7 days from now.
-            assert _as_utc(refreshed.next_billing_date) > old_next
+            assert refreshed.last_delivery_date is not None
+            # WEEKLY → the clock moves from the delivery just created to one week later.
+            assert refreshed.next_delivery_date == refreshed.last_delivery_date + timedelta(weeks=1)
+            assert refreshed.next_delivery_date > old_next
 
     def test_generated_order_is_linked_back_to_subscription(
         self, app, db, sample_user, sample_product
@@ -266,10 +274,11 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _create
                 payment_cls.return_value.create_payment.return_value = MagicMock(id=1)
 
-                result = SubscriptionService().process_subscription_billing(sub.id)
+                result = SubscriptionService().create_next_order(sub.id, due_only=False)
 
             linked = Order.query.get(created_ids["order_id"])
             assert linked.subscription_id == sub.id
@@ -312,9 +321,10 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _capture
 
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id, due_only=False)
 
             assert captured["order_data"]["payment_method"] == PaymentMethod.CARD.value
             assert captured["kwargs"]["subscription"] is sub
@@ -341,7 +351,7 @@ class TestProcessSubscriptionBilling:
             db.session.commit()
 
             with pytest.raises(ValidationError):
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id)
 
     def test_delivery_instructions_from_address_propagated(
         self, app, db, sample_user, sample_product
@@ -366,29 +376,24 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _capture
                 payment_cls.return_value.create_payment.return_value = MagicMock(id=1)
 
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id, due_only=False)
 
             assert captured["order_data"]["delivery_notes"] == "Leave at door, ring twice"
 
-    def test_already_billed_this_cycle_is_skipped_idempotently(
-        self, app, db, sample_user, sample_product
-    ):
-        """If last_billing_date is already within today's UTC window, billing is
-        skipped (CEL-002 idempotency) and NO order is created."""
+    def test_a_live_order_for_the_date_is_never_created_twice(self, app, db, sample_user, sample_product):
+        """The idempotency guard (spec 2026-10-23 §4.3, replacing CEL-002's same-day check): a
+        non-cancelled order of this subscription for the next delivery date means NO second order."""
         with app.app_context():
             addr = _make_address(db, sample_user)
-            sub = _make_subscription(
-                db,
-                sample_user,
-                addr,
-                number="SUB-IDEM",
-                last_billing_date=datetime.now(UTC),
-                total_orders_generated=2,
-            )
+            sub = _make_subscription(db, sample_user, addr, number="SUB-IDEM", total_orders_generated=2)
             _add_item(db, sub, sample_product)
+            db.session.commit()
+            existing = _real_order_factory(sample_user.id)(sample_user.id, {}, subscription=sub)
+            existing.delivery_date = sub.next_delivery_date
             db.session.commit()
 
             with (
@@ -396,12 +401,10 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.payment_service.PaymentService"),
             ):
                 create_order = order_cls.return_value.create_order
-                result = SubscriptionService().process_subscription_billing(sub.id)
+                result = SubscriptionService().create_next_order(sub.id, due_only=False)
 
             create_order.assert_not_called()
-            assert result["success"] is True
-            assert result["skipped"] is True
-            assert result["reason"] == "already_billed_this_cycle"
+            assert (result["success"], result["skipped"], result["reason"]) == (True, True, "already_created")
             # Counter must not advance on a skip.
             assert Subscription.query.get(sub.id).total_orders_generated == 2
 
@@ -421,7 +424,7 @@ class TestProcessSubscriptionBilling:
             db.session.commit()
 
             with pytest.raises(ValidationError):
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id)
 
     def test_paused_subscription_raises_validation_error(
         self, app, db, sample_user, sample_product
@@ -439,12 +442,12 @@ class TestProcessSubscriptionBilling:
             db.session.commit()
 
             with pytest.raises(ValidationError):
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id)
 
     def test_missing_subscription_raises_not_found(self, app, db):
         with app.app_context():
             with pytest.raises(NotFoundError):
-                SubscriptionService().process_subscription_billing(999999)
+                SubscriptionService().create_next_order(999999)
 
     def test_order_data_does_not_reference_phantom_fields(
         self, app, db, sample_user, sample_product
@@ -468,10 +471,11 @@ class TestProcessSubscriptionBilling:
                 patch("business_app.services.order_service.OrderService") as order_cls,
                 patch("business_app.services.payment_service.PaymentService") as payment_cls,
             ):
+                order_cls.customer_order_refusal.return_value = None  # this customer may order
                 order_cls.return_value.create_order.side_effect = _capture
                 payment_cls.return_value.create_payment.return_value = MagicMock(id=1)
 
-                SubscriptionService().process_subscription_billing(sub.id)
+                SubscriptionService().create_next_order(sub.id, due_only=False)
 
             od = captured["order_data"]
             assert "delivery_address_street" not in od
@@ -483,56 +487,32 @@ class TestProcessSubscriptionBilling:
 
 
 # ===========================================================================
-# pause_subscription
+# pause / resume (the live, user-scoped methods; the legacy uncalled copies are gone)
 # ===========================================================================
 @pytest.mark.unit
 class TestPauseSubscription:
-    def test_active_pause_sets_pause_end_date_and_start_date(
-        self, app, db, sample_user
-    ):
+    def test_active_pause_records_the_pause(self, app, db, sample_user):
         with app.app_context():
             addr = _make_address(db, sample_user)
             sub = _make_subscription(db, sample_user, addr, number="SUB-PA1")
             db.session.commit()
-            until = datetime.now(UTC) + timedelta(days=10)
 
-            SubscriptionService().pause_subscription(sub.id, pause_until=until)
+            outcome = SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id, "Holiday")
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.PAUSED
-            # pause_end_date (NOT phantom pause_until) carries the until value.
-            assert refreshed.pause_end_date is not None
-            assert refreshed.pause_start_date is not None
+            assert (refreshed.pause_reason, refreshed.resume_date) == ("Holiday", None)
             assert refreshed.paused_at is not None
-
-    def test_pause_without_until_sets_end_date_none(self, app, db, sample_user):
-        with app.app_context():
-            addr = _make_address(db, sample_user)
-            sub = _make_subscription(db, sample_user, addr, number="SUB-PA2")
-            db.session.commit()
-
-            SubscriptionService().pause_subscription(sub.id)
-
-            refreshed = Subscription.query.get(sub.id)
-            assert refreshed.status == SubscriptionStatus.PAUSED
-            assert refreshed.pause_end_date is None
-            # Pause start was still recorded.
-            assert refreshed.pause_start_date is not None
+            assert (outcome["cancelled_orders"], outcome["kept_orders"]) == ([], [])
 
     def test_pause_non_active_raises_validation_error(self, app, db, sample_user):
         with app.app_context():
             addr = _make_address(db, sample_user)
-            sub = _make_subscription(
-                db,
-                sample_user,
-                addr,
-                status=SubscriptionStatus.PAUSED,
-                number="SUB-PA3",
-            )
+            sub = _make_subscription(db, sample_user, addr, status=SubscriptionStatus.PAUSED, number="SUB-PA3")
             db.session.commit()
 
             with pytest.raises(ValidationError):
-                SubscriptionService().pause_subscription(sub.id)
+                SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id, "x")
 
     def test_pause_respects_user_scope(self, app, db, sample_user):
         """Pausing with a wrong user_id raises NotFound (ownership guard)."""
@@ -542,66 +522,30 @@ class TestPauseSubscription:
             db.session.commit()
 
             with pytest.raises(NotFoundError):
-                SubscriptionService().pause_subscription(sub.id, user_id=sample_user.id + 999)
+                SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id + 999, "x")
 
 
-# ===========================================================================
-# resume_subscription
-# ===========================================================================
 @pytest.mark.unit
 class TestResumeSubscription:
-    def test_paused_resume_recalculates_next_billing_without_crashing(
-        self, app, db, sample_user
-    ):
-        """Pre-fix this crashed reading subscription.frequency. It must produce a
-        real datetime next_billing_date and clear pause_end_date."""
+    def test_paused_resume_dates_the_next_delivery_by_the_rule(self, app, db, sample_user):
+        """Pre-fix this crashed reading subscription.frequency. The next delivery is the first one the
+        lead allows (spec 2026-10-23 §4.6), and the pause is cleared."""
+        from business_app.services import subscription_schedule
+        from business_app.utils.local_windows import local_date
+
         with app.app_context():
             addr = _make_address(db, sample_user)
-            sub = _make_subscription(
-                db,
-                sample_user,
-                addr,
-                status=SubscriptionStatus.PAUSED,
-                number="SUB-RE1",
-            )
+            sub = _make_subscription(db, sample_user, addr, status=SubscriptionStatus.PAUSED, number="SUB-RE1")
             sub.pause_end_date = datetime.now(UTC) + timedelta(days=5)
             db.session.commit()
 
-            SubscriptionService().resume_subscription(sub.id)
+            with patch("business_app.tasks.subscription_tasks.create_subscription_delivery_task.delay"):
+                SubscriptionService().resume_subscription_for_user(sub.id, sample_user.id)
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.ACTIVE
-            # resume_date (NOT phantom resumed_at) is stamped.
-            assert refreshed.resume_date is not None
-            # pause_end_date cleared.
-            assert refreshed.pause_end_date is None
-            assert refreshed.paused_at is None
-            # next_billing_date recomputed to a real future datetime.
-            assert isinstance(refreshed.next_billing_date, datetime)
-            assert _as_utc(refreshed.next_billing_date) > datetime.now(UTC)
-
-    def test_resume_uses_billing_cycle_for_recalculation(self, app, db, sample_user):
-        """WEEKLY billing_cycle → next billing ~7 days out, computed from
-        billing_cycle (the real field), not the phantom frequency attribute."""
-        with app.app_context():
-            addr = _make_address(db, sample_user)
-            sub = _make_subscription(
-                db,
-                sample_user,
-                addr,
-                status=SubscriptionStatus.PAUSED,
-                number="SUB-RE2",
-                billing_cycle=SubscriptionFrequency.WEEKLY,
-            )
-            db.session.commit()
-
-            before = datetime.now(UTC)
-            SubscriptionService().resume_subscription(sub.id)
-
-            refreshed = Subscription.query.get(sub.id)
-            delta = _as_utc(refreshed.next_billing_date) - before
-            # ~7 days for weekly (allow generous slack for test runtime).
-            assert timedelta(days=6) < delta < timedelta(days=8)
+            assert (refreshed.pause_end_date, refreshed.paused_at) == (None, None)
+            assert refreshed.next_delivery_date == subscription_schedule.earliest_delivery_date(local_date())
 
     def test_resume_non_paused_raises_validation_error(self, app, db, sample_user):
         with app.app_context():
@@ -610,26 +554,7 @@ class TestResumeSubscription:
             db.session.commit()
 
             with pytest.raises(ValidationError):
-                SubscriptionService().resume_subscription(sub.id)
-
-    def test_pause_then_resume_roundtrip_is_consistent(self, app, db, sample_user):
-        """Full real-world cycle: active → pause(until) → resume."""
-        with app.app_context():
-            addr = _make_address(db, sample_user)
-            sub = _make_subscription(db, sample_user, addr, number="SUB-RT1")
-            db.session.commit()
-            svc = SubscriptionService()
-
-            svc.pause_subscription(sub.id, pause_until=datetime.now(UTC) + timedelta(days=3))
-            paused = Subscription.query.get(sub.id)
-            assert paused.status == SubscriptionStatus.PAUSED
-            assert paused.pause_end_date is not None
-
-            svc.resume_subscription(sub.id)
-            resumed = Subscription.query.get(sub.id)
-            assert resumed.status == SubscriptionStatus.ACTIVE
-            assert resumed.pause_end_date is None
-            assert resumed.resume_date is not None
+                SubscriptionService().resume_subscription_for_user(sub.id, sample_user.id)
 
 
 # ===========================================================================
@@ -638,7 +563,7 @@ class TestResumeSubscription:
 @pytest.mark.unit
 class TestSendSubscriptionNotification:
     def test_template_data_built_from_real_fields(self, app, db, sample_user):
-        """plan_name←name, frequency←billing_cycle.value, total_amount←
+        """plan_name←name, frequency←frequency.value, total_amount←
         float(billing_amount) — all REAL model fields (no phantom plan.name)."""
         with app.app_context():
             addr = _make_address(db, sample_user)
@@ -647,7 +572,7 @@ class TestSendSubscriptionNotification:
                 sample_user,
                 addr,
                 number="SUB-NOT1",
-                billing_cycle=SubscriptionFrequency.MONTHLY,
+                frequency=SubscriptionFrequency.MONTHLY,
                 billing_amount=Decimal("120000.00"),
             )
             db.session.commit()
@@ -690,13 +615,10 @@ class TestSendSubscriptionNotification:
             with pytest.raises(NotificationError):
                 svc.send_subscription_notification(123456, "cancelled")
 
-    def test_next_billing_date_serialized_isoformat(self, app, db, sample_user):
+    def test_next_delivery_date_serialized_isoformat(self, app, db, sample_user):
         with app.app_context():
             addr = _make_address(db, sample_user)
-            nbd = datetime.now(UTC) + timedelta(days=7)
-            sub = _make_subscription(
-                db, sample_user, addr, number="SUB-NOT3", next_billing_date=nbd
-            )
+            sub = _make_subscription(db, sample_user, addr, number="SUB-NOT3")
             db.session.commit()
 
             svc = NotificationService()
@@ -704,9 +626,6 @@ class TestSendSubscriptionNotification:
                 svc.send_subscription_notification(sub.id, "renewed")
 
             template = send.call_args.args[3]
-            # Serialized to ISO 8601 from the stored next_billing_date. (The
-            # SQLite backend drops tzinfo on read, so compare against the value
-            # actually persisted rather than the pre-store aware datetime.)
-            stored = Subscription.query.get(sub.id).next_billing_date
-            assert template["next_billing_date"] == stored.isoformat()
-            assert _as_utc(stored) == nbd
+            stored = Subscription.query.get(sub.id).next_delivery_date
+            assert template["next_delivery_date"] == stored.isoformat()
+            assert "next_billing_date" not in template

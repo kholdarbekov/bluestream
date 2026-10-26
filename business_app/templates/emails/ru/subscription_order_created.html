@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Заказ по подписке оформлен - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Заказ по подписке оформлен</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>По вашей подписке создан заказ <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Номер заказа</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Доставка</th>
+        <td>{{ delivery_date }}, {% if window %}{{ window }}{% else %}время уточним позже{% endif %}</td>
+    </tr>
+    {% for item in items %}
+    <tr>
+        <th>{{ item.name }}</th>
+        <td>× {{ item.qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr>
+        <th>Итого</th>
+        <td>{{ total }} сум</td>
+    </tr>
+</table>
+
+{% if payment == "cash" %}
+{% if prepaid_applied %}<p>Учтено {{ prepaid_applied }} сум с вашего предоплаченного баланса.</p>{% endif %}
+<p>{% if amount_due %}Оплата курьеру при получении: <strong>{{ amount_due }} сум</strong>.{% else %}При получении ничего платить не нужно.{% endif %}</p>
+{% elif payment == "company_account" %}
+<p>Списывается с корпоративного счёта.</p>
+{% elif payment == "online_unpaid" %}
+<p>Пожалуйста, оплатите до {{ deadline }}. Заказ, не оплаченный к этому времени, будет отменён.</p>
+{% if pay_url %}
+<p style="text-align: center;">
+    <a href="{{ pay_url }}" class="btn-primary">Оплатить</a>
+</p>
+{% endif %}
+{% elif payment == "online_paid" %}
+<p>Оплачено.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

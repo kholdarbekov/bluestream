@@ -1602,7 +1602,7 @@ const Orders = () => {
               ) : null}
               {Number(selectedOrder.tier_discount) > 0 ? (
                 <Descriptions.Item
-                  label={t('ui.orders.tier_discount', 'Tier discount (cash on delivery)')}
+                  label={t('ui.orders.tier_discount', "Tier discount (customer's bot/web order)")}
                 >
                   −{formatMoney(selectedOrder.tier_discount)} UZS
                 </Descriptions.Item>

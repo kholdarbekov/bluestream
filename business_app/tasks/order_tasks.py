@@ -19,7 +19,9 @@ from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import NotificationChannel
 from shared.enums import DeliveryStatus, OrderStatus, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
+from business_app.utils.timezone_utils import get_utc_now
 from business_app import db
+from shared.business_config import CLICK_PAYMENT_WINDOW_HOURS
 
 logger = get_task_logger(__name__)
 
@@ -146,12 +148,19 @@ def auto_confirm_pending_orders():
 
 @shared_task(time_limit=600, soft_time_limit=540)
 def cancel_abandoned_orders():
-    """Cancel orders that have been abandoned (no payment after 24 hours)"""
+    """Cancel unpaid orders whose payment deadline has passed (spec 2026-10-23 §4.5).
+
+    The deadline is `OrderService.payment_deadline`, the ONE rule: an ordinary order has
+    CLICK_PAYMENT_WINDOW_HOURS, a subscription order also waits for the end of its delivery window. The
+    candidates are still the orders older than that window (so the query stays cheap); each is cancelled
+    only once its own deadline has passed. The customer is told "not paid by <deadline>" by
+    `send_payment_expired_notice_task`, published after the cancel committed, instead of the generic
+    "status changed: cancelled" message."""
     try:
         logger.info("Cancelling abandoned orders")
 
-        # Get orders pending for more than 24 hours without payment
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        now = get_utc_now()
+        cutoff_time = now - timedelta(hours=CLICK_PAYMENT_WINDOW_HOURS)
 
         # Local import: the service imports the tasks package for its push hook.
         from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
@@ -172,8 +181,8 @@ def cancel_abandoned_orders():
                 # agent placed on a store's behalf belongs to the store until it answers or the
                 # request expires. A cash agent order's Payment row is PENDING by construction,
                 # so without this every such order matched — and this sweep does not confirm, it
-                # CANCELS, releasing the prepayment and telling the shop "no payment received
-                # within 24 hours" about an order it was never asked to pay online.
+                # CANCELS, releasing the prepayment and telling the shop "no payment received"
+                # about an order it was never asked to pay online.
                 AgentOrderConfirmationService.pending_request_filter(),
                 # F1 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md):
                 # a failed delivery never ends its order. One that waits for a new date is
@@ -186,31 +195,26 @@ def cancel_abandoned_orders():
         )
 
         order_service = OrderService()
-        notification_service = NotificationService()
         cancelled_count = 0
 
         for order in abandoned_orders:
+            if OrderService.payment_deadline(order) > now:
+                continue  # a subscription order still inside its delivery window
             try:
-                # Cancel the order
-                order_service.cancel_order(order.id, reason="Order abandoned - no payment received within 24 hours")
-
-                # Send abandonment notification
-                notification_service.send_notification(
-                    order.user_id,
-                    "order_cancelled_abandoned",
-                    template_data={
-                        "order_number": order.order_number,
-                        "cancellation_reason": "No payment received within 24 hours",
-                        "reorder_url": f"{current_app.config['COMPANY_WEBSITE']}/reorder/{order.id}",
-                    },
+                # `cancel_order` commits. The notice is published only after that commit.
+                order_service.cancel_order(
+                    order.id, reason="Order cancelled - not paid by its payment deadline", notify=False
                 )
-
-                cancelled_count += 1
-                logger.info(f"Cancelled abandoned order {order.id}")
-
             except Exception as e:
                 logger.error(f"Failed to cancel abandoned order {order.id}: {e}")
                 continue
+
+            cancelled_count += 1
+            logger.info(f"Cancelled abandoned order {order.id}")
+            try:
+                send_payment_expired_notice_task.delay(order.id)
+            except Exception:  # noqa: BLE001 - the cancel stands; only the notice is lost
+                logger.exception("Failed to publish the payment-deadline notice for order %s", order.id)
 
         db.session.commit()  # Release row locks
         logger.info(f"Cancelled {cancelled_count} abandoned orders")
@@ -220,6 +224,19 @@ def cancel_abandoned_orders():
         db.session.rollback()
         logger.error(f"Failed to cancel abandoned orders: {e}")
         return {"error": str(e)}
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+def send_payment_expired_notice_task(self, order_id: int):
+    """Tell the customer their order was cancelled because it was not paid by its deadline (spec 2026-10-23
+    §4.5, §9): the customer bot's notice route, else email. A bot failure retries; email is one attempt."""
+    from business_app.services import customer_notices
+
+    try:
+        return customer_notices.send_payment_expired(order_id)
+    except customer_notices.RetryableNoticeError as exc:
+        logger.warning("Payment-deadline notice for order %s will be retried: %s", order_id, exc)
+        raise self.retry(exc=exc)
 
 
 @shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)

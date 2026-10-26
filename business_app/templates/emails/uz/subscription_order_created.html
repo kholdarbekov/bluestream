@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Obuna buyurtmangiz yaratildi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Obuna buyurtmangiz yaratildi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Obunangiz bo'yicha <strong>#{{ order_number }}</strong> buyurtmasi yaratildi.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Yetkazib berish</th>
+        <td>{{ delivery_date }}, {% if window %}{{ window }}{% else %}vaqti keyinroq aniqlanadi{% endif %}</td>
+    </tr>
+    {% for item in items %}
+    <tr>
+        <th>{{ item.name }}</th>
+        <td>× {{ item.qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr>
+        <th>Jami</th>
+        <td>{{ total }} so'm</td>
+    </tr>
+</table>
+
+{% if payment == "cash" %}
+{% if prepaid_applied %}<p>Oldindan to'lov balansingizdan {{ prepaid_applied }} so'm hisobga olindi.</p>{% endif %}
+<p>{% if amount_due %}Kuryerga eshik oldida <strong>{{ amount_due }} so'm</strong> to'laysiz.{% else %}Eshik oldida hech narsa to'lash shart emas.{% endif %}</p>
+{% elif payment == "company_account" %}
+<p>Kompaniya hisobingizdan yechiladi.</p>
+{% elif payment == "online_unpaid" %}
+<p>Iltimos, {{ deadline }} gacha to'lang. Shu vaqtgacha to'lanmagan buyurtma bekor qilinadi.</p>
+{% if pay_url %}
+<p style="text-align: center;">
+    <a href="{{ pay_url }}" class="btn-primary">Hozir to'lash</a>
+</p>
+{% endif %}
+{% elif payment == "online_paid" %}
+<p>To'langan.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizga yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

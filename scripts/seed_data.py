@@ -2025,11 +2025,6 @@ def seed_essential_translations():
             "ru": "Ежемесячно",
             "uz": "Oylik"
         },
-        "Monthly Savings": {
-            "en": "Monthly Savings",
-            "ru": "Ежемесячная экономия",
-            "uz": "Oylik tejash"
-        },
         "Most Popular": {
             "en": "Most Popular",
             "ru": "Самый популярный",

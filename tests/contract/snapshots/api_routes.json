@@ -3522,13 +3522,6 @@
     "rule": "/api/v1/orders/statuses"
   },
   {
-    "endpoint": "orders.create_subscription_order",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/orders/subscription"
-  },
-  {
     "endpoint": "payments.get_payments",
     "methods": [
       "GET"
@@ -3667,13 +3660,6 @@
       "GET"
     ],
     "rule": "/api/v1/payments/statistics"
-  },
-  {
-    "endpoint": "payments.create_subscription_payment",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/payments/subscription"
   },
   {
     "endpoint": "payments.tokenize_card",
@@ -4551,13 +4537,6 @@
     "rule": "/api/v1/subscriptions/<int:subscription_id>/resume"
   },
   {
-    "endpoint": "subscriptions.retry_billing",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/retry-billing"
-  },
-  {
     "endpoint": "subscriptions.skip_next_delivery",
     "methods": [
       "POST"
@@ -4577,13 +4556,6 @@
       "GET"
     ],
     "rule": "/api/v1/subscriptions/statistics"
-  },
-  {
-    "endpoint": "subscriptions.get_subscription_templates",
-    "methods": [
-      "GET"
-    ],
-    "rule": "/api/v1/subscriptions/templates"
   },
   {
     "endpoint": "support.create_support_message",

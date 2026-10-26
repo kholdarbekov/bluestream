@@ -41,6 +41,23 @@ _DELIVERY_ENDPOINT = 'delivery-completed'
 # route path, both dedup layers' claims and both releases.
 _REORDER_REMINDER_ENDPOINT = 'reorder-reminder'
 
+# The customer notices (plan 2026-10-24 Task 3; spec 2026-10-23 §9). Same one-token rule: the route path,
+# the claim and its release.
+_CUSTOMER_NOTICE_ENDPOINT = 'customer-notice'
+_NOTICE_ORDER_CREATED = 'subscription_order_created'
+_NOTICE_DELIVERY_SKIPPED = 'subscription_delivery_skipped'
+_NOTICE_PAID_ORDER_KEPT = 'subscription_paid_order_kept'
+_NOTICE_PAYMENT_EXPIRED = 'order_payment_expired'
+_CUSTOMER_NOTICE_KINDS = frozenset(
+    {_NOTICE_ORDER_CREATED, _NOTICE_DELIVERY_SKIPPED, _NOTICE_PAID_ORDER_KEPT, _NOTICE_PAYMENT_EXPIRED}
+)
+# A paid order that stays: one copy per action that kept it (spec 2026-10-23 §2.7).
+_PAID_ORDER_KEPT_KEYS = {
+    'skip': 'telegram.customer_notice.paid_order_kept_skip',
+    'pause': 'telegram.customer_notice.paid_order_kept_pause',
+    'cancel': 'telegram.customer_notice.paid_order_kept_cancel',
+}
+
 # Answered with HTTP 410 when Telegram refuses the send because this account blocked the bot
 # (or was deleted). The backend send task reads the STATUS (`trigger_bot_webhook` drops
 # non-200 bodies, keeping only their `message`), marks the account blocked and does not retry
@@ -131,6 +148,112 @@ def _order_id_or_none(value) -> Optional[int]:
     except (TypeError, ValueError, OverflowError):
         return None
     return order_id if order_id > 0 else None
+
+
+def _customer_notice_problem(data: dict) -> Optional[str]:
+    """Why a customer-notice payload cannot be rendered, or None. Asked before the claim is taken, so a
+    corrected retry still gets through. The language is the backend's one answer; the bot never picks its own."""
+    if not data.get('notice_id') or not data.get('telegram_id'):
+        return 'Missing required fields: notice_id, telegram_id'
+    if data.get('kind') not in _CUSTOMER_NOTICE_KINDS:
+        return f"Unknown kind: {data.get('kind')!r}"
+    if data.get('language') not in SUPPORTED_LANGUAGES:
+        return f'language must be one of {", ".join(SUPPORTED_LANGUAGES)}'
+    if data['kind'] == _NOTICE_PAID_ORDER_KEPT and data.get('trigger') not in _PAID_ORDER_KEPT_KEYS:
+        return f"Unknown trigger: {data.get('trigger')!r}"
+    return None
+
+
+def _notice_deadline(language: str, value) -> str:
+    """A backend deadline (an ISO instant) by the bot's own date-and-time rule; a dash when absent."""
+    from utils import format_datetime
+
+    try:
+        return format_datetime(datetime.fromisoformat(str(value)), language) if value else '—'
+    except ValueError:
+        return '—'
+
+
+def _notice_payment_line(language: str, data: dict) -> str:
+    """How the order is paid, from the backend's `payment` answer (spec 2026-10-23 §4.4)."""
+    from utils import format_price
+
+    payment = data.get('payment')
+    if payment == 'cash':
+        due = float(data.get('amount_due') or 0)
+        if due > 0:
+            line = i18n.get('telegram.customer_notice.pay_cash', language, amount=format_price(due))
+        else:
+            line = i18n.get('telegram.customer_notice.pay_cash_covered', language)
+        prepaid = float(data.get('prepaid_applied') or 0)
+        if prepaid > 0:
+            prepaid_line = i18n.get('telegram.customer_notice.pay_cash_prepaid', language, amount=format_price(prepaid))
+            line = f'{prepaid_line}\n{line}'
+        return line
+    if payment == 'company_account':
+        return i18n.get('telegram.customer_notice.pay_company_account', language)
+    if payment == 'online_unpaid':
+        return i18n.get(
+            'telegram.customer_notice.pay_online', language, deadline=_notice_deadline(language, data.get('deadline'))
+        )
+    if payment == 'online_paid':
+        return i18n.get('telegram.customer_notice.pay_online_paid', language)
+    return ''
+
+
+def _customer_notice_text(language: str, data: dict) -> str:
+    """The notice's message, in the backend's `language`. Every backend-supplied string is HTML-escaped (the
+    message is sent as HTML); dates and money are formatted by the bot's own rules (`utils`)."""
+    from utils import format_date, format_price
+
+    kind = data['kind']
+    if kind == _NOTICE_ORDER_CREATED:
+        when = format_date(data.get('delivery_date')) or '—'
+        if data.get('window_start') and data.get('window_end'):
+            delivery = i18n.get(
+                'telegram.customer_notice.delivery_window', language, date=when,
+                start=_html_escaped(data['window_start']), end=_html_escaped(data['window_end']),
+            )
+        else:
+            delivery = i18n.get('telegram.customer_notice.delivery_tbc', language, date=when)
+        items = '\n'.join(
+            i18n.get(
+                'telegram.customer_notice.item', language,
+                name=_html_escaped(item.get('name')), qty=_html_escaped(item.get('qty')),
+            )
+            for item in (data.get('items') or [])
+        )
+        return i18n.get(
+            'telegram.customer_notice.order_created', language,
+            order_number=_html_escaped(data.get('order_number')),
+            delivery=delivery,
+            items=items or '—',
+            total=format_price(float(data.get('total') or 0)),
+            payment=_notice_payment_line(language, data),
+        )
+    if kind == _NOTICE_DELIVERY_SKIPPED:
+        dates = ', '.join(filter(None, (format_date(day) for day in (data.get('skipped_dates') or []))))
+        return i18n.get(
+            'telegram.customer_notice.delivery_skipped', language,
+            subscription_name=_html_escaped(data.get('subscription_name')) or '—',
+            dates=dates or '—',
+            reason=_html_escaped(data.get('reason')) or '—',
+            next_date=format_date(data.get('next_delivery_date')) or '—',
+        )
+    if kind == _NOTICE_PAID_ORDER_KEPT:
+        trigger = data['trigger']
+        values = {
+            'order_number': _html_escaped(data.get('order_number')),
+            'date': format_date(data.get('delivery_date')) or '—',
+        }
+        if trigger == 'skip':
+            values['next_date'] = format_date(data.get('next_delivery_date')) or '—'
+        return i18n.get(_PAID_ORDER_KEPT_KEYS[trigger], language, **values)
+    return i18n.get(
+        'telegram.customer_notice.payment_expired', language,
+        order_number=_html_escaped(data.get('order_number')),
+        deadline=_notice_deadline(language, data.get('deadline')),
+    )
 
 
 @web.middleware
@@ -484,6 +607,7 @@ class WebhookServer:
         self.app.router.add_post(f'/internal/{_AGENT_ORDER_ENDPOINT}',
                                  self.agent_order_proposed_handler)
         self.app.router.add_post(f'/internal/{_REORDER_REMINDER_ENDPOINT}', self.reorder_reminder_handler)
+        self.app.router.add_post(f'/internal/{_CUSTOMER_NOTICE_ENDPOINT}', self.customer_notice_handler)
         self.app.router.add_get('/internal/stats', stats_handler)
         self.app.router.add_get('/health', health_handler)
 
@@ -1155,6 +1279,86 @@ class WebhookServer:
             logger.error(f"Error processing reorder reminder: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
+    async def customer_notice_handler(self, request):
+        """
+        Handle a customer notice from the backend (plan 2026-10-24 Task 3; spec 2026-10-23 §4.4, §4.5, §9).
+
+        POST /internal/customer-notice
+        {
+            "notice_id": "subscription-log:41",   # stable across the backend's retries: one message per id
+            "kind": "subscription_order_created", # | subscription_delivery_skipped | subscription_paid_order_kept
+                                                  # | order_payment_expired
+            "telegram_id": "810000001",
+            "language": "ru",                     # resolved by the backend; never read from the customer here
+            ... the kind's facts (business_app/services/customer_notices.py documents each set) ...
+            "timestamp": "..."                    # added by trigger_bot_webhook; unused
+        }
+
+        Built and sent by business_app/services/customer_notices.py from Celery tasks published after the
+        commit that caused the notice. Structure mirrors `reorder_reminder_handler`: HMAC verify, bot-app
+        guard, JSON parse, the payload checked BEFORE the claim (a broken one is 400 and claims nothing), one
+        Redis claim on `notice_id`, render, send. Every failure after the claim releases it; a send Telegram
+        refuses because the customer blocked the bot answers 410 BOT_BLOCKED (the backend marks the account
+        and emails instead). Buttons: Pay now for an unpaid Click order (`retry_payment`'s callback) and View
+        order, from `keyboards.CustomerNoticeKeyboards`.
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                logger.warning(f"Invalid webhook signature from {request.remote}")
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+
+            if not self.bot_app:
+                logger.error("Bot application not initialized in webhook server")
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({'success': False, 'message': 'Invalid JSON'}, status=400)
+
+            problem = _customer_notice_problem(data)
+            if problem:
+                return web.json_response({'success': False, 'message': problem}, status=400)
+
+            notice_id = str(data['notice_id'])
+            if await self._is_duplicate_webhook(_CUSTOMER_NOTICE_ENDPOINT, notice_id):
+                logger.info("Duplicate customer notice %s, skipping", notice_id)
+                return web.json_response({'success': True, 'message': 'Already processed (deduplicated)'})
+
+            # The claim is held from here on: every failure releases it, or the backend's retry (same
+            # notice_id) would be answered "already processed" and the notice lost for good.
+            try:
+                from keyboards import CustomerNoticeKeyboards
+
+                language = data['language']
+                keyboard = CustomerNoticeKeyboards.notice(
+                    language,
+                    order_id=_order_id_or_none(data.get('order_id')),
+                    pay_now=data['kind'] == _NOTICE_ORDER_CREATED and data.get('payment') == 'online_unpaid',
+                )
+                await self.bot_app.bot.send_message(
+                    chat_id=data['telegram_id'],
+                    text=_customer_notice_text(language, data),
+                    parse_mode='HTML',
+                    reply_markup=keyboard,
+                )
+            except Forbidden as exc:
+                await self._release_webhook_dedup(_CUSTOMER_NOTICE_ENDPOINT, notice_id)
+                logger.info("Customer notice %s not delivered, bot blocked: %s", notice_id, exc)
+                return web.json_response(
+                    {'success': False, 'error_code': _BOT_BLOCKED_CODE, 'message': 'Bot was blocked by the user'},
+                    status=410,
+                )
+            except Exception:
+                await self._release_webhook_dedup(_CUSTOMER_NOTICE_ENDPOINT, notice_id)
+                raise
+
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+
+        except Exception as e:
+            logger.error(f"Error processing customer notice: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
     async def start(self):
         """Start the webhook server"""
         try:
@@ -1174,6 +1378,7 @@ class WebhookServer:
             logger.info(f"  POST http://{self.host}:{self.port}/internal/delivery-completed")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/{_AGENT_ORDER_ENDPOINT}")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/{_REORDER_REMINDER_ENDPOINT}")
+            logger.info(f"  POST http://{self.host}:{self.port}/internal/{_CUSTOMER_NOTICE_ENDPOINT}")
             logger.info(f"  GET  http://{self.host}:{self.port}/internal/stats")
             logger.info(f"  GET  http://{self.host}:{self.port}/health")
 

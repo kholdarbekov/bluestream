@@ -83,7 +83,9 @@ def test_cart_estimate_path_query_budget(db, ladder, sample_user, capsys):
     service = LoyaltyService()
     _db.session.expire_all()
     with _Counter() as counted:
-        service.quote_tier_discount(sample_user, Decimal("54000"), PaymentMethod.CASH)
+        service.quote_tier_discount(
+            sample_user, Decimal("54000"), PaymentMethod.CASH, order_source="web", is_subscription_order=False
+        )
         service.calculate_points_for_purchase(sample_user.id, 54000)
     with capsys.disabled():
         print(f"\n[budget] cart-estimate loyalty path: {len(counted)} statements")
@@ -179,7 +181,9 @@ def test_session_rollback_clears_request_memos(db, ladder, sample_user):
     _db.session.expire_all()
 
     # One call that warms both memos (mirrors the cart-estimate path above).
-    service.quote_tier_discount(sample_user, Decimal("54000"), PaymentMethod.CASH)
+    service.quote_tier_discount(
+        sample_user, Decimal("54000"), PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    )
 
     qp_memo = g.get(_QUALIFYING_POINTS_MEMO_KEY)
     account_memo = g.get(_LOYALTY_ACCOUNT_MEMO_KEY)

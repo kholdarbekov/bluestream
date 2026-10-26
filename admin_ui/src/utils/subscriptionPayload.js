@@ -1,16 +1,27 @@
 // Pure transform from antd form values to an admin subscription API payload.
 // Kept separate from the page so it can be unit-tested deterministically.
+//
+// ONE `frequency` drives a subscription (spec 2026-10-23). The delivery day is a weekday (0 = Monday,
+// the backend's convention) for weekly and biweekly, a day of the month for monthly, and nothing for
+// daily: only the field that frequency uses is sent, the other is cleared.
+
+const WEEKDAY_FREQUENCIES = ['weekly', 'biweekly'];
+const MONTH_DAY_FREQUENCIES = ['monthly'];
+
+export const usesWeekday = (frequency) => WEEKDAY_FREQUENCIES.includes(frequency);
+export const usesDayOfMonth = (frequency) => MONTH_DAY_FREQUENCIES.includes(frequency);
 
 const toIso = (d) => (d && typeof d.toISOString === 'function' ? d.toISOString() : undefined);
+// The next delivery is a calendar DATE, never an instant.
+const toDate = (d) => (d && typeof d.format === 'function' ? d.format('YYYY-MM-DD') : undefined);
 
 export function buildSubscriptionPayload(values, { isEdit } = {}) {
   const base = {
     name: values.name,
     description: values.description,
-    billing_cycle: values.billing_cycle,
-    delivery_frequency: values.delivery_frequency,
-    delivery_day_of_week: values.delivery_day_of_week ?? null,
-    delivery_day_of_month: values.delivery_day_of_month ?? null,
+    frequency: values.frequency,
+    delivery_day_of_week: usesWeekday(values.frequency) ? (values.delivery_day_of_week ?? null) : null,
+    delivery_day_of_month: usesDayOfMonth(values.frequency) ? (values.delivery_day_of_month ?? null) : null,
     delivery_time_slot_id: values.delivery_time_slot_id ?? null,
     delivery_address_id: values.delivery_address_id,
     payment_method: values.payment_method,
@@ -44,8 +55,7 @@ export function buildSubscriptionPayload(values, { isEdit } = {}) {
     payload.billing_amount = values.billing_amount;
   }
   if (values.override_manual_billing_dates) {
-    payload.next_billing_date = toIso(values.next_billing_date);
-    payload.last_billing_date = toIso(values.last_billing_date);
+    payload.next_delivery_date = toDate(values.next_delivery_date);
   }
   return payload;
 }

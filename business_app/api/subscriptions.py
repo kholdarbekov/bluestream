@@ -7,12 +7,12 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from business_app.utils.service_factory import get_subscription_service, get_notification_service
 from business_app.utils.helpers import get_current_language
+from business_app.utils.local_windows import local_date
 from business_app.utils.translations import get_translation
 from business_app.serializers.subscription_serializers import (
     serialize_subscription,
     serialize_subscription_item,
     serialize_subscription_log,
-    SubscriptionSchema,
     CreateSubscriptionRequest,
     UpdateSubscriptionRequest,
     PauseSubscriptionRequest,
@@ -26,7 +26,7 @@ from business_app.serializers.subscription_serializers import (
 )
 from business_app.utils.constants import NotificationType
 from business_app.utils.exceptions import NotFoundError, ValidationError, ConflictError
-from business_app.utils.pydantic_helpers import validate_json_with_model, serialize_database_model, serialize_response
+from business_app.utils.pydantic_helpers import validate_json_with_model, serialize_response
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -36,7 +36,6 @@ from business_app.utils.api_responses import (
     conflict_response,
     internal_error_response,
 )
-from business_app.tasks.subscription_tasks import process_subscription_billing
 from business_app import db
 
 subscriptions_bp = Blueprint("subscriptions", __name__)
@@ -53,14 +52,14 @@ def get_subscriptions():
         page = int(request.args.get("page", 1))
         per_page = min(int(request.args.get("per_page", 20)), 50)
         status = request.args.get("status")
-        billing_cycle = request.args.get("billing_cycle")
+        frequency = request.args.get("frequency")
 
         pagination = get_subscription_service().get_user_subscriptions_paginated(
             user_id=current_user_id,
             page=page,
             per_page=per_page,
             status=status,
-            billing_cycle=billing_cycle,
+            frequency=frequency,
         )
 
         return paginated_response(
@@ -138,8 +137,8 @@ def create_subscription():
             template_data={
                 "subscription_name": subscription.get("name"),
                 "billing_amount": subscription.get("billing_amount"),
-                "billing_cycle": subscription.get("billing_cycle"),
-                "next_billing_date": subscription.get("next_billing_date"),
+                "frequency": subscription.get("frequency"),
+                "next_delivery_date": subscription.get("next_delivery_date"),
             },
         )
 
@@ -180,11 +179,9 @@ def update_subscription(subscription_id):
             update_data=validated_data.model_dump(exclude_none=True),
         )
 
-        # Use Pydantic schema for response
-        subscription_response = serialize_database_model(subscription, SubscriptionSchema)
-
         return success_response(
-            data={"subscription": subscription_response}, message=get_translation("api.subscriptions.updated")
+            data={"subscription": serialize_subscription(subscription)},
+            message=get_translation("api.subscriptions.updated"),
         )
 
     except NotFoundError as e:
@@ -208,13 +205,12 @@ def pause_subscription(subscription_id):
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
         reason = validated_data.reason or get_translation("api.subscriptions.default_reason_customer_request")
-        resume_date = validated_data.resume_date
-        subscription = get_subscription_service().pause_subscription_for_user(
+        outcome = get_subscription_service().pause_subscription_for_user(
             subscription_id=subscription_id,
             user_id=current_user_id,
             reason=reason,
-            resume_date=resume_date,
         )
+        subscription = outcome["subscription"]
 
         # Send notification
         language = get_current_language()
@@ -224,25 +220,17 @@ def pause_subscription(subscription_id):
             template_data={
                 "subscription_name": subscription.get_translated("name", language),
                 "pause_reason": reason,
-                "resume_date": (
-                    resume_date.strftime("%Y-%m-%d")
-                    if resume_date
-                    else get_translation("api.subscriptions.manual_resume_required")
-                ),
+                "resume_date": get_translation("api.subscriptions.manual_resume_required"),
             },
         )
 
-        # Schedule automatic resume if date specified
-        if resume_date:
-            from business_app.tasks.subscription_tasks import resume_subscription_task
-
-            resume_subscription_task.apply_async(args=[subscription_id], eta=resume_date)
-
-        # Use Pydantic schema for response
-        subscription_response = serialize_database_model(subscription, SubscriptionSchema)
-
         return success_response(
-            data={"subscription": subscription_response}, message=get_translation("api.subscriptions.paused")
+            data={
+                "subscription": serialize_subscription(subscription),
+                "cancelled_orders": outcome["cancelled_orders"],
+                "kept_orders": outcome["kept_orders"],
+            },
+            message=get_translation("api.subscriptions.paused"),
         )
 
     except NotFoundError as e:
@@ -275,7 +263,7 @@ def resume_subscription(subscription_id):
             "subscription_resumed",
             template_data={
                 "subscription_name": subscription.get_translated("name", language),
-                "next_billing_date": subscription.next_billing_date.strftime("%Y-%m-%d"),
+                "next_delivery_date": subscription.next_delivery_date.isoformat(),
             },
         )
 
@@ -306,45 +294,33 @@ def cancel_subscription(subscription_id):
         validated_data = request.validated_json
 
         reason = validated_data.reason or get_translation("api.subscriptions.default_reason_customer_request")
-        immediate = validated_data.immediate
-        subscription = get_subscription_service().cancel_subscription_for_user(
+        # Always immediate (spec 2026-10-23 §4.6); a paid upcoming order still stays (§2.7).
+        outcome = get_subscription_service().cancel_subscription_for_user(
             subscription_id=subscription_id,
             user_id=current_user_id,
             reason=reason,
-            immediate=immediate,
         )
+        subscription = outcome["subscription"]
 
-        # Send notification
-        notification_type = (
-            NotificationType.SUBSCRIPTION_CANCELLED
-            if immediate
-            else NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED
-        )
         language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
-            notification_type,
+            NotificationType.SUBSCRIPTION_CANCELLED,
             template_data={
                 "subscription_name": subscription.get_translated("name", language),
                 "cancellation_reason": reason,
-                "effective_date": (
-                    subscription.end_date.strftime("%Y-%m-%d")
-                    if subscription.end_date
-                    else get_translation("api.subscriptions.immediate")
-                ),
+                "effective_date": local_date().isoformat(),
             },
         )
 
-        # Use Pydantic schema for response
-        subscription_response = serialize_database_model(subscription, SubscriptionSchema)
-        current_app.logger.info(f"Cancel subscription: response={subscription_response}")
-
-        message = (
-            get_translation("api.subscriptions.cancelled")
-            if immediate
-            else get_translation("api.subscriptions.cancellation_scheduled")
+        return success_response(
+            data={
+                "subscription": serialize_subscription(subscription),
+                "cancelled_orders": outcome["cancelled_orders"],
+                "kept_orders": outcome["kept_orders"],
+            },
+            message=get_translation("api.subscriptions.cancelled"),
         )
-        return success_response(data={"subscription": subscription.to_dict()}, message=message)
 
     except NotFoundError as e:
         db.session.rollback()
@@ -398,8 +374,6 @@ def add_subscription_item(subscription_id):
         item = item_result["item"]
         billing_amount = item_result["billing_amount"]
 
-        # Use Pydantic schema for response
-        # item_response = serialize_database_model(item, SubscriptionItemSchema)
         item_response = item.to_dict()
         current_app.logger.info(f"Add subscription item SUCCESS: item_response: {item_response}")
 
@@ -543,59 +517,6 @@ def get_subscription_logs(subscription_id):
         return internal_error_response(get_translation("api.subscriptions.error.get_logs_failed"))
 
 
-@subscriptions_bp.route("/templates", methods=["GET"])
-def get_subscription_templates():
-    """Get subscription templates/presets"""
-    try:
-        # Predefined subscription templates
-        templates = [
-            {
-                "id": "basic_weekly",
-                "name": get_translation("api.subscriptions.templates.basic_weekly.name"),
-                "description": get_translation("api.subscriptions.templates.basic_weekly.description"),
-                "billing_cycle": "weekly",
-                "delivery_frequency": "weekly",
-                "discount_percentage": 5.0,
-                "suggested_items": [
-                    {"product_id": 1, "quantity": 4},  # 4x 19L bottles
-                ],
-                "estimated_monthly_cost": 45000,
-            },
-            {
-                "id": "family_monthly",
-                "name": get_translation("api.subscriptions.templates.family_monthly.name"),
-                "description": get_translation("api.subscriptions.templates.family_monthly.description"),
-                "billing_cycle": "monthly",
-                "delivery_frequency": "monthly",
-                "discount_percentage": 10.0,
-                "suggested_items": [
-                    {"product_id": 1, "quantity": 16},  # 16x 19L bottles
-                    {"product_id": 2, "quantity": 8},  # 8x 5L bottles
-                ],
-                "estimated_monthly_cost": 160000,
-            },
-            {
-                "id": "office_daily",
-                "name": get_translation("api.subscriptions.templates.office_daily.name"),
-                "description": get_translation("api.subscriptions.templates.office_daily.description"),
-                "billing_cycle": "monthly",
-                "delivery_frequency": "daily",
-                "discount_percentage": 15.0,
-                "suggested_items": [
-                    {"product_id": 1, "quantity": 2},  # 2x 19L bottles daily
-                    {"product_id": 3, "quantity": 4},  # 4x 1L bottles daily
-                ],
-                "estimated_monthly_cost": 280000,
-            },
-        ]
-
-        return success_response(data={"templates": templates})
-
-    except Exception as e:
-        current_app.logger.error(f"Get subscription templates error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.get_templates_failed"))
-
-
 @subscriptions_bp.route("/preview", methods=["POST"])
 @jwt_required()
 @validate_json_with_model(SubscriptionPreviewRequest)
@@ -608,10 +529,8 @@ def preview_subscription():
         # Calculate subscription preview
         preview = get_subscription_service().calculate_subscription_preview(
             user_id=current_user_id,
-            billing_cycle=validated_data.billing_cycle,
-            delivery_frequency=validated_data.delivery_frequency,
+            frequency=validated_data.frequency,
             items=validated_data.items,
-            discount_percentage=validated_data.discount_percentage,
         )
 
         # Serialize the preview response using the response schema
@@ -669,6 +588,7 @@ def skip_next_delivery(subscription_id):
         subscription = skip_result["subscription"]
         current_next_delivery = skip_result["original_delivery_date"]
         new_next_delivery = skip_result["new_next_delivery_date"]
+        new_next_iso = new_next_delivery.isoformat() if new_next_delivery else None
 
         # Send notification
         language = get_current_language()
@@ -677,8 +597,8 @@ def skip_next_delivery(subscription_id):
             "delivery_skipped",
             template_data={
                 "subscription_name": subscription.get_translated("name", language),
-                "skipped_date": current_next_delivery.strftime("%Y-%m-%d"),
-                "next_delivery_date": new_next_delivery.strftime("%Y-%m-%d"),
+                "skipped_date": current_next_delivery.isoformat(),
+                "next_delivery_date": new_next_iso,
                 "reason": reason,
             },
         )
@@ -686,7 +606,9 @@ def skip_next_delivery(subscription_id):
         return success_response(
             data={
                 "original_delivery_date": current_next_delivery.isoformat(),
-                "new_next_delivery_date": new_next_delivery.isoformat(),
+                "new_next_delivery_date": new_next_iso,
+                "cancelled_orders": skip_result["cancelled_orders"],
+                "kept_orders": skip_result["kept_orders"],
             },
             message=get_translation("api.subscriptions.next_delivery_skipped"),
         )
@@ -732,10 +654,8 @@ def change_payment_method(subscription_id):
             },
         )
 
-        subscription_response = serialize_database_model(subscription, SubscriptionSchema)
-
         return success_response(
-            data={"subscription": subscription_response},
+            data={"subscription": serialize_subscription(subscription)},
             message=get_translation("api.subscriptions.payment_method_updated"),
         )
 
@@ -749,28 +669,3 @@ def change_payment_method(subscription_id):
         db.session.rollback()
         current_app.logger.error(f"Change payment method error: {e}")
         return internal_error_response(get_translation("api.subscriptions.error.change_payment_failed"))
-
-
-@subscriptions_bp.route("/<int:subscription_id>/retry-billing", methods=["POST"])
-@jwt_required()
-def retry_billing(subscription_id):
-    """Retry failed billing for subscription"""
-    try:
-        current_user_id = get_jwt_identity()
-        get_subscription_service().validate_retry_billing_for_user(
-            subscription_id=subscription_id,
-            user_id=current_user_id,
-        )
-
-        # Process billing retry asynchronously
-        process_subscription_billing.delay(subscription_id, retry=True)
-
-        return success_response(message=get_translation("api.subscriptions.billing_retry_initiated"))
-
-    except NotFoundError as e:
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        return error_response(get_translation(e.message), status_code=400)
-    except Exception as e:
-        current_app.logger.error(f"Retry billing error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.retry_billing_failed"))

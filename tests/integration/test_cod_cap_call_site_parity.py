@@ -70,7 +70,7 @@ does not "fix" the gap:
 * ``CashCollectionService.post_collection``'s PERSONAL_CARD_TRANSFER path is
   documented as EXEMPT from the cap by design (the debt it creates is settled
   in the same transaction) -- it is not a "restricted?" decision site at all.
-* ``SubscriptionService.process_subscription_billing`` routes through
+* ``SubscriptionService.create_next_order`` routes through
   ``OrderService.create_order`` -> the same ``_resolve_payment_method`` that
   backs site 7; it is wiring onto an already-covered site, not a copy.
 

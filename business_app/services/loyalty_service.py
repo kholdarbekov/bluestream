@@ -28,6 +28,7 @@ from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.translations import get_translation
 from business_app.utils.validators import normalize_phone_number
 from business_app.utils.constants import (
+    SELF_SERVICE_ORDER_SOURCES,
     LoyaltyActionType,
     LoyaltyTransactionType,
     RewardStatus,
@@ -68,9 +69,11 @@ def clamp_tier_discount(
 ) -> Decimal:
     """Hold the tier discount to whatever the other two discounts left.
 
-    The subscription rate, the reward value and the tier rate are three
-    independently admin-configurable numbers; nothing stops them summing past
-    100%. The tier discount is the one that yields, so ``total_amount`` can
+    The reward value and the tier rate are independently admin-configurable
+    numbers; nothing stops them summing past 100%. (A subscription order never
+    carries a tier discount, by ``quote_tier_discount``'s channel gate, so
+    ``discount_amount`` is zero wherever a tier applies; the bound reads it
+    anyway.) The tier discount is the one that yields, so ``total_amount`` can
     never go negative and ``ck_orders_tier_discount_nonneg`` can never be
     violated.
 
@@ -86,23 +89,33 @@ def clamp_tier_discount(
 
 
 def tier_discount_for_rail(
-    user,
+    order,
     *,
     subtotal: Decimal,
     discount_amount: Decimal,
     loyalty_discount: Decimal,
     payment_method: Union[str, PaymentMethod, None],
 ) -> Decimal:
-    """What the loyalty tier takes off ``subtotal`` on ``payment_method``. A quote; writes nothing.
+    """What the loyalty tier takes off ``order``'s ``subtotal`` on ``payment_method``. A quote; writes nothing.
 
-    COD only (`is_cod_rail`), clamped by `clamp_tier_discount`. The one expression behind every
-    stored tier discount on an EXISTING order: `rail_pricing.quote_order_for_rail` (and through it
-    every payment-method change) calls it. Import it; never re-type it.
+    `quote_tier_discount` decides it with the order's own channel (``order_source``,
+    ``is_subscription_order``), so a staff-entered or subscription order moved onto cash stays
+    without it; clamped by `clamp_tier_discount`. The one expression behind every stored tier
+    discount on an EXISTING order: `rail_pricing.quote_order_for_rail` (and through it every
+    payment-method change) calls it. Import it; never re-type it.
     """
     if not is_cod_rail(payment_method):
         return Decimal("0.00")
     return clamp_tier_discount(
-        LoyaltyService().quote_tier_discount(user, Decimal(str(subtotal)), payment_method).amount,
+        LoyaltyService()
+        .quote_tier_discount(
+            order.user,
+            Decimal(str(subtotal)),
+            payment_method,
+            order_source=order.order_source,
+            is_subscription_order=bool(order.is_subscription_order),
+        )
+        .amount,
         subtotal=Decimal(str(subtotal)),
         discount_amount=Decimal(str(discount_amount)),
         loyalty_discount=Decimal(str(loyalty_discount)),
@@ -281,20 +294,30 @@ class LoyaltyService:
         user,
         basis: Decimal,
         payment_method: Union[str, PaymentMethod, None],
+        *,
+        order_source: Optional[str],
+        is_subscription_order: bool,
     ) -> TierDiscountQuote:
         """The ONE place that decides whether a tier discount applies.
 
-        Four gates, all of which must pass:
+        Five gates, all of which must pass:
 
-        1. The rail is COD. The discount exists to move volume off the
+        1. The customer placed the order themselves, in the Telegram bot or on
+           the website (``order_source`` in ``SELF_SERVICE_ORDER_SOURCES``), and
+           it is not a subscription order. Staff-entered orders (admin panel,
+           operator phone order, sales agent) and every subscription order never
+           carry it (spec 2026-10-23 §2). Both arguments are required so no
+           caller inherits the discount by omission, and both are already on the
+           payload or the row, so this gate reads nothing from the DB.
+        2. The rail is COD. The discount exists to move volume off the
            fiscalized gateways, so it attaches to ``PaymentMethod.CASH`` and
            nothing else — compared via ``is_cod_rail``/``canonical_rail`` so
            the legacy ``card`` value and a NULL rail can never match.
-        2. The user is loyalty-eligible (entity users without an active
+        3. The user is loyalty-eligible (entity users without an active
            loyalty-eligible contract are excluded by the pre-existing SSOT).
-        3. A tier resolves for them — the higher of their badge and their
+        4. A tier resolves for them — the higher of their badge and their
            live qualifying points (``effective_tier``).
-        4. That tier's ``discount_percentage`` is above zero.
+        5. That tier's ``discount_percentage`` is above zero.
 
         The rate is read LIVE from ``LoyaltyTierConfig.discount_percentage``.
         No percentage is ever hardcoded here, in copy, or in a test — dev,
@@ -304,6 +327,8 @@ class LoyaltyService:
         clamped against the other discounts; that is ``clamp_tier_discount``'s
         job, applied last by the caller.
         """
+        if order_source not in SELF_SERVICE_ORDER_SOURCES or is_subscription_order:
+            return NO_TIER_DISCOUNT
         if not is_cod_rail(payment_method):
             return NO_TIER_DISCOUNT
         if not self.is_user_loyalty_eligible(user):
@@ -2572,8 +2597,9 @@ class LoyaltyService:
     ):
         """Tell a member their tier changed, and why.
 
-        A downgrade removes a cash discount, so it states the trailing-365-day
-        figure alongside the threshold it fell short of.
+        A downgrade lowers the tier discount on the member's own bot and website
+        cash orders, so it states the trailing-365-day figure alongside the
+        threshold it fell short of.
         """
         from ..tasks.notification_tasks import send_loyalty_notification_task
 

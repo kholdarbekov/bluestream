@@ -1050,6 +1050,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'date parametri majburiy',
         'ru': 'Требуется параметр date'
     },
+    'api.delivery.error.invalid_weekday': {
+        'en': 'weekday must be 0 (Monday) to 6 (Sunday), or "any"',
+        'uz': 'weekday 0 (dushanba) dan 6 (yakshanba) gacha yoki "any" bo\'lishi kerak',
+        'ru': 'weekday должен быть от 0 (понедельник) до 6 (воскресенье) или "any"'
+    },
     'api.delivery.error.invalid_date_format': {
         'en': 'Invalid date format. Use YYYY-MM-DD',
         'uz': 'Sana formati noto\'g\'ri. YYYY-MM-DD formatidan foydalaning',
@@ -1214,11 +1219,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna bekor qilindi',
         'ru': 'Подписка отменена'
     },
-    'api.subscriptions.cancellation_scheduled': {
-        'en': 'Subscription cancellation scheduled',
-        'uz': 'Obunani bekor qilish rejalashtirildi',
-        'ru': 'Отмена подписки запланирована'
-    },
     'api.subscriptions.paused': {
         'en': 'Subscription paused',
         'uz': 'Obuna to\'xtatildi',
@@ -1259,11 +1259,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna to\'lov usuli yangilandi',
         'ru': 'Способ оплаты подписки обновлен'
     },
-    'api.subscriptions.billing_retry_initiated': {
-        'en': 'Billing retry initiated',
-        'uz': 'Hisob-kitobni qayta urinish boshlandi',
-        'ru': 'Повторная попытка списания запущена'
-    },
     'api.subscriptions.default_reason_customer_request': {
         'en': 'Customer request',
         'uz': 'Mijoz so\'rovi',
@@ -1273,11 +1268,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Manual resume required',
         'uz': 'Qo\'lda davom ettirish talab etiladi',
         'ru': 'Требуется ручное возобновление'
-    },
-    'api.subscriptions.immediate': {
-        'en': 'Immediate',
-        'uz': 'Darhol',
-        'ru': 'Немедленно'
     },
     'api.subscriptions.unknown_product': {
         'en': 'Unknown product',
@@ -1298,6 +1288,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Invalid subscription status value',
         'uz': 'Obuna holati qiymati noto\'g\'ri',
         'ru': 'Недопустимое значение статуса подписки'
+    },
+    'api.subscriptions.error.invalid_frequency_value': {
+        'en': 'Invalid subscription frequency value',
+        'uz': 'Obuna chastotasi qiymati noto\'g\'ri',
+        'ru': 'Недопустимое значение частоты подписки'
     },
     'api.subscriptions.error.invalid_delivery_address': {
         'en': 'Invalid delivery address',
@@ -1354,16 +1349,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Faqat faol obunalar yetkazib berishni o\'tkazib yuborishi mumkin',
         'ru': 'Только активные подписки могут пропускать доставку'
     },
-    'api.subscriptions.error.only_active_retry': {
-        'en': 'Only active subscriptions can retry billing',
-        'uz': 'Faqat faol obunalar hisob-kitobni qayta urinishi mumkin',
-        'ru': 'Только активные подписки могут повторить списание'
-    },
-    'api.subscriptions.error.resume_date_future': {
-        'en': 'Resume date must be in the future',
-        'uz': 'Davom ettirish sanasi kelajakda bo\'lishi kerak',
-        'ru': 'Дата возобновления должна быть в будущем'
-    },
     'api.subscriptions.error.product_not_found': {
         'en': 'Product not found',
         'uz': 'Mahsulot topilmadi',
@@ -1383,11 +1368,6 @@ BACKEND_TRANSLATIONS = {
         'en': '{product}: at least {minimum} per delivery (you chose {quantity})',
         'uz': '{product}: har bir yetkazishda kamida {minimum} ta (siz {quantity} ta tanladingiz)',
         'ru': '{product}: не менее {minimum} шт. за доставку (вы выбрали {quantity})'
-    },
-    'api.subscriptions.error.no_failed_billing_to_retry': {
-        'en': 'No failed billing attempts to retry',
-        'uz': 'Qayta urinish uchun muvaffaqiyatsiz hisob-kitob yo\'q',
-        'ru': 'Нет неудачных списаний для повторной попытки'
     },
     'api.subscriptions.error.get_failed': {
         'en': 'Failed to retrieve subscriptions',
@@ -1449,11 +1429,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna jurnallarini olishda xatolik',
         'ru': 'Не удалось получить журналы подписки'
     },
-    'api.subscriptions.error.get_templates_failed': {
-        'en': 'Failed to retrieve subscription templates',
-        'uz': 'Obuna shablonlarini olishda xatolik',
-        'ru': 'Не удалось получить шаблоны подписок'
-    },
     'api.subscriptions.error.preview_failed': {
         'en': 'Failed to calculate subscription preview',
         'uz': 'Obuna oldindan ko\'rishini hisoblashda xatolik',
@@ -1474,11 +1449,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna to\'lov usulini o\'zgartirishda xatolik',
         'ru': 'Не удалось изменить способ оплаты подписки'
     },
-    'api.subscriptions.error.retry_billing_failed': {
-        'en': 'Failed to retry billing',
-        'uz': 'Hisob-kitobni qayta urinishda xatolik',
-        'ru': 'Не удалось повторить списание'
-    },
     'api.subscriptions.log.updated_fields': {
         'en': 'Updated fields: {fields}',
         'uz': 'Yangilangan maydonlar: {fields}',
@@ -1498,11 +1468,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Reason: {reason}',
         'uz': 'Sabab: {reason}',
         'ru': 'Причина: {reason}'
-    },
-    'api.subscriptions.log.cancellation_scheduled': {
-        'en': 'Subscription will be cancelled on {date}. Reason: {reason}',
-        'uz': 'Obuna {date} da bekor qilinadi. Sabab: {reason}',
-        'ru': 'Подписка будет отменена {date}. Причина: {reason}'
     },
     'api.subscriptions.log.item_added': {
         'en': 'Added {quantity}x {product}',
@@ -1529,35 +1494,42 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lov usuli {old_method} dan {new_method} ga o\'zgartirildi',
         'ru': 'Способ оплаты изменен с {old_method} на {new_method}'
     },
-    'api.subscriptions.templates.basic_weekly.name': {
-        'en': 'Basic Weekly',
-        'uz': 'Asosiy haftalik',
-        'ru': 'Базовая еженедельная'
+    # Written by the subscription engine (spec 2026-10-23 §2.7, §2.8, §4.3), in the customer's language:
+    # the bot's "view logs" shows them as they are. The skip reasons are also Task 3's notice labels.
+    'api.subscriptions.log.order_created': {
+        'en': 'Order {order_number} created for delivery on {date}',
+        'uz': '{date} kuni yetkazib berish uchun {order_number} buyurtmasi yaratildi',
+        'ru': 'Создан заказ {order_number} с доставкой {date}'
     },
-    'api.subscriptions.templates.basic_weekly.description': {
-        'en': 'Perfect for small families - weekly water delivery',
-        'uz': 'Kichik oilalar uchun ideal - haftalik suv yetkazib berish',
-        'ru': 'Идеально для небольших семей - еженедельная доставка воды'
+    'api.subscriptions.log.paid_order_kept': {
+        'en': 'Paid order {order_number} for {date} stays and will be delivered',
+        'uz': '{date} kungi to\'langan {order_number} buyurtmasi saqlanadi va yetkazib beriladi',
+        'ru': 'Оплаченный заказ {order_number} на {date} сохранён и будет доставлен'
     },
-    'api.subscriptions.templates.family_monthly.name': {
-        'en': 'Family Monthly',
-        'uz': 'Oilaviy oylik',
-        'ru': 'Семейная ежемесячная'
+    'api.subscriptions.skip_reason.date_passed': {
+        'en': 'the delivery date had already passed',
+        'uz': 'yetkazib berish sanasi o\'tib ketgan edi',
+        'ru': 'дата доставки уже прошла'
     },
-    'api.subscriptions.templates.family_monthly.description': {
-        'en': 'Great value for larger families - monthly bulk delivery',
-        'uz': 'Katta oilalar uchun qulay - oyiga yirik yetkazib berish',
-        'ru': 'Выгодно для больших семей - ежемесячная доставка большим объемом'
+    'api.subscriptions.skip_reason.out_of_stock': {
+        'en': 'a product was out of stock',
+        'uz': 'mahsulot omborda qolmagan edi',
+        'ru': 'товара не было в наличии'
     },
-    'api.subscriptions.templates.office_daily.name': {
-        'en': 'Office Daily',
-        'uz': 'Ofis uchun kunlik',
-        'ru': 'Ежедневно в офис'
+    'api.subscriptions.skip_reason.below_minimum': {
+        'en': 'the order was below the minimum order amount',
+        'uz': 'buyurtma minimal buyurtma summasidan kam edi',
+        'ru': 'сумма заказа была ниже минимальной'
     },
-    'api.subscriptions.templates.office_daily.description': {
-        'en': 'Fresh water for your office every day',
-        'uz': 'Ofisingiz uchun har kuni toza suv',
-        'ru': 'Свежая вода для вашего офиса каждый день'
+    'api.subscriptions.skip_reason.customer_barred': {
+        'en': 'your account cannot place orders right now',
+        'uz': 'hisobingiz hozircha buyurtma bera olmaydi',
+        'ru': 'с вашего аккаунта сейчас нельзя оформлять заказы'
+    },
+    'api.subscriptions.skip_reason.cod_debt_limit': {
+        'en': 'the limit of unpaid cash orders was reached',
+        'uz': 'to\'lanmagan naqd buyurtmalar chegarasiga yetildi',
+        'ru': 'достигнут лимит неоплаченных заказов с оплатой наличными'
     },
 
     # ============================================================================
@@ -1565,11 +1537,14 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     # Published by GET /api/v1/loyalty/tiers alongside each tier's rate, and
     # rendered by /my-loyalty. No literal percentage: the rate is per-tier and
-    # comes from LoyaltyTierConfig.
+    # comes from LoyaltyTierConfig. Rule: the tier discount is a perk of orders
+    # the customer places THEMSELVES in the Telegram bot or on the website and
+    # pays on delivery (cash or card transfer to the driver). Framed as our
+    # thank-you, never as a rejection.
     'api.loyalty.tier_discount_condition': {
-        'en': 'Tier discounts apply to cash-on-delivery orders only — cash or a card transfer to the driver at the door. They do not apply to Click, Payme or online card payments.',
-        'uz': "Daraja chegirmalari faqat yetkazib berishda to'lanadigan buyurtmalarga qo'llaniladi — haydovchiga naqd yoki eshik oldida uning kartasiga o'tkazma. Click, Payme yoki onlayn karta to'lovlariga qo'llanilmaydi.",
-        'ru': 'Скидки уровня применяются только к заказам с оплатой при доставке — наличными или переводом на карту курьера у двери. К оплате через Click, Payme или банковской картой онлайн они не применяются.'
+        'en': 'Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery — in cash or by card transfer to the driver.',
+        'uz': "Telegram botimiz yoki saytimiz orqali buyurtma berganingiz uchun minnatdorchiligimiz: u yerda o'zingiz beradigan va yetkazib berishda — naqd yoki haydovchi kartasiga o'tkazma orqali — to'laydigan har bir buyurtmangizga daraja chegirmangiz avtomatik qo'llaniladi.",
+        'ru': 'Наша благодарность за заказы в Telegram-боте и на сайте: скидка вашего уровня автоматически применяется к каждому заказу, который вы оформляете там сами и оплачиваете при доставке — наличными или переводом на карту курьера.'
     },
     'api.loyalty.points_earned': {
         'en': 'AquaCoins earned',
@@ -2243,6 +2218,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Discount',
         'uz': 'Chegirma',
         'ru': 'Скидка'
+    },
+    'ui.loyalty.discount_help': {
+        'en': 'Taken off cash-on-delivery orders customers place themselves in the Telegram bot or on the website. Not applied to orders entered by staff (admin, call centre, sales agents) or to subscription orders.',
+        'uz': "Mijozlar Telegram bot yoki sayt orqali o'zlari beradigan, yetkazib berishda to'lanadigan buyurtmalarga qo'llaniladi. Xodimlar (admin, call-markaz, savdo agentlari) kiritgan buyurtmalarga va obuna buyurtmalariga qo'llanilmaydi.",
+        'ru': 'Применяется к заказам с оплатой при доставке, которые клиенты оформляют сами в Telegram-боте или на сайте. Не применяется к заказам, введённым сотрудниками (админ, колл-центр, торговые агенты), и к заказам по подписке.'
     },
     'ui.loyalty.discount_type': {
         'en': 'Discount Type',
@@ -4475,18 +4455,18 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Награда: −{amount} UZS'
     },
     'telegram.orders.estimate_tier_line': {
-        'en': '{tier_name} discount −{percentage}% 🏷 — −{amount} UZS',
-        'uz': '{tier_name} chegirma −{percentage}% 🏷 — −{amount} UZS',
-        'ru': 'Скидка {tier_name} −{percentage}% 🏷 — −{amount} UZS'
+        'en': '{tier_name} bot discount −{percentage}% 🏷 — −{amount} UZS',
+        'uz': '{tier_name} bot chegirmasi −{percentage}% 🏷 — −{amount} UZS',
+        'ru': 'Скидка {tier_name} в боте −{percentage}% 🏷 — −{amount} UZS'
     },
     # Order-details / order-placed screens (MessageBuilder.build_order_summary).
     # The order payload carries tier_discount but not tier_name or
     # tier_discount_percentage (see business_app/serializers/order_serializers.py),
     # so — unlike estimate_tier_line above — this line needs only the amount.
     'telegram.orders.order_tier_discount_line': {
-        'en': '🏷 Cash-payment discount — −{amount} UZS',
-        'uz': '🏷 Naqd to\'lov uchun chegirma — −{amount} UZS',
-        'ru': '🏷 Скидка за оплату наличными — −{amount} UZS'
+        'en': '🏷 Tier discount (bot & website perk) — −{amount} UZS',
+        'uz': '🏷 Daraja chegirmasi (bot va sayt bonusi) — −{amount} UZS',
+        'ru': '🏷 Скидка уровня (бонус бота и сайта) — −{amount} UZS'
     },
     'telegram.orders.detail_paid_line': {
         'en': '✅ Paid: {amount} UZS',
@@ -4544,13 +4524,21 @@ BACKEND_TRANSLATIONS = {
     'Discount': {
         'en': 'Discount', 'uz': 'Chegirma', 'ru': 'Скидка'
     },
+    'Tier discount (bot & website perk)': {
+        'en': 'Tier discount (bot & website perk)',
+        'uz': 'Daraja chegirmasi (bot va sayt bonusi)',
+        'ru': 'Скидка уровня (бонус бота и сайта)',
+    },
+    'Subscription discount': {
+        'en': 'Subscription discount', 'uz': 'Obuna chegirmasi', 'ru': 'Скидка по подписке'
+    },
     'Reward discount': {
         'en': 'Reward discount', 'uz': 'Mukofot chegirmasi', 'ru': 'Скидка по награде'
     },
-    '{tier} discount ({percent}%)': {
-        'en': '{tier} discount ({percent}%)',
-        'uz': '{tier} chegirmasi ({percent}%)',
-        'ru': 'Скидка {tier} ({percent}%)'
+    '{tier} website discount ({percent}%)': {
+        'en': '{tier} website discount ({percent}%)',
+        'uz': '{tier} sayt chegirmasi ({percent}%)',
+        'ru': 'Скидка {tier} на сайте ({percent}%)'
     },
     'Pay cash on delivery and save {amount}': {
         'en': 'Pay cash on delivery and save {amount}',
@@ -4612,16 +4600,6 @@ BACKEND_TRANSLATIONS = {
         'uz': '📋 Loglar',
         'ru': '📋 Журнал'
     },
-    'telegram.subscription.use_template': {
-        'en': '📋 Use Template',
-        'uz': '📋 Shablondan foydalanish',
-        'ru': '📋 Использовать шаблон'
-    },
-    'telegram.subscription.create_custom': {
-        'en': '✨ Create Custom',
-        'uz': '✨ Maxsus yaratish',
-        'ru': '✨ Создать свою'
-    },
     'telegram.subscription.add_item': {
         'en': '➕ Add Item',
         'uz': '➕ Mahsulot qo\'shish',
@@ -4656,11 +4634,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Total Spent',
         'uz': 'Jami sarflangan',
         'ru': 'Всего потрачено'
-    },
-    'telegram.subscription.total_savings': {
-        'en': 'Total Savings',
-        'uz': 'Jami tejalgan',
-        'ru': 'Всего сэкономлено'
     },
 
     # ============================================================================
@@ -5294,6 +5267,19 @@ BACKEND_TRANSLATIONS = {
         'uz': '⚠️ Bu joylashuv yetkazib berish hududimizdan (Toshkent) tashqarida. Iltimos, xizmat ko\'rsatish hududidagi joylashuvni yuboring.',
         'ru': '⚠️ Это местоположение находится вне нашей зоны доставки (Ташкент). Пожалуйста, отправьте местоположение в пределах зоны обслуживания.'
     },
+    # ─── Subscription builder: daily frequency + day of the month (single-frequency, 2026-10-24) ───
+    'landing.custom_subscription.frequency.daily': {
+        'en': 'Daily', 'uz': 'Har kuni', 'ru': 'Ежедневно'
+    },
+    'landing.custom_subscription.frequency.daily_desc': {
+        'en': 'Delivered every day', 'uz': 'Har kuni yetkazib beriladi', 'ru': 'Доставляется каждый день'
+    },
+    'landing.custom_subscription.delivery_day_of_month': {
+        'en': 'Day of the month', 'uz': 'Oyning kuni', 'ru': 'День месяца'
+    },
+    'landing.custom_subscription.select_day_of_month': {
+        'en': 'Select a day of the month', 'uz': 'Oyning kunini tanlang', 'ru': 'Выберите день месяца'
+    },
     # ─── Public delivery-coverage page (/coverage) ───────────────────────
     'landing.nav.coverage': {
         'en': 'Coverage', 'uz': 'Hududlar', 'ru': 'Зона доставки'
@@ -5848,6 +5834,101 @@ BACKEND_TRANSLATIONS = {
         'uz': '✏️ Manzilni qayta kiritish',
         'ru': '✏️ Ввести адрес заново'
     },
+    'telegram.subscription.select_day_of_week': {
+        'en': 'On which day of the week should we deliver?',
+        'uz': 'Qaysi hafta kuni yetkazib beramiz?',
+        'ru': 'В какой день недели доставлять?'
+    },
+    'telegram.subscription.select_day_of_month': {
+        'en': 'On which day of the month should we deliver? Months with fewer days use their last day.',
+        'uz': 'Oyning qaysi kuni yetkazib beramiz? Kunlari kam oylarda oxirgi kun olinadi.',
+        'ru': 'В какой день месяца доставлять? В коротких месяцах это будет последний день.'
+    },
+    'telegram.subscription.select_time_slot': {
+        'en': 'Choose a delivery time.',
+        'uz': 'Yetkazib berish vaqtini tanlang.',
+        'ru': 'Выберите время доставки.'
+    },
+    'telegram.subscription.any_time': {
+        'en': 'Any time (we will confirm it)',
+        'uz': 'Istalgan vaqt (o\'zimiz aniqlaymiz)',
+        'ru': 'В любое время (уточним сами)'
+    },
+    'telegram.subscription.delivery_day': {
+        'en': 'Delivery day',
+        'uz': 'Yetkazib berish kuni',
+        'ru': 'День доставки'
+    },
+    'telegram.subscription.delivery_time': {
+        'en': 'Delivery time',
+        'uz': 'Yetkazib berish vaqti',
+        'ru': 'Время доставки'
+    },
+    'telegram.subscription.time_to_be_confirmed': {
+        'en': 'time to be confirmed',
+        'uz': 'vaqti keyin aniqlanadi',
+        'ru': 'время уточним'
+    },
+    'telegram.subscription.weekday_0': {
+        'en': 'Monday',
+        'uz': 'Dushanba',
+        'ru': 'Понедельник'
+    },
+    'telegram.subscription.weekday_1': {
+        'en': 'Tuesday',
+        'uz': 'Seshanba',
+        'ru': 'Вторник'
+    },
+    'telegram.subscription.weekday_2': {
+        'en': 'Wednesday',
+        'uz': 'Chorshanba',
+        'ru': 'Среда'
+    },
+    'telegram.subscription.weekday_3': {
+        'en': 'Thursday',
+        'uz': 'Payshanba',
+        'ru': 'Четверг'
+    },
+    'telegram.subscription.weekday_4': {
+        'en': 'Friday',
+        'uz': 'Juma',
+        'ru': 'Пятница'
+    },
+    'telegram.subscription.weekday_5': {
+        'en': 'Saturday',
+        'uz': 'Shanba',
+        'ru': 'Суббота'
+    },
+    'telegram.subscription.weekday_6': {
+        'en': 'Sunday',
+        'uz': 'Yakshanba',
+        'ru': 'Воскресенье'
+    },
+    'telegram.subscription.status_active': {
+        'en': 'Active',
+        'uz': 'Faol',
+        'ru': 'Активна'
+    },
+    'telegram.subscription.status_paused': {
+        'en': 'Paused',
+        'uz': 'To\'xtatilgan',
+        'ru': 'Приостановлена'
+    },
+    'telegram.subscription.status_cancelled': {
+        'en': 'Cancelled',
+        'uz': 'Bekor qilingan',
+        'ru': 'Отменена'
+    },
+    'telegram.subscription.status_expired': {
+        'en': 'Expired',
+        'uz': 'Muddati tugagan',
+        'ru': 'Истекла'
+    },
+    'telegram.subscription.status_trial': {
+        'en': 'Trial',
+        'uz': 'Sinov',
+        'ru': 'Пробная'
+    },
     'telegram.subscription.frequency_daily': {
         'en': 'Daily',
         'uz': 'Har kuni',
@@ -6214,9 +6295,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Уровень: {tier}'
     },
     'telegram.loyalty.tier_cod_perk': {
-        'en': '{pct}% off when you pay cash on delivery',
-        'uz': "Yetkazib berishda naqd to'lasangiz {pct}% chegirma",
-        'ru': 'Скидка {pct}% при оплате наличными при доставке'
+        'en': '{pct}% off every order you place here in the bot or on our website, paid on delivery',
+        'uz': "Shu bot yoki saytimiz orqali beradigan, yetkazib berishda to'lanadigan har bir buyurtmangizga {pct}% chegirma",
+        'ru': 'Скидка {pct}% на каждый заказ здесь, в боте, или на сайте с оплатой при доставке'
     },
     'telegram.loyalty.tier_secured': {
         'en': 'Status secured',
@@ -6512,11 +6593,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovlar tarixi',
         'ru': 'История списаний'
     },
-    'telegram.subscription.billing_retry_initiated': {
-        'en': 'Billing retry started.',
-        'uz': 'To\'lovni qayta o\'tkazishga urinish boshlandi.',
-        'ru': 'Повторное списание запущено.'
-    },
     'telegram.subscription.cancelled_success': {
         'en': 'Subscription cancelled.',
         'uz': 'Obuna bekor qilindi.',
@@ -6526,11 +6602,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Confirm Subscription',
         'uz': 'Obunani tasdiqlash',
         'ru': 'Подтверждение подписки'
-    },
-    'telegram.subscription.create_template_or_custom': {
-        'en': 'Start from a template or build your own subscription.',
-        'uz': 'Tayyor shablondan boshlang yoki o\'z obunangizni tuzing.',
-        'ru': 'Начните с шаблона или соберите свою подписку.'
     },
     'telegram.subscription.created_success': {
         'en': 'Subscription created.',
@@ -6601,11 +6672,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Items',
         'uz': 'Mahsulotlar',
         'ru': 'Товары'
-    },
-    'telegram.subscription.next_billing': {
-        'en': 'Next billing',
-        'uz': 'Keyingi to\'lov',
-        'ru': 'Следующее списание'
     },
     'telegram.subscription.next_delivery': {
         'en': 'Next delivery',
@@ -6891,6 +6957,127 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu buyurtmaga allaqachon javob berilgan.',
         'ru': 'На этот заказ уже дан ответ.'
     },
+    # ============================================================================
+    # Customer notices (plan 2026-10-24 Task 3; spec 2026-10-23 §9), rendered by
+    # telegram_bot/webhook_server.py::_customer_notice_text for the backend's
+    # business_app/services/customer_notices.py. `order_created` is the frame; the delivery
+    # line, the item lines and the payment line are rendered with their own keys and handed
+    # in, because i18n.get fills placeholders itself. Never "call us": the bot chat is the
+    # way to reach us. uz/ru need a native read before prod.
+    # ============================================================================
+    'telegram.customer_notice.order_created': {
+        'en': '🗓 <b>Your subscription order {order_number} is placed</b>\n\n'
+              '🚚 Delivery: {delivery}\n{items}\n\n'
+              '💰 Total: {total} UZS\n{payment}',
+        'uz': '🗓 <b>Obuna bo\'yicha {order_number} buyurtmangiz yaratildi</b>\n\n'
+              '🚚 Yetkazib berish: {delivery}\n{items}\n\n'
+              '💰 Jami: {total} so\'m\n{payment}',
+        'ru': '🗓 <b>Создан заказ {order_number} по вашей подписке</b>\n\n'
+              '🚚 Доставка: {delivery}\n{items}\n\n'
+              '💰 Итого: {total} сум\n{payment}'
+    },
+    'telegram.customer_notice.delivery_window': {
+        'en': '{date}, from {start} to {end}',
+        'uz': '{date}, soat {start} dan {end} gacha',
+        'ru': '{date}, с {start} до {end}'
+    },
+    'telegram.customer_notice.delivery_tbc': {
+        'en': '{date}, time to be confirmed',
+        'uz': '{date}, vaqti keyinroq aniqlanadi',
+        'ru': '{date}, время уточним позже'
+    },
+    # A localized unit word, as telegram.agent_order.item: the Cyrillic guard catches a ru row
+    # that is really the English string.
+    'telegram.customer_notice.item': {
+        'en': '• {name} × {qty}',
+        'uz': '• {name} — {qty} dona',
+        'ru': '• {name} — {qty} шт.'
+    },
+    'telegram.customer_notice.pay_cash': {
+        'en': '💵 Pay {amount} UZS to the driver at the door.',
+        'uz': '💵 Kuryerga eshik oldida {amount} so\'m to\'laysiz.',
+        'ru': '💵 Оплата курьеру при получении: {amount} сум.'
+    },
+    'telegram.customer_notice.pay_cash_prepaid': {
+        'en': '💳 {amount} UZS of your prepaid balance is applied.',
+        'uz': '💳 Oldindan to\'lov balansingizdan {amount} so\'m hisobga olindi.',
+        'ru': '💳 Учтено {amount} сум с вашего предоплаченного баланса.'
+    },
+    'telegram.customer_notice.pay_cash_covered': {
+        'en': '✅ Nothing to pay at the door.',
+        'uz': '✅ Eshik oldida hech narsa to\'lash shart emas.',
+        'ru': '✅ При получении ничего платить не нужно.'
+    },
+    'telegram.customer_notice.pay_company_account': {
+        'en': '🏢 Charged to your company account.',
+        'uz': '🏢 Kompaniya hisobingizdan yechiladi.',
+        'ru': '🏢 Списывается с корпоративного счёта.'
+    },
+    # Names the Pay button as telegram.payment.pay_now labels it.
+    'telegram.customer_notice.pay_online': {
+        'en': '💳 Please pay by {deadline} with the 💳 Pay Now button. An order not paid by then is cancelled.',
+        'uz': '💳 Iltimos, {deadline} gacha «💳 Hozir to\'lash» tugmasi orqali to\'lang. '
+              'Shu vaqtgacha to\'lanmagan buyurtma bekor qilinadi.',
+        'ru': '💳 Пожалуйста, оплатите до {deadline} кнопкой «💳 Оплатить». '
+              'Заказ, не оплаченный к этому времени, будет отменён.'
+    },
+    'telegram.customer_notice.pay_online_paid': {
+        'en': '✅ Paid.',
+        'uz': '✅ To\'langan.',
+        'ru': '✅ Оплачено.'
+    },
+    # {reason} is api.subscriptions.skip_reason.<code>, rendered by the backend in the same language.
+    'telegram.customer_notice.delivery_skipped': {
+        'en': '⏭ <b>Delivery skipped</b>\n\n'
+              'The delivery of your subscription «{subscription_name}» on {dates} was skipped because {reason}.\n\n'
+              '🚚 Next delivery: {next_date}',
+        'uz': '⏭ <b>Yetkazib berish o\'tkazib yuborildi</b>\n\n'
+              '«{subscription_name}» obunangiz bo\'yicha {dates} kungi yetkazib berish o\'tkazib yuborildi, '
+              'chunki {reason}.\n\n'
+              '🚚 Keyingi yetkazib berish: {next_date}',
+        'ru': '⏭ <b>Доставка пропущена</b>\n\n'
+              'Доставка по вашей подписке «{subscription_name}» на {dates} пропущена: {reason}.\n\n'
+              '🚚 Следующая доставка: {next_date}'
+    },
+    'telegram.customer_notice.paid_order_kept_skip': {
+        'en': '📦 <b>Your paid order {order_number} stays</b>\n\n'
+              'It is already paid, so it will be delivered on {date}. '
+              'Your skip applies to the delivery after it; your next delivery after that is {next_date}.',
+        'uz': '📦 <b>To\'langan {order_number} buyurtmangiz saqlanadi</b>\n\n'
+              'U allaqachon to\'langan, shuning uchun {date} kuni yetkazib beriladi. '
+              'O\'tkazib yuborish undan keyingi yetkazib berishga tegishli; keyingi yetkazib berish — {next_date}.',
+        'ru': '📦 <b>Оплаченный заказ {order_number} остаётся</b>\n\n'
+              'Он уже оплачен, поэтому будет доставлен {date}. '
+              'Пропуск относится к следующей за ним доставке; следующая доставка — {next_date}.'
+    },
+    'telegram.customer_notice.paid_order_kept_pause': {
+        'en': '📦 <b>Your paid order {order_number} stays</b>\n\n'
+              'It is already paid, so it will be delivered on {date}. '
+              'Your subscription is paused: no new orders until you resume it.',
+        'uz': '📦 <b>To\'langan {order_number} buyurtmangiz saqlanadi</b>\n\n'
+              'U allaqachon to\'langan, shuning uchun {date} kuni yetkazib beriladi. '
+              'Obunangiz to\'xtatildi: qayta yoqmaguningizcha yangi buyurtmalar yaratilmaydi.',
+        'ru': '📦 <b>Оплаченный заказ {order_number} остаётся</b>\n\n'
+              'Он уже оплачен, поэтому будет доставлен {date}. '
+              'Подписка приостановлена: новых заказов не будет, пока вы её не возобновите.'
+    },
+    'telegram.customer_notice.paid_order_kept_cancel': {
+        'en': '📦 <b>Your paid order {order_number} stays</b>\n\n'
+              'It is already paid, so it will be delivered on {date}. '
+              'Your subscription is cancelled: no new orders will be created.',
+        'uz': '📦 <b>To\'langan {order_number} buyurtmangiz saqlanadi</b>\n\n'
+              'U allaqachon to\'langan, shuning uchun {date} kuni yetkazib beriladi. '
+              'Obunangiz bekor qilindi: yangi buyurtmalar yaratilmaydi.',
+        'ru': '📦 <b>Оплаченный заказ {order_number} остаётся</b>\n\n'
+              'Он уже оплачен, поэтому будет доставлен {date}. '
+              'Подписка отменена: новые заказы создаваться не будут.'
+    },
+    'telegram.customer_notice.payment_expired': {
+        'en': '❌ <b>Order {order_number} cancelled</b>\n\nIt was not paid by {deadline}, so we cancelled it.',
+        'uz': '❌ <b>{order_number} buyurtmasi bekor qilindi</b>\n\n'
+              'U {deadline} gacha to\'lanmagani uchun bekor qilindi.',
+        'ru': '❌ <b>Заказ {order_number} отменён</b>\n\nОн не был оплачен до {deadline}, поэтому мы его отменили.'
+    },
 
 }
 
@@ -7111,8 +7298,9 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.payment_status': _ui_tr('Payment Status', "To'lov holati", 'Статус оплаты'),
     'ui.orders.payment_summary': _ui_tr('Payment Summary', "To'lov xulosasi", 'Сводка оплаты'),
     # Order money breakdown (Orders.js detail modal). Every line is published by
-    # the backend; the tier discount is a cash-on-delivery benefit and its label
-    # says so, because the same order on Click carries 0.
+    # the backend. The tier discount applies only to cash-on-delivery orders the
+    # customer places THEMSELVES in the bot or on the website; staff-entered and
+    # subscription orders carry 0, so the label names that channel.
     'ui.orders.money_breakdown': _ui_tr('Money Breakdown', 'Summa tafsiloti', 'Расшифровка суммы'),
     'ui.orders.subtotal': _ui_tr('Subtotal', 'Oraliq jami', 'Промежуточная сумма'),
     'ui.orders.subscription_discount': _ui_tr(
@@ -7120,9 +7308,9 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     ),
     'ui.orders.loyalty_discount': _ui_tr('Reward discount', 'Mukofot chegirmasi', 'Скидка по награде'),
     'ui.orders.tier_discount': _ui_tr(
-        'Tier discount (cash on delivery)',
-        'Daraja chegirmasi (yetkazib berishda naqd)',
-        'Скидка уровня (оплата наличными при доставке)',
+        "Tier discount (customer's bot/web order)",
+        "Daraja chegirmasi (mijozning bot/sayt buyurtmasi)",
+        'Скидка уровня (заказ клиента в боте/на сайте)',
     ),
     'ui.orders.delivery_fee': _ui_tr('Delivery fee', 'Yetkazib berish narxi', 'Стоимость доставки'),
     'ui.orders.payment_timeline': _ui_tr('Payment Timeline', "To'lov tarixi", 'Лента оплаты'),
@@ -8548,6 +8736,17 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'Keep achieving the same order goal in consecutive periods. Reach the required number of consecutive achievements and you earn bonus AquaCoins — then it repeats. Skipping a period resets the streak.',
         'Bir xil buyurtma maqsadini ketma-ket davrlarda bajaring. Talab qilingan ketma-ket bajarishlar soniga yeting va bonus AquaCoins olasiz — keyin u takrorlanadi. Davrni o\'tkazib yuborsangiz seriya nolga tushadi.',
         'Достигайте одной и той же цели по заказам в последовательные периоды. Наберите нужное число последовательных достижений и получите бонусные AquaCoins — затем всё повторяется. Пропуск периода сбрасывает серию.'),
+    # Which orders get the tier discount. Appended to the FAQ (accordion +
+    # FAQPage JSON-LD) only when some tier carries a rate - same condition as
+    # the tier-grid footnote. NO literal percentage.
+    'loyalty_guide.faq.q10': _ui_tr(
+        'Which orders get my tier discount?',
+        "Daraja chegirmasi qaysi buyurtmalarga qo'llaniladi?",
+        'К каким заказам применяется скидка уровня?'),
+    'loyalty_guide.faq.a10': _ui_tr(
+        "Every order you place yourself in our Telegram bot or on our website and pay on delivery — in cash or by card transfer to the driver. It's taken off automatically at checkout: our thank-you for ordering in the bot or on the website.",
+        "Telegram botimiz yoki saytimiz orqali o'zingiz beradigan va yetkazib berishda — naqd yoki haydovchi kartasiga o'tkazma orqali — to'laydigan har bir buyurtmangizga. Chegirma rasmiylashtirishda avtomatik qo'llaniladi — bu bot yoki sayt orqali buyurtma berganingiz uchun minnatdorchiligimiz.",
+        'К каждому заказу, который вы оформляете сами в нашем Telegram-боте или на сайте и оплачиваете при доставке — наличными или переводом на карту курьера. Скидка применяется автоматически при оформлении — это наша благодарность за заказ в боте или на сайте.'),
     'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
     'loyalty_guide.earn.surprise_desc': _ui_tr(
         "Every now and then we surprise members who order with a little extra — a bonus of AquaCoins that lands in your balance when you least expect it. No schedule, no formula; that's what keeps it a surprise.",
@@ -8617,11 +8816,12 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.tier.from': _ui_tr('From {pts} AquaCoins', '{pts} AquaCoinsdan', 'От {pts} AquaCoins'),
     'loyalty_guide.tier.label_multiplier': _ui_tr('AquaCoins rate', 'AquaCoins koeffitsiyenti', 'множитель'),
-    # The tier discount is granted on the cash-on-delivery rail only. The stat
-    # label and the perk bullet are the two places the card publishes the rate,
-    # so both name the condition. The rate itself is always the {pct} parameter.
+    # The tier discount is a perk of orders the customer places themselves in
+    # our Telegram bot or on our website (paid on delivery). The stat label and
+    # the perk bullet are the two places the card publishes the rate, so both
+    # name the channel. The rate itself is always the {pct} parameter.
     'loyalty_guide.tier.label_discount': _ui_tr(
-        'cash-order discount', 'naqd buyurtma chegirmasi', 'скидка за оплату наличными'
+        'bot & website discount', 'bot va sayt chegirmasi', 'скидка в боте и на сайте'
     ),
 
     # Tier NAMES are model-translatable (LoyaltyTierConfig.name entity translations,
@@ -8631,20 +8831,21 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     # from live LoyaltyTierConfig; the discount bullet is hidden at 0%.
     'loyalty_guide.tier.perk_multiplier': _ui_tr('{mult}× AquaCoins on every order', 'Har buyurtmada {mult}× AquaCoins', '{mult}× AquaCoins за каждый заказ'),
     'loyalty_guide.tier.perk_discount': _ui_tr(
-        '{pct}% off when you pay cash on delivery',
-        "Yetkazib berishda naqd to'lasangiz {pct}% chegirma",
-        'Скидка {pct}% при оплате наличными при доставке',
+        '{pct}% off orders you place in our bot or on our website, paid on delivery',
+        "Botimiz yoki saytimiz orqali beriladigan, yetkazib berishda to'lanadigan buyurtmalarga {pct}% chegirma",
+        'Скидка {pct}% на заказы в нашем боте или на сайте с оплатой при доставке',
     ),
     # Quiet fine-print footnote anchored to the tier stat's `*` marker (see
-    # loyalty_guide.html) — replaces the earlier dedicated COD section, which
+    # loyalty_guide.html) — states the rule (bot/website perk, paid on delivery;
+    # subscription deliveries keep the subscription price) once. Replaces the earlier dedicated COD section, which
     # the owner found too loud for what is a small disclosure. Rendered once,
     # beneath the tier grid, only when some active tier carries a rate. NO
     # literal percentage — the rate itself is always the {pct} parameter
     # elsewhere on the card.
     'loyalty_guide.tier.discount_footnote': _ui_tr(
-        '* Tier discount applies to cash-on-delivery orders only.',
-        "* Daraja chegirmasi faqat yetkazib berishda naqd to'lanadigan buyurtmalarga taalluqli.",
-        '* Скидка уровня действует только при оплате наличными при доставке.',
+        "* Your tier discount is a perk of ordering in our Telegram bot or on our website: it's taken off automatically when you place the order yourself and pay on delivery — in cash or by card transfer to the driver. Subscription deliveries keep their own subscription price; your tier perk is there whenever you place an extra order in the bot or on the website.",
+        "* Daraja chegirmasi — Telegram botimiz yoki saytimiz orqali buyurtma berishning afzalligi: buyurtmani o'zingiz berib, yetkazib berishda naqd yoki haydovchi kartasiga o'tkazma orqali to'laganingizda u avtomatik qo'llaniladi. Obuna yetkazmalari o'z obuna narxida qoladi; bot yoki sayt orqali qo'shimcha buyurtma berganingizda daraja bonusingiz doim siz bilan.",
+        '* Скидка уровня — преимущество заказа в нашем Telegram-боте и на сайте: она применяется автоматически, когда вы оформляете заказ сами и оплачиваете при доставке — наличными или переводом на карту курьера. Доставки по подписке идут по своей цене подписки; бонус уровня всегда ждёт вас, когда вы оформляете дополнительный заказ в боте или на сайте.',
     ),
 
     # Tagline + qualitative benefit bullets are keyed by tier display_order (0=lowest
@@ -8923,16 +9124,6 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'Sizning AquaCoins',
         'Ваши AquaCoins',
     ),
-    'Earn bonus AquaCoins on subscription orders. Redeem for discounts, free products, and exclusive perks.': _ui_tr(
-        'Earn bonus AquaCoins on subscription orders. Redeem for discounts, free products, and exclusive perks.',
-        "Obuna buyurtmalarida bonus AquaCoins yig'ing. Chegirmalar, bepul mahsulotlar va eksklyuziv imtiyozlar uchun ishlating.",
-        'Зарабатывайте бонусные AquaCoins на заказах по подписке. Тратьте их на скидки, бесплатные товары и эксклюзивные привилегии.',
-    ),
-    'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus AquaCoins (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.': _ui_tr(
-        'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus AquaCoins (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.',
-        "Obuna a'zolari bir martalik xaridlarga nisbatan 20% gacha tejaydi. Shuningdek, bepul yetkazib berish, bonus AquaCoins (2x gacha koeffitsiyent) va faqat obunachilar uchun maxsus aksiyalardan foydalanasiz. Aniq tejamkorlik tanlangan mahsulotlar va buyurtma chastotasiga bog'liq.",
-        'Участники подписки экономят до 20% по сравнению с разовыми покупками. Вы также получаете бесплатную доставку, зарабатываете бонусные AquaCoins (множитель до 2x) и доступ к эксклюзивным акциям только для подписчиков. Точная экономия зависит от выбранных товаров и частоты заказов.',
-    ),
     'landing.loyalty.points': _ui_tr('AquaCoins', 'AquaCoins', 'AquaCoins'),
     'landing.loyalty.subtitle': _ui_tr(
         'Earn AquaCoins with every purchase and redeem them for amazing rewards!',
@@ -8973,6 +9164,114 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
+
+
+# ============================================================================
+# Subscription copy on customer pages (/subscriptions, /services).
+# A subscription gives NO discount (billing charges the regular price), delivery is free, AquaCoins
+# are earned at the user's tier rate, and the point of it is that the system places every order on
+# schedule. Pinned by tests/integration/test_subscriptions_page_truthful_copy.py.
+# ============================================================================
+SUBSCRIPTION_PAGE_TRANSLATIONS = {
+    'Never Run Out': _ui_tr('Never Run Out', "Suvsiz qolmang", 'Вода всегда в запасе'),
+    'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.': _ui_tr(
+        'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.',
+        "Obunangiz har bir buyurtmani jadval bo'yicha o'zi beradi, shuning uchun suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz.",
+        'Подписка сама оформляет каждый заказ по расписанию, поэтому вы не забудете заказать воду и не останетесь без неё в самый нужный момент.',
+    ),
+    'Delivery is always free, on subscription deliveries as on every order.': _ui_tr(
+        'Delivery is always free, on subscription deliveries as on every order.',
+        "Yetkazib berish doim bepul: obuna bo'yicha yetkazishlarda ham, har bir buyurtmada ham.",
+        'Доставка всегда бесплатная: и для доставок по подписке, и для каждого заказа.',
+    ),
+    "Earn AquaCoins on every subscription delivery at your tier's rate, and redeem them for rewards.": _ui_tr(
+        "Earn AquaCoins on every subscription delivery at your tier's rate, and redeem them for rewards.",
+        "Obuna bo'yicha har bir yetkazishda darajangiz stavkasi bo'yicha AquaCoins yig'ing va ularni mukofotlarga almashtiring.",
+        'Получайте AquaCoins за каждую доставку по подписке по ставке вашего уровня и обменивайте их на награды.',
+    ),
+    'What do I get with a subscription?': _ui_tr(
+        'What do I get with a subscription?', 'Obuna nimalarni beradi?', 'Что я получаю с подпиской?',
+    ),
+    "Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most. Delivery is always free, and you earn AquaCoins on every subscription delivery at your tier's rate. Subscription deliveries are billed at the regular price.": _ui_tr(
+        "Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most. Delivery is always free, and you earn AquaCoins on every subscription delivery at your tier's rate. Subscription deliveries are billed at the regular price.",
+        "Obunangiz har bir buyurtmani jadval bo'yicha o'zi beradi, shuning uchun suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz. Yetkazib berish doim bepul, obuna bo'yicha har bir yetkazishda esa darajangiz stavkasi bo'yicha AquaCoins yig'asiz. Obuna bo'yicha yetkazishlar oddiy narxda hisoblanadi.",
+        'Подписка сама оформляет каждый заказ по расписанию, поэтому вы не забудете заказать воду и не останетесь без неё в самый нужный момент. Доставка всегда бесплатная, а за каждую доставку по подписке вы получаете AquaCoins по ставке вашего уровня. Доставки по подписке оплачиваются по обычной цене.',
+    ),
+    'Auto': _ui_tr('Auto', 'Avto', 'Авто'),
+    'Orders placed for you': _ui_tr('Orders placed for you', "Buyurtmalar siz uchun beriladi", 'Заказы оформляем за вас'),
+    'Delivery on every order': _ui_tr('Delivery on every order', "Har bir buyurtmada yetkazib berish", 'Доставка с каждым заказом'),
+    'Let your water orders take care of themselves, and never run out.': _ui_tr(
+        'Let your water orders take care of themselves, and never run out.',
+        "Suv buyurtmalari o'z-o'zidan bajarilsin, suvsiz qolmang.",
+        'Пусть заказы воды оформляются сами, а вода никогда не заканчивается.',
+    ),
+    'Choose a delivery frequency below to preview your schedule': _ui_tr(
+        'Choose a delivery frequency below to preview your schedule',
+        "Jadvalingizni ko'rish uchun quyida yetkazib berish chastotasini tanlang",
+        'Выберите частоту доставки ниже, чтобы увидеть своё расписание',
+    ),
+    'Your Delivery Schedule': _ui_tr('Your Delivery Schedule', 'Yetkazib berish jadvalingiz', 'Ваше расписание доставки'),
+    'Build your subscription with the subscription builder on our home page, or start one in our Telegram bot. Pick your products and schedule, and we place every order for you.': _ui_tr(
+        'Build your subscription with the subscription builder on our home page, or start one in our Telegram bot. Pick your products and schedule, and we place every order for you.',
+        "Obunani bosh sahifadagi obuna konstruktorida yarating yoki Telegram botimizda boshlang. Mahsulotlar va jadvalni tanlang, har bir buyurtmani biz o'zimiz beramiz.",
+        'Создайте подписку в конструкторе подписки на главной странице или начните её в нашем Telegram-боте. Выберите товары и расписание, а каждый заказ мы оформим за вас.',
+    ),
+    'Open the Subscription Builder': _ui_tr('Open the Subscription Builder', 'Obuna konstruktorini ochish', 'Открыть конструктор подписки'),
+    'Subscribe in Telegram': _ui_tr('Subscribe in Telegram', "Telegramda obuna bo'lish", 'Оформить подписку в Telegram'),
+    'Create your subscription on our website or in our Telegram bot': _ui_tr(
+        'Create your subscription on our website or in our Telegram bot',
+        "Obunani saytimizda yoki Telegram botimizda yarating",
+        'Оформите подписку на сайте или в нашем Telegram-боте',
+    ),
+    "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.": _ui_tr(
+        "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.",
+        "Albatta! Qat'iy tariflardan farqli o'laroq, obunalarimiz to'liq moslashtiriladi. Katalogimizdan istalgan mahsulotni tanlang, miqdorni o'zingiz belgilang, qulay yetkazib berish chastotasini tanlang va hatto aniq yetkazib berish kunlarini belgilang. Mahsulotlar, miqdor yoki chastotani istalgan vaqtda Telegram botimizda o'zgartirishingiz mumkin. Yangi mahsulotlar va miqdorlar biz beradigan keyingi buyurtmadan boshlab kuchga kiradi, yangi chastota, kun yoki vaqt oralig'i esa keyingi yetkazishni yangi jadval bo'yicha belgilaydi. Biz allaqachon bergan buyurtma o'zgarmaydi.",
+        'Конечно! В отличие от фиксированных тарифов, наши подписки полностью настраиваются. Выберите любые товары из каталога, задайте свои количества, выберите удобную частоту доставки и даже конкретные дни доставки. Менять товары, количества или частоту можно в любое время в нашем Telegram-боте. Новые товары и количества действуют со следующего заказа, который мы оформим, а новая частота, день или временной интервал определяют следующую доставку по новому расписанию. Уже оформленный заказ не меняется.',
+    ),
+    'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip your next delivery in the Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.': _ui_tr(
+        'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip your next delivery in the Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.',
+        "Obunani istalgan vaqtda to'xtatib turishingiz mumkin, masalan ta'til paytida, va qaytganingizda davom ettirasiz: buni shaxsiy kabinetda yoki Telegram botimizda qilish mumkin. Keyingi yetkazishni o'tkazib yuborish Telegram botimizda mavjud. To'xtatish, o'tkazib yuborish yoki bekor qilish hali to'lanmagan kelgusi buyurtmani bekor qiladi. Siz allaqachon to'lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o'tkazib yuborib ham, to'xtatib ham bo'lmaydi: u qoladi va yetkaziladi, o'zgarish esa keyingi yetkazishdan boshlab kuchga kiradi.",
+        'Вы можете приостановить подписку в любое время, например на время отпуска, и возобновить её, когда вернётесь, в личном кабинете или в нашем Telegram-боте. Пропустить ближайшую доставку можно в Telegram-боте. Приостановка, пропуск или отмена отменяют ближайший ещё не оплаченный заказ. Уже оплаченный заказ или заказ, который курьер уже забрал для доставки, нельзя пропустить или приостановить: он остаётся и будет доставлен, а изменение действует со следующей доставки.',
+    ),
+    'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in our Telegram bot.': _ui_tr(
+        'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in our Telegram bot.',
+        "Obunani Click orqali karta bilan, yetkazib berishda naqd pul bilan yoki biznes mijozlar uchun biznes hisobi orqali to'lash mumkin. Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi va obunangizdagi to'lov usuli bilan to'lanadi; uni Telegram botimizda o'zgartirish mumkin.",
+        'Подписку можно оплачивать картой через Click, наличными при доставке, а бизнес-клиентам через бизнес-счёт. Каждая плановая доставка оформляется как обычный заказ и оплачивается способом оплаты, указанным в подписке; его можно изменить в нашем Telegram-боте.',
+    ),
+    'Your subscription delivers to the address you chose when you created it. If you need a different address, message us in our Telegram bot and we will update it for you.': _ui_tr(
+        'Your subscription delivers to the address you chose when you created it. If you need a different address, message us in our Telegram bot and we will update it for you.',
+        "Obunangiz yaratishda tanlagan manzilingizga yetkaziladi. Boshqa manzil kerak bo'lsa, Telegram botimizga yozing, biz uni siz uchun yangilaymiz.",
+        'Подписка доставляется на адрес, который вы выбрали при её создании. Если нужен другой адрес, напишите нам в Telegram-боте, и мы обновим его за вас.',
+    ),
+    'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If you run into a problem with a payment, message us in our Telegram bot and we will help.': _ui_tr(
+        'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If you run into a problem with a payment, message us in our Telegram bot and we will help.',
+        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi kabi amalga oshiriladi. To'lovda muammo bo'lsa, Telegram botimizga yozing, yordam beramiz.",
+        'Каждая плановая доставка оформляется как обычный заказ, поэтому оплата проходит так же, как и для любого заказа. Если возникнут трудности с оплатой, напишите нам в Telegram-боте, и мы поможем.',
+    ),
+    # /services blurb: DB-only until now, so the old "special discounts" text lived only in the database.
+    'landing.services.subscription_plans.description': _ui_tr(
+        'Set a delivery schedule and we place every order for you, so you never forget to order water and never run out when you need it most. Delivery is always free.',
+        "Yetkazib berish jadvalini belgilang, har bir buyurtmani biz o'zimiz beramiz: suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz. Yetkazib berish doim bepul.",
+        'Задайте расписание доставки, и каждый заказ мы оформим за вас: вы не забудете заказать воду и не останетесь без неё в самый нужный момент. Доставка всегда бесплатная.',
+    ),
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_PAGE_TRANSLATIONS)
+
+# English-literal storefront keys of the home-page subscription builder (index.html hands them to
+# subscription-constructor.js; `{day}` is filled in by the script) and of /my-subscriptions.
+SUBSCRIPTION_WEB_TRANSLATIONS = {
+    'Day {day} of the month': _ui_tr('Day {day} of the month', 'Oyning {day}-kuni', '{day}-е число месяца'),
+    'Shown once you are signed in': _ui_tr(
+        'Shown once you are signed in',
+        "Tizimga kirganingizdan so'ng ko'rsatiladi",
+        'Будет показано после входа в аккаунт',
+    ),
+    'Please select a day of the month': _ui_tr(
+        'Please select a day of the month', 'Iltimos, oyning kunini tanlang', 'Пожалуйста, выберите день месяца'
+    ),
+    'Time to be confirmed': _ui_tr('Time to be confirmed', 'Vaqti tasdiqlanadi', 'Время уточняется'),
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_WEB_TRANSLATIONS)
 
 
 # ============================================================================

@@ -33,7 +33,7 @@ def mock_i18n(monkeypatch):
             "telegram.order.total": "Total: {0} UZS",
             "telegram.orders.estimate_discount_line": "Discount: {amount}",
             "telegram.orders.estimate_reward_line": "Loyalty rewards: {amount}",
-            "telegram.orders.order_tier_discount_line": "Cash-payment discount: {amount}",
+            "telegram.orders.order_tier_discount_line": "Tier discount (bot & website perk): {amount}",
             "telegram.orders.delivery_fee": "Delivery fee: {amount}",
             "telegram.orders.detail_paid_line": "Paid: {amount}",
             "telegram.orders.detail_to_pay_line": "To pay: {amount}",
@@ -57,7 +57,7 @@ def test_discount_line_comes_before_the_total(app, mock_i18n):
     summary = MessageBuilder.build_order_summary(_order(tier_discount=810, total_amount=53190), "en")
 
     lines = summary.split("\n")
-    discount_index = next(i for i, line in enumerate(lines) if "Cash-payment discount" in line)
+    discount_index = next(i for i, line in enumerate(lines) if "Tier discount (bot & website perk)" in line)
     total_index = next(i for i, line in enumerate(lines) if line.startswith("💰"))
 
     assert discount_index < total_index
@@ -74,7 +74,7 @@ def test_no_breakdown_when_nothing_is_discounted(app, mock_i18n):
     # the amount-only assertion above but still be a defect.
     assert "Discount" not in summary
     assert "Loyalty rewards" not in summary
-    assert "Cash-payment discount" not in summary
+    assert "Tier discount (bot & website perk)" not in summary
 
 
 def test_details_state_paid_and_left_to_pay(app, mock_i18n):

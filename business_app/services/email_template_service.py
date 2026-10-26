@@ -40,12 +40,17 @@ class EmailTemplateService:
         "delivery_rescheduled": "delivery_rescheduled",
         "subscription_created": "subscription_created",
         "subscription_reminder": "subscription_reminder",
-        "subscription_renewal": "subscription_renewal",
         "subscription_cancelled": "subscription_cancelled",
         "reward_redeemed": "reward_redeemed",
         "agent_performance": "agent_performance",
         "reorder_reminder": "reorder_reminder",
         "reorder_escalation_digest": "reorder_escalation_digest",
+        # The customer notices of spec 2026-10-23 §9, for a customer with no Telegram
+        # (business_app/services/customer_notices.py).
+        "subscription_order_created": "subscription_order_created",
+        "subscription_delivery_skipped": "subscription_delivery_skipped",
+        "subscription_paid_order_kept": "subscription_paid_order_kept",
+        "order_payment_expired": "order_payment_expired",
     }
 
     # Email subjects by template and language
@@ -104,11 +109,6 @@ class EmailTemplateService:
             "uz": "Obuna eslatmasi - {company_name}",
             "en": "Subscription Reminder - {company_name}",
             "ru": "Напоминание о подписке - {company_name}",
-        },
-        "subscription_renewal": {
-            "uz": "Obuna yangilandi - {company_name}",
-            "en": "Subscription Renewed - {company_name}",
-            "ru": "Подписка продлена - {company_name}",
         },
         "subscription_cancelled": {
             "uz": "Obuna bekor qilindi - {company_name}",
@@ -185,6 +185,27 @@ class EmailTemplateService:
             "uz": "Yo'qolgan mijozlar: {escalated_count} ta yangi - {company_name}",
             "en": "Lapsed customers: {escalated_count} new to follow up - {company_name}",
             "ru": "Пропавшие клиенты (новых: {escalated_count}) - {company_name}",
+        },
+        # The customer notices (spec 2026-10-23 §9). uz/ru need a native read before prod.
+        "subscription_order_created": {
+            "uz": "Obuna buyurtmasi #{order_number} yaratildi - {company_name}",
+            "en": "Subscription order #{order_number} placed - {company_name}",
+            "ru": "Заказ по подписке #{order_number} оформлен - {company_name}",
+        },
+        "subscription_delivery_skipped": {
+            "uz": "Obuna bo'yicha yetkazib berish o'tkazib yuborildi - {company_name}",
+            "en": "Subscription delivery skipped - {company_name}",
+            "ru": "Доставка по подписке пропущена - {company_name}",
+        },
+        "subscription_paid_order_kept": {
+            "uz": "To'langan #{order_number} buyurtmangiz yetkazib beriladi - {company_name}",
+            "en": "Your paid order #{order_number} will be delivered - {company_name}",
+            "ru": "Оплаченный заказ #{order_number} будет доставлен - {company_name}",
+        },
+        "order_payment_expired": {
+            "uz": "#{order_number} buyurtmasi bekor qilindi: to'lanmagan - {company_name}",
+            "en": "Order #{order_number} cancelled: not paid - {company_name}",
+            "ru": "Заказ #{order_number} отменён: не оплачен - {company_name}",
         },
     }
 

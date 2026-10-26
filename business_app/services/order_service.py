@@ -3,8 +3,9 @@ Order service for the Water Business Platform
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
 from flask import current_app
 from sqlalchemy import desc, func, select
@@ -27,11 +28,12 @@ from shared.enums import (  # noqa: E402
     PaymentStatus,
     DeliveryStatus,
     PaymentMethod,
-    SubscriptionFrequency,
     UserRole,
 )
-from shared.constants import ORDER_DISPLAY_AWAITING_NEW_DATE  # noqa: E402
+from shared.business_config import CLICK_PAYMENT_WINDOW_HOURS  # noqa: E402
+from shared.constants import DISPLAY_TIMEZONE, ORDER_DISPLAY_AWAITING_NEW_DATE  # noqa: E402
 from shared.status_transitions import is_valid_order_transition  # noqa: E402
+from business_app.utils.timezone_utils import ensure_utc, get_utc_now  # noqa: E402
 from business_app.utils.payment_projection import FISCALIZED_RAILS, MONEY_HELD_PAYMENT_STATUSES  # noqa: E402
 from shared.payment_methods import (  # noqa: E402
     UnknownPaymentMethodError,
@@ -80,6 +82,10 @@ ADMIN_REASON_MAX_LENGTH = min(
 # F6: the admin status moves that must name that reason. The admin status route
 # enforces it, and GET /orders/statuses publishes it so the Orders page keeps no copy.
 ADMIN_REASON_REQUIRED_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.RETURNED})
+
+# A subscription order with no delivery window may be paid until its delivery day is over (spec 2026-10-23
+# §4.5): the last minute of that day, local, which reads as the end of the day wherever it is quoted.
+_END_OF_DELIVERY_DAY = time(23, 59)
 
 
 class OrderService:
@@ -130,6 +136,26 @@ class OrderService:
         """`customer_order_refusal` as a yes/no, for callers that only need the answer."""
         return OrderService.customer_order_refusal(user) is None
 
+    @staticmethod
+    def payment_deadline(order: Order) -> datetime:
+        """When an unpaid online order is cancelled, as an aware UTC instant (spec 2026-10-23 §2.5, §4.5).
+
+        The ONE rule: `cancel_abandoned_orders` applies it, and the subscription order notice and the
+        cancellation notice quote it. An ordinary order has CLICK_PAYMENT_WINDOW_HOURS from its creation. A
+        subscription order has the later of that and the end of its delivery window, or the end of its delivery
+        day (local) when it has no window: never less than the full window, never before its delivery is over.
+        """
+        created = ensure_utc(order.created_at) if order.created_at is not None else get_utc_now()
+        deadline = created + timedelta(hours=CLICK_PAYMENT_WINDOW_HOURS)
+        if order.is_subscription_order and order.delivery_date is not None:
+            end_of_delivery = datetime.combine(
+                order.delivery_date,
+                order.delivery_window_end or _END_OF_DELIVERY_DAY,
+                tzinfo=ZoneInfo(DISPLAY_TIMEZONE),
+            )
+            deadline = max(deadline, end_of_delivery.astimezone(timezone.utc))
+        return deadline
+
     @log_service_call(operation_type="order", track_performance=True)
     @log_business_event(event_type="created", entity_type="order")
     def create_order(
@@ -174,6 +200,12 @@ class OrderService:
         # Validate order data
         self._validate_order_data(order_data)
 
+        # A subscription order's creation is told by its own notice (subscription_notices, spec 2026-10-23 §9),
+        # sent after the subscription engine commits. The generic creation-time messages would say it twice: the
+        # "confirmed" status notice (the instant COD confirmation, a business-account order paid at creation)
+        # and the business-account payment confirmation. Later status notices are unchanged.
+        announce_creation = subscription is None
+
         # A promo code and a redeemed loyalty reward are mutually exclusive on a
         # single order. Guard up front (before any DB work) so the conflict is
         # reported before points are touched or rows are created.
@@ -210,8 +242,8 @@ class OrderService:
         )
 
         # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED: a contract line's price and the
-        # COD-only loyalty tier discount both follow it. `_resolve_payment_method` reads only the
-        # payload and the lines' coverage, never a total.
+        # loyalty tier discount (`LoyaltyService.quote_tier_discount`) both follow it.
+        # `_resolve_payment_method` reads only the payload and the lines' coverage, never a total.
         payment_method = self._resolve_payment_method(
             order_data,
             user=user,
@@ -247,7 +279,12 @@ class OrderService:
             if discount_amount > subtotal:
                 raise ValidationError("Subscription discount cannot exceed the order subtotal")
 
-        # Loyalty tier discount — COD rail only. LoyaltyService is the ONE
+        # The channel is part of the price, so it is read before the quote: the tier discount
+        # follows it (spec 2026-10-23).
+        order_source = order_data.get("order_source", "web")
+
+        # Loyalty tier discount — the customer's own bot or website order on the
+        # COD rail, never a subscription order. LoyaltyService is the ONE
         # place that decides whether it applies and at what live rate; this
         # method never holds a percentage. The basis is the full subtotal
         # (design §4.3), and the result is clamped LAST so no combination of
@@ -258,7 +295,15 @@ class OrderService:
         from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
 
         tier_discount = clamp_tier_discount(
-            LoyaltyService().quote_tier_discount(user, subtotal, payment_method).amount,
+            LoyaltyService()
+            .quote_tier_discount(
+                user,
+                subtotal,
+                payment_method,
+                order_source=order_source,
+                is_subscription_order=subscription is not None,
+            )
+            .amount,
             subtotal=subtotal,
             discount_amount=discount_amount,
             loyalty_discount=Decimal("0.00"),
@@ -284,7 +329,6 @@ class OrderService:
             raise ValidationError("Order total must be positive after discounts")
 
         # Create order
-        order_source = order_data.get("order_source", "web")
         created_by_staff_id = order_data.get("created_by_staff_id")
         # ARCH-006: staff-channel orders must record the creating operator.
         assert_order_creator_for_source(
@@ -302,8 +346,10 @@ class OrderService:
             delivery_address_id=delivery_address["delivery_address_id"],
             payment_method=payment_method,
             # A subscription-generated order is an ordinary order that happens to
-            # carry a subscription_id — nothing downstream may branch on origin. The one exception
-            # is `OrderService.can_reorder` (R8): a subscription order is never repeated by a reorder.
+            # carry a subscription_id — nothing downstream may branch on origin. Two exceptions:
+            # `OrderService.can_reorder` (R8), a subscription order is never repeated by a reorder;
+            # and tier pricing, a subscription order never carries a tier discount
+            # (`LoyaltyService.quote_tier_discount`'s channel gate, spec 2026-10-23).
             subscription_id=subscription.id if subscription is not None else None,
             is_subscription_order=subscription is not None,
             delivery_date=order_data.get("delivery_date"),
@@ -432,6 +478,8 @@ class OrderService:
                         "consume_marking_codes": bool(order_data.get("consume_marking_codes", False)),
                     },
                     commit=False,
+                    trigger_notifications=announce_creation,
+                    notify_confirmation=announce_creation,
                 )
 
                 if payment_method == PaymentMethod.CASH and payment:
@@ -520,6 +568,7 @@ class OrderService:
                         order.id,
                         OrderStatus.CONFIRMED,
                         notes="Auto-confirmed - returning customer (COD)",
+                        notify=announce_creation,
                     )
             except Exception:
                 db.session.rollback()
@@ -1142,44 +1191,6 @@ class OrderService:
             "expires_at": expires_at,
         }
 
-    def create_subscription_order(
-        self,
-        subscription_data: Dict[str, Any],
-        items_data: List[Dict[str, Any]],
-    ) -> Any:
-        """Create recurring subscription via subscription service."""
-        frequency_value = subscription_data.get("frequency")
-        try:
-            frequency = SubscriptionFrequency(frequency_value)
-        except ValueError as exc:
-            raise ValidationError("Invalid subscription frequency") from exc
-
-        payment_method_raw = subscription_data.get("payment_method") or PaymentMethod.CASH.value
-        try:
-            payment_method = PaymentMethod(payment_method_raw)
-        except ValueError as exc:
-            raise ValidationError("Invalid payment method") from exc
-
-        from business_app.utils.service_factory import get_subscription_service
-
-        payload = {
-            "user_id": subscription_data["user_id"],
-            "name": "Recurring water delivery",
-            "description": subscription_data.get("delivery_notes") or "",
-            "billing_cycle": frequency.value,
-            "delivery_frequency": frequency.value,
-            "delivery_address_id": subscription_data.get("delivery_address_id"),
-            "payment_method": payment_method,
-            "auto_renew": True,
-            "start_date": (
-                datetime.fromisoformat(subscription_data["start_date"])
-                if subscription_data.get("start_date")
-                else datetime.now(timezone.utc)
-            ),
-        }
-
-        return get_subscription_service().create_subscription(payload, items_data)
-
     @staticmethod
     def require_admin_reason(reason: Optional[str]) -> str:
         """F6: every admin cancel, and every admin MOVE to returned, names its reason.
@@ -1214,6 +1225,7 @@ class OrderService:
         commit: bool = True,
         *,
         history_reason: Optional[str] = None,
+        notify: bool = True,
     ) -> Order:
         """Update order status.
 
@@ -1224,6 +1236,9 @@ class OrderService:
 
         ``notes`` lands on the history row the customer's Track screen prints.
         ``history_reason`` lands on its staff-only ``reason`` (F6).
+
+        ``notify=False`` sends no generic status notice: the caller tells the customer with a message of its
+        own (a subscription order's creation notice, the payment-deadline cancellation notice).
         """
         order = Order.query.get(order_id)
         if not order:
@@ -1313,6 +1328,8 @@ class OrderService:
             db.session.commit()
             # Notification dispatch happens only after a successful commit so
             # rolled-back transitions do not fire stale notifications.
+            if not notify:
+                return order
             try:
                 self._send_order_notification(order, f"status_changed_{new_status.value}")
             except Exception:  # noqa: BLE001
@@ -1331,12 +1348,14 @@ class OrderService:
         actor_user_id: int = None,
         process_payment_refund: bool = True,
         history_reason: Optional[str] = None,
+        notify: bool = True,
     ) -> Order:
         """Cancel an order.
 
         ``reason`` is the history NOTE, shown to the customer; the tax-committee
         rescue reads its own marker back out of it. ``history_reason`` is an
-        admin's internal reason (F6), stored on the history row's ``reason``."""
+        admin's internal reason (F6), stored on the history row's ``reason``.
+        ``notify`` is `update_order_status`'s: False when the caller sends its own notice."""
         from shared.enums import PaymentMethod
 
         order = self.get_order(order_id, user_id)
@@ -1383,7 +1402,7 @@ class OrderService:
         # status, so moving the work does not change what it decides.
         # Cancel order
         order = self.update_order_status(
-            order_id, OrderStatus.CANCELLED, actor_id, reason, history_reason=history_reason
+            order_id, OrderStatus.CANCELLED, actor_id, reason, history_reason=history_reason, notify=notify
         )
 
         if stock_was_deducted:
@@ -1501,8 +1520,18 @@ class OrderService:
             return CUSTOMER_CANCEL_NOT_CANCELLABLE
         return None
 
-    def cancel_order_as_customer(self, order_id: int, user_id: int, reason: Optional[str] = None) -> Order:
+    def cancel_order_as_customer(
+        self,
+        order_id: int,
+        user_id: int,
+        reason: Optional[str] = None,
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Order:
         """The customer's own cancel: refused unless `customer_cancel_block_code` says None (F5).
+
+        `actor_user_id` names who acted when it was not the customer: a subscription paused or cancelled
+        by an admin cancels its upcoming orders by this same rule (spec 2026-10-23 §4.6).
 
         The answer is decided on locked rows, taken in the codebase's documented order,
         Delivery first and then Order, the sequence `OrderScheduleService._apply_reschedule`
@@ -1549,7 +1578,7 @@ class OrderService:
                 details={"reason_code": block_code},
                 error_code="ORDER_NOT_CUSTOMER_CANCELLABLE",
             )
-        return self.cancel_order(order_id, user_id=user_id, reason=reason)
+        return self.cancel_order(order_id, user_id=user_id, reason=reason, actor_user_id=actor_user_id)
 
     def rescue_order_after_psp_failure(self, cancelled_order_id: int, user_id: int) -> Order:
         """Clone a tax-committee-cancelled order into a new PENDING cash order.
@@ -1906,10 +1935,16 @@ class OrderService:
         for item in items_data:
             product: Product = Product.query.get(item["product_id"])
             if not product:
-                raise NotFoundError(f"Product {item['product_id']} not found")
+                raise NotFoundError(f"Product {item['product_id']} not found", error_code="ORDER_PRODUCT_UNAVAILABLE")
 
+            # Coded so a caller can tell a refusal from a failure: the subscription engine skips the delivery
+            # for these and tells the customer why (spec 2026-10-23 §2.8, subscription_notices.REFUSAL_REASONS).
             if not product.is_active:
-                raise ValidationError(f"Product {product.name} is not available")
+                raise ValidationError(
+                    f"Product {product.name} is not available",
+                    details={"product_id": product.id, "product_name": product.name},
+                    error_code="ORDER_PRODUCT_UNAVAILABLE",
+                )
 
             quantity = int(item["quantity"])
 
@@ -1918,7 +1953,14 @@ class OrderService:
             min_order_quantity = int(product.min_order_quantity or 1)
             if quantity < min_order_quantity:
                 raise ValidationError(
-                    f"{product.name}: minimum order quantity is {min_order_quantity} " f"(you ordered {quantity})"
+                    f"{product.name}: minimum order quantity is {min_order_quantity} " f"(you ordered {quantity})",
+                    details={
+                        "product_id": product.id,
+                        "product_name": product.name,
+                        "min_order_quantity": min_order_quantity,
+                        "quantity": quantity,
+                    },
+                    error_code="ORDER_ITEM_BELOW_MIN_QUANTITY",
                 )
 
             fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))

@@ -5,9 +5,8 @@ Handles recurring water delivery subscriptions
 
 from datetime import UTC, date, datetime, timezone, timedelta
 from decimal import Decimal
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Iterable, Optional, Tuple
 from flask import current_app
-from dateutil.relativedelta import relativedelta
 
 from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
 from business_app.models.user import User, UserAddress
@@ -16,11 +15,29 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.delivery import DeliveryTimeSlot
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
+from business_app.utils.local_windows import local_date
 from business_app.utils.order_totals import compute_order_total
+from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES
+from business_app.services import subscription_notices, subscription_schedule
 from shared.enums import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
 from business_app.utils.translations import get_translation
-from sqlalchemy.orm import joinedload
 from business_app import db
+
+_CENT = Decimal("0.01")
+# One run creates every delivery that is due, normally one. A bound, so no bug can loop forever.
+_MAX_ORDERS_PER_RUN = 31
+
+
+def _hhmm(value) -> Optional[str]:
+    return value.strftime("%H:%M") if value is not None else None
+
+
+def _order_ref(order: Order) -> Dict[str, Any]:
+    return {
+        "id": order.id,
+        "order_number": order.order_number,
+        "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+    }
 
 
 class SubscriptionService:
@@ -29,9 +46,11 @@ class SubscriptionService:
     # Fields an admin may set only behind an explicit override flag.
     _ADMIN_OVERRIDE_FIELDS = {
         "billing_amount": "manual_billing_amount",
-        "next_billing_date": "manual_billing_dates",
-        "last_billing_date": "manual_billing_dates",
+        "next_delivery_date": "manual_billing_dates",
     }
+
+    # A change to any of these moves the next delivery by the rule (spec 2026-10-23 §4.6, §9).
+    _SCHEDULE_FIELDS = ("frequency", "delivery_day_of_week", "delivery_day_of_month", "delivery_time_slot_id")
 
     # Never editable through admin_update_subscription: status transitions go
     # through the lifecycle actions (pause/resume/cancel) and identity columns
@@ -84,13 +103,21 @@ class SubscriptionService:
             raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
         return method
 
-    def create_subscription(self, subscription_data: Dict[str, Any], items: List[Dict[str, Any]]) -> Subscription:
+    def create_subscription(
+        self,
+        subscription_data: Dict[str, Any],
+        items: List[Dict[str, Any]],
+        discount_percentage: float = 0.0,
+    ) -> Subscription:
         """
         Create a new subscription
 
         Args:
             subscription_data: Dictionary containing subscription configuration
             items: List of subscription items with product_id and quantity
+            discount_percentage: Subscription discount. Subscriptions give none, so only the
+                admin path passes it; it is deliberately NOT read from subscription_data,
+                which is built from customer-reachable requests.
 
         Returns:
             Created Subscription object
@@ -115,7 +142,6 @@ class SubscriptionService:
         total_amount = self._calculate_items_total(items)
 
         # Apply discount if provided
-        discount_percentage = subscription_data.get("discount_percentage", 0)
         if discount_percentage > 0:
             total_amount = total_amount * (1 - discount_percentage / 100)
 
@@ -124,42 +150,22 @@ class SubscriptionService:
         if start_date is None:
             start_date = datetime.now(timezone.utc)
 
-        # Get and validate billing cycle and delivery frequency
-        billing_cycle_str = subscription_data.get("billing_cycle", "monthly")
-        delivery_frequency_str = subscription_data.get("delivery_frequency", "weekly")
-
-        # Convert to enum
         try:
-            billing_cycle = SubscriptionFrequency(billing_cycle_str)
-            delivery_frequency = SubscriptionFrequency(delivery_frequency_str)
-        except ValueError as e:
+            frequency = SubscriptionFrequency(subscription_data["frequency"])
+        except (KeyError, ValueError) as e:
             raise ValidationError(f"Invalid frequency value: {e}")
 
-        # Validate billing vs delivery frequency
-        self._validate_billing_frequency(billing_cycle, delivery_frequency)
-
-        # Calculate next billing date based on billing cycle
-        next_billing_date = self._calculate_next_billing_date(start_date, billing_cycle)
-
-        # Calculate next delivery date based on delivery frequency
-        next_delivery_date = self._calculate_next_delivery_date(
-            start_date,
-            delivery_frequency,
-            subscription_data.get("delivery_day_of_week"),
-            subscription_data.get("delivery_day_of_month"),
-        )
-
         # Create subscription
+        slot_id = subscription_data.get("delivery_time_slot_id")
         subscription = Subscription(
             user_id=user_id,
             name=subscription_data.get("name", "Water Delivery Subscription"),
             description=subscription_data.get("description", ""),
             status=SubscriptionStatus.ACTIVE,
-            billing_cycle=billing_cycle,
-            delivery_frequency=delivery_frequency,
             delivery_day_of_week=subscription_data.get("delivery_day_of_week"),
             delivery_day_of_month=subscription_data.get("delivery_day_of_month"),
-            delivery_time_slot_id=subscription_data.get("delivery_time_slot_id"),
+            # The object, not only the id: the schedule below reads the slot before the row is flushed.
+            delivery_time_slot=db.session.get(DeliveryTimeSlot, slot_id) if slot_id else None,
             delivery_address_id=subscription_data.get("delivery_address_id"),
             payment_method=self._validated_payment_method(subscription_data.get("payment_method", "cash")),
             auto_renew=subscription_data.get("auto_renew", True),
@@ -167,11 +173,20 @@ class SubscriptionService:
             billing_amount=total_amount,
             start_date=start_date,
             end_date=subscription_data.get("end_date"),
-            next_billing_date=next_billing_date,
-            next_delivery_date=next_delivery_date,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
+        # One frequency (spec 2026-10-23 §2.1); the first delivery by the rule (§4.3).
+        subscription.frequency = frequency
+        today = local_date()
+        subscription.next_delivery_date = subscription_schedule.first_delivery(
+            subscription, today, start=local_date(start_date)
+        )
+        # A weekly, biweekly or monthly subscription created without its day keeps the first delivery's (§2.9).
+        for field, value in subscription_schedule.missing_anchor_day(
+            subscription, subscription.next_delivery_date
+        ).items():
+            setattr(subscription, field, value)
 
         db.session.add(subscription)
         db.session.flush()  # Get subscription ID
@@ -198,249 +213,194 @@ class SubscriptionService:
         db.session.commit()
         current_app.logger.info(f"SubscriptionItem object CREATED SUCCESSFULLY with db commit")  # noqa: F541
 
-        # Schedule first delivery (async task)
+        # A first delivery inside the lead window is created now, otherwise by the daily job (§4.3).
+        self._create_first_order_if_due(subscription, today)
+
+        return {**subscription.to_dict(), **self.published_schedule(subscription)}
+
+    # ------------------------------------------------------------------ the engine (spec §4.3, §2.8)
+
+    def _create_first_order_if_due(self, subscription: Subscription, today: date) -> None:
+        """At creation, at resume and after the next delivery moved (a frequency, day or slot change, or the
+        admin's "Set next delivery date"): a next delivery inside the lead window gets its order now, through
+        the worker (as before this change); a later one is left to the daily job (§4.3, §4.6)."""
+        if (
+            subscription.status != SubscriptionStatus.ACTIVE
+            or subscription.next_delivery_date is None
+            or subscription.next_delivery_date > subscription_schedule.due_through(today)
+        ):
+            return
         try:
             from business_app.tasks.subscription_tasks import create_subscription_delivery_task
 
             create_subscription_delivery_task.delay(subscription.id)
-            current_app.logger.info(
-                f"create_subscription SERVICE create_subscription_delivery_task task scheduled"  # noqa: F541
-            )  # noqa: E501,F541
         except Exception:
-            # Log error but don't fail subscription creation if Celery is unavailable
-            current_app.logger.exception("Failed to schedule delivery task")
-            current_app.logger.warning(f"Subscription {subscription.id} created but delivery task not scheduled")
+            # Celery being down must not fail the action; the 09:00 job still creates the order.
+            current_app.logger.exception("Failed to enqueue the first order of subscription %s", subscription.id)
 
-        return subscription.to_dict()
-
-    def update_subscription(self, subscription_id: int, user_id: int = None, **updates) -> Subscription:
-        """Update subscription details"""
-        query = Subscription.query.filter_by(id=subscription_id)
-        if user_id:
-            query = query.filter_by(user_id=user_id)
-
-        subscription = query.first()
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        # Only allow updates for active or paused subscriptions
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            raise ValidationError("Cannot update cancelled or expired subscription")
-
-        # Update allowed fields
-        allowed_fields = [
-            "delivery_address_street",
-            "delivery_address_city",
-            "delivery_address_latitude",
-            "delivery_address_longitude",
-            "delivery_instructions",
-            "preferred_delivery_time",
-        ]
-
-        for field, value in updates.items():
-            if field in allowed_fields:
-                setattr(subscription, field, value)
-
-        subscription.updated_at = datetime.now(timezone.utc)
-        db.session.commit()
-
-        return subscription
-
-    def update_subscription_items(
-        self, subscription_id: int, items: List[Dict[str, Any]], user_id: int = None
-    ) -> Subscription:
-        """Update subscription items"""
-        query = Subscription.query.filter_by(id=subscription_id)
-        if user_id:
-            query = query.filter_by(user_id=user_id)
-
-        subscription = query.first()
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            raise ValidationError("Cannot update items for cancelled or expired subscription")
-
-        # Validate new items
-        self._validate_subscription_items(items)
-
-        # Remove existing items
-        SubscriptionItem.query.filter_by(subscription_id=subscription_id).delete()
-
-        # Add new items
-        total_amount = 0
-        for item_data in items:
-            product: Product = Product.query.get(item_data["product_id"])
-            unit_price = product.base_price if product else 0
-
-            subscription_item = SubscriptionItem(
-                subscription_id=subscription_id,
-                product_id=item_data["product_id"],
-                quantity=item_data["quantity"],
-                unit_price=unit_price,
+    def create_due_orders(self, today: Optional[date] = None) -> Dict[str, Any]:
+        """The daily job (§4.3): every ACTIVE subscription whose next delivery is due by `today`'s lead
+        gets its order(s). One subscription can have more than one due after downtime."""
+        today = today or local_date()
+        due_ids = [
+            row.id
+            for row in Subscription.query.with_entities(Subscription.id)
+            .filter(
+                Subscription.status == SubscriptionStatus.ACTIVE,
+                Subscription.next_delivery_date <= subscription_schedule.due_through(today),
             )
-            db.session.add(subscription_item)
+            .order_by(Subscription.id)
+            .all()
+        ]
+        summary = {"total_processed": 0, "successful": 0, "skipped": 0, "failed": 0, "errors": []}
+        for subscription_id in due_ids:
+            summary["total_processed"] += 1
+            for _ in range(_MAX_ORDERS_PER_RUN):
+                try:
+                    result = self.create_next_order(subscription_id, today=today)
+                except Exception as exc:  # one subscription must never stop the run
+                    db.session.rollback()
+                    current_app.logger.exception("Subscription %s: creating its next order failed", subscription_id)
+                    summary["failed"] += 1
+                    summary["errors"].append({"subscription_id": subscription_id, "error": str(exc)})
+                    break
+                summary["successful"] += len(result.get("created_order_ids", []))
+                summary["skipped"] += result.get("skipped_deliveries", 0)
+                if not result["success"] and not result.get("skipped"):
+                    summary["failed"] += 1
+                    summary["errors"].append({"subscription_id": subscription_id, "error": result.get("error")})
+                if not result.get("advanced"):
+                    break
+        return summary
 
-            total_amount += unit_price * item_data["quantity"]
+    def create_next_order(
+        self, subscription_id: int, *, today: Optional[date] = None, due_only: bool = True
+    ) -> Dict[str, Any]:
+        """Create the order for the subscription's next delivery, dated and windowed, then advance (§4.3).
 
-        # Note: `Subscription` has no `total_amount` column (only
-        # `billing_amount` / `total_amount_billed`) — the running
-        # `total_amount` computed above is a local variable only, never
-        # persisted on the model (Task 20).
-        subscription.updated_at = datetime.now(timezone.utc)
+        `due_only` (the job, creation and resume) leaves a delivery outside the lead window alone; the
+        admin's "Create next order now" passes False. Never back-dated (§2.8): a next delivery that has
+        already passed is skipped, with every other passed one, and the order is made for the first
+        scheduled date from today. A refused order (one of the §2.8 refusals) skips that one delivery and
+        advances; it is never retried. Any other failure moves nothing, and the next run tries again. The
+        admin's run for a delivery not yet due changes nothing on a refusal either: it only reports it.
 
-        db.session.commit()
-
-        return subscription
-
-    def pause_subscription(
-        self, subscription_id: int, user_id: int = None, pause_until: datetime = None
-    ) -> Subscription:
-        """Pause subscription"""
-        query = Subscription.query.filter_by(id=subscription_id)
-        if user_id:
-            query = query.filter_by(user_id=user_id)
-
-        subscription = query.first()
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            raise ValidationError("Can only pause active subscriptions")
-
-        subscription.status = SubscriptionStatus.PAUSED
-        subscription.paused_at = datetime.now(timezone.utc)
-        subscription.pause_start_date = datetime.now(timezone.utc)
-        subscription.pause_end_date = pause_until
-        subscription.updated_at = datetime.now(timezone.utc)
-
-        db.session.commit()
-
-        # Cancel pending deliveries
-        self._cancel_pending_deliveries(subscription_id)
-
-        # Send notification
-        self._send_subscription_notification(subscription, "paused")
-
-        return subscription
-
-    def resume_subscription(self, subscription_id: int, user_id: int = None) -> Subscription:
-        """Resume paused subscription"""
-        query = Subscription.query.filter_by(id=subscription_id)
-        if user_id:
-            query = query.filter_by(user_id=user_id)
-
-        subscription = query.first()
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        if subscription.status != SubscriptionStatus.PAUSED:
-            raise ValidationError("Can only resume paused subscriptions")
-
-        subscription.status = SubscriptionStatus.ACTIVE
-        subscription.paused_at = None
-        subscription.pause_end_date = None
-        subscription.resume_date = datetime.now(timezone.utc)
-        subscription.updated_at = datetime.now(timezone.utc)
-
-        # Recalculate next billing date
-        subscription.next_billing_date = self._calculate_next_billing_date(
-            datetime.now(timezone.utc), subscription.billing_cycle
-        )
-
-        db.session.commit()
-
-        # Schedule next delivery
-        self._schedule_subscription_delivery(subscription_id)
-
-        # Send notification
-        self._send_subscription_notification(subscription, "resumed")
-
-        return subscription
-
-    def cancel_subscription(
-        self, subscription_id: int, user_id: int = None, reason: str = None, immediate: bool = False
-    ) -> Subscription:
-        """Cancel subscription"""
-        query = Subscription.query.filter_by(id=subscription_id)
-        if user_id:
-            query = query.filter_by(user_id=user_id)
-
-        subscription = query.first()
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        if subscription.status == SubscriptionStatus.CANCELLED:
-            raise ValidationError("Subscription is already cancelled")
-
-        if immediate:
-            subscription.status = SubscriptionStatus.CANCELLED
-            subscription.cancelled_at = datetime.now(timezone.utc)
-            subscription.end_date = datetime.now(timezone.utc)
-        else:
-            # Cancel at end of current billing period
-            subscription.status = SubscriptionStatus.CANCELLED
-            subscription.cancelled_at = datetime.now(timezone.utc)
-            subscription.end_date = subscription.next_billing_date
-
-        subscription.cancellation_reason = reason
-        subscription.updated_at = datetime.now(timezone.utc)
-
-        db.session.commit()
-
-        # Cancel pending deliveries if immediate cancellation
-        if immediate:
-            self._cancel_pending_deliveries(subscription_id)
-
-        # Send notification
-        self._send_subscription_notification(subscription, "cancelled")
-
-        return subscription
-
-    def process_subscription_billing(self, subscription_id: int) -> Dict[str, Any]:
-        """Process subscription billing.
-
-        Idempotency (CEL-002): we take a row-level lock on the subscription and
-        skip if ``last_billing_date`` already falls within today's UTC window.
-        The daily billing task may retry mid-loop after a crash; the guard
-        prevents the same subscription from being billed twice in one window.
+        The result always says whether the clock `advanced`, so the daily job knows whether to look again.
         """
-        subscription = Subscription.query.filter_by(id=subscription_id).with_for_update().first()
+        today = today or local_date()
+        subscription = self._fetch(Subscription.query.filter_by(id=subscription_id), lock=True)
         if not subscription:
             raise NotFoundError("Subscription not found")
-
         if subscription.status != SubscriptionStatus.ACTIVE:
             db.session.commit()  # release the row lock before raising
-            raise ValidationError("Cannot bill inactive subscription")
+            raise ValidationError("Cannot create an order for an inactive subscription")
 
-        if self._already_billed_this_cycle(subscription):
-            current_app.logger.info(f"Subscription {subscription_id} already billed this cycle; skipping")
-            db.session.commit()  # release the row lock
+        result: Dict[str, Any] = {
+            "success": True,
+            "subscription_id": subscription_id,
+            "advanced": False,
+            "created_order_ids": [],
+            "skipped_deliveries": 0,
+        }
+        if subscription.next_delivery_date is None:
+            subscription.next_delivery_date = subscription_schedule.first_delivery(subscription, today)
+        day, passed = subscription_schedule.catch_up(subscription, subscription.next_delivery_date, today)
+        if passed:
+            subscription.next_delivery_date = day
+            log = self._delivery_skipped_log(subscription, passed, subscription_notices.SKIP_DATE_PASSED, day, None)
+            db.session.commit()
+            self._deliver([log])
+            result.update(advanced=True, skipped_deliveries=len(passed))
+            subscription = self._fetch(Subscription.query.filter_by(id=subscription_id), lock=True)
+
+        not_due = day > subscription_schedule.due_through(today)
+        if due_only and not_due:
+            db.session.commit()
+            return {**result, "skipped": True, "reason": "not_due", **self._clock_fields(subscription)}
+
+        existing = self._live_order_for(subscription_id, day)
+        if existing is not None:
+            # The crash window (order committed, the clock and its ORDER_CREATED row not): heal the clock and
+            # write the ORDER_CREATED row the normal path writes, so the customer still gets its notice (a
+            # Click subscriber's only Pay now). Never a second order, and never a second notice: an order that
+            # already has its row is only healed.
+            subscription.last_delivery_date = day
+            subscription.next_delivery_date = subscription_schedule.advance(subscription, day)
+            notices = [] if self._order_announced(existing) else [self._order_created_log(subscription, existing, day)]
+            db.session.commit()
+            self._deliver(notices)
             return {
-                "success": True,
+                **result,
+                "advanced": True,
                 "skipped": True,
-                "reason": "already_billed_this_cycle",
-                "subscription_id": subscription_id,
-                "last_billing_date": (
-                    subscription.last_billing_date.isoformat() if subscription.last_billing_date else None
-                ),
-                "next_billing_date": (
-                    subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
-                ),
+                "reason": "already_created",
+                "order_id": existing.id,
+                "delivery_date": day.isoformat(),
+                **self._clock_fields(subscription),
             }
 
-        # Create order for subscription
         from .order_service import OrderService
 
-        order_service = OrderService()
+        refusal = OrderService.customer_order_refusal(subscription.user)
+        if refusal is not None:
+            if not_due:
+                db.session.rollback()  # release the row lock: nothing changes
+                return self._refused_before_due(
+                    subscription_id, subscription_notices.SKIP_CUSTOMER_BARRED, refusal, result
+                )
+            return self._skip_refused_delivery(
+                subscription_id, day, subscription_notices.SKIP_CUSTOMER_BARRED, refusal, result
+            )
 
-        # Address lives on the UserAddress relationship (delivery_address_id FK),
-        # not flat columns. create_order requires delivery_address_id.
+        try:
+            order = OrderService().create_order(
+                subscription.user_id, self._order_data(subscription, day), subscription=subscription
+            )
+        except Exception as exc:
+            db.session.rollback()
+            reason = subscription_notices.refusal_reason(exc)
+            if reason is None:
+                # Not a §2.8 refusal. `create_order` reports an unexpected failure (a Redis or database
+                # outage) as a ValidationError with no code. Nothing moves and the next run tries again; a
+                # date that passes meanwhile is skipped by `catch_up`.
+                current_app.logger.exception("Subscription %s: creating the order for %s failed", subscription_id, day)
+                return {**result, "success": False, "error": str(exc)}
+            current_app.logger.warning("Subscription %s: the order for %s was refused: %s", subscription_id, day, exc)
+            if not_due:
+                return self._refused_before_due(subscription_id, reason, str(exc), result)
+            return self._skip_refused_delivery(subscription_id, day, reason, str(exc), result)
+
+        # The Order is authoritative: billing_amount records what was actually charged.
+        subscription.billing_amount = order.total_amount
+        subscription.total_amount_billed = (subscription.total_amount_billed or Decimal("0.00")) + order.total_amount
+        subscription.total_orders_generated = (subscription.total_orders_generated or 0) + 1
+        log = self._order_created_log(subscription, order, day)
+        subscription.last_delivery_date = day
+        subscription.next_delivery_date = subscription_schedule.advance(subscription, day)
+        db.session.commit()
+        self._deliver([log])
+
+        return {
+            **result,
+            "advanced": True,
+            "created_order_ids": [order.id],
+            "order_id": order.id,
+            "amount": float(order.total_amount),
+            "delivery_date": day.isoformat(),
+            **self._clock_fields(subscription),
+        }
+
+    @staticmethod
+    def _order_data(subscription: Subscription, day: date) -> Dict[str, Any]:
+        """The order for `day`, in the slot's window when the slot is offered that day (§4.2). The slot's
+        own fees are never applied: `create_order` keeps its normal delivery-fee rule."""
         address = subscription.delivery_address
-        order_data = {
+        window = subscription_schedule.window_for(subscription.delivery_time_slot, day)
+        return {
             "items": [
                 {"product_id": item.product_id, "quantity": item.quantity} for item in subscription.subscription_items
             ],
+            # Address lives on the UserAddress relationship; create_order requires delivery_address_id.
             "delivery_address": {
                 "delivery_address_id": subscription.delivery_address_id,
                 "street": address.street_address if address else None,
@@ -450,105 +410,378 @@ class SubscriptionService:
             },
             "delivery_notes": address.delivery_instructions if address else None,
             "payment_method": subscription.payment_method.value,
+            "delivery_date": day,
+            "delivery_window_start": window[0] if window else None,
+            "delivery_window_end": window[1] if window else None,
         }
 
-        try:
-            order = order_service.create_order(
-                subscription.user_id,
-                order_data,
-                subscription=subscription,
+    def _order_created_log(self, subscription: Subscription, order: Order, day: date) -> SubscriptionLog:
+        """The ORDER_CREATED row an order the subscription created owes, added in the transaction that moves
+        the clock; its notice is sent from it after the commit (§9)."""
+        log = SubscriptionLog(
+            subscription_id=subscription.id,
+            action=subscription_notices.ORDER_CREATED,
+            details=get_translation(
+                "api.subscriptions.log.order_created",
+                self._owner_language(subscription),
+                order_number=order.order_number,
+                date=day.isoformat(),
+            ),
+            extra_data={"order_id": order.id, "order_number": order.order_number, "delivery_date": day.isoformat()},
+        )
+        db.session.add(log)
+        return log
+
+    @staticmethod
+    def _order_announced(order: Order) -> bool:
+        """Whether this order already has its ORDER_CREATED row (and so its notice). Read only on the rare
+        crash-heal path, so the rows are filtered here rather than by a JSON query each database spells
+        differently."""
+        return any(
+            (log.extra_data or {}).get("order_id") == order.id
+            for log in SubscriptionLog.query.filter_by(
+                subscription_id=order.subscription_id, action=subscription_notices.ORDER_CREATED
             )
-
-            # The Order is authoritative. create_order already produced exactly
-            # one Payment for order.total_amount via initialize_order_payment,
-            # so billing_amount records what was actually charged rather than a
-            # separately-computed estimate that could never be fully paid.
-            subscription.billing_amount = order.total_amount
-            subscription.total_amount_billed = (
-                subscription.total_amount_billed or Decimal("0.00")
-            ) + order.total_amount
-
-            now = datetime.now(timezone.utc)
-            subscription.last_billing_date = now
-            subscription.next_billing_date = self._calculate_next_billing_date(now, subscription.billing_cycle)
-            subscription.total_orders_generated = (subscription.total_orders_generated or 0) + 1
-
-            db.session.commit()
-
-            return {
-                "success": True,
-                "order_id": order.id,
-                "amount": float(order.total_amount),
-                "next_billing_date": subscription.next_billing_date.isoformat(),
-            }
-
-        except ValidationError as exc:
-            db.session.rollback()
-            if getattr(exc, "error_code", None) == "COD_DEBT_LIMIT_REACHED":
-                return self._skip_cycle_for_cod_debt(subscription)
-            current_app.logger.warning("Subscription %s billing rejected: %s", subscription_id, exc)
-            return {"success": False, "error": str(exc)}
-
-        except Exception as e:
-            db.session.rollback()
-            current_app.logger.exception("Subscription billing failed")
-            return {"success": False, "error": str(e)}
-
-    def _skip_cycle_for_cod_debt(self, subscription: Subscription) -> Dict[str, Any]:
-        """Billing was refused because the customer is over the COD debt cap.
-
-        This is NOT a payment failure: we never touch failed_payment_count (so
-        it can't trip the pause-after-N machinery) and the subscription stays
-        ACTIVE. We advance next_billing_date so the daily task doesn't retry
-        every run; the subscription self-heals as soon as the debt is settled.
-        """
-        from business_app.services.notification_service import NotificationService
-
-        now = datetime.now(timezone.utc)
-        subscription.next_billing_date = self._calculate_next_billing_date(now, subscription.billing_cycle)
-        db.session.commit()
-
-        current_app.logger.warning(
-            "Subscription %s billing skipped: customer %s is over the COD debt limit",
-            subscription.id,
-            subscription.user_id,
         )
 
-        try:
-            NotificationService().send_notification(
-                subscription.user_id,
-                "subscription_billing_skipped_cod_debt",
-                template_data={
-                    "subscription_name": subscription.name,
-                    "next_billing_date": (
-                        subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
-                    ),
-                },
-            )
-        except Exception:
-            current_app.logger.exception(
-                "Failed to notify user %s about the skipped subscription cycle", subscription.user_id
-            )
+    def _refused_before_due(
+        self, subscription_id: int, reason: str, detail: str, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """The admin's "Create next order now" for a delivery not yet due was refused (controller ruling, final
+        review I3). Nothing changes: no skip, no clock move, no notice. The refusal may clear by the delivery
+        day, when the daily job creates the order or, still refused, skips it (§2.8)."""
+        subscription = db.session.get(Subscription, subscription_id)
+        return {**result, "success": False, "reason": reason, "error": detail, **self._clock_fields(subscription)}
 
+    def _skip_refused_delivery(
+        self, subscription_id: int, day: date, reason: str, detail: str, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """§2.8: the order for `day` cannot be created. That one delivery is skipped, the clock moves to the
+        next scheduled date and the customer is owed one notice. Not a payment failure: the subscription
+        stays ACTIVE and no failure counter moves.
+
+        The row is locked again and re-read first: after `create_order` rolled back, the lock was gone, and a
+        skip, pause, cancel or change that committed meanwhile wins. Then nothing is skipped here."""
+        subscription = self._fetch(Subscription.query.filter_by(id=subscription_id), lock=True)
+        if (
+            subscription is None
+            or subscription.status != SubscriptionStatus.ACTIVE
+            or subscription.next_delivery_date != day
+        ):
+            db.session.commit()  # release the row lock
+            return {**result, "success": False, "skipped": True, "reason": "changed_meanwhile", "error": detail}
+        next_day = subscription_schedule.advance(subscription, day)
+        subscription.next_delivery_date = next_day
+        log = self._delivery_skipped_log(subscription, [day], reason, next_day, detail)
+        db.session.commit()
+        self._deliver([log])
         return {
+            **result,
             "success": False,
+            "advanced": True,
             "skipped": True,
-            "reason": "cod_debt_limit",
-            "subscription_id": subscription.id,
-            "next_billing_date": subscription.next_billing_date.isoformat(),
+            "reason": reason,
+            "error": detail,
+            "skipped_deliveries": result["skipped_deliveries"] + 1,
+            "skipped_date": day.isoformat(),
+            **self._clock_fields(subscription),
         }
 
-    def get_user_subscriptions(self, user_id: int, status: SubscriptionStatus = None) -> List[Subscription]:
-        """Get user's subscriptions"""
-        query = Subscription.query.options(
-            joinedload(Subscription.subscription_items).joinedload(SubscriptionItem.product),
-            joinedload(Subscription.delivery_address),
-        ).filter_by(user_id=user_id)
+    def _delivery_skipped_log(
+        self, subscription: Subscription, skipped: List[date], reason: str, next_day: date, detail: Optional[str]
+    ) -> SubscriptionLog:
+        language = self._owner_language(subscription)
+        log = SubscriptionLog(
+            subscription_id=subscription.id,
+            action=subscription_notices.DELIVERY_SKIPPED,
+            details=get_translation(
+                "api.subscriptions.log.delivery_skipped",
+                language,
+                date=", ".join(day.isoformat() for day in skipped),
+                reason=get_translation(f"api.subscriptions.skip_reason.{reason}", language),
+            ),
+            extra_data={
+                "skipped_by": "system",
+                "reason_code": reason,
+                "skipped_dates": [day.isoformat() for day in skipped],
+                "next_delivery_date": next_day.isoformat(),
+                "detail": detail,
+            },
+        )
+        db.session.add(log)
+        return log
 
-        if status:
-            query = query.filter_by(status=status)
+    @staticmethod
+    def _live_order_for(subscription_id: int, day: date, *, live_only: bool = False) -> Optional[Order]:
+        """The idempotency guard (§4.3): a non-cancelled order of this subscription for this date. With
+        `live_only`, one still in play (not delivered, cancelled or returned)."""
+        from shared.enums import OrderStatus
 
-        return query.order_by(Subscription.created_at.desc()).all()
+        status = Order.status.in_(ACTIVE_ORDER_STATUSES) if live_only else Order.status != OrderStatus.CANCELLED
+        return Order.query.filter(
+            Order.subscription_id == subscription_id,
+            Order.delivery_date == day,
+            status,
+        ).first()
+
+    @staticmethod
+    def _clock_fields(subscription: Subscription) -> Dict[str, Any]:
+        return {
+            "next_delivery_date": (
+                subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+            ),
+        }
+
+    @staticmethod
+    def _owner_language(subscription: Subscription) -> Optional[str]:
+        """System-written log lines are in the customer's language: the bot shows them as they are."""
+        return getattr(subscription.user, "preferred_language", None) or None
+
+    @staticmethod
+    def _deliver(notices: Iterable[SubscriptionLog]) -> None:
+        """Hand committed notice rows to the Task 3 hook. Only ever called after the commit."""
+        for log in notices:
+            subscription_notices.deliver(log)
+
+    # ------------------------------------------------------------------ the one published schedule (§9)
+
+    @staticmethod
+    def _orders_in_play(subscription_id: int) -> List[Order]:
+        """This subscription's orders still alive (not delivered, cancelled or returned), soonest first."""
+        return (
+            Order.query.filter(
+                Order.subscription_id == subscription_id,
+                Order.status.in_(ACTIVE_ORDER_STATUSES),
+            )
+            .order_by(Order.delivery_date.is_(None), Order.delivery_date, Order.id)
+            .all()
+        )
+
+    @classmethod
+    def _upcoming_order(cls, subscription_id: int) -> Optional[Order]:
+        """§9: this subscription's created order that is neither cancelled nor dispatched, the soonest
+        first. Dispatched means the driver has it (`customer_cancel_block_code` WITH_DRIVER)."""
+        from .order_service import CUSTOMER_CANCEL_PAID, OrderService
+
+        for order in cls._orders_in_play(subscription_id):
+            if order.delivery_date is not None and OrderService.customer_cancel_block_code(order) in (
+                None,
+                CUSTOMER_CANCEL_PAID,
+            ):
+                return order
+        return None
+
+    @classmethod
+    def upcoming_delivery(cls, subscription: Subscription) -> Optional[Dict[str, Any]]:
+        """The "upcoming delivery" the bot, the web and admin show (§9): the created order that is neither
+        cancelled nor dispatched, otherwise `next_delivery_date` in the slot's window. None for a paused or
+        cancelled subscription with no such order."""
+        order = cls._upcoming_order(subscription.id) if subscription.id is not None else None
+        if order is not None:
+            return {
+                "date": order.delivery_date.isoformat(),
+                "window_start": _hhmm(order.delivery_window_start),
+                "window_end": _hhmm(order.delivery_window_end),
+                "order_id": order.id,
+            }
+        if subscription.status != SubscriptionStatus.ACTIVE or subscription.next_delivery_date is None:
+            return None
+        window = subscription_schedule.window_for(subscription.delivery_time_slot, subscription.next_delivery_date)
+        return {
+            "date": subscription.next_delivery_date.isoformat(),
+            "window_start": _hhmm(window[0]) if window else None,
+            "window_end": _hhmm(window[1]) if window else None,
+            "order_id": None,
+        }
+
+    @classmethod
+    def published_schedule(cls, subscription: Subscription) -> Dict[str, Any]:
+        """The schedule fields every subscription payload carries, decided here once (§9)."""
+        frequency = subscription.frequency
+        return {
+            "frequency": getattr(frequency, "value", frequency),
+            "next_delivery_date": (
+                subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+            ),
+            "last_delivery_date": (
+                subscription.last_delivery_date.isoformat() if subscription.last_delivery_date else None
+            ),
+            "deliveries_per_month": float(subscription_schedule.deliveries_per_month(frequency)),
+            "upcoming_delivery": cls.upcoming_delivery(subscription),
+        }
+
+    @staticmethod
+    def _monthly_amount(amount, frequency) -> Decimal:
+        """A per-delivery amount over a month, by the one calendar-accurate count (§4.2)."""
+        return (Decimal(str(amount or 0)) * subscription_schedule.deliveries_per_month(frequency)).quantize(_CENT)
+
+    @classmethod
+    def monthly_value(cls, subscription: Subscription) -> Decimal:
+        return cls._monthly_amount(subscription.billing_amount, subscription.frequency)
+
+    @classmethod
+    def monthly_recurring_revenue(cls, subscriptions: Optional[Iterable[Subscription]] = None) -> Decimal:
+        """MRR: what the ACTIVE subscriptions bring in a month. The admin dashboard, the subscription
+        report and the subscription analytics all ask this one function (§4.2, §5.6)."""
+        if subscriptions is None:
+            subscriptions = Subscription.query.filter_by(status=SubscriptionStatus.ACTIVE).all()
+        return sum(
+            (cls.monthly_value(s) for s in subscriptions if s.status == SubscriptionStatus.ACTIVE),
+            Decimal("0.00"),
+        )
+
+    # ------------------------------------------------------------------ actions, one rule each (§4.6, §2.7)
+
+    def _settle_orders_in_play(
+        self, subscription: Subscription, *, reason: str, actor_user_id: Optional[int]
+    ) -> Tuple[List[Order], List[Tuple[Order, str]]]:
+        """Pause and cancel (§4.6 with §2.7): cancel this subscription's unpaid orders the driver does not
+        have; every other live order stays and is delivered. The customer's own cancel rule decides,
+        on locked rows, so a pickup or a payment that commits first wins."""
+        from .order_service import OrderService
+
+        order_service = OrderService()
+        cancelled: List[Order] = []
+        kept: List[Tuple[Order, str]] = []
+        for order in self._orders_in_play(subscription.id):
+            code = OrderService.customer_cancel_block_code(order)
+            if code is None:
+                try:
+                    order_service.cancel_order_as_customer(
+                        order.id, subscription.user_id, reason=reason, actor_user_id=actor_user_id
+                    )
+                    cancelled.append(order)
+                    continue
+                except (ValidationError, ConflictError):
+                    order = db.session.get(Order, order.id, populate_existing=True)
+                    code = OrderService.customer_cancel_block_code(order)
+            kept.append((order, code))
+        return cancelled, kept
+
+    def _paid_order_kept_logs(
+        self, subscription: Subscription, kept: List[Tuple[Order, str]], trigger: str, next_day: Optional[date]
+    ) -> List[SubscriptionLog]:
+        """§2.7: a paid order stays and is delivered; the customer is owed a notice saying so."""
+        from .order_service import CUSTOMER_CANCEL_PAID
+
+        language = self._owner_language(subscription)
+        logs = []
+        for order, code in kept:
+            if code != CUSTOMER_CANCEL_PAID:
+                continue
+            log = SubscriptionLog(
+                subscription_id=subscription.id,
+                action=subscription_notices.PAID_ORDER_KEPT,
+                details=get_translation(
+                    "api.subscriptions.log.paid_order_kept",
+                    language,
+                    order_number=order.order_number,
+                    date=order.delivery_date.isoformat() if order.delivery_date else "",
+                ),
+                extra_data={
+                    "order_id": order.id,
+                    "order_number": order.order_number,
+                    "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+                    "trigger": trigger,
+                    "next_delivery_date": next_day.isoformat() if next_day else None,
+                },
+            )
+            db.session.add(log)
+            logs.append(log)
+        return logs
+
+    @staticmethod
+    def _action_outcome(
+        subscription: Subscription, cancelled: List[Order], kept: List[Tuple[Order, str]]
+    ) -> Dict[str, Any]:
+        return {
+            "subscription": subscription,
+            "cancelled_orders": [_order_ref(order) for order in cancelled],
+            "kept_orders": [{**_order_ref(order), "reason_code": code} for order, code in kept],
+        }
+
+    def _pause(
+        self, subscription: Subscription, *, reason: str, details: str, actor_user_id: Optional[int]
+    ) -> Dict[str, Any]:
+        cancelled, kept = self._settle_orders_in_play(subscription, reason=reason, actor_user_id=actor_user_id)
+        subscription.pause(reason=reason)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription.id,
+                action="paused",
+                details=details,
+                user_id=actor_user_id,
+                extra_data={
+                    "cancelled_order_ids": [order.id for order in cancelled],
+                    "kept_order_ids": [order.id for order, _ in kept],
+                },
+            )
+        )
+        notices = self._paid_order_kept_logs(subscription, kept, "pause", None)
+        db.session.commit()
+        self._deliver(notices)
+        return self._action_outcome(subscription, cancelled, kept)
+
+    def _resume(self, subscription: Subscription, *, details: str, actor_user_id: Optional[int]) -> Subscription:
+        """§4.6: the next delivery is the first allowed one after the lead; inside the lead it is created now."""
+        today = local_date()
+        subscription.resume()
+        subscription.pause_end_date = None
+        subscription.next_delivery_date = subscription_schedule.first_delivery(subscription, today)
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(subscription_id=subscription.id, action="resumed", details=details, user_id=actor_user_id)
+        )
+        db.session.commit()
+        self._create_first_order_if_due(subscription, today)
+        return subscription
+
+    def _cancel(
+        self, subscription: Subscription, *, reason: str, details: str, actor_user_id: Optional[int]
+    ) -> Dict[str, Any]:
+        """§4.6: always immediate. A paid upcoming order still stays (§2.7)."""
+        cancelled, kept = self._settle_orders_in_play(subscription, reason=reason, actor_user_id=actor_user_id)
+        subscription.cancel(reason=reason)
+        subscription.end_date = datetime.now(UTC)
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription.id,
+                action="cancelled",
+                details=details,
+                user_id=actor_user_id,
+                extra_data={
+                    "cancelled_order_ids": [order.id for order in cancelled],
+                    "kept_order_ids": [order.id for order, _ in kept],
+                },
+            )
+        )
+        notices = self._paid_order_kept_logs(subscription, kept, "cancel", None)
+        db.session.commit()
+        self._deliver(notices)
+        return self._action_outcome(subscription, cancelled, kept)
+
+    def _reschedule_after_change(self, subscription: Subscription) -> None:
+        """The frequency, day or slot changed: the next delivery by the rule (§4.6, §9). The last created
+        delivery (`last_delivery_date`, the newest order's date) stays as it is; while its order is still live
+        (not delivered, cancelled or returned, the driver may already have it) the next one waits a full cycle
+        after it, so a change never gives two deliveries back to back."""
+        last = subscription.last_delivery_date
+        subscription.next_delivery_date = subscription_schedule.delivery_after_change(
+            subscription,
+            local_date(),
+            last,
+            order_created=last is not None and self._live_order_for(subscription.id, last, live_only=True) is not None,
+        )
+
+    def _set_schedule_field(self, subscription: Subscription, field: str, value: Any) -> None:
+        """Write one schedule field so the rule reads the new value at once (the slot object, not only
+        its id)."""
+        if field == "delivery_time_slot_id":
+            subscription.delivery_time_slot = db.session.get(DeliveryTimeSlot, value) if value else None
+            subscription.delivery_time_slot_id = value
+        else:
+            setattr(subscription, field, value)
 
     def get_subscription_analytics(self, start_date: datetime = None, end_date: datetime = None) -> Dict[str, Any]:
         """Get subscription analytics"""
@@ -567,14 +800,7 @@ class SubscriptionService:
         trial_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.TRIAL])
         cancelled_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.CANCELLED])
 
-        # Revenue metrics. `Subscription` has no `total_amount` column — only
-        # `billing_amount` (last/estimated charge) and `total_amount_billed`
-        # (running total); the former mirrors what this method is estimating.
-        monthly_revenue = sum(
-            float(s.billing_amount or 0)
-            for s in subscriptions
-            if s.status == SubscriptionStatus.ACTIVE and s.frequency == SubscriptionFrequency.MONTHLY
-        )
+        monthly_revenue = float(self.monthly_recurring_revenue(subscriptions))
 
         # Churn rate
         churn_rate = (cancelled_subscriptions / total_subscriptions) * 100 if total_subscriptions > 0 else 0
@@ -595,13 +821,24 @@ class SubscriptionService:
             "frequency_breakdown": self._get_frequency_breakdown(subscriptions),
         }
 
+    @staticmethod
+    def frequency_filter(value: Optional[str]) -> Optional[SubscriptionFrequency]:
+        """A subscription list's `?frequency=`, for the customer and the admin list alike: None when absent.
+        An unknown value is the client's mistake (400), not a database error (500)."""
+        if not value:
+            return None
+        try:
+            return SubscriptionFrequency(value)
+        except ValueError as exc:
+            raise ValidationError("api.subscriptions.error.invalid_frequency_value") from exc
+
     def get_user_subscriptions_paginated(
         self,
         user_id: int,
         page: int,
         per_page: int,
         status: Optional[str] = None,
-        billing_cycle: Optional[str] = None,
+        frequency: Optional[str] = None,
     ):
         """Get user subscriptions with filtering and pagination."""
         query = Subscription.query.filter_by(user_id=user_id)
@@ -612,8 +849,9 @@ class SubscriptionService:
             except ValueError as exc:
                 raise ValidationError("api.subscriptions.error.invalid_status_value") from exc
 
-        if billing_cycle:
-            query = query.filter_by(billing_cycle=billing_cycle)
+        frequency = self.frequency_filter(frequency)
+        if frequency is not None:
+            query = query.filter_by(frequency=frequency)
 
         return query.order_by(Subscription.created_at.desc()).paginate(
             page=page,
@@ -659,15 +897,13 @@ class SubscriptionService:
             "user_id": user_id,
             "name": validated_data.name,
             "description": validated_data.description or "",
-            "billing_cycle": validated_data.billing_cycle,
-            "delivery_frequency": validated_data.delivery_frequency,
+            "frequency": validated_data.frequency,
             "delivery_day_of_week": validated_data.delivery_day_of_week,
             "delivery_day_of_month": validated_data.delivery_day_of_month,
             "delivery_time_slot_id": validated_data.delivery_time_slot_id,
             "delivery_address_id": validated_data.delivery_address_id,
             "payment_method": payment_method,
             "auto_renew": validated_data.auto_renew,
-            "discount_percentage": validated_data.discount_percentage,
             "start_date": validated_data.start_date or datetime.now(UTC),
             "end_date": validated_data.end_date,
         }
@@ -681,12 +917,13 @@ class SubscriptionService:
         update_data: Dict[str, Any],
     ) -> Subscription:
         """Update a user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
             raise ValidationError("api.subscriptions.error.cannot_update_cancelled")
 
         changes = {}
+        schedule_changed = False
         for field, new_value in update_data.items():
             if not hasattr(subscription, field):
                 continue
@@ -705,12 +942,20 @@ class SubscriptionService:
             if field == "payment_method":
                 new_value = self._validated_payment_method(new_value)
 
-            setattr(subscription, field, new_value)
+            if field in self._SCHEDULE_FIELDS:
+                if field == "frequency":
+                    new_value = SubscriptionFrequency(new_value)
+                schedule_changed = schedule_changed or new_value != old_value
+                self._set_schedule_field(subscription, field, new_value)
+            else:
+                setattr(subscription, field, new_value)
             changes[field] = {
                 "old": self._serialize_for_log(old_value),
                 "new": self._serialize_for_log(new_value),
             }
 
+        if schedule_changed:
+            self._reschedule_after_change(subscription)
         subscription.updated_at = datetime.now(UTC)
         if changes:
             log = SubscriptionLog(
@@ -726,93 +971,43 @@ class SubscriptionService:
             db.session.add(log)
 
         db.session.commit()
+        if schedule_changed:
+            self._create_first_order_if_due(subscription, local_date())
         return subscription
 
-    def pause_subscription_for_user(
-        self,
-        subscription_id: int,
-        user_id: int,
-        reason: str,
-        resume_date: Optional[datetime] = None,
-    ) -> Subscription:
-        """Pause a user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+    def pause_subscription_for_user(self, subscription_id: int, user_id: int, reason: str) -> Dict[str, Any]:
+        """Pause a user-owned subscription (§4.6, §2.7): its unpaid upcoming orders are cancelled, a paid
+        one stays. Returns the subscription and the orders cancelled and kept."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
         if subscription.status != SubscriptionStatus.ACTIVE:
             raise ValidationError("api.subscriptions.error.only_active_pause")
-
-        if resume_date and resume_date <= datetime.now(UTC):
-            raise ValidationError("api.subscriptions.error.resume_date_future")
-
-        subscription.pause(reason=reason, resume_date=resume_date)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="paused",
-                details=get_translation("api.subscriptions.log.reason", reason=reason),
-            )
+        return self._pause(
+            subscription,
+            reason=reason,
+            details=get_translation("api.subscriptions.log.reason", reason=reason),
+            actor_user_id=subscription.user_id,
         )
-        db.session.commit()
-        return subscription
 
     def resume_subscription_for_user(self, subscription_id: int, user_id: int) -> Subscription:
-        """Resume a paused user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        """Resume a paused user-owned subscription (§4.6)."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
         if subscription.status != SubscriptionStatus.PAUSED:
             raise ValidationError("api.subscriptions.error.only_paused_resume")
-
-        subscription.resume()
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="resumed",
-                details=get_translation("api.subscriptions.log.resumed"),
-            )
+        return self._resume(
+            subscription, details=get_translation("api.subscriptions.log.resumed"), actor_user_id=subscription.user_id
         )
-        db.session.commit()
-        return subscription
 
-    def cancel_subscription_for_user(
-        self,
-        subscription_id: int,
-        user_id: int,
-        reason: str,
-        immediate: bool,
-    ) -> Subscription:
-        """Cancel a user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+    def cancel_subscription_for_user(self, subscription_id: int, user_id: int, reason: str) -> Dict[str, Any]:
+        """Cancel a user-owned subscription, immediately (§4.6). A paid upcoming order stays (§2.7)."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
         if subscription.status == SubscriptionStatus.CANCELLED:
             raise ValidationError("api.subscriptions.error.already_cancelled")
-
-        if immediate:
-            subscription.cancel(reason=reason)
-            db.session.add(
-                SubscriptionLog(
-                    subscription_id=subscription_id,
-                    action="cancelled",
-                    details=get_translation(
-                        "api.subscriptions.log.cancelled_with_reason",
-                        reason=reason,
-                    ),
-                )
-            )
-        else:
-            subscription.auto_renew = False
-            subscription.end_date = subscription.next_billing_date
-            db.session.add(
-                SubscriptionLog(
-                    subscription_id=subscription_id,
-                    action="cancellation_scheduled",
-                    details=get_translation(
-                        "api.subscriptions.log.cancellation_scheduled",
-                        date=subscription.end_date.strftime("%Y-%m-%d"),
-                        reason=reason,
-                    ),
-                    user_id=user_id,
-                )
-            )
-
-        db.session.commit()
-        return subscription
+        return self._cancel(
+            subscription,
+            reason=reason,
+            details=get_translation("api.subscriptions.log.cancelled_with_reason", reason=reason),
+            actor_user_id=subscription.user_id,
+        )
 
     def get_subscription_items_for_user(self, subscription_id: int, user_id: int) -> List[SubscriptionItem]:
         """Get subscription items for a user-owned subscription."""
@@ -1006,9 +1201,7 @@ class SubscriptionService:
                 "total_paid": total_paid,
                 "total_payments": len(payments),
                 "failed_payments": failed_payments,
-                "next_billing_date": (
-                    subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
-                ),
+                # The next delivery is published once, as the subscription's `upcoming_delivery` (§9).
                 "next_billing_amount": subscription.billing_amount,
             },
         }
@@ -1072,37 +1265,17 @@ class SubscriptionService:
                 if most_ordered_product:
                     break
 
-        upcoming_deliveries = 0
-        today = date.today()
-        for subscription in subscriptions:
-            if subscription.status == SubscriptionStatus.ACTIVE:
-                next_delivery = subscription.calculate_next_delivery_date()
-                if next_delivery >= today:
-                    upcoming_deliveries += 1
-
         monthly_spending = {}
         for i in range(12):
             month_start = (datetime.now(UTC).replace(day=1) - timedelta(days=32 * i)).replace(day=1)
             month_key = month_start.strftime("%Y-%m")
 
-            month_total = 0
+            month_total = Decimal("0.00")
             for subscription in subscriptions:
                 if subscription.created_at.date() <= month_start.date() and (
                     not subscription.end_date or subscription.end_date.date() >= month_start.date()
                 ):
-                    billing_amount = subscription.billing_amount or 0
-                    if subscription.billing_cycle == SubscriptionFrequency.MONTHLY:
-                        month_total += billing_amount
-                    elif subscription.billing_cycle == SubscriptionFrequency.WEEKLY:
-                        month_total += billing_amount * 4
-                    elif subscription.billing_cycle == SubscriptionFrequency.DAILY:
-                        month_total += billing_amount * 30
-                    elif str(subscription.billing_cycle) == SubscriptionFrequency.MONTHLY.value:
-                        month_total += billing_amount
-                    elif str(subscription.billing_cycle) == SubscriptionFrequency.WEEKLY.value:
-                        month_total += billing_amount * 4
-                    elif str(subscription.billing_cycle) == SubscriptionFrequency.DAILY.value:
-                        month_total += billing_amount * 30
+                    month_total += self.monthly_value(subscription)
 
             monthly_spending[month_key] = float(month_total)
 
@@ -1116,7 +1289,8 @@ class SubscriptionService:
             "total_deliveries": total_deliveries,
             "average_order_value": float(average_order_value),
             "most_ordered_product": most_ordered_product,
-            "upcoming_deliveries": upcoming_deliveries,
+            # Every active subscription has exactly one upcoming delivery.
+            "upcoming_deliveries": active_subscriptions,
             "monthly_spending_trend": monthly_spending,
         }
 
@@ -1126,25 +1300,45 @@ class SubscriptionService:
         user_id: int,
         reason: str,
     ) -> Dict[str, Any]:
-        """Log skip-next-delivery and calculate adjusted next date."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        """Skip the upcoming delivery (§9).
+
+        An unpaid created order is cancelled: that skips its delivery, and the clock (already one cycle on
+        since the order was created) stays. A paid one stays and is delivered (§2.7), so the clock moves one
+        cycle instead, as it does when no order is created yet. `new_next_delivery_date` is the upcoming
+        delivery after the skip.
+        """
+        from .order_service import OrderService
+
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
         if subscription.status != SubscriptionStatus.ACTIVE:
             raise ValidationError("api.subscriptions.error.only_active_skip")
 
-        current_next_delivery = subscription.calculate_next_delivery_date()
-        frequency = (
-            subscription.delivery_frequency.value
-            if hasattr(subscription.delivery_frequency, "value")
-            else str(subscription.delivery_frequency)
-        )
-        if frequency == SubscriptionFrequency.DAILY.value:
-            new_next_delivery = current_next_delivery + timedelta(days=1)
-        elif frequency == SubscriptionFrequency.WEEKLY.value:
-            new_next_delivery = current_next_delivery + timedelta(weeks=1)
-        elif frequency == SubscriptionFrequency.MONTHLY.value:
-            new_next_delivery = current_next_delivery + relativedelta(months=1)
+        upcoming = self._upcoming_order(subscription_id)
+        cancelled: List[Order] = []
+        kept: List[Tuple[Order, str]] = []
+        if upcoming is not None:
+            code = OrderService.customer_cancel_block_code(upcoming)
+            if code is None:
+                try:
+                    OrderService().cancel_order_as_customer(upcoming.id, subscription.user_id, reason=reason)
+                    cancelled.append(upcoming)
+                except (ValidationError, ConflictError):  # a pickup or a payment committed first
+                    upcoming = db.session.get(Order, upcoming.id, populate_existing=True)
+                    code = OrderService.customer_cancel_block_code(upcoming)
+            if not cancelled:
+                kept.append((upcoming, code))
+
+        if cancelled:
+            skipped_date = cancelled[0].delivery_date
         else:
-            new_next_delivery = current_next_delivery + timedelta(days=7)
+            skipped_date = subscription.next_delivery_date or subscription_schedule.first_delivery(
+                subscription, local_date()
+            )
+            subscription.next_delivery_date = subscription_schedule.advance(subscription, skipped_date)
+        subscription.updated_at = datetime.now(UTC)
+        db.session.flush()
+        upcoming_after = self.upcoming_delivery(subscription)
+        new_next = date.fromisoformat(upcoming_after["date"]) if upcoming_after else None
 
         db.session.add(
             SubscriptionLog(
@@ -1152,23 +1346,27 @@ class SubscriptionService:
                 action="delivery_skipped",
                 details=get_translation(
                     "api.subscriptions.log.delivery_skipped",
-                    date=current_next_delivery.strftime("%Y-%m-%d"),
+                    date=skipped_date.isoformat(),
                     reason=reason,
                 ),
-                user_id=user_id,
+                user_id=subscription.user_id,
                 extra_data={
-                    "original_delivery_date": current_next_delivery.isoformat(),
-                    "new_delivery_date": new_next_delivery.isoformat(),
+                    "skipped_by": "customer",
+                    "original_delivery_date": skipped_date.isoformat(),
+                    "new_delivery_date": new_next.isoformat() if new_next else None,
                     "reason": reason,
+                    "cancelled_order_ids": [order.id for order in cancelled],
                 },
             )
         )
+        notices = self._paid_order_kept_logs(subscription, kept, "skip", subscription.next_delivery_date)
         db.session.commit()
+        self._deliver(notices)
 
         return {
-            "subscription": subscription,
-            "original_delivery_date": current_next_delivery,
-            "new_next_delivery_date": new_next_delivery,
+            **self._action_outcome(subscription, cancelled, kept),
+            "original_delivery_date": skipped_date,
+            "new_next_delivery_date": new_next,
         }
 
     def change_payment_method_for_user(
@@ -1208,18 +1406,18 @@ class SubscriptionService:
             "new_payment_method": new_payment_method,
         }
 
-    def validate_retry_billing_for_user(self, subscription_id: int, user_id: int) -> Subscription:
-        """Validate whether billing retry can be initiated."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            raise ValidationError("api.subscriptions.error.only_active_retry")
-        if subscription.failed_billing_attempts == 0:
-            raise ValidationError("api.subscriptions.error.no_failed_billing_to_retry")
-        return subscription
+    @staticmethod
+    def _fetch(query, *, lock: bool = False) -> Optional[Subscription]:
+        """The one way a subscription row is read for a change. `lock` takes it FOR UPDATE, fresh from the
+        database, so a skip, pause, resume, cancel or change serialises with the daily run, which locks the
+        same row (§4.3), instead of racing it."""
+        if lock:
+            query = query.with_for_update().populate_existing()
+        return query.first()
 
-    def _get_subscription_or_raise(self, subscription_id: int) -> Subscription:
+    def _get_subscription_or_raise(self, subscription_id: int, *, lock: bool = False) -> Subscription:
         """Load a subscription by id without an ownership filter (admin scope)."""
-        subscription = Subscription.query.get(subscription_id)
+        subscription = self._fetch(Subscription.query.filter_by(id=subscription_id), lock=lock)
         if not subscription:
             raise NotFoundError("Subscription not found")
         return subscription
@@ -1234,8 +1432,8 @@ class SubscriptionService:
     def admin_create_subscription(self, validated_data: Any, actor_user_id: int) -> Dict[str, Any]:
         """Admin: create a subscription for any user.
 
-        Reuses ``create_subscription`` (which validates items, enforces the
-        frequency invariant, computes dates and commits), then attaches an
+        Reuses ``create_subscription`` (which validates items, computes the
+        first delivery by the schedule rule and commits), then attaches an
         audit-log row stamped with the acting admin. Validates that the
         delivery address belongs to the target user (``create_subscription``
         does not).
@@ -1262,22 +1460,22 @@ class SubscriptionService:
             "user_id": validated_data.user_id,
             "name": validated_data.name,
             "description": validated_data.description or "",
-            "billing_cycle": validated_data.billing_cycle,
-            "delivery_frequency": validated_data.delivery_frequency,
+            "frequency": validated_data.frequency,
             "delivery_day_of_week": validated_data.delivery_day_of_week,
             "delivery_day_of_month": validated_data.delivery_day_of_month,
             "delivery_time_slot_id": validated_data.delivery_time_slot_id,
             "delivery_address_id": validated_data.delivery_address_id,
             "payment_method": payment_method,
             "auto_renew": validated_data.auto_renew,
-            "discount_percentage": validated_data.discount_percentage,
             "start_date": (
                 self._ensure_utc(validated_data.start_date) if validated_data.start_date else datetime.now(UTC)
             ),
             "end_date": self._ensure_utc(validated_data.end_date) if validated_data.end_date else None,
         }
 
-        result = self.create_subscription(subscription_data, validated_data.items)
+        result = self.create_subscription(
+            subscription_data, validated_data.items, discount_percentage=validated_data.discount_percentage
+        )
 
         # create_subscription commits and returns to_dict(); attach audit + any
         # loyalty multiplier override, keyed off the unique subscription number.
@@ -1307,12 +1505,15 @@ class SubscriptionService:
         """Admin: update subscription fields with optional warned overrides.
 
         By default only ACTIVE/PAUSED subscriptions are editable and the
-        override-gated fields (billing_amount, next/last_billing_date) are
+        override-gated fields (billing_amount, the next delivery date) are
         dropped. ``overrides`` re-enables them:
         ``edit_any_status`` / ``manual_billing_amount`` / ``manual_billing_dates``.
+
+        One frequency (spec 2026-10-23 §2.1). A real change of frequency, day or slot moves the next delivery
+        by the rule (§4.6, §9); "Set next delivery date" is checked by the rule (§9).
         """
         overrides = overrides or {}
-        subscription = self._get_subscription_or_raise(subscription_id)
+        subscription = self._get_subscription_or_raise(subscription_id, lock=True)
 
         if not overrides.get("edit_any_status") and subscription.status not in [
             SubscriptionStatus.ACTIVE,
@@ -1337,21 +1538,11 @@ class SubscriptionService:
         for field in self._ADMIN_PROTECTED_FIELDS:
             data.pop(field, None)
 
-        # Frequency invariant on the effective (post-update) pair.
-        if "billing_cycle" in data or "delivery_frequency" in data:
-            eff_billing = data.get("billing_cycle", subscription.billing_cycle)
-            eff_delivery = data.get("delivery_frequency", subscription.delivery_frequency)
-            try:
-                eff_billing = SubscriptionFrequency(eff_billing.value if hasattr(eff_billing, "value") else eff_billing)
-                eff_delivery = SubscriptionFrequency(
-                    eff_delivery.value if hasattr(eff_delivery, "value") else eff_delivery
-                )
-            except ValueError as exc:
-                raise ValidationError("Invalid frequency value") from exc
-            self._validate_billing_frequency(eff_billing, eff_delivery)
+        next_delivery = data.pop("next_delivery_date", None)
 
         changes: Dict[str, Any] = {}
         override_changes: Dict[str, Any] = {}
+        schedule_changed = False
         if status_override_used:
             override_changes["edit_any_status"] = {"status_at_edit": self._serialize_for_log(subscription.status)}
         for field, new_value in data.items():
@@ -1372,19 +1563,32 @@ class SubscriptionService:
             if field == "payment_method":
                 new_value = self._validated_payment_method(new_value)
 
-            if field in ("billing_cycle", "delivery_frequency"):
-                try:
-                    new_value = SubscriptionFrequency(new_value.value if hasattr(new_value, "value") else new_value)
-                except ValueError as exc:
-                    raise ValidationError("Invalid frequency value") from exc
-
             new_value = self._ensure_utc(new_value)
 
-            setattr(subscription, field, new_value)
+            if field in self._SCHEDULE_FIELDS:
+                schedule_changed = schedule_changed or new_value != old_value
+                self._set_schedule_field(subscription, field, new_value)
+            else:
+                setattr(subscription, field, new_value)
             entry = {"old": self._serialize_for_log(old_value), "new": self._serialize_for_log(new_value)}
             changes[field] = entry
             if field in self._ADMIN_OVERRIDE_FIELDS:
                 override_changes[field] = entry
+
+        if next_delivery is not None:
+            try:
+                subscription_schedule.validate_next_delivery(subscription, next_delivery, local_date())
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+            entry = {
+                "old": self._serialize_for_log(subscription.next_delivery_date),
+                "new": self._serialize_for_log(next_delivery),
+            }
+            subscription.next_delivery_date = next_delivery
+            changes["next_delivery_date"] = override_changes["next_delivery_date"] = entry
+            schedule_changed = True
+        elif schedule_changed:
+            self._reschedule_after_change(subscription)
 
         subscription.updated_at = datetime.now(UTC)
         if changes:
@@ -1408,6 +1612,8 @@ class SubscriptionService:
                 )
             )
         db.session.commit()
+        if schedule_changed:
+            self._create_first_order_if_due(subscription, local_date())
         return subscription
 
     def admin_add_item(
@@ -1536,101 +1742,37 @@ class SubscriptionService:
         db.session.commit()
         return subscription
 
-    def admin_pause_subscription(
-        self,
-        subscription_id: int,
-        actor_user_id: int,
-        reason: str,
-        resume_date: Optional[datetime] = None,
-    ) -> Subscription:
-        """Admin: pause an ACTIVE subscription (audit-logged)."""
-        subscription = self._get_subscription_or_raise(subscription_id)
+    def admin_pause_subscription(self, subscription_id: int, actor_user_id: int, reason: str) -> Dict[str, Any]:
+        """Admin: pause an ACTIVE subscription, by the customer's rule (§4.6): unpaid upcoming orders are
+        cancelled, a paid one stays. Audit-logged with the acting admin."""
+        subscription = self._get_subscription_or_raise(subscription_id, lock=True)
         if subscription.status != SubscriptionStatus.ACTIVE:
             raise ValidationError("Only active subscriptions can be paused")
-
-        if resume_date is not None:
-            resume_date = self._ensure_utc(resume_date)
-            if resume_date <= datetime.now(UTC):
-                raise ValidationError("Resume date must be in the future")
-
-        subscription.pause(reason=reason, resume_date=resume_date)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="paused",
-                details=f"Paused by admin: {reason}",
-                user_id=actor_user_id,
-            )
+        return self._pause(
+            subscription, reason=reason, details=f"Paused by admin: {reason}", actor_user_id=actor_user_id
         )
-        db.session.commit()
-        return subscription
 
     def admin_resume_subscription(self, subscription_id: int, actor_user_id: int) -> Subscription:
-        """Admin: resume a PAUSED subscription; advances next_billing_date via the
-        correct service helper (the model's own helper is broken for enums)."""
-        subscription = self._get_subscription_or_raise(subscription_id)
+        """Admin: resume a PAUSED subscription, by the customer's rule (§4.6)."""
+        subscription = self._get_subscription_or_raise(subscription_id, lock=True)
         if subscription.status != SubscriptionStatus.PAUSED:
             raise ValidationError("Only paused subscriptions can be resumed")
+        return self._resume(subscription, details="Resumed by admin", actor_user_id=actor_user_id)
 
-        subscription.status = SubscriptionStatus.ACTIVE
-        subscription.paused_at = None
-        subscription.pause_reason = None
-        subscription.pause_end_date = None
-        subscription.resume_date = None
-        subscription.next_billing_date = self._calculate_next_billing_date(
-            datetime.now(UTC), subscription.billing_cycle
-        )
-        subscription.updated_at = datetime.now(UTC)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="resumed",
-                details="Resumed by admin",
-                user_id=actor_user_id,
-            )
-        )
-        db.session.commit()
-        return subscription
-
-    def admin_cancel_subscription(
-        self,
-        subscription_id: int,
-        actor_user_id: int,
-        reason: str,
-        immediate: bool = True,
-    ) -> Subscription:
-        """Admin: cancel a subscription (immediate soft-cancel by default)."""
-        subscription = self._get_subscription_or_raise(subscription_id)
+    def admin_cancel_subscription(self, subscription_id: int, actor_user_id: int, reason: str) -> Dict[str, Any]:
+        """Admin: cancel a subscription, immediately, by the customer's rule (§4.6, §2.7)."""
+        subscription = self._get_subscription_or_raise(subscription_id, lock=True)
         if subscription.status == SubscriptionStatus.CANCELLED:
             raise ValidationError("Subscription is already cancelled")
-
-        if immediate:
-            subscription.cancel(reason=reason)
-            subscription.end_date = datetime.now(UTC)
-            action = "cancelled"
-            details = f"Cancelled by admin: {reason}"
-        else:
-            subscription.auto_renew = False
-            subscription.end_date = subscription.next_billing_date
-            action = "cancellation_scheduled"
-            when = subscription.end_date.strftime("%Y-%m-%d") if subscription.end_date else "end of cycle"
-            details = f"Cancellation scheduled by admin for {when}: {reason}"
-
-        subscription.updated_at = datetime.now(UTC)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action=action,
-                details=details,
-                user_id=actor_user_id,
-            )
+        return self._cancel(
+            subscription, reason=reason, details=f"Cancelled by admin: {reason}", actor_user_id=actor_user_id
         )
-        db.session.commit()
-        return subscription
 
-    def _get_user_subscription_or_raise(self, subscription_id: int, user_id: int) -> Subscription:
+    def _get_user_subscription_or_raise(
+        self, subscription_id: int, user_id: int, *, lock: bool = False
+    ) -> Subscription:
         """Fetch a subscription scoped to a user or raise not found."""
-        subscription = Subscription.query.filter_by(id=subscription_id, user_id=user_id).first()
+        subscription = self._fetch(Subscription.query.filter_by(id=subscription_id, user_id=user_id), lock=lock)
         if not subscription:
             raise NotFoundError("api.subscriptions.error.not_found")
         return subscription
@@ -1704,127 +1846,6 @@ class SubscriptionService:
 
     # _calculate_subscription_total with plan removed - discounts applied directly to subscriptions
 
-    def _validate_billing_frequency(
-        self, billing_cycle: SubscriptionFrequency, delivery_frequency: SubscriptionFrequency
-    ):
-        """
-        Validate that billing cycle is appropriate for delivery frequency.
-        Billing period should not be shorter than delivery period.
-        """
-        frequency_order = {
-            SubscriptionFrequency.DAILY: 1,
-            SubscriptionFrequency.WEEKLY: 2,
-            SubscriptionFrequency.BIWEEKLY: 3,
-            SubscriptionFrequency.MONTHLY: 4,
-        }
-
-        billing_rank = frequency_order.get(billing_cycle, 4)
-        delivery_rank = frequency_order.get(delivery_frequency, 2)
-
-        if billing_rank < delivery_rank:
-            raise ValidationError(
-                f"Billing cycle ({billing_cycle.value}) cannot be shorter than "
-                f"delivery frequency ({delivery_frequency.value}). "
-                f"Example: You cannot bill monthly for daily deliveries."
-            )
-
-    def _already_billed_this_cycle(self, subscription: Subscription) -> bool:
-        """True when this subscription has already been billed in the current
-        UTC-day window.
-
-        Two clauses, because ``last_billing_date`` alone is not crash-proof:
-        ``create_order`` commits the order before the caller advances the
-        counters (``last_billing_date`` / ``next_billing_date`` /
-        ``total_orders_generated``), so a crash in between would otherwise
-        re-bill on retry and mint a duplicate order. Since ``create_order``
-        now stamps ``Order.subscription_id`` inside its own atomic
-        transaction, we can ask the orders table directly instead of trusting
-        counters that might not have advanced.
-
-        The order clause counts orders of ANY status, including CANCELLED. An
-        abandoned electronic order that ``cancel_abandoned_orders`` cancelled
-        must not trigger an immediate replacement — the customer receives the
-        next cycle's order on schedule, not an instant retry.
-        """
-        from business_app.models.order import Order
-
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        last = subscription.last_billing_date
-        if last is not None:
-            try:
-                if last.tzinfo is None:
-                    last = last.replace(tzinfo=timezone.utc)
-                if last >= today_start:
-                    return True
-            except (AttributeError, TypeError):
-                # Legacy/corrupt last_billing_date (e.g. wrong type). Don't
-                # trust it either way — the row-level lock in
-                # process_subscription_billing is already held, so raising
-                # here would leave that transaction open across the caller's
-                # per-subscription try/except in the daily billing task. Fall
-                # through to the order-existence check instead, which is the
-                # crash-proof source of truth anyway.
-                pass
-
-        return db.session.query(
-            Order.query.filter(
-                Order.subscription_id == subscription.id,
-                Order.created_at >= today_start,
-            ).exists()
-        ).scalar()
-
-    def _calculate_next_billing_date(self, start_date: datetime, frequency: SubscriptionFrequency) -> datetime:
-        """Calculate next billing date based on frequency"""
-        if frequency == SubscriptionFrequency.DAILY:
-            return start_date + timedelta(days=1)
-        elif frequency == SubscriptionFrequency.WEEKLY:
-            return start_date + timedelta(weeks=1)
-        elif frequency == SubscriptionFrequency.BIWEEKLY:
-            return start_date + timedelta(weeks=2)
-        elif frequency == SubscriptionFrequency.MONTHLY:
-            return start_date + relativedelta(months=1)
-        else:
-            return start_date + relativedelta(months=1)  # Default to monthly
-
-    def _schedule_subscription_delivery(self, subscription_id: int):
-        """Schedule subscription delivery"""
-        try:
-            from ..tasks.subscription_tasks import schedule_subscription_delivery_task
-
-            schedule_subscription_delivery_task.delay(subscription_id)
-        except Exception:
-            current_app.logger.exception("Failed to schedule subscription delivery for %s", subscription_id)
-
-    def _send_subscription_confirmation(self, subscription: Subscription):
-        """Send subscription confirmation"""
-        try:
-            from ..tasks.notification_tasks import send_subscription_confirmation_task
-
-            send_subscription_confirmation_task.delay(subscription.id)
-        except Exception:
-            current_app.logger.exception("Failed to send subscription confirmation for %s", subscription.id)
-
-    def _send_subscription_notification(self, subscription: Subscription, event_type: str):
-        """Send subscription notification"""
-        try:
-            from ..tasks.notification_tasks import send_subscription_notification_task
-
-            send_subscription_notification_task.delay(subscription.id, event_type)
-        except Exception:
-            current_app.logger.exception(
-                "Failed to send subscription notification (%s) for %s", event_type, subscription.id
-            )
-
-    def _cancel_pending_deliveries(self, subscription_id: int):
-        """Cancel pending deliveries for subscription"""
-        try:
-            from ..tasks.subscription_tasks import cancel_subscription_deliveries_task
-
-            cancel_subscription_deliveries_task.delay(subscription_id)
-        except Exception:
-            current_app.logger.exception("Failed to cancel pending deliveries for %s", subscription_id)
-
     def _calculate_items_total(self, items: List[Dict[str, Any]]) -> float:
         """Calculate total amount for subscription items"""
         total = 0.0
@@ -1837,55 +1858,6 @@ class SubscriptionService:
             total += float(product.base_price * item["quantity"])
 
         return total
-
-    def _calculate_next_delivery_date(
-        self,
-        start_date: datetime,
-        frequency: SubscriptionFrequency,
-        day_of_week: Optional[int] = None,
-        day_of_month: Optional[int] = None,
-    ) -> datetime:
-        """Calculate next delivery date based on frequency and preferences"""
-        if frequency == SubscriptionFrequency.DAILY:
-            return start_date + timedelta(days=1)
-
-        elif frequency == SubscriptionFrequency.WEEKLY:
-            # If day_of_week specified, find next occurrence of that day
-            if day_of_week is not None:
-                days_ahead = day_of_week - start_date.weekday()
-                if days_ahead <= 0:  # Target day already happened this week
-                    days_ahead += 7
-                return start_date + timedelta(days=days_ahead)
-            else:
-                return start_date + timedelta(weeks=1)
-
-        elif frequency == SubscriptionFrequency.BIWEEKLY:
-            if day_of_week is not None:
-                days_ahead = day_of_week - start_date.weekday()
-                if days_ahead <= 0:
-                    days_ahead += 14
-                else:
-                    days_ahead += 7  # Skip to next occurrence after 2 weeks
-                return start_date + timedelta(days=days_ahead)
-            else:
-                return start_date + timedelta(weeks=2)
-
-        elif frequency == SubscriptionFrequency.MONTHLY:
-            # If day_of_month specified, use that day
-            if day_of_month is not None:
-                next_month = start_date + relativedelta(months=1)
-                # Handle edge case where day doesn't exist in month (e.g., Feb 30)
-                try:
-                    return next_month.replace(day=day_of_month)
-                except ValueError:
-                    # Use last day of month if specified day doesn't exist
-                    return next_month + relativedelta(day=31)
-            else:
-                return start_date + relativedelta(months=1)
-
-        else:
-            # Default to weekly
-            return start_date + timedelta(weeks=1)
 
     def get_billing_info(self, subscription_id: int) -> Dict[str, Any]:
         """
@@ -1907,45 +1879,27 @@ class SubscriptionService:
         # Get payment method
         payment_method = subscription.payment_method.value or PaymentMethod.CASH
 
-        # Calculate days until next billing
-        days_until_billing = 0
-        if subscription.next_billing_date:
-            # Ensure both datetimes are timezone-aware for comparison
-            next_billing = subscription.next_billing_date
-            if next_billing.tzinfo is None:
-                # If next_billing_date is naive, assume UTC
-                next_billing = next_billing.replace(tzinfo=timezone.utc)
-
-            now = datetime.now(timezone.utc)
-            days_until_billing = (next_billing.date() - now.date()).days
-
+        # The next delivery is published once, as the subscription's `upcoming_delivery` (§9): no second copy.
         return {
             "subscription_id": subscription_id,
-            "next_billing_date": subscription.next_billing_date,
             "next_billing_amount": next_billing_amount,
             "payment_method": payment_method.value if hasattr(payment_method, "value") else payment_method,
-            "days_until_billing": max(0, days_until_billing),
-            # 'is_trial': subscription.status == SubscriptionStatus.TRIAL,
-            # 'trial_ends_at': subscription.trial_end_date if subscription.status == SubscriptionStatus.TRIAL else None
         }
 
     def calculate_subscription_preview(
         self,
         user_id: int,
-        billing_cycle: str,
-        delivery_frequency: str,
+        frequency,
         items: List[Dict[str, Any]],
-        discount_percentage: float = 0,
     ) -> Dict[str, Any]:
         """
-        Calculate preview of subscription before creation
+        Calculate preview of subscription before creation. Subscriptions give no discount,
+        so the preview quotes none (the same decision creation makes).
 
         Args:
             user_id: User ID
-            billing_cycle: Billing cycle (monthly, quarterly, annually)
-            delivery_frequency: Delivery frequency (daily, weekly, biweekly, monthly)
+            frequency: The one frequency (daily, weekly, biweekly, monthly)
             items: List of items with product_id and quantity
-            discount_percentage: Discount percentage to apply
 
         Returns:
             Preview information with pricing breakdown
@@ -1981,11 +1935,13 @@ class SubscriptionService:
                 }
             )
 
-        # Apply discount
-        discount_amount = (subtotal * discount_percentage / 100) if discount_percentage > 0 else 0
+        # Subscriptions give no discount
+        discount_amount = 0
 
         # Calculate delivery fee (if applicable)
         delivery_fee = 0  # Can be calculated based on address/distance
+
+        from business_app.services.loyalty_service import LoyaltyService
 
         # Calculate final total. A subscription preview is a QUOTE, so it must
         # use the same expression as the order it previews.
@@ -1995,146 +1951,33 @@ class SubscriptionService:
             delivery_fee=Decimal(str(delivery_fee)),
             # Rewards are redeemed against an existing order; a preview has none.
             loyalty_discount=Decimal("0.00"),
-            # No `tier_discount` column exists yet.
-            tier_discount=Decimal("0.00"),
+            # The one tier decision; billing stamps subscription orders "web", and the flag makes it 0.
+            tier_discount=LoyaltyService()
+            .quote_tier_discount(
+                user,
+                Decimal(str(subtotal)),
+                None,
+                order_source="web",
+                is_subscription_order=True,
+            )
+            .amount,
         )
 
-        # Calculate frequency-based pricing
-        frequency_multiplier = {"daily": 30, "weekly": 4, "biweekly": 2, "monthly": 1}.get(delivery_frequency, 1)
-
-        monthly_cost = total_amount * frequency_multiplier
+        frequency = SubscriptionFrequency(frequency)
+        monthly_cost = self._monthly_amount(total_amount, frequency)
 
         return {
             "items": item_details,
             "subtotal": float(subtotal),
-            "discount_percentage": discount_percentage,
+            "discount_percentage": 0,
             "discount_amount": float(discount_amount),
             "delivery_fee": float(delivery_fee),
             "total_amount": float(total_amount),
-            "billing_cycle": billing_cycle,
-            "delivery_frequency": delivery_frequency,
+            "frequency": frequency.value,
+            "deliveries_per_month": float(subscription_schedule.deliveries_per_month(frequency)),
             "estimated_monthly_cost": float(monthly_cost),
             "estimated_annual_cost": float(monthly_cost * 12),
         }
-
-    def calculate_subscription_statistics(self, user_id: int) -> Dict[str, Any]:
-        """
-        Calculate subscription statistics for a user
-
-        Args:
-            user_id: User ID
-
-        Returns:
-            Statistics dictionary
-        """
-        # Get all user subscriptions
-        subscriptions = Subscription.query.filter_by(user_id=user_id).all()
-
-        if not subscriptions:
-            return {
-                "total_subscriptions": 0,
-                "active_subscriptions": 0,
-                "total_spent": 0,
-                "total_deliveries": 0,
-                "average_order_value": 0,
-                "total_savings": 0,
-                "most_ordered_product": None,
-            }
-
-        # Calculate statistics
-        total_spent = 0
-        total_deliveries = 0
-        active_count = 0
-        product_counts = {}
-
-        for subscription in subscriptions:
-            if subscription.status == SubscriptionStatus.ACTIVE:
-                active_count += 1
-
-            # Count deliveries (estimated from subscription duration and frequency)
-            if subscription.created_at and subscription.frequency:
-                days_active = (datetime.now(timezone.utc) - subscription.created_at).days
-                deliveries_per_week = {"daily": 7, "weekly": 1, "biweekly": 0.5, "monthly": 0.25}.get(
-                    (
-                        subscription.frequency.value
-                        if hasattr(subscription.frequency, "value")
-                        else subscription.frequency
-                    ),
-                    1,
-                )
-
-                estimated_deliveries = int((days_active / 7) * deliveries_per_week)
-                total_deliveries += estimated_deliveries
-                total_spent += float(subscription.billing_amount or 0) * estimated_deliveries
-
-            # Count products
-            for item in subscription.subscription_items:
-                product_name = item.product.name if item.product else "Unknown"
-                product_counts[product_name] = product_counts.get(product_name, 0) + item.quantity
-
-        # Find most ordered product
-        most_ordered = max(product_counts.items(), key=lambda x: x[1])[0] if product_counts else None
-
-        # Calculate average order value
-        avg_order = total_spent / total_deliveries if total_deliveries > 0 else 0
-
-        # Calculate savings (example: 10% off regular pricing)
-        estimated_savings = total_spent * 0.1
-
-        return {
-            "total_subscriptions": len(subscriptions),
-            "active_subscriptions": active_count,
-            "total_spent": float(total_spent),
-            "total_deliveries": total_deliveries,
-            "average_order_value": float(avg_order),
-            "total_savings": float(estimated_savings),
-            "most_ordered_product": most_ordered,
-        }
-
-    def skip_next_delivery(self, subscription_id: int, user_id: int = None, skip_reason: str = None) -> Subscription:
-        """
-        Skip the next delivery for a subscription
-
-        Args:
-            subscription_id: Subscription ID
-            user_id: Optional user ID for validation
-            skip_reason: Reason for skipping
-
-        Returns:
-            Updated Subscription object
-        """
-        subscription = Subscription.query.get(subscription_id)
-        if not subscription:
-            raise NotFoundError("Subscription not found")
-
-        # Validate ownership
-        if user_id and subscription.user_id != user_id:
-            raise ValidationError("Subscription does not belong to user")
-
-        # Can only skip active subscriptions
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            raise ValidationError("Can only skip deliveries for active subscriptions")
-
-        # Calculate next delivery date after skip
-        if subscription.next_delivery_date:
-            frequency_days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(
-                subscription.frequency.value if hasattr(subscription.frequency, "value") else subscription.frequency, 7
-            )
-
-            new_next_delivery = subscription.next_delivery_date + timedelta(days=frequency_days)
-            subscription.next_delivery_date = new_next_delivery
-
-        # Log the skip
-        if hasattr(subscription, "add_log"):
-            subscription.add_log(
-                action="delivery_skipped",
-                description=f'Delivery skipped. Reason: {skip_reason or "User request"}',
-                user_id=user_id,
-            )
-
-        db.session.commit()
-
-        return subscription
 
     def _get_frequency_breakdown(self, subscriptions: List[Subscription]) -> Dict[str, int]:
         """Get subscription frequency breakdown"""

@@ -744,3 +744,265 @@ def test_reorder_reminders_downgrade_removes_exactly_what_the_upgrade_added(ephe
 
         command.upgrade(config, REORDER_REMINDERS_REVISION)
         assert present() == ([True, True, True], True)
+
+
+# ---- Subscriptions: one frequency, local delivery DATEs (spec 2026-10-23 §4.1, §9; plan T1) ----
+
+SUBSCRIPTION_FREQUENCY_REVISION = "5ea02acb0f0b"
+SUBSCRIPTION_FREQUENCY_PARENT_REVISION = "b4f1c7e9a2d3"
+_OLD_SUBSCRIPTION = (
+    "INSERT INTO subscriptions (subscription_number, user_id, status, name, billing_cycle, billing_amount, "
+    "next_billing_date, delivery_frequency, delivery_day_of_week, delivery_day_of_month, delivery_time_slot_id, "
+    "delivery_address_id, next_delivery_date, last_delivery_date, start_date, payment_method, discount_percentage, "
+    "created_at, updated_at) VALUES (:number, :user_id, 'active', 'Water', :billing, 30000, :next_billing, "
+    ":delivery, :dow, :dom, :slot, :address, :next_delivery, :last_delivery, '2026-09-01T00:00:00+00', 'cash', 0, "
+    "now(), now()) RETURNING id"
+)
+
+
+def _subscription_columns(conn):
+    return {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            text(
+                "SELECT column_name, udt_name, is_nullable FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'subscriptions'"
+            )
+        )
+    }
+
+
+def _old_subscription_world(db):
+    """Six rows at b4f1c7e9a2d3, one per case the backfill must get right. Subscriptions go in as SQL
+    (the model is already head-shaped); users with Core (`_insert_user`); the rest with the ORM, whose
+    tables are the same at both revisions. Tashkent is UTC+5, so a 19:00Z-or-later instant is the NEXT
+    local day: the cases put instants there to fail a UTC-date implementation."""
+    from business_app.models.delivery import DeliveryTimeSlot
+    from business_app.models.user import UserAddress
+    from tests.integration.test_sales_agent_pg_constraints import _order
+
+    user_id = _insert_user(db, phone="+998900000601", password_hash="not-a-real-hash", first_name="Sub")
+    address = UserAddress(
+        user_id=user_id, full_address="Amir Temur 1", city="Tashkent", latitude=41.31, longitude=69.27
+    )
+    slot = DeliveryTimeSlot(name="MWF", start_time="10:00", end_time="12:00", is_active=True, available_days=[0, 2, 4])
+    db.session.add_all([address, slot])
+    db.session.commit()
+    w = SimpleNamespace(user=user_id, address=address.id, slot=slot.id)
+    db.session.remove()
+
+    rows = {
+        # Mismatched pair, no day; billing instant 20:30Z = 01:30 on 1 November in Tashkent.
+        "mismatched": dict(billing="monthly", delivery="weekly", next_billing="2026-10-31T20:30:00+00"),
+        # Weekly Thursday, a stale next_delivery_date the backfill must replace; billed Monday 26 October.
+        "weekly_thu": dict(billing="weekly", delivery="weekly", dow=3, next_billing="2026-10-26T09:00:00+00",
+                           next_delivery="2026-10-01T10:00:00+00"),
+        # Biweekly with no day: the day comes from the backfilled date (Wednesday 28 October).
+        "biweekly_no_day": dict(billing="biweekly", delivery="biweekly", next_billing="2026-10-28T06:00:00+00"),
+        # Daily on a Mon/Wed/Fri slot, billed on a Tuesday: the next delivery is Wednesday.
+        "daily_slot": dict(billing="daily", delivery="daily", slot=w.slot, next_billing="2026-10-27T04:00:00+00"),
+        # Monthly on the 31st, billed 5 November: 30 November.
+        "monthly_31": dict(billing="monthly", delivery="monthly", dom=31, next_billing="2026-11-05T07:00:00+00"),
+        # Weekly Monday created by an admin (a `created` log), billed 19:30Z = 00:30 Monday 26 October locally;
+        # a stored last_delivery_date (21:00Z = 11 October locally) and no orders.
+        "admin_monday": dict(billing="weekly", delivery="weekly", dow=0, next_billing="2026-10-25T19:30:00+00",
+                             last_delivery="2026-10-10T21:00:00+00"),
+    }
+    with db.engine.begin() as conn:
+        for number, (key, row) in enumerate(rows.items()):
+            params = {"dow": None, "dom": None, "slot": None, "next_delivery": None, "last_delivery": None, **row}
+            setattr(w, key, conn.execute(
+                text(_OLD_SUBSCRIPTION),
+                {"number": f"SUB-MIG-{number}", "user_id": w.user, "address": w.address, **params},
+            ).scalar_one())
+        conn.execute(
+            text("INSERT INTO subscription_logs (subscription_id, action, details, user_id, extra_data, created_at, "
+                 "updated_at) VALUES (:sid, 'created', 'Created by admin', :uid, '{}', now(), now())"),
+            {"sid": w.admin_monday, "uid": w.user},
+        )
+
+    # weekly_thu: the NEWEST order (by created_at) has no delivery date, so its local creation day counts
+    # (19:00Z on 19 October = 20 October in Tashkent), not the older order's 15 October.
+    # biweekly_no_day: one order, delivered on its own delivery_date.
+    for subscription_id, delivery_date, created_at in (
+        (w.weekly_thu, date(2026, 10, 15), datetime(2026, 10, 14, 8, 0, tzinfo=UTC)),
+        (w.weekly_thu, None, datetime(2026, 10, 19, 20, 0, tzinfo=UTC)),
+        (w.biweekly_no_day, date(2026, 10, 14), datetime(2026, 10, 13, 5, 0, tzinfo=UTC)),
+    ):
+        db.session.add(_order(db, user_id=w.user, subscription_id=subscription_id, delivery_date=delivery_date,
+                              created_at=created_at))
+    db.session.commit()
+    db.session.remove()
+    return w
+
+
+_SUBSCRIPTION_STATE = (
+    "SELECT id, frequency::text, billing_cycle::text, delivery_frequency::text, delivery_day_of_week, "
+    "delivery_day_of_month, next_delivery_date, last_delivery_date FROM subscriptions ORDER BY id"
+)
+
+
+def _expected_upgraded(w):
+    return [
+        (w.mismatched, "monthly", "monthly", "weekly", None, 1, date(2026, 11, 1), None),
+        (w.weekly_thu, "weekly", "weekly", "weekly", 3, None, date(2026, 10, 29), date(2026, 10, 20)),
+        (w.biweekly_no_day, "biweekly", "biweekly", "biweekly", 2, None, date(2026, 10, 28), date(2026, 10, 14)),
+        (w.daily_slot, "daily", "daily", "daily", None, None, date(2026, 10, 28), None),
+        (w.monthly_31, "monthly", "monthly", "monthly", None, 31, date(2026, 11, 30), None),
+        (w.admin_monday, "weekly", "weekly", "weekly", 0, None, date(2026, 10, 26), date(2026, 10, 11)),
+    ]
+
+
+@pytest.mark.integration
+def test_subscription_frequency_backfill_and_round_trip(ephemeral_pg_database, capsys):
+    """Upgrade: `frequency` from `billing_cycle` (mismatched pairs keep the cadence they were billed on,
+    §2.6) and NOT NULL; the delivery dates become local DATEs; next_delivery_date is the first anchor on or
+    after next_billing_date's local day; NULL weekly/biweekly/monthly days come from it; last_delivery_date
+    is the newest order's. The pre-flight prints the mismatch count and the rows whose weekday may be the
+    web builder's 0 = Sunday. Downgrade: `frequency` goes and the dates come back as local midnight;
+    the old pair is untouched. A second upgrade lands on the same rows."""
+    from alembic import command
+
+    from business_app import db
+    from business_app.models.subscription import Subscription
+    from business_app.services.subscription_schedule import first_delivery_on_or_after
+    from business_app.utils.local_windows import local_date
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_PARENT_REVISION)
+        w = _old_subscription_world(db)
+        capsys.readouterr()
+
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_REVISION)
+
+        printed = capsys.readouterr().out
+        assert "1 subscription(s) have billing_cycle != delivery_frequency" in printed
+        assert f"delivery_day_of_week not set by an admin (may be 0 = Sunday): [{w.weekly_thu}]" in printed
+        assert _rows(db.engine, _SUBSCRIPTION_STATE) == _expected_upgraded(w)
+        with db.engine.connect() as conn:
+            columns = _subscription_columns(conn)
+        assert columns["frequency"] == ("subscription_frequency", "NO")
+        assert columns["next_delivery_date"] == ("date", "YES")
+        assert columns["last_delivery_date"] == ("date", "YES")
+        # The migration's frozen anchor rule agrees with the live one, row by row.
+        billed = dict(_rows(db.engine, "SELECT id, next_billing_date FROM subscriptions"))
+        for sub in Subscription.query.order_by(Subscription.id):
+            assert first_delivery_on_or_after(sub, local_date(billed[sub.id])) == sub.next_delivery_date
+        db.session.remove()
+
+        command.downgrade(config, SUBSCRIPTION_FREQUENCY_PARENT_REVISION)
+
+        with db.engine.connect() as conn:
+            columns = _subscription_columns(conn)
+        assert "frequency" not in columns
+        assert columns["next_delivery_date"][0] == columns["last_delivery_date"][0] == "timestamptz"
+        assert _rows(
+            db.engine,
+            "SELECT billing_cycle::text, delivery_frequency::text, next_delivery_date, last_delivery_date "
+            "FROM subscriptions WHERE id IN (:a, :b) ORDER BY id",
+            a=w.mismatched,
+            b=w.weekly_thu,
+        ) == [
+            ("monthly", "weekly", datetime(2026, 10, 31, 19, 0, tzinfo=UTC), None),
+            ("weekly", "weekly", datetime(2026, 10, 28, 19, 0, tzinfo=UTC), datetime(2026, 10, 19, 19, 0, tzinfo=UTC)),
+        ]
+
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_REVISION)
+
+        assert _rows(db.engine, _SUBSCRIPTION_STATE) == _expected_upgraded(w)
+
+
+@pytest.mark.integration
+def test_subscription_frequency_refuses_a_row_it_cannot_schedule(ephemeral_pg_database):
+    """A weekday outside 0-6 has no anchor: the upgrade aborts naming the row and writes nothing."""
+    from alembic import command
+
+    from business_app import db
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_PARENT_REVISION)
+        w = _old_subscription_world(db)
+        _run(db.engine, f"UPDATE subscriptions SET delivery_day_of_week = 7 WHERE id = {w.weekly_thu}")
+
+        refusal = rf"no delivery date can be scheduled for subscription\(s\) \[{w.weekly_thu}\]"
+        with pytest.raises(RuntimeError, match=refusal):
+            command.upgrade(config, SUBSCRIPTION_FREQUENCY_REVISION)
+
+        assert _revision(db.engine) == SUBSCRIPTION_FREQUENCY_PARENT_REVISION
+        with db.engine.connect() as conn:
+            assert "frequency" not in _subscription_columns(conn)
+
+
+# ---- Subscriptions: the contract step drops the four old columns (plan 2026-10-24 Task 6) ----
+
+SUBSCRIPTION_CONTRACT_REVISION = "7c3d9e5a1b84"
+_OLD_SUBSCRIPTION_COLUMNS = {"billing_cycle", "delivery_frequency", "next_billing_date", "last_billing_date"}
+_NEW_SUBSCRIPTION_STATE = (
+    "SELECT id, frequency::text, delivery_day_of_week, delivery_day_of_month, next_delivery_date, "
+    "last_delivery_date FROM subscriptions ORDER BY id"
+)
+_BILLING_INDEX = (
+    "SELECT count(*) FROM pg_indexes WHERE tablename = 'subscriptions' "
+    "AND indexname = 'idx_subscriptions_status_next_billing'"
+)
+
+
+@pytest.mark.integration
+def test_subscription_contract_drops_the_old_columns_and_the_downgrade_restores_them(ephemeral_pg_database):
+    """Upgrade: billing_cycle, delivery_frequency, next_billing_date, last_billing_date and their index are
+    gone; `frequency` and the delivery DATEs are untouched. Downgrade: the four come back NOT NULL (the last
+    nullable), the pair copied from `frequency`, next_billing_date the local midnight of next_delivery_date
+    (now() when there is none), last_billing_date the local midnight of last_delivery_date; the index returns.
+    A second upgrade lands on the same rows."""
+    from alembic import command
+
+    from business_app import db
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_PARENT_REVISION)
+        w = _old_subscription_world(db)
+        command.upgrade(config, SUBSCRIPTION_FREQUENCY_REVISION)
+        before = _rows(db.engine, _NEW_SUBSCRIPTION_STATE)
+        assert before[0][4] == date(2026, 11, 1)
+        _run(db.engine, f"UPDATE subscriptions SET next_delivery_date = NULL WHERE id = {w.daily_slot}")
+        before = _rows(db.engine, _NEW_SUBSCRIPTION_STATE)
+
+        command.upgrade(config, SUBSCRIPTION_CONTRACT_REVISION)
+
+        with db.engine.connect() as conn:
+            columns = _subscription_columns(conn)
+        assert _OLD_SUBSCRIPTION_COLUMNS.isdisjoint(columns)
+        assert columns["frequency"] == ("subscription_frequency", "NO")
+        assert _rows(db.engine, _BILLING_INDEX) == [(0,)]
+        assert _rows(db.engine, _NEW_SUBSCRIPTION_STATE) == before
+
+        command.downgrade(config, SUBSCRIPTION_FREQUENCY_REVISION)
+
+        with db.engine.connect() as conn:
+            columns = _subscription_columns(conn)
+        assert columns["billing_cycle"] == ("subscription_frequency", "NO")
+        assert columns["delivery_frequency"] == ("subscription_frequency", "NO")
+        assert columns["next_billing_date"] == ("timestamptz", "NO")
+        assert columns["last_billing_date"] == ("timestamptz", "YES")
+        assert _rows(db.engine, _BILLING_INDEX) == [(1,)]
+        assert _rows(db.engine, "SELECT count(*) FROM subscriptions WHERE billing_cycle <> frequency "
+                                "OR delivery_frequency <> frequency") == [(0,)]
+        assert _rows(
+            db.engine,
+            "SELECT next_billing_date, last_billing_date FROM subscriptions WHERE id = :a",
+            a=w.weekly_thu,
+        ) == [(datetime(2026, 10, 28, 19, 0, tzinfo=UTC), datetime(2026, 10, 19, 19, 0, tzinfo=UTC))]
+        assert _rows(
+            db.engine, "SELECT next_billing_date IS NOT NULL, last_billing_date FROM subscriptions WHERE id = :a",
+            a=w.daily_slot,
+        ) == [(True, None)]
+
+        command.upgrade(config, SUBSCRIPTION_CONTRACT_REVISION)
+
+        assert _rows(db.engine, _NEW_SUBSCRIPTION_STATE) == before

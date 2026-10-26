@@ -81,11 +81,12 @@ def _seed(db, key: str, value: str, lang: str | None = None) -> None:
 
 @pytest.mark.integration
 @pytest.mark.api
-def test_tier_card_states_the_discount_is_for_cash_orders(client, db, program, tiers):
+def test_tier_card_presents_the_discount_as_a_bot_and_website_perk(client, db, program, tiers):
     """The stat and the perk bullet are the two places the card publishes the
-    rate. Both must carry the condition, and neither may embed the rate itself."""
-    _seed(db, "loyalty_guide.tier.label_discount", "cash-order discount")
-    _seed(db, "loyalty_guide.tier.perk_discount", "{pct}% off when you pay cash on delivery")
+    rate. Both must name the channel (bot / website), and neither may embed the
+    rate itself."""
+    _seed(db, "loyalty_guide.tier.label_discount", "bot & website discount")
+    _seed(db, "loyalty_guide.tier.perk_discount", "{pct}% off orders you place in our bot or on our website, paid on delivery")
 
     # `{{ 'key' | t }}` with no arguments is a compile-time constant for
     # Jinja (the filter is not @pass_context), so the value is folded into the
@@ -100,13 +101,13 @@ def test_tier_card_states_the_discount_is_for_cash_orders(client, db, program, t
     # convention), which would render this page in the wrong language.
     html = client.application.test_client().get("/loyalty-guide?lang=en").get_data(as_text=True)
 
-    assert "20% off when you pay cash on delivery" in html
-    assert "cash-order discount" in html
+    assert "20% off orders you place in our bot or on our website, paid on delivery" in html
+    assert "bot &amp; website discount" in html
     # The 0% tier still shows no perk bullet. A plain substring check for
     # "0% off..." is a false negative here: it also matches inside the
     # Summit tier's "20% off..." bullet. Anchor on the digit boundary so the
     # standalone "0%" bullet is what's actually being ruled out.
-    assert re.search(r"(?<!\d)0% off when you pay cash on delivery", html) is None
+    assert re.search(r"(?<!\d)0% off orders you place in our bot", html) is None
     assert "{pct}" not in html
 
 
@@ -118,7 +119,7 @@ def test_zero_discount_tier_shows_no_discount_stat(client, db, program, tiers):
     asterisk either. Summit (20%) still gets its stat, now carrying the `*`
     marker that ties it to the footnote via aria-describedby."""
     _seed(db, "loyalty_guide.tier.label_multiplier", "points multiplier")
-    _seed(db, "loyalty_guide.tier.label_discount", "cash-order discount")
+    _seed(db, "loyalty_guide.tier.label_discount", "bot & website discount")
 
     # A plain `{{ 'key' | t }}` call (no dynamic kwargs) is a compile-time
     # constant to Jinja's optimizer, so whichever test renders this template
@@ -131,11 +132,11 @@ def test_zero_discount_tier_shows_no_discount_stat(client, db, program, tiers):
     # Summit (20%) gets its stat, with the accessible asterisk marker...
     assert (
         '<strong>20%<sup class="lg-stat__sup" aria-describedby="lg-tier-discount-note">*</sup></strong>'
-        '<span>cash-order discount</span>' in html
+        '<span>bot &amp; website discount</span>' in html
     )
     # ...but Base (0%) must not render a "0%" discount stat, or an asterisk, at all.
     assert "<strong>0%<sup" not in html
-    assert "<strong>0%</strong><span>cash-order discount</span>" not in html
+    assert "<strong>0%</strong><span>bot &amp; website discount</span>" not in html
     # The multiplier stat is unaffected either way — the card never ends up
     # with zero stats.
     assert html.count("points multiplier") == len(tiers)
@@ -152,7 +153,7 @@ def test_discount_stat_does_not_truncate_a_fractional_rate(client, db, program, 
     summit.discount_percentage = 2.5
     db.session.commit()
 
-    _seed(db, "loyalty_guide.tier.label_discount", "cash-order discount")
+    _seed(db, "loyalty_guide.tier.label_discount", "bot & website discount")
 
     # `{{ 'key' | t }}` with no arguments is a compile-time constant for
     # Jinja (the filter is not @pass_context), so the value is folded into the
@@ -165,10 +166,10 @@ def test_discount_stat_does_not_truncate_a_fractional_rate(client, db, program, 
 
     assert (
         '<strong>2.5%<sup class="lg-stat__sup" aria-describedby="lg-tier-discount-note">*</sup></strong>'
-        '<span>cash-order discount</span>' in html
+        '<span>bot &amp; website discount</span>' in html
     )
     assert "<strong>2%<sup" not in html
-    assert "<strong>2%</strong><span>cash-order discount</span>" not in html
+    assert "<strong>2%</strong><span>bot &amp; website discount</span>" not in html
 
 
 @pytest.mark.integration
@@ -228,28 +229,100 @@ def test_no_active_tier_discount_shows_no_asterisk_or_footnote(client, db, progr
     assert 'id="lg-tier-discount-note"' not in html
 
 
+CUSTOMER_TIER_KEYS = (
+    "loyalty_guide.tier.label_discount",
+    "loyalty_guide.tier.perk_discount",
+    "loyalty_guide.tier.discount_footnote",
+    "loyalty_guide.faq.a10",
+)
+BACKEND_TIER_KEYS = (
+    "api.loyalty.tier_discount_condition",
+    "telegram.loyalty.tier_cod_perk",
+    "telegram.orders.order_tier_discount_line",
+)
+# The channel the discount is a perk of, per language.
+CHANNEL = {"en": ("bot", "website"), "uz": ("bot", "sayt"), "ru": ("бот", "сайт")}
+# Rejection wording the owner ruled out of customer tier copy.
+REJECTION = {
+    "en": ("not eligible", "excluded", "except", "only"),
+    "uz": ("faqat",),
+    "ru": ("только",),
+}
+PAY_ON_DELIVERY = {"en": "delivery", "uz": "yetkazib berishda", "ru": "при доставке"}
+SUBSCRIPTION = {"en": "subscription", "uz": "obuna", "ru": "подписк"}
+CASH_WORDS = {"en": "cash", "uz": "naqd", "ru": "налич"}
+
+
+def _shipped_row(key):
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    return BACKEND_TRANSLATIONS[key]
+
+
 @pytest.mark.integration
-def test_shipped_tier_discount_copy_names_the_payment_condition():
-    """The DEFAULT catalogue — what actually ships to customers — must carry
-    the condition everywhere the rate is published: the stat label, the perk
-    bullet, and the footnote the asterisk points to."""
-    from scripts.seed_backend_translations import LOYALTY_GUIDE_TRANSLATIONS
+@pytest.mark.parametrize("lang", ["en", "uz", "ru"])
+def test_shipped_tier_discount_copy_presents_the_bot_and_website_perk(lang):
+    """The DEFAULT catalogue - what actually ships to customers - frames the
+    tier discount as a perk of ordering in the bot / on the website, never as a
+    rejection of other orders."""
+    for key in CUSTOMER_TIER_KEYS + BACKEND_TIER_KEYS:
+        text = _shipped_row(key)[lang].lower()
+        for word in CHANNEL[lang]:
+            if key == "telegram.orders.order_tier_discount_line" or key == "loyalty_guide.faq.a10":
+                continue  # channel named as bot/website in the line itself below
+            assert word in text, f"{key}[{lang}] does not name {word!r}"
+        for word in REJECTION[lang]:
+            assert word not in text, f"{key}[{lang}] reads as rejection ({word!r})"
+    for key in ("loyalty_guide.faq.a10", "telegram.orders.order_tier_discount_line"):
+        text = _shipped_row(key)[lang].lower()
+        assert any(w in text for w in CHANNEL[lang]), f"{key}[{lang}] names no channel"
 
-    label = LOYALTY_GUIDE_TRANSLATIONS["loyalty_guide.tier.label_discount"]
-    perk = LOYALTY_GUIDE_TRANSLATIONS["loyalty_guide.tier.perk_discount"]
-    footnote = LOYALTY_GUIDE_TRANSLATIONS["loyalty_guide.tier.discount_footnote"]
+    for key in (
+        "loyalty_guide.tier.perk_discount",
+        "loyalty_guide.tier.discount_footnote",
+        "api.loyalty.tier_discount_condition",
+    ):
+        assert PAY_ON_DELIVERY[lang] in _shipped_row(key)[lang].lower(), f"{key}[{lang}]"
+    assert SUBSCRIPTION[lang] in _shipped_row("loyalty_guide.tier.discount_footnote")[lang].lower()
+    # My orders lists every order, so the summary label must not say "cash".
+    assert CASH_WORDS[lang] not in _shipped_row("telegram.orders.order_tier_discount_line")[lang].lower()
+    for key in ("loyalty_guide.tier.label_discount", "loyalty_guide.tier.perk_discount"):
+        assert CASH_WORDS[lang] not in _shipped_row(key)[lang].lower()
 
-    assert "cash" in label["en"].lower()
-    assert "naqd" in label["uz"].lower()
-    assert "налич" in label["ru"].lower()
-    assert "cash" in perk["en"].lower()
-    assert "naqd" in perk["uz"].lower()
-    assert "налич" in perk["ru"].lower()
-    assert "cash" in footnote["en"].lower()
-    assert "naqd" in footnote["uz"].lower()
-    assert "налич" in footnote["ru"].lower()
-    for lang in ("en", "uz", "ru"):
-        assert footnote.get(lang), f"discount_footnote has no {lang} value"
+
+@pytest.mark.integration
+@pytest.mark.parametrize("lang", ["en", "uz", "ru"])
+def test_the_guide_faq_answers_which_orders_get_the_tier_discount(client, db, program, tiers, lang):
+    """q10/a10 join the accordion AND the FAQPage JSON-LD when some tier has a
+    rate, and disappear when every tier is at 0% (same condition as the
+    footnote)."""
+    import json
+
+    q, a = f"Q10 marker {lang}", f"A10 marker {lang}"
+    _seed(db, "loyalty_guide.faq.q10", q, lang=lang)
+    _seed(db, "loyalty_guide.faq.a10", a, lang=lang)
+
+    def page():
+        client.application.jinja_env.cache.clear()
+        return client.application.test_client().get(
+            f"/loyalty-guide?lang={lang}", follow_redirects=True
+        ).get_data(as_text=True)
+
+    html = page()
+    assert q in html and a in html
+    blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
+    faq_pages = [d for d in map(json.loads, blocks) if d.get("@type") == "FAQPage"]
+    assert faq_pages, "FAQPage JSON-LD missing"
+    faq_page = faq_pages[0]
+    names = [e["name"] for e in faq_page["mainEntity"]]
+    answers = [e["acceptedAnswer"]["text"] for e in faq_page["mainEntity"]]
+    assert q in names and a in answers
+
+    for tier in tiers:
+        tier.discount_percentage = 0
+    db.session.commit()
+    html = page()
+    assert q not in html and a not in html
 
 
 @pytest.mark.integration

@@ -3,123 +3,34 @@ Subscription Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for subscription-related data serialization
 """
 
-from datetime import datetime, date
-from typing import Dict, Any, Optional, List
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.models.subscription import SubscriptionItem
 from business_app.serializers.types import MoneyFloat
+from shared.enums import SubscriptionFrequency
 
 
-class SubscriptionItemSchema(BaseModel):
-    """Subscription item schema"""
+class _OneFrequency(BaseModel):
+    """ONE `frequency` drives a subscription (spec 2026-10-23 §2.1)."""
 
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: int
-    subscription_id: int
-    product_id: int
-    product_name: str
-    product_sku: Optional[str] = None
-    quantity: int
-    unit_price: MoneyFloat
-    total_price: MoneyFloat
-
-    # Product details
-    product_image_url: Optional[str] = None
-    product_description: Optional[str] = None
-    product_weight: Optional[float] = None
-    product_volume: Optional[float] = None
-
-    # Item configuration
-    delivery_schedule: Optional[str] = None
-    special_instructions: Optional[str] = None
+    frequency: SubscriptionFrequency
 
 
-class SubscriptionAddressSchema(BaseModel):
-    """Subscription delivery address schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: int
-    title: str
-    full_address: str
-    city: str
-    district: Optional[str] = None
-    postal_code: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    delivery_instructions: Optional[str] = None
-
-
-class SubscriptionSchema(BaseModel):
-    """Main subscription schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: int
-    user_id: int
-    name: str
-    description: Optional[str] = None
-    status: str
-
-    # Billing configuration
-    billing_cycle: str
-    billing_amount: MoneyFloat
-    discount_percentage: float = Field(default=0.0)
-
-    # Delivery configuration
-    delivery_frequency: str
-    delivery_day_of_week: Optional[int] = None  # 0=Monday, 6=Sunday
-    delivery_day_of_month: Optional[int] = None  # 1-31
-    delivery_time_slot_id: Optional[int] = None
-    delivery_time_slot: Optional[Dict[str, Any]] = None  # Full time slot details
-
-    # Payment configuration
-    payment_method: str
-    auto_renew: bool = Field(default=True)
-
-    # Billing tracking
-    total_amount_billed: MoneyFloat = Field(default=0)
-    failed_billing_attempts: int = Field(default=0)
-    last_billing_date: Optional[datetime] = None
-    next_billing_date: Optional[datetime] = None
-
-    # Schedule tracking
-    last_delivery_date: Optional[date] = None
-    next_delivery_date: Optional[date] = None
-
-    # Lifecycle dates
-    start_date: datetime
-    end_date: Optional[datetime] = None
-    pause_start_date: Optional[datetime] = None
-    pause_end_date: Optional[datetime] = None
-
-    # Timestamps
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    # Relationships (optional, loaded when needed)
-    subscription_items: List[SubscriptionItemSchema] = Field(default_factory=list)
-    delivery_address: Optional[SubscriptionAddressSchema] = None
-
-
-class CreateSubscriptionRequest(BaseModel):
+class CreateSubscriptionRequest(_OneFrequency):
     """Create subscription request schema"""
 
     name: str = Field(..., min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    billing_cycle: str  # Will be validated as SubscriptionFrequency value
-    delivery_frequency: str  # Will be validated as SubscriptionFrequency value
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: int = Field(..., gt=0)
     payment_method: str
     auto_renew: bool = Field(default=True)
-    discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     items: List[Dict[str, Any]] = Field(..., min_length=1)
@@ -130,26 +41,30 @@ class UpdateSubscriptionRequest(BaseModel):
 
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
+    # What the bot's "change frequency" sends (§4.6); the next delivery is recomputed by the rule.
+    frequency: Optional[SubscriptionFrequency] = None
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: Optional[int] = Field(None, gt=0)
     payment_method: Optional[str] = None
     auto_renew: Optional[bool] = None
+    # Unsupported fields must answer 400, not be dropped and reported as a saved success.
+    model_config = ConfigDict(extra="forbid")
 
 
 class PauseSubscriptionRequest(BaseModel):
-    """Pause subscription request schema"""
+    """Pause subscription request schema. Resuming is always the customer's (or an admin's) own action:
+    no client ever set an automatic resume date, so none is accepted (spec 2026-10-23 §4.7)."""
 
     reason: Optional[str] = Field(None, max_length=500)
-    resume_date: Optional[datetime] = None
 
 
 class CancelSubscriptionRequest(BaseModel):
-    """Cancel subscription request schema"""
+    """Cancel subscription request schema. A cancel is always immediate (spec 2026-10-23 §4.6); the
+    `immediate` flag the bot still sends is ignored."""
 
     reason: Optional[str] = Field(None, max_length=500)
-    immediate: bool = Field(default=False)
 
 
 class AddSubscriptionItemRequest(BaseModel):
@@ -167,13 +82,10 @@ class UpdateSubscriptionItemRequest(BaseModel):
     special_instructions: Optional[str] = Field(None, max_length=200)
 
 
-class SubscriptionPreviewRequest(BaseModel):
-    """Subscription preview request schema"""
+class SubscriptionPreviewRequest(_OneFrequency):
+    """Subscription preview request schema: one `frequency`."""
 
-    billing_cycle: str  # SubscriptionFrequency value
-    delivery_frequency: str  # SubscriptionFrequency value
     items: List[Dict[str, Any]] = Field(..., min_length=1)
-    discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
 
 
 class SubscriptionPreviewResponse(BaseModel):
@@ -196,23 +108,6 @@ class SubscriptionPreviewResponse(BaseModel):
 
     # Item breakdown
     items_breakdown: List[Dict[str, Any]]
-
-
-class SubscriptionBillingInfo(BaseModel):
-    """Subscription billing information schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    next_billing_date: Optional[datetime] = None
-    billing_amount: MoneyFloat
-    payment_method: str
-    failed_attempts: int = Field(default=0)
-    last_successful_payment: Optional[datetime] = None
-    total_amount_billed: MoneyFloat = Field(default=0)
-
-    # Payment history summary
-    successful_payments: int = Field(default=0)
-    failed_payments: int = Field(default=0)
 
 
 class SubscriptionStatistics(BaseModel):
@@ -252,21 +147,6 @@ class SubscriptionLogSchema(BaseModel):
     extra_data: Optional[Dict[str, Any]] = None
 
 
-class SubscriptionTemplate(BaseModel):
-    """Subscription template schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: str
-    name: str
-    description: str
-    billing_cycle: str
-    delivery_frequency: str
-    discount_percentage: float
-    suggested_items: List[Dict[str, Any]]
-    estimated_monthly_cost: MoneyFloat
-
-
 class ChangePaymentMethodRequest(BaseModel):
     """Change payment method request schema"""
 
@@ -279,20 +159,8 @@ class SkipDeliveryRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
 
 
-class SubscriptionResponseSchema(BaseModel):
-    """Standard subscription response schema"""
-
-    success: bool
-    message: str
-    subscription: Optional[SubscriptionSchema] = None
-    errors: Optional[List[str]] = None
-
-
 # Export all schemas for easy importing
 __all__ = [
-    "SubscriptionSchema",
-    "SubscriptionItemSchema",
-    "SubscriptionAddressSchema",
     "CreateSubscriptionRequest",
     "UpdateSubscriptionRequest",
     "PauseSubscriptionRequest",
@@ -301,13 +169,10 @@ __all__ = [
     "UpdateSubscriptionItemRequest",
     "SubscriptionPreviewRequest",
     "SubscriptionPreviewResponse",
-    "SubscriptionBillingInfo",
     "SubscriptionStatistics",
     "SubscriptionLogSchema",
-    "SubscriptionTemplate",
     "ChangePaymentMethodRequest",
     "SkipDeliveryRequest",
-    "SubscriptionResponseSchema",
 ]
 
 
@@ -323,6 +188,8 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
     Returns:
         Serialized subscription data
     """
+    from business_app.services.subscription_service import SubscriptionService
+
     try:
         subscription_data = {
             "id": subscription.id,
@@ -330,14 +197,8 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             "name": subscription.name,
             "description": getattr(subscription, "description", None),
             "status": subscription.status.value if hasattr(subscription.status, "value") else str(subscription.status),
-            "billing_cycle": (
-                subscription.billing_cycle.value
-                if hasattr(subscription.billing_cycle, "value")
-                else str(subscription.billing_cycle)
-            ),
             "billing_amount": float(subscription.billing_amount),
             "discount_percentage": getattr(subscription, "discount_percentage", 0.0),
-            "delivery_frequency": subscription.delivery_frequency.value,
             "delivery_day_of_week": getattr(subscription, "delivery_day_of_week", None),
             "delivery_day_of_month": getattr(subscription, "delivery_day_of_month", None),
             "delivery_time_slot_id": getattr(subscription, "delivery_time_slot_id", None),
@@ -352,22 +213,9 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             "auto_renew": getattr(subscription, "auto_renew", True),
             "total_amount_billed": float(getattr(subscription, "total_amount_billed", 0)),
             "failed_billing_attempts": getattr(subscription, "failed_billing_attempts", 0),
-            "last_billing_date": (
-                subscription.last_billing_date.isoformat() if getattr(subscription, "last_billing_date", None) else None
-            ),
-            "next_billing_date": (
-                subscription.next_billing_date.isoformat() if getattr(subscription, "next_billing_date", None) else None
-            ),
-            "last_delivery_date": (
-                subscription.last_delivery_date.isoformat()
-                if getattr(subscription, "last_delivery_date", None)
-                else None
-            ),
-            "next_delivery_date": (
-                subscription.next_delivery_date.isoformat()
-                if getattr(subscription, "next_delivery_date", None)
-                else None
-            ),
+            # frequency, next/last_delivery_date, deliveries_per_month and upcoming_delivery: the one
+            # answer every client shows (spec 2026-10-23 §9), never re-derived by a client.
+            **SubscriptionService.published_schedule(subscription),
             "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
             "end_date": subscription.end_date.isoformat() if getattr(subscription, "end_date", None) else None,
             "pause_start_date": (
@@ -444,20 +292,6 @@ def serialize_subscription_address(address) -> Dict[str, Any]:
         return {"id": address.id, "title": address.title, "full_address": address.full_address, "city": address.city}
 
 
-def serialize_subscription_billing_info(billing_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Serialize subscription billing information"""
-    return {
-        "next_billing_date": billing_info.get("next_billing_date"),
-        "billing_amount": float(billing_info.get("billing_amount", 0)),
-        "payment_method": billing_info.get("payment_method", ""),
-        "failed_attempts": billing_info.get("failed_attempts", 0),
-        "last_successful_payment": billing_info.get("last_successful_payment"),
-        "total_amount_billed": float(billing_info.get("total_amount_billed", 0)),
-        "successful_payments": billing_info.get("successful_payments", 0),
-        "failed_payments": billing_info.get("failed_payments", 0),
-    }
-
-
 def serialize_subscription_statistics(stats_data: Dict[str, Any]) -> Dict[str, Any]:
     """Serialize subscription statistics"""
     return {
@@ -511,14 +345,12 @@ def serialize_subscription_log(log) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class AdminCreateSubscriptionRequest(BaseModel):
+class AdminCreateSubscriptionRequest(_OneFrequency):
     """Admin: create a subscription for any user."""
 
     user_id: int = Field(..., gt=0)
     name: str = Field(..., min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    billing_cycle: str  # SubscriptionFrequency value
-    delivery_frequency: str  # SubscriptionFrequency value
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
@@ -532,19 +364,19 @@ class AdminCreateSubscriptionRequest(BaseModel):
     items: List[Dict[str, Any]] = Field(..., min_length=1)
 
 
-class AdminUpdateSubscriptionRequest(BaseModel):
+class AdminUpdateSubscriptionRequest(_OneFrequency):
     """Admin: update subscription fields, with optional warned overrides.
 
     All content fields are optional. The ``override_*`` flags gate the
-    dangerous fields: billing_amount / billing dates are only applied when
+    dangerous fields: billing_amount / the next delivery date are only applied when
     their flag is set, and a cancelled/expired subscription can only be
     edited when ``override_edit_any_status`` is true (see the service).
     """
 
+    frequency: Optional[SubscriptionFrequency] = None
+
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    billing_cycle: Optional[str] = None
-    delivery_frequency: Optional[str] = None
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
@@ -557,8 +389,8 @@ class AdminUpdateSubscriptionRequest(BaseModel):
     end_date: Optional[datetime] = None
     # Override-gated fields:
     billing_amount: Optional[float] = Field(None, ge=0.0)
-    next_billing_date: Optional[datetime] = None
-    last_billing_date: Optional[datetime] = None
+    # "Set next delivery date" (spec 2026-10-23 §9), checked by the schedule rule.
+    next_delivery_date: Optional[date] = None
     # Override flags:
     override_edit_any_status: bool = Field(default=False)
     override_manual_billing_amount: bool = Field(default=False)

@@ -83,6 +83,7 @@ import itertools
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 
 import pytest
@@ -2259,10 +2260,9 @@ def fenced(db):
         user_id=owner.id,
         status=SubscriptionStatus.ACTIVE,
         name="Weekly water",
-        billing_cycle=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         billing_amount=Decimal("10.00"),
-        next_billing_date=datetime.now(UTC) + timedelta(days=7),
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        next_delivery_date=(local_date() + timedelta(days=7)),
         delivery_address_id=address.id,
         start_date=datetime.now(UTC),
         payment_method=PaymentMethod.CASH,

@@ -78,7 +78,9 @@ def test_cash_order_carries_the_tier_discount(app, db, customer, sample_product,
     assert resp.status_code == 201, resp.get_json()
     order = _reload(resp.get_json()["data"]["order"]["id"])
 
-    expected = LoyaltyService().quote_tier_discount(customer, order.subtotal, PaymentMethod.CASH).amount
+    expected = LoyaltyService().quote_tier_discount(
+        customer, order.subtotal, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount
     assert expected > Decimal("0.00")  # the feature is actually doing something
     assert Decimal(str(order.tier_discount)) == expected
     assert Decimal(str(order.total_amount)) == compute_order_total(

@@ -104,7 +104,7 @@ def make_celery(app=None):
 
     # Configure periodic tasks
     celery.conf.beat_schedule = {
-        # Process subscription billing daily at 9 AM
+        # Create every subscription order due by the lead (spec 2026-10-23 §4.3), daily at 9 AM
         "process-subscription-billing": {
             "task": "business_app.tasks.subscription_tasks.process_daily_subscription_billing",
             "schedule": crontab(hour=9, minute=0),
@@ -310,11 +310,6 @@ def make_celery(app=None):
             "task": "ops.celery_heartbeat",
             "schedule": crontab(minute="*/5"),
             "options": {"expires": 300},
-        },
-        # Send subscription renewal reminders
-        "subscription-renewal-reminders": {
-            "task": "business_app.tasks.subscription_tasks.send_renewal_reminders",
-            "schedule": crontab(hour=10, minute=0),  # Daily at 10 AM
         },
         # Optimize delivery routes daily
         "optimize-delivery-routes": {

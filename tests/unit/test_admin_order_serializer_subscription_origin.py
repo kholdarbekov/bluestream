@@ -8,6 +8,7 @@ emitted them.
 """
 
 from datetime import datetime, timedelta, timezone
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 
 import pytest
@@ -30,15 +31,14 @@ def sample_subscription(db, sample_user, sample_product, user_address):
         user_id=sample_user.id,
         name="Weekly Water",
         status=SubscriptionStatus.ACTIVE,
-        billing_cycle=SubscriptionFrequency.WEEKLY,
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         delivery_address_id=user_address.id,
         payment_method=PaymentMethod.CASH,
         auto_renew=True,
         discount_percentage=10.0,
         billing_amount=Decimal("0.00"),
         start_date=datetime.now(timezone.utc),
-        next_billing_date=datetime.now(timezone.utc) - timedelta(minutes=1),
+        next_delivery_date=local_date(),
     )
     db.session.add(subscription)
     db.session.flush()
@@ -59,7 +59,7 @@ def sample_subscription(db, sample_user, sample_product, user_address):
 class TestSerializeOrderAdminSubscriptionOrigin:
     def test_subscription_generated_order_exposes_origin_fields(self, app, db, sample_subscription):
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sample_subscription.id)
+            result = SubscriptionService().create_next_order(sample_subscription.id)
             order = Order.query.get(result["order_id"])
 
             data = serialize_order_admin(order)

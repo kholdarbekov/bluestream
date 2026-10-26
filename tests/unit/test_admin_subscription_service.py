@@ -1,6 +1,8 @@
 import pytest
 from datetime import UTC, datetime, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
+from unittest.mock import patch
 
 from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
 from business_app.models.user import UserAddress
@@ -36,11 +38,10 @@ def _make_subscription(
     *,
     number,
     status=SubscriptionStatus.ACTIVE,
-    billing_cycle=SubscriptionFrequency.MONTHLY,
-    delivery_frequency=SubscriptionFrequency.WEEKLY,
+    frequency=SubscriptionFrequency.MONTHLY,
     billing_amount=Decimal("50000.00"),
-    next_billing_date=None,
-    last_billing_date=None,
+    next_delivery_date=None,
+    last_delivery_date=None,
     payment_method=PaymentMethod.CARD,
 ):
     sub = Subscription(
@@ -48,11 +49,10 @@ def _make_subscription(
         user_id=user.id,
         status=status,
         name="Standard",
-        billing_cycle=billing_cycle,
+        frequency=frequency,
         billing_amount=billing_amount,
-        next_billing_date=next_billing_date or (datetime.now(UTC) + timedelta(days=7)),
-        last_billing_date=last_billing_date,
-        delivery_frequency=delivery_frequency,
+        next_delivery_date=next_delivery_date or (local_date() + timedelta(days=7)),
+        last_delivery_date=last_delivery_date,
         delivery_address_id=addr.id,
         payment_method=payment_method,
         start_date=datetime.now(UTC),
@@ -89,8 +89,7 @@ class TestAdminCreateSubscription:
             payload = AdminCreateSubscriptionRequest(
                 user_id=sample_user.id,
                 name="Weekly Water",
-                billing_cycle="monthly",
-                delivery_frequency="weekly",
+                frequency="monthly",
                 delivery_address_id=addr.id,
                 payment_method="cash",
                 items=[{"product_id": sample_product.id, "quantity": 3}],
@@ -123,8 +122,7 @@ class TestAdminCreateSubscription:
             payload = AdminCreateSubscriptionRequest(
                 user_id=sample_user.id,
                 name="Weekly Water",
-                billing_cycle="monthly",
-                delivery_frequency="weekly",
+                frequency="monthly",
                 delivery_address_id=999999,  # nonexistent / not owned
                 payment_method="cash",
                 items=[{"product_id": sample_product.id, "quantity": 3}],
@@ -134,25 +132,27 @@ class TestAdminCreateSubscription:
                     validated_data=payload, actor_user_id=admin_user.id
                 )
 
-    def test_rejects_billing_shorter_than_delivery(
+    def test_one_frequency_is_stored(
         self, app, db, sample_user, sample_product, admin_user
     ):
+        """One frequency (spec 2026-10-23 §2.1): it is the cadence orders are created on."""
         with app.app_context():
             addr = _make_address(db, sample_user)
             db.session.commit()
             payload = AdminCreateSubscriptionRequest(
                 user_id=sample_user.id,
                 name="Weekly Water",
-                billing_cycle="daily",  # rank 1 < weekly delivery rank 2
-                delivery_frequency="weekly",
+                frequency="daily",
                 delivery_address_id=addr.id,
                 payment_method="cash",
                 items=[{"product_id": sample_product.id, "quantity": 3}],
             )
-            with pytest.raises(ValidationError):
-                SubscriptionService().admin_create_subscription(
+            with patch("business_app.tasks.subscription_tasks.create_subscription_delivery_task.delay"):
+                result = SubscriptionService().admin_create_subscription(
                     validated_data=payload, actor_user_id=admin_user.id
                 )
+            sub = Subscription.query.filter_by(subscription_number=result["subscription_number"]).one()
+            assert sub.frequency == SubscriptionFrequency.DAILY
 
 
 @pytest.mark.unit
@@ -254,28 +254,24 @@ class TestAdminUpdateSubscription:
             )
             assert updated.name == "Reactivated name"
 
-    def test_rejects_frequency_invariant_violation(
+    def test_a_frequency_change_is_saved(
         self, app, db, sample_user, sample_product, admin_user
     ):
         with app.app_context():
             addr = _make_address(db, sample_user)
-            # Fixture is WEEKLY billing / WEEKLY delivery (valid). The update sets
-            # billing_cycle to daily (rank 1) while delivery stays weekly (rank 2),
-            # so billing_rank(1) < delivery_rank(2) violates the invariant.
             sub = _make_subscription(
                 db, sample_user, addr, number="SUB-U6",
-                billing_cycle=SubscriptionFrequency.WEEKLY,
-                delivery_frequency=SubscriptionFrequency.WEEKLY,
+                frequency=SubscriptionFrequency.WEEKLY,
             )
             db.session.commit()
-            with pytest.raises(ValidationError):
-                # billing daily (rank 1) < delivery weekly (rank 2) -> invalid.
-                SubscriptionService().admin_update_subscription(
-                    subscription_id=sub.id,
-                    update_data={"billing_cycle": "daily"},
-                    actor_user_id=admin_user.id,
-                    overrides={},
-                )
+            request_data = AdminUpdateSubscriptionRequest(frequency="daily")
+            updated = SubscriptionService().admin_update_subscription(
+                subscription_id=sub.id,
+                update_data=request_data.model_dump(exclude_none=True),
+                actor_user_id=admin_user.id,
+                overrides={},
+            )
+            assert updated.frequency == SubscriptionFrequency.DAILY
 
     def test_status_field_cannot_be_smuggled_via_update(
         self, app, db, sample_user, sample_product, admin_user
@@ -428,38 +424,36 @@ class TestAdminLifecycle:
             db.session.commit()
             updated = SubscriptionService().admin_pause_subscription(
                 subscription_id=sub.id, actor_user_id=admin_user.id, reason="ops hold"
-            )
+            )["subscription"]
             assert updated.status == SubscriptionStatus.PAUSED
             log = SubscriptionLog.query.filter_by(subscription_id=sub.id, action="paused").first()
             assert log is not None and log.user_id == admin_user.id
 
-    def test_resume_advances_next_billing_date_via_service_helper(
+    def test_resume_dates_the_next_delivery_by_the_customers_rule(
         self, app, db, sample_user, sample_product, admin_user
     ):
+        """Admin and customer resume alike (spec 2026-10-23 §4.6): the first delivery the lead allows,
+        not the old admin "+1 cycle", and never the seeded past date."""
+        from business_app.services import subscription_schedule
+        from business_app.utils.local_windows import local_date
+
         with app.app_context():
             addr = _make_address(db, sample_user)
-            # Seed a PAST next_billing_date so a no-op resume (the broken model
-            # helper) would leave it in the past — this makes the assertion
-            # actually discriminate the correct service-helper recompute.
             past = datetime.now(UTC) - timedelta(days=30)
             sub = _make_subscription(
                 db, sample_user, addr, number="SUB-L2",
                 status=SubscriptionStatus.PAUSED,
-                billing_cycle=SubscriptionFrequency.WEEKLY,
-                next_billing_date=past,
+                frequency=SubscriptionFrequency.WEEKLY,
+                next_delivery_date=past.date(),
             )
             db.session.commit()
-            updated = SubscriptionService().admin_resume_subscription(
-                subscription_id=sub.id, actor_user_id=admin_user.id
-            )
+            with patch("business_app.tasks.subscription_tasks.create_subscription_delivery_task.delay") as enqueued:
+                updated = SubscriptionService().admin_resume_subscription(
+                    subscription_id=sub.id, actor_user_id=admin_user.id
+                )
             assert updated.status == SubscriptionStatus.ACTIVE
-            nbd = updated.next_billing_date
-            if nbd.tzinfo is None:  # SQLite DateTime(timezone=True) drops tzinfo on reload
-                nbd = nbd.replace(tzinfo=UTC)
-            now = datetime.now(UTC)
-            # weekly resume must recompute to ~now + 7 days, NOT the seeded past value
-            assert nbd > now
-            assert abs((nbd - (now + timedelta(days=7))).total_seconds()) < 300
+            assert updated.next_delivery_date == subscription_schedule.earliest_delivery_date(local_date())
+            enqueued.assert_called_once_with(sub.id)  # inside the lead: created now
             assert SubscriptionLog.query.filter_by(
                 subscription_id=sub.id, action="resumed"
             ).first() is not None
@@ -473,7 +467,7 @@ class TestAdminLifecycle:
             db.session.commit()
             updated = SubscriptionService().admin_cancel_subscription(
                 subscription_id=sub.id, actor_user_id=admin_user.id, reason="customer request"
-            )
+            )["subscription"]
             assert updated.status == SubscriptionStatus.CANCELLED
             assert SubscriptionLog.query.filter_by(
                 subscription_id=sub.id, action="cancelled"

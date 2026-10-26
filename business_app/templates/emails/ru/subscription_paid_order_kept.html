@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Оплаченный заказ остаётся - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Оплаченный заказ остаётся</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Заказ <strong>#{{ order_number }}</strong> уже оплачен, поэтому он остаётся и будет доставлен <strong>{{ delivery_date }}</strong>.</p>
+</div>
+
+{% if trigger == "skip" %}
+<p>Пропуск относится к следующей за ним доставке; следующая доставка — <strong>{{ next_delivery_date }}</strong>.</p>
+{% elif trigger == "pause" %}
+<p>Подписка приостановлена: новых заказов не будет, пока вы её не возобновите.</p>
+{% else %}
+<p>Подписка отменена: новые заказы создаваться не будут.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

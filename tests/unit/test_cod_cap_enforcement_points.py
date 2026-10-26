@@ -11,6 +11,7 @@ before" regression guard.
 """
 
 from datetime import datetime, timedelta, timezone
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 
 import pytest
@@ -611,14 +612,13 @@ class TestSubscriptionPlaceCapSkip:
             user_id=user.id,
             name="Weekly Water",
             status=SubscriptionStatus.ACTIVE,
-            billing_cycle=SubscriptionFrequency.WEEKLY,
-            delivery_frequency=SubscriptionFrequency.WEEKLY,
+            frequency=SubscriptionFrequency.WEEKLY,
             delivery_address_id=address.id,
             payment_method=PaymentMethod.CASH,
             auto_renew=True,
             billing_amount=Decimal("0.00"),
             start_date=datetime.now(timezone.utc),
-            next_billing_date=datetime.now(timezone.utc) - timedelta(minutes=1),
+            next_delivery_date=local_date(),
         )
         db.session.add(subscription)
         db.session.flush()
@@ -648,9 +648,9 @@ class TestSubscriptionPlaceCapSkip:
         _cap_the_place(db, user_address)
         subscription = self._subscription(db, sample_user, sample_product, user_address)
         before_failures = subscription.failed_payment_count or 0
-        before_next = subscription.next_billing_date
+        before_next = subscription.next_delivery_date
 
-        result = SubscriptionService().process_subscription_billing(subscription.id)
+        result = SubscriptionService().create_next_order(subscription.id)
 
         assert result["success"] is False
         assert result["skipped"] is True
@@ -659,7 +659,7 @@ class TestSubscriptionPlaceCapSkip:
         refreshed = Subscription.query.get(subscription.id)
         assert refreshed.status is SubscriptionStatus.ACTIVE
         assert (refreshed.failed_payment_count or 0) == before_failures
-        assert refreshed.next_billing_date > before_next
+        assert refreshed.next_delivery_date > before_next
         assert Order.query.filter_by(subscription_id=subscription.id).count() == 0
 
     def test_billing_to_ungrouped_address_still_succeeds(
@@ -669,6 +669,6 @@ class TestSubscriptionPlaceCapSkip:
         from business_app.services.subscription_service import SubscriptionService
 
         subscription = self._subscription(db, sample_user, sample_product, user_address)
-        result = SubscriptionService().process_subscription_billing(subscription.id)
+        result = SubscriptionService().create_next_order(subscription.id)
         assert result["success"] is True
         assert "order_id" in result

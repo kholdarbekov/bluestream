@@ -224,10 +224,11 @@ async def test_the_suggested_order_walks_straight_to_the_backend_body(monkeypatc
 
     await harness.send(ops.tap("staff_sales_v_skip_notes"))
 
-    # The quote carries the RAIL the agent just chose. `create_order` applies
-    # a live tier discount per payment method, so an estimate priced without
-    # one is a number the store is not going to be charged — the agent reads
-    # it out to the shopkeeper on the very next line of this screen.
+    # The quote carries the RAIL the agent just chose. `create_order` prices
+    # a contract customer's lines by payment method (contract dual pricing),
+    # so an estimate priced without one is a number the store is not going to
+    # be charged — the agent reads it out to the shopkeeper on the very next
+    # line of this screen.
     assert [c.data for c in _calls(harness, "POST", ESTIMATE)] == [
         {"items": [{"product_id": 3, "quantity": 20}], "payment_method": "cash"},
     ]

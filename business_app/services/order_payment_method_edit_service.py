@@ -320,8 +320,8 @@ class OrderPaymentMethodEditService:
             db.session.flush()
 
             # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #2): the bank-transfer
-            #     contract price, and no COD-only tier discount. business_account is not a
-            #     COD rail, so a COD-only tier discount must not survive onto
+            #     contract price, and no tier discount. business_account is not a
+            #     COD rail, so a tier discount (COD, customer-placed bot/web orders only) must not survive onto
             #     it: the corporate account must be billed the same
             #     undiscounted amount a fiscalized rail would be. This is a
             #     revenue-correctness point rather than a fiscal one
@@ -499,7 +499,8 @@ class OrderPaymentMethodEditService:
             self.corporate_service.reverse_order_prepayment(order.id, reason=reason, actor_user_id=actor_user_id)
 
             # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #3): the contract CASH price, and
-            #     for a loyalty-eligible customer the COD tier discount. Before step 2, so the fresh
+            #     the tier discount only if `LoyaltyService.quote_tier_discount` grants it (customer-placed
+            #     bot/web order, not staff-entered or subscription). Before step 2, so the fresh
             #     COD obligation is priced off the re-priced total.
             from business_app.services.rail_pricing import reprice_order_for_rail
 
@@ -590,8 +591,9 @@ class OrderPaymentMethodEditService:
                 )
 
             # 1b. THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #4): the catalogue price for a
-            #     contract line. THE TIER DISCOUNT FOLLOWS THE RAIL — it is a COD-only benefit
-            #     and must never reach a Click fiscal receipt:
+            #     contract line. THE TIER DISCOUNT FOLLOWS THE RAIL — it needs a COD rail (and a
+            #     customer-placed bot/web order; see `LoyaltyService.quote_tier_discount`) so it
+            #     must never reach a Click fiscal receipt:
             #     build_click_fiscalization_payload prices received_card off
             #     order.total_amount while filling per-item Discount from
             #     loyalty_discount ALONE, so a tier-discounted total here would

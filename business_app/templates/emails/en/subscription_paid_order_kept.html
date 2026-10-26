@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Your paid order stays - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Your paid order stays</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Order <strong>#{{ order_number }}</strong> is already paid, so it stays and will be delivered on <strong>{{ delivery_date }}</strong>.</p>
+</div>
+
+{% if trigger == "skip" %}
+<p>Your skip applies to the delivery after it; your next delivery after that is <strong>{{ next_delivery_date }}</strong>.</p>
+{% elif trigger == "pause" %}
+<p>Your subscription is paused: no new orders until you resume it.</p>
+{% else %}
+<p>Your subscription is cancelled: no new orders will be created.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

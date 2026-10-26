@@ -29,6 +29,26 @@
         });
     }
 
+    // The backend publishes ONE `upcoming_delivery` ({date, window_start, window_end, order_id}); the page
+    // only shows it. `date` is a calendar date ("YYYY-MM-DD").
+    function upcomingDay(subscription) {
+        var upcoming = subscription.upcoming_delivery;
+        return upcoming && upcoming.date ? upcoming.date : null;
+    }
+
+    function upcomingDayLabel(subscription) {
+        var day = upcomingDay(subscription);
+        return day === null ? 'N/A' : formatDate(day + 'T00:00:00');
+    }
+
+    function upcomingWindowLabel(subscription) {
+        var upcoming = subscription.upcoming_delivery;
+        if (!upcoming) return 'N/A';
+        return upcoming.window_start && upcoming.window_end
+            ? upcoming.window_start + ' - ' + upcoming.window_end
+            : PAGE_DATA.i18n.time_to_be_confirmed;
+    }
+
     async function loadSubscriptionOverview() {
         try {
             var response = await apiRequest('/subscriptions?status=active');
@@ -42,22 +62,20 @@
                 var currentMonth = now.getMonth();
                 var currentYear = now.getFullYear();
 
+                // The backend's upcoming delivery is a calendar date ("YYYY-MM-DD"); compare its month text.
+                var thisMonth = now.getFullYear() + '-' + String(currentMonth + 1).padStart(2, '0');
                 var deliveriesThisMonth = subscriptions.filter(function (sub) {
-                    if (!sub.next_delivery_date) return false;
-                    var deliveryDate = new Date(sub.next_delivery_date);
-                    return deliveryDate.getMonth() === currentMonth &&
-                        deliveryDate.getFullYear() === currentYear;
+                    var day = upcomingDay(sub);
+                    return day !== null && day.slice(0, 7) === thisMonth;
                 }).length;
 
                 document.getElementById('activeSubscriptionsCount').textContent = activeCount;
                 document.getElementById('nextDeliveryCount').textContent = deliveriesThisMonth;
-                document.getElementById('monthlySavings').textContent = formatPrice(0);
             }
         } catch (error) {
             console.error('Failed to load subscription overview:', error);
             document.getElementById('activeSubscriptionsCount').textContent = '0';
             document.getElementById('nextDeliveryCount').textContent = '0';
-            document.getElementById('monthlySavings').textContent = '0 UZS';
         }
     }
 
@@ -110,7 +128,7 @@
                 '</div>' +
                 '<div class="col-md-3 text-right">' +
                 '<h5 class="mb-0">' + formatPrice(subscription.billing_amount) + '</h5>' +
-                '<small class="text-muted">/' + escapeHtml(subscription.delivery_frequency) + '</small>' +
+                '<small class="text-muted">/' + escapeHtml(subscription.frequency) + '</small>' +
                 '</div></div></div>' +
                 '<div class="subscription-body">' +
                 '<div class="row">' +
@@ -123,11 +141,11 @@
                 '<div class="row">' +
                 '<div class="col-6">' +
                 '<small class="text-muted">' + escapeHtml(PAGE_DATA.i18n.next_delivery) + '</small>' +
-                '<div><strong>' + (subscription.next_delivery_date ? escapeHtml(formatDate(subscription.next_delivery_date)) : 'N/A') + '</strong></div>' +
+                '<div><strong>' + escapeHtml(upcomingDayLabel(subscription)) + '</strong></div>' +
                 '</div>' +
                 '<div class="col-6">' +
-                '<small class="text-muted">' + escapeHtml(PAGE_DATA.i18n.next_billing) + '</small>' +
-                '<div><strong>' + (subscription.next_billing_date ? escapeHtml(formatDate(subscription.next_billing_date)) : 'N/A') + '</strong></div>' +
+                '<small class="text-muted">' + escapeHtml(PAGE_DATA.i18n.time_slot) + '</small>' +
+                '<div><strong>' + escapeHtml(upcomingWindowLabel(subscription)) + '</strong></div>' +
                 '</div></div></div></div>' +
                 '<div class="col-md-4">' +
                 '<div class="subscription-meta">' +
@@ -305,21 +323,20 @@
             '</div></div>' +
             '<div class="col-md-6">' +
             '<div class="subscription-pricing">' +
-            '<h3>' + formatPrice(subscription.billing_amount) + '<small>/' + escapeHtml(subscription.delivery_frequency) + '</small></h3>' +
+            '<h3>' + formatPrice(subscription.billing_amount) + '<small>/' + escapeHtml(subscription.frequency) + '</small></h3>' +
             '<div class="pricing-details">' +
             '<div><strong>' + escapeHtml(PAGE_DATA.i18n.products) + ':</strong></div>' +
             '<ul style="padding-left: 20px; margin-top: 5px;">' + productsHtml + '</ul>' +
-            '<div>' + escapeHtml(PAGE_DATA.i18n.delivery_frequency) + ': <strong>' + escapeHtml(subscription.delivery_frequency) + '</strong></div>' +
-            '<div>' + escapeHtml(PAGE_DATA.i18n.next_billing) + ': <strong>' + (subscription.next_billing_date ? escapeHtml(formatDate(subscription.next_billing_date)) : 'N/A') + '</strong></div>' +
+            '<div>' + escapeHtml(PAGE_DATA.i18n.frequency_label) + ': <strong>' + escapeHtml(subscription.frequency) + '</strong></div>' +
             '</div></div></div></div>' +
             '<div class="delivery-info mb-4">' +
             '<h5>' + escapeHtml(PAGE_DATA.i18n.delivery_information) + '</h5>' +
             '<div class="row">' +
             '<div class="col-md-6">' +
             '<div class="info-group"><strong>' + escapeHtml(PAGE_DATA.i18n.next_delivery) + ':</strong>' +
-            '<div>' + (subscription.next_delivery_date ? escapeHtml(formatDate(subscription.next_delivery_date)) : 'N/A') + '</div></div>' +
+            '<div>' + escapeHtml(upcomingDayLabel(subscription)) + '</div></div>' +
             '<div class="info-group"><strong>' + escapeHtml(PAGE_DATA.i18n.time_slot) + ':</strong>' +
-            '<div>' + escapeHtml(subscription.delivery_time_slot || 'N/A') + '</div></div>' +
+            '<div>' + escapeHtml(upcomingWindowLabel(subscription)) + '</div></div>' +
             '<div class="info-group"><strong>' + escapeHtml(PAGE_DATA.i18n.payment_method) + ':</strong>' +
             '<div>' + escapeHtml(subscription.payment_method ? subscription.payment_method.toUpperCase() : 'N/A') + '</div></div>' +
             '</div>' +
@@ -397,7 +414,8 @@
 
         try {
             var response = await apiRequest('/subscriptions/' + subscriptionId + '/pause', {
-                method: 'POST'
+                method: 'POST',
+                body: JSON.stringify({})
             });
 
             var result = await response.json();

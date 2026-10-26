@@ -28,9 +28,11 @@ from handlers.subscriptions import (
     ITEM_SELECT_PRODUCT,
     ITEM_SELECT_QUANTITY,
     SELECT_ADDRESS,
+    SELECT_DAY,
     SELECT_FREQUENCY,
     SELECT_PAYMENT,
     SELECT_QUANTITY,
+    SELECT_SLOT,
 )
 
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure, build_bot_harness
@@ -48,7 +50,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 PRODUCTS = "/api/v1/products"
 ADDRESSES = "/api/v1/auth/addresses"
 PAYMENT_METHODS = "/api/v1/payments/methods"
-TEMPLATES = "/api/v1/subscriptions/templates"
+SLOTS = "/api/v1/delivery/time-slots"
 
 SUB_ID = 12
 PRODUCT_ID = 7
@@ -91,6 +93,8 @@ TRANSLATIONS = {
     "telegram.subscription.total_items": "items so far",
     "telegram.subscription.add_more_or_continue": "add more or continue",
     "telegram.subscription.select_frequency": "HOW-OFTEN",
+    "telegram.subscription.select_day_of_week": "WHICH-WEEKDAY",
+    "telegram.subscription.select_time_slot": "WHICH-TIME",
     "telegram.subscription.select_address": "WHERE-TO",
     "telegram.subscription.select_payment": "HOW-TO-PAY",
     "telegram.subscription.no_addresses": "no addresses yet",
@@ -142,7 +146,11 @@ async def bot(monkeypatch):
             }
         },
     )
-    harness.backend.route("GET", TEMPLATES, lambda _c: {"data": {}})
+    harness.backend.route(
+        "GET",
+        SLOTS,
+        lambda _c: {"time_slots": [{"id": 5, "name": "Morning", "time_range": "10:00-12:00"}]},
+    )
     harness.backend.addresses[ADDRESS_ID] = {
         "id": ADDRESS_ID,
         "address_line1": "15, Chilonzor dahasi",
@@ -210,6 +218,10 @@ async def reach_payment_screen(bot, user):
     await bot.send(user.tap("sub_items_done"))
     assert bot.conversation_state("subscription_creation") == SELECT_ADDRESS
     await bot.send(user.tap("subscription_freq_weekly"))
+    assert bot.conversation_state("subscription_creation") == SELECT_DAY
+    await bot.send(user.tap("subscription_day_3"))
+    assert bot.conversation_state("subscription_creation") == SELECT_SLOT
+    await bot.send(user.tap("subscription_slot_5"))
     assert bot.conversation_state("subscription_creation") == SELECT_PAYMENT
     await bot.send(user.tap(f"addr_{ADDRESS_ID}"))
     assert bot.conversation_state("subscription_creation") == CONFIRM_SUBSCRIPTION
@@ -246,8 +258,8 @@ async def test_back_from_the_payment_screen_returns_to_the_address_list(bot, use
         "by the step the customer just left"
     )
     creation = bot.application.user_data[DEFAULT_USER_ID]["subscription_creation"]
-    assert creation["delivery_frequency"] == "weekly", (
-        "going back one step must not discard the frequency two steps back"
+    assert creation["frequency"] == "weekly" and creation["delivery_day"] == 3, (
+        "going back one step must not discard the frequency and day two steps back"
     )
 
 
@@ -531,3 +543,27 @@ async def test_an_item_flow_expiring_leaves_a_subscription_being_built_alone(bot
     await fire_conversation_timeout(bot, side_flow, user.tap(enter))
 
     assert {key: flow_data.get(key) for key in before} == before
+
+
+# ---------------------------------------------------------------------------
+# Subscriptions give no discount: the bot must not send a discount field
+# ---------------------------------------------------------------------------
+
+
+async def test_the_bot_sends_no_discount_in_the_preview_or_create_bodies(bot, user):
+    bot.backend.route(
+        "POST",
+        "/api/v1/subscriptions/preview",
+        lambda _c: {"data": {"preview": {"items": [], "frequency": "weekly", "total_amount": 50000}}},
+    )
+    bot.backend.route("POST", "/api/v1/subscriptions", lambda _c: {"data": {"subscription": {"id": SUB_ID}}})
+    await reach_payment_screen(bot, user)
+
+    await bot.send(user.tap("sub_payment_cash"))
+    await bot.send(user.tap("confirm_create_subscription"))
+
+    sent = [c for c in bot.backend.calls if c.endpoint.startswith("/api/v1/subscriptions") and c.method == "POST"]
+    endpoints = {c.endpoint for c in sent}
+    assert {"/api/v1/subscriptions/preview", "/api/v1/subscriptions"} <= endpoints, endpoints
+    for call in sent:
+        assert "discount_percentage" not in (call.data or {}), call

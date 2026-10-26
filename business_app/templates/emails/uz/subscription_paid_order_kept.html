@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block title %}To'langan buyurtmangiz saqlanadi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>To'langan buyurtmangiz saqlanadi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p><strong>#{{ order_number }}</strong> buyurtmasi allaqachon to'langan, shuning uchun u saqlanadi va <strong>{{ delivery_date }}</strong> kuni yetkazib beriladi.</p>
+</div>
+
+{% if trigger == "skip" %}
+<p>O'tkazib yuborish undan keyingi yetkazib berishga tegishli; keyingi yetkazib berish — <strong>{{ next_delivery_date }}</strong>.</p>
+{% elif trigger == "pause" %}
+<p>Obunangiz to'xtatildi: qayta yoqmaguningizcha yangi buyurtmalar yaratilmaydi.</p>
+{% else %}
+<p>Obunangiz bekor qilindi: yangi buyurtmalar yaratilmaydi.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizga yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

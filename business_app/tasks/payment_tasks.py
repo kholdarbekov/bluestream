@@ -10,13 +10,11 @@ from typing import Dict, Any, List
 from flask import current_app
 
 from business_app.models.payment import Payment, PaymentTransaction, PaymentFiscalization
-from business_app.models.order import Order
 from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger
-from business_app.utils.constants import NotificationChannel
 from business_app.utils.exceptions import ProviderUnavailableError, PaymentError
 from business_app.utils.payment_projection import FISCALIZED_RAILS, order_is_dead, order_is_resolved
 from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
@@ -580,43 +578,6 @@ def send_cod_reconciliation_reminders(self):
 
 # NOTE: process_loyalty_points_payment task removed — loyalty points are spent
 # only on rewards (LoyaltyReward.points_cost), never as a direct payment method.
-
-
-@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
-def send_payment_reminder(self, order_id: int):
-    """Send payment reminder for unpaid orders"""
-    try:
-        logger.info(f"Sending payment reminder for order {order_id}")
-
-        order = Order.query.get(order_id)
-        if not order:
-            logger.error(f"Order {order_id} not found")
-            return {"success": False, "error": "Order not found"}
-
-        # Check if order still needs payment
-        if order.status != OrderStatus.PENDING:
-            logger.info(f"Order {order_id} no longer needs payment reminder")
-            return {"success": False, "error": "Order status changed"}
-
-        # Send reminder notification
-        notification_service = NotificationService()
-        notification_service.send_notification(
-            order.user_id,
-            "payment_reminder",
-            channels=[NotificationChannel.TELEGRAM],
-            template_data={
-                "order_number": order.order_number,
-                "order_total": float(order.total_amount) if order.total_amount is not None else None,
-                "payment_deadline": (order.created_at + timedelta(hours=24)).isoformat(),
-            },
-        )
-
-        logger.info(f"Payment reminder sent for order {order_id}")
-        return {"success": True, "order_id": order_id}
-
-    except Exception as exc:
-        logger.error(f"Failed to send payment reminder: {exc}")
-        raise self.retry(exc=exc)
 
 
 @shared_task(time_limit=300, soft_time_limit=270)

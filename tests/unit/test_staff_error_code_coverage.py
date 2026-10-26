@@ -212,6 +212,8 @@ NOT_STAFF_FACING: dict[str, str] = {
     "DELIVERY_DATE_REQUIRED": f"{_BOT_NEVER_SENDS}: re-dispatch always passes a date, the one the operator tapped "
     f"or local today when none is sent (order_schedule_service.py _apply_reschedule, staff_service.py "
     f"redispatch_failed_delivery){_FALLBACK}",
+    "ORDER_ITEM_BELOW_MIN_QUANTITY": f"{_BOT_NEVER_SENDS}: the visit order refuses a line under the product "
+    f"minimum first, as SALES_ORDER_MIN_QTY (visit_service.py), before create_order reads it{_FALLBACK}",
     "ORDER_RESCHEDULE_REASON_TOO_LONG": f"{_BOT_NEVER_SENDS}: the re-dispatch POST carries no reason "
     f"(order_schedule_service.py _normalize_reason, api_client.redispatch_delivery){_FALLBACK}",
     "SALES_CONTACT_ROLE_INVALID": f"{_BOT_NEVER_SENDS}: a new outlet's contact is always role 'owner' and the bot "

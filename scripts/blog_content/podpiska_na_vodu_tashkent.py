@@ -8,7 +8,7 @@ model; cadence-planning table; routes via the Telegram bot.
 ARTICLE = {
     "slug": "podpiska-na-vodu-tashkent",
     "category": "company_news",
-    "tags": "subscription,savings,recurring,plan,convenience,delivery,tashkent",
+    "tags": "subscription,auto-order,recurring,plan,convenience,delivery,tashkent",
     "featured_image": "/static/images/news/news-8.jpg",
     "image_alt_text": "customer scheduling water-delivery subscription on a phone",
     "is_featured": False,
@@ -40,13 +40,13 @@ ARTICLE = {
 <p>Вы знаете заранее, сколько бутылей в месяц закажете и какая сумма уйдёт на питьевую воду. Это особенно важно для офисов, ведущих месячный бюджет, и для семей, планирующих коммунальные расходы.</p>
 
 <h3>2. Никаких «вода закончилась в субботу»</h3>
-<p>Подписка строится не на остатке, а на скорости расхода. Если вы пьёте 4 бутыли 19 л в месяц, доставка раз в неделю по одной бутыли удержит вас в комфортной зоне без скачков и пустых дней.</p>
+<p>Подписка строится не на остатке, а на скорости расхода. Если вы пьёте 4 бутыли 19 л в месяц, доставка раз в неделю по одной бутыли удержит вас в комфортной зоне без скачков и пустых дней. Автозаказ делает остальное: подписка сама оформляет каждый заказ по графику, поэтому вы не забудете заказать воду и не останетесь без неё, когда она нужнее всего.</p>
 
 <h3>3. Автоматический возврат тары</h3>
 <p>На каждой доставке курьер забирает пустые 19 л бутыли и привозит полные. Цикл закрытый: вы не храните пустую тару неделями, а возвратные бутыли проходят промышленную мойку и санитарную обработку перед повторным розливом.</p>
 
-<h3>4. Лучшая удельная цена за литр</h3>
-<p>На определённые подписочные планы действуют скидки относительно разовых заказов — пересмотрите актуальные тарифы на странице <a href="/subscriptions">/subscriptions</a>. Подписка выгоднее, если вы и так стабильно заказываете воду каждую неделю или две.</p>
+<h3>4. Бесплатная доставка и AquaCoins</h3>
+<p>Доставка всегда бесплатная — и по подписке, и при разовом заказе. За каждую доставку по подписке вы получаете AquaCoins по ставке вашего уровня и можете обменивать их на награды. Воду по подписке вы покупаете по обычной цене; главное преимущество — автозаказ: система сама оформляет каждый заказ по графику, и вы больше не забываете заказать воду. Актуальные условия — на странице <a href="/subscriptions">/subscriptions</a>.</p>
 
 <h3>5. Гибкость: пауза, пропуск, отмена</h3>
 <p>Уехали в отпуск на месяц? Поставьте подписку на паузу. Нужно пропустить одну доставку? Это делается в один клик. Хотите отменить — отмена доступна без штрафов в стандартных условиях. Подробности и текущие правила — на странице <a href="/subscriptions">/subscriptions</a>.</p>
@@ -151,13 +151,13 @@ ARTICLE = {
 <h2>Сезонность и корректировка плана</h2>
 <p>В Ташкенте расход питьевой воды заметно меняется по сезонам. С июня по август расход легко вырастает на 30–50% по сравнению с зимой: жара, спорт, больше чая со льдом и холодной воды для гостей. Подписка позволяет учесть это без хлопот: летом вы добавляете одну дополнительную бутыль в неделю или временно переходите на более частую периодичность, осенью возвращаетесь к привычному графику. Все изменения вносятся в личном кабинете или в Telegram-боте за минуту и применяются со следующей доставки. Не нужно держать таблицу расхода — достаточно реагировать на наблюдаемое: если за месяц вы один раз остались без воды или заказывали внеплановую доставку, увеличьте план на одну позицию.</p>
 
-<h2>Подписка для офисов: операционная экономия</h2>
-<p>Для бизнеса подписка — это не только удобство, но и операционная экономия. Офис-менеджер перестаёт каждую неделю запрашивать заявку, согласовывать оплату, контролировать остаток в кулере. Бюджет на питьевую воду превращается в один периодический платёж — это упрощает учёт и снимает споры о «лишних бутылях в этом месяце». Для крупных офисов и сетей доступен ежемесячный счёт с НДС, договор и регулярная отчётность — детали и форматы оформления уточните при подключении на <a href="/subscriptions">/subscriptions</a> или у менеджера.</p>
+<h2>Подписка для офисов: операционное удобство</h2>
+<p>Для бизнеса подписка — это не только удобство, но и операционное удобство. Офис-менеджер перестаёт каждую неделю запрашивать заявку, согласовывать оплату, контролировать остаток в кулере. Расходы на питьевую воду становятся предсказуемыми — это упрощает учёт и снимает споры о «лишних бутылях в этом месяце». Каждая доставка оформляется отдельным заказом и оплачивается выбранным способом: наличными при получении, через Click или с корпоративного счёта. Подробности — на странице <a href="/subscriptions">/subscriptions</a>.</p>
 
 <h2>Часто задаваемые вопросы</h2>
 
 <h3>Как поставить подписку на паузу?</h3>
-<p>В Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> или в личном кабинете на сайте — раздел «Моя подписка», кнопка «Пауза». Также можно позвонить менеджеру. Возобновление — в один клик.</p>
+<p>В Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> или в личном кабинете на сайте — раздел «Моя подписка», кнопка «Пауза». Если нужна помощь, напишите нам в чат Telegram-бота. Возобновление — в один клик.</p>
 
 <h3>Что делать, если я уезжаю на месяц?</h3>
 <p>Поставьте подписку на паузу на нужный период или пропустите ближайшие доставки. Никаких штрафов и пересчётов вручную не требуется.</p>
@@ -175,7 +175,7 @@ ARTICLE = {
 <p>Да. Подписка поддерживает смешанные позиции: например, 2 бутыли 19 л на кухню и 4 бутыли 10 л в детскую — в одной доставке.</p>
 
 <h3>Как идёт оплата — раз в месяц или за каждую доставку?</h3>
-<p>Доступны оба варианта: по факту каждой доставки или ежемесячным счётом для офисов. Способ оплаты выбирается при оформлении и меняется в настройках подписки.</p>
+<p>За каждую доставку. Подписка сама оформляет заказ на каждую плановую доставку, и он оплачивается способом, выбранным в подписке: наличными при получении, через Click или с корпоративного счёта. Ежемесячный счёт не выставляется. Способ оплаты выбирается при оформлении и меняется в Telegram-боте.</p>
 
 <h3>Где увидеть ближайшие доставки?</h3>
 <p>В Telegram-боте — команда «Мои доставки», там виден график на ближайшие недели. На сайте — раздел «Моя подписка» в личном кабинете.</p>
@@ -200,7 +200,7 @@ ARTICLE = {
     {"@type": "Question", "name": "Какая минимальная продолжительность подписки?", "acceptedAnswer": {"@type": "Answer", "text": "Минимального обязательного срока нет. Вы можете начать и отменить подписку в любой момент по стандартным условиям."}},
     {"@type": "Question", "name": "Есть ли плата за подключение?", "acceptedAnswer": {"@type": "Answer", "text": "Нет, активация подписки бесплатна. Залог за возвратные 19 л бутыли начисляется при первой доставке и возвращается при сдаче тары."}},
     {"@type": "Question", "name": "Можно ли в одной подписке заказывать 19 л и 10 л?", "acceptedAnswer": {"@type": "Answer", "text": "Да. Подписка поддерживает смешанные позиции в одной доставке."}},
-    {"@type": "Question", "name": "Как идёт оплата — раз в месяц или за каждую доставку?", "acceptedAnswer": {"@type": "Answer", "text": "Доступны оба варианта: по факту каждой доставки или ежемесячным счётом для офисов."}},
+    {"@type": "Question", "name": "Как идёт оплата — раз в месяц или за каждую доставку?", "acceptedAnswer": {"@type": "Answer", "text": "За каждую доставку: заказ на каждую плановую доставку оформляется отдельно и оплачивается выбранным способом (наличными, через Click или с корпоративного счёта). Ежемесячный счёт не выставляется."}},
     {"@type": "Question", "name": "Где увидеть ближайшие доставки?", "acceptedAnswer": {"@type": "Answer", "text": "В Telegram-боте команда Мои доставки, на сайте раздел Моя подписка в личном кабинете."}}
   ]
 }
@@ -233,13 +233,13 @@ ARTICLE = {
 <p>Bir oyda qancha idish buyurtma qilishingiz va qancha pul ketishi oldindan ma’lum bo‘ladi. Bu oylik byudjetni yuritadigan ofislar va kommunal xarajatlarni rejalashtiruvchi oilalar uchun ayniqsa muhim.</p>
 
 <h3>2. «Shanba kuni suv tugadi» bo‘lmaydi</h3>
-<p>Obuna qoldiqqa emas, sarf tezligiga asoslanadi. Agar siz oyda 4 ta 19 l idishni iste’mol qilsangiz, haftada bir idishlik yetkazib berish sizni qulay zonada ushlab turadi.</p>
+<p>Obuna qoldiqqa emas, sarf tezligiga asoslanadi. Agar siz oyda 4 ta 19 l idishni iste’mol qilsangiz, haftada bir idishlik yetkazib berish sizni qulay zonada ushlab turadi. Avtobuyurtma qolganini o‘zi bajaradi: obuna har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi, shuning uchun siz suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz.</p>
 
 <h3>3. Idishni avtomatik qaytarish</h3>
 <p>Har yetkazib berishda kuryer bo‘sh 19 l idishlarni olib ketadi va to‘lalarini olib keladi. Sikl yopiq: bo‘sh idishlarni haftalab saqlamaysiz, qaytariladigan idishlar esa qayta to‘ldirishdan oldin sanoat yuvinishi va sanitariya ishlovidan o‘tadi.</p>
 
-<h3>4. Litri uchun yaxshiroq narx</h3>
-<p>Ayrim obuna rejalariga bir martalik buyurtmalarga nisbatan chegirmalar amal qiladi — joriy tariflarni <a href="/subscriptions">/subscriptions</a> sahifasida ko‘ring. Agar siz har hafta yoki ikki haftada barqaror suv buyurtma qilsangiz, obuna foydaliroq.</p>
+<h3>4. Bepul yetkazib berish va AquaCoins</h3>
+<p>Yetkazib berish doim bepul — obunada ham, bir martalik buyurtmada ham. Obuna bo‘yicha har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi va ularni mukofotlarga almashtirish mumkin. Obunadagi suv odatiy narxda hisoblanadi; asosiy afzallik esa avtobuyurtma: tizim har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi va siz suv buyurtma qilishni unutmaysiz. Joriy shartlar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
 
 <h3>5. Moslashuvchanlik: pauza, o‘tkazib yuborish, bekor qilish</h3>
 <p>Bir oyga ta’tilga ketdingizmi? Obunani pauzaga qo‘ying. Bitta yetkazib berishni o‘tkazib yuborish kerakmi? Bu bir bosishda bajariladi. Bekor qilish ham standart shartlarda jarimasiz mavjud. Tafsilotlar va joriy qoidalar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
@@ -344,13 +344,13 @@ ARTICLE = {
 <h2>Mavsumiylik va rejani moslash</h2>
 <p>Toshkentda ichimlik suv sarfi mavsumlar bo‘yicha sezilarli o‘zgaradi. Iyundan avgustgacha sarf qishga nisbatan 30–50% gacha oshishi mumkin: jazirama, sport, ko‘proq muzli choy va mehmonlar uchun sovuq suv. Obuna buni qiyinchiliksiz hisobga olish imkonini beradi: yozda haftasiga bitta qo‘shimcha idish qo‘shasiz yoki vaqtincha tez-tez davriylikka o‘tasiz, kuzda esa odatdagi jadvalga qaytasiz. Barcha o‘zgarishlar shaxsiy kabinet yoki Telegram-botda bir daqiqada kiritiladi va keyingi yetkazib berishdan kuchga kiradi. Sarf jadvalini yuritish shart emas — kuzatilgan natijaga reaksiya qilish kifoya: agar bir oyda bir marta suvsiz qolgan bo‘lsangiz yoki rejadan tashqari yetkazib berish buyurtma qilgan bo‘lsangiz, rejani bitta pozitsiyaga oshiring.</p>
 
-<h2>Ofislar uchun obuna: operatsion tejamkorlik</h2>
-<p>Biznes uchun obuna — bu nafaqat qulaylik, balki operatsion tejamkorlik. Ofis menejer har hafta buyurtma berishni so‘rashni, to‘lovni kelishishni, kulerdagi qoldiqni nazorat qilishni to‘xtatadi. Ichimlik suv byudjeti bitta davriy to‘lovga aylanadi — bu hisob-kitobni soddalashtiradi va «bu oydagi ortiqcha idishlar» haqidagi bahslarni olib tashlaydi. Yirik ofislar va tarmoqlar uchun QQS bilan oylik hisob, shartnoma va muntazam hisobotlar mavjud — tafsilotlar va rasmiylashtirish formatlarini ulash paytida <a href="/subscriptions">/subscriptions</a> da yoki menejerdan aniqlang.</p>
+<h2>Ofislar uchun obuna: operatsion qulaylik</h2>
+<p>Biznes uchun obuna — bu nafaqat qulaylik, balki operatsion qulaylik. Ofis menejer har hafta buyurtma berishni so‘rashni, to‘lovni kelishishni, kulerdagi qoldiqni nazorat qilishni to‘xtatadi. Ichimlik suv xarajatlari oldindan ma’lum bo‘ladi — bu hisob-kitobni soddalashtiradi va «bu oydagi ortiqcha idishlar» haqidagi bahslarni olib tashlaydi. Har bir yetkazib berish alohida buyurtma sifatida rasmiylashtiriladi va tanlangan usulda to‘lanadi: yetkazib berishda naqd pul, Click orqali yoki korporativ hisobdan. Tafsilotlar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 
 <h3>Obunani qanday pauzaga qo‘yish mumkin?</h3>
-<p><a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> Telegram-botida yoki saytdagi shaxsiy kabinetda — «Mening obunam» bo‘limi, «Pauza» tugmasi. Menejerga qo‘ng‘iroq qilish ham mumkin. Davom ettirish — bir bosishda.</p>
+<p><a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> Telegram-botida yoki saytdagi shaxsiy kabinetda — «Mening obunam» bo‘limi, «Pauza» tugmasi. Yordam kerak bo‘lsa, Telegram-bot chatida bizga yozing. Davom ettirish — bir bosishda.</p>
 
 <h3>Bir oyga safarga ketsam-chi?</h3>
 <p>Obunani kerakli muddatga pauzaga qo‘ying yoki yaqin yetkazib berishlarni o‘tkazib yuboring. Hech qanday jarima yoki qo‘lda qayta hisoblash kerak emas.</p>
@@ -368,7 +368,7 @@ ARTICLE = {
 <p>Ha. Obuna aralash pozitsiyalarni qo‘llab-quvvatlaydi: masalan, oshxona uchun 2 ta 19 l va bolalar xonasi uchun 4 ta 10 l — bitta yetkazib berishda.</p>
 
 <h3>To‘lov qanday — oyiga bir marta yoki har yetkazib berishga?</h3>
-<p>Ikkala variant ham mavjud: har yetkazib berish faktiga ko‘ra yoki ofislar uchun oylik hisob-kitob. To‘lov usuli rasmiylashtirishda tanlanadi va sozlamalarda o‘zgartiriladi.</p>
+<p>Har bir yetkazib berish uchun. Obuna har bir rejalashtirilgan yetkazib berishga buyurtmani o‘zi rasmiylashtiradi va u obunada tanlangan usulda to‘lanadi: yetkazib berishda naqd pul, Click orqali yoki korporativ hisobdan. Oylik hisob-faktura chiqarilmaydi. To‘lov usuli rasmiylashtirishda tanlanadi va Telegram-botda o‘zgartiriladi.</p>
 
 <h3>Yaqin yetkazib berishlarni qayerda ko‘rish mumkin?</h3>
 <p>Telegram-botda — «Mening yetkazib berishlarim» buyrug‘i, u yerda yaqin haftalar jadvali ko‘rinadi. Saytda — shaxsiy kabinetdagi «Mening obunam» bo‘limi.</p>
@@ -393,7 +393,7 @@ ARTICLE = {
     {"@type": "Question", "name": "Obunaning minimal muddati qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Majburiy minimal muddat yo‘q. Standart shartlar bo‘yicha istalgan paytda boshlash va bekor qilish mumkin."}},
     {"@type": "Question", "name": "Faollashtirish uchun to‘lov bormi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q, obunani faollashtirish bepul. 19 l idish uchun garov birinchi yetkazib berishda hisoblanadi va idishni topshirishda qaytariladi."}},
     {"@type": "Question", "name": "Bitta obunada 19 l va 10 l buyurtma qilish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Obuna bitta yetkazib berishda aralash pozitsiyalarni qo‘llab-quvvatlaydi."}},
-    {"@type": "Question", "name": "To‘lov oyiga bir marta yoki har yetkazib berishga?", "acceptedAnswer": {"@type": "Answer", "text": "Ikkala variant ham mavjud: har yetkazib berish faktiga ko‘ra yoki ofislar uchun oylik hisob-kitob."}},
+    {"@type": "Question", "name": "To‘lov oyiga bir marta yoki har yetkazib berishga?", "acceptedAnswer": {"@type": "Answer", "text": "Har bir yetkazib berish uchun: har bir rejalashtirilgan yetkazib berishga buyurtma alohida rasmiylashtiriladi va tanlangan usulda to‘lanadi (naqd pul, Click yoki korporativ hisob). Oylik hisob-faktura chiqarilmaydi."}},
     {"@type": "Question", "name": "Yaqin yetkazib berishlarni qayerda ko‘rish mumkin?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-botda Mening yetkazib berishlarim buyrug‘i va saytdagi Mening obunam bo‘limi."}}
   ]
 }
@@ -426,13 +426,13 @@ ARTICLE = {
 <p>You know in advance how many bottles per month you will order and what the spend will be. That matters for offices on a monthly budget and for households tracking utility-style costs.</p>
 
 <h3>2. No "out of water on Saturday"</h3>
-<p>A subscription is built on consumption rate, not on running stock. If you go through 4 bottles of 19 L per month, a weekly cadence of one bottle keeps you in a comfortable zone with no spikes and no empty days.</p>
+<p>A subscription is built on consumption rate, not on running stock. If you go through 4 bottles of 19 L per month, a weekly cadence of one bottle keeps you in a comfortable zone with no spikes and no empty days. Auto-order does the rest: the subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.</p>
 
 <h3>3. Automatic bottle return</h3>
 <p>On every delivery the courier picks up the empty 19 L bottles and drops off full ones. The cycle is closed: you don't store empty bottles for weeks, and the returnable bottles go through industrial washing and sanitation before being filled again.</p>
 
-<h3>4. Better per-litre value</h3>
-<p>Certain subscription plans carry a discount versus one-off orders — check current pricing on <a href="/subscriptions">/subscriptions</a>. The subscription wins on value if you're already ordering steadily every week or two.</p>
+<h3>4. Free delivery and AquaCoins</h3>
+<p>Delivery is always free, on subscription deliveries as on every order. Earn AquaCoins on every subscription delivery at your tier's rate and redeem them for rewards. Subscription water is billed at the regular price; the real advantage is auto-order: the system places each order for you on schedule, so you never forget to order water. Current terms are on <a href="/subscriptions">/subscriptions</a>.</p>
 
 <h3>5. Flexibility: pause, skip, cancel</h3>
 <p>Travelling for a month? Pause the subscription. Need to skip one delivery? One click. Cancellation is available without penalties under standard terms. Specifics and current rules live on <a href="/subscriptions">/subscriptions</a>.</p>
@@ -536,7 +536,7 @@ ARTICLE = {
 <h2>Frequently asked questions</h2>
 
 <h3>How do I pause a subscription?</h3>
-<p>In the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> or in your website account — section "My subscription", button "Pause". You can also call a manager. Resuming is one click.</p>
+<p>In the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> or in your website account — section "My subscription", button "Pause". If you need help, message us in the Telegram bot chat. Resuming is one click.</p>
 
 <h3>What if I'm travelling for a month?</h3>
 <p>Pause the subscription for that period or skip the upcoming deliveries. There are no penalties and no manual re-billing.</p>
@@ -554,7 +554,7 @@ ARTICLE = {
 <p>Yes. The subscription supports mixed line items: for example, 2 bottles of 19 L for the kitchen and 4 bottles of 10 L for the kids' room — all in one delivery.</p>
 
 <h3>Am I billed monthly or per delivery?</h3>
-<p>Both options are available: per-delivery billing or a single monthly invoice for offices. The billing mode is chosen at sign-up and can be changed in subscription settings.</p>
+<p>Per delivery. The subscription places an order for each scheduled delivery itself, and it is paid with the payment method on your subscription: cash on delivery, Click, or a company account. No monthly invoice is issued. The payment method is chosen at sign-up and can be changed in the Telegram bot.</p>
 
 <h3>Where can I see my upcoming deliveries?</h3>
 <p>In the Telegram bot — the "My deliveries" command shows the schedule for the upcoming weeks. On the website — the "My subscription" section in your account.</p>
@@ -579,7 +579,7 @@ ARTICLE = {
     {"@type": "Question", "name": "What is the minimum subscription length?", "acceptedAnswer": {"@type": "Answer", "text": "There is no mandatory minimum length. You can start and cancel at any time under standard terms."}},
     {"@type": "Question", "name": "Is there a setup fee?", "acceptedAnswer": {"@type": "Answer", "text": "No, activation is free. A deposit on the 19 L returnable bottles is charged on the first delivery and refunded when the bottles are returned."}},
     {"@type": "Question", "name": "Can I order both 19 L and 10 L on the same subscription?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The subscription supports mixed line items in a single delivery."}},
-    {"@type": "Question", "name": "Am I billed monthly or per delivery?", "acceptedAnswer": {"@type": "Answer", "text": "Both options are available: per-delivery billing or a single monthly invoice for offices."}},
+    {"@type": "Question", "name": "Am I billed monthly or per delivery?", "acceptedAnswer": {"@type": "Answer", "text": "Per delivery: each scheduled delivery is placed as its own order and paid with the method on your subscription (cash on delivery, Click, or a company account). No monthly invoice is issued."}},
     {"@type": "Question", "name": "Where can I see my upcoming deliveries?", "acceptedAnswer": {"@type": "Answer", "text": "In the Telegram bot the My deliveries command and on the website the My subscription section in your account."}}
   ]
 }

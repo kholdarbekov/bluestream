@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Buyurtma bekor qilindi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Buyurtma bekor qilindi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p><strong>#{{ order_number }}</strong> buyurtmasi {{ deadline }} gacha to'lanmagani uchun bekor qilindi.</p>
+</div>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizga yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

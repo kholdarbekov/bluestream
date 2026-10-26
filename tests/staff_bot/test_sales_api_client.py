@@ -93,9 +93,10 @@ async def test_sales_wrappers_call_the_documented_routes(monkeypatch):
                      "is_sold_out": False, "is_low": True}]}, None),
         ("GET", "/api/v1/staff/sales/stock-check-products", "t", None, None),
         ("GET", "/api/v1/staff/sales/outlets/7/payment-methods", "t", None, None),
-        # The RAIL rides with the quote: `create_order` applies a live tier
-        # discount per payment method, so an estimate that omitted it read one
-        # total to the shopkeeper while the store was charged another.
+        # The RAIL rides with the quote: a contract customer's price follows
+        # the payment method (contract dual pricing), so an estimate that
+        # omitted it read one total to the shopkeeper while the store was
+        # charged another.
         ("POST", "/api/v1/staff/sales/outlets/7/order-estimate", "t",
          {"items": [{"product_id": 11, "quantity": 8}], "payment_method": "cash"}, None),
         ("POST", "/api/v1/staff/sales/visits/31/order", "t",

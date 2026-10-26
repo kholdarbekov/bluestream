@@ -223,9 +223,7 @@ class NotificationService:
         "reminder": [NotificationType.SUBSCRIPTION_REMINDER.value],
         "subscription": [
             NotificationType.SUBSCRIPTION_CREATED.value,
-            NotificationType.SUBSCRIPTION_RENEWAL.value,
             NotificationType.SUBSCRIPTION_CANCELLED.value,
-            NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value,
             NotificationType.SUBSCRIPTION_REMINDER.value,
         ],
     }
@@ -932,9 +930,11 @@ class NotificationService:
         template_data = {
             "subscription_id": subscription.id,
             "plan_name": subscription.name or "Standard",
-            "frequency": subscription.billing_cycle.value,
+            "frequency": subscription.frequency.value,
             "total_amount": float(subscription.billing_amount) if subscription.billing_amount is not None else None,
-            "next_billing_date": subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
+            "next_delivery_date": (
+                subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+            ),
             "event_type": event_type,
         }
 
@@ -3096,9 +3096,7 @@ class NotificationService:
             NotificationType.PAYMENT_CONFIRMATION.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_CREATED.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
-            NotificationType.SUBSCRIPTION_RENEWAL.value: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_CANCELLED.value: [NotificationChannel.EMAIL],
-            NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL.value: [NotificationChannel.EMAIL],
             NotificationType.SYSTEM.value: [NotificationChannel.EMAIL],
             NotificationType.SYSTEM_ALERT.value: [NotificationChannel.EMAIL],

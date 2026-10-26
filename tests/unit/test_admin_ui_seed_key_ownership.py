@@ -26,6 +26,7 @@ and `AdminUiTranslationService.get_translations(lang, "common")` unions EVERY
 `ui_*` category.
 """
 
+import ast
 import importlib.util
 from collections import defaultdict
 from pathlib import Path
@@ -43,23 +44,20 @@ LANGUAGES = ("en", "uz", "ru")
 # sales module did, and deleting the line below.
 PRE_EXISTING_CONFLICTS = {
     "active",  # notifications, product_categories, time_slots, translations_page, tryouts
-    "address",  # bottle_tracking, subscriptions ("Delivery address"), tryouts
-    "create_failed",  # product_categories, subscriptions, time_slots
-    "created",  # product_categories, subscriptions, time_slots
+    "create_failed",  # product_categories, time_slots
+    "created",  # product_categories, time_slots
     "delete_confirm",  # time_slots, translations_page
     "delete_failed",  # product_categories, time_slots
     "inactive",  # notifications, product_categories, time_slots, translations_page
     "name_placeholder",  # product_categories, time_slots
     "name_required",  # product_categories, time_slots
     "page_title",  # bottle_tracking, time_slots, translations_page, tryouts
-    "quantity",  # bottle_tracking, subscriptions ("Qty"), tryouts
-    "search_placeholder",  # product_categories, subscriptions, translations_page, tryouts
+    "search_placeholder",  # product_categories, translations_page, tryouts
     "showing_range",  # product_categories, translations_page
     "toast_created",  # translations_page, tryouts
     "toast_export_failed",  # notifications, translations_page
     "toast_updated",  # translations_page, tryouts
-    "update_failed",  # product_categories, subscriptions, time_slots
-    "updated",  # subscriptions, time_slots
+    "update_failed",  # product_categories, time_slots
 }
 
 SALES_SEED = "seed_ui_sales_translations.py"
@@ -139,6 +137,55 @@ def test_pre_existing_conflict_allowlist_is_not_stale():
     assert not stale, (
         f"These keys no longer conflict and must be removed from PRE_EXISTING_CONFLICTS: {stale}. "
         "Leaving them there would hide a future regression on the same key."
+    )
+
+
+SUBSCRIPTIONS_SEED = "seed_ui_subscriptions_translations.py"
+# Builds an app and seeds at import time (no `__main__` guard), so its table is read from the source.
+DISPATCH_SEED = "seed_dispatch_translations.py"
+
+
+def _source_table_keys(filename, name):
+    """The keys of the module-level dict literal `name` in a seed that must not be imported."""
+    tree = ast.parse((ROOT / "scripts" / filename).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(target, "id", None) == name for target in node.targets):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError(f"{filename} has no module-level {name} dict")
+
+
+def test_subscriptions_seed_shares_no_bare_key_with_any_other_admin_ui_seed():
+    """Stricter than the allowlisted check above: the Subscriptions page owns its keys outright.
+
+    Even an identical value is a collision here, because `bulk_create_or_update` moves the shared row
+    into the category of whichever seed ran last, so running this seed re-homed the Bottle tracking,
+    Try-outs, Product categories and Time slots labels (final review of the single-frequency change,
+    2026-10-26). Pre-existing collisions BETWEEN the other seeds are out of this test's scope."""
+    subscriptions = {
+        key
+        for catalog in _catalogs(_load(ROOT / "scripts" / SUBSCRIPTIONS_SEED))
+        for pairs in catalog.values()
+        for key in pairs
+    }
+    assert subscriptions, f"{SUBSCRIPTIONS_SEED} yielded no keys: the guard would pass vacuously"
+
+    owners = defaultdict(set)
+    for path in sorted((ROOT / "scripts").glob(SEED_GLOB)):
+        if path.name == SUBSCRIPTIONS_SEED:
+            continue
+        catalogs = list(_catalogs(_load(path)))
+        assert catalogs, f"{path.name} yielded no translation table: teach _catalogs its shape"
+        for catalog in catalogs:
+            for pairs in catalog.values():
+                for key in pairs:
+                    owners[key].add(path.name)
+    for key in _source_table_keys(DISPATCH_SEED, "KEYS"):
+        owners[key].add(DISPATCH_SEED)
+
+    shared = {key: sorted(owners[key]) for key in sorted(subscriptions & owners.keys())}
+    assert not shared, (
+        f"{SUBSCRIPTIONS_SEED} writes keys other admin-UI seeds also write: {shared}. Give the Subscriptions "
+        "page its own key (the `sub_` prefix) in admin_ui/src/pages/Subscriptions.js AND the seed."
     )
 
 

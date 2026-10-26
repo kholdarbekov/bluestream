@@ -15,8 +15,7 @@ class TestAdminSubscriptionSerializers:
         model = AdminCreateSubscriptionRequest(
             user_id=7,
             name="Weekly Water",
-            billing_cycle="monthly",
-            delivery_frequency="weekly",
+            frequency="monthly",
             delivery_address_id=3,
             payment_method="cash",
             items=[{"product_id": 2, "quantity": 4}],
@@ -30,8 +29,7 @@ class TestAdminSubscriptionSerializers:
         with pytest.raises(PydanticValidationError):
             AdminCreateSubscriptionRequest(
                 name="X yz",
-                billing_cycle="monthly",
-                delivery_frequency="weekly",
+                frequency="monthly",
                 delivery_address_id=3,
                 payment_method="cash",
                 items=[{"product_id": 2, "quantity": 4}],
@@ -42,8 +40,7 @@ class TestAdminSubscriptionSerializers:
             AdminCreateSubscriptionRequest(
                 user_id=7,
                 name="X yz",
-                billing_cycle="monthly",
-                delivery_frequency="weekly",
+                frequency="monthly",
                 delivery_address_id=3,
                 payment_method="cash",
                 items=[],
@@ -68,13 +65,13 @@ class TestAdminSubscriptionSerializers:
     def test_update_request_carries_override_values(self):
         model = AdminUpdateSubscriptionRequest(
             billing_amount=12345.0,
-            next_billing_date="2026-08-01T09:00:00+00:00",
+            next_delivery_date="2026-08-01",
             override_manual_billing_amount=True,
             override_manual_billing_dates=True,
         )
         assert model.billing_amount == 12345.0
         assert model.override_manual_billing_amount is True
-        assert model.next_billing_date is not None
+        assert model.next_delivery_date is not None
 
     def test_add_item_request_validates_quantity(self):
         with pytest.raises(PydanticValidationError):

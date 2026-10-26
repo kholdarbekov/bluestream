@@ -207,8 +207,22 @@ def get_live_tracking(delivery_id):
 
 @delivery_bp.route("/time-slots", methods=["GET"])
 def get_time_slots():
-    """Get available delivery time slots for a date"""
+    """Get available delivery time slots for a date, or (`weekday`) the slots a recurring delivery can pick"""
     try:
+        weekday_arg = request.args.get("weekday")
+        if weekday_arg is not None:
+            # A subscription's day-and-slot chooser (spec 2026-10-23 §2.9): no date exists yet, so the
+            # slots offered that weekday (0 = Monday), or every active slot with `weekday=any`.
+            if weekday_arg == "any":
+                weekday = None
+            elif weekday_arg.isdigit() and int(weekday_arg) in range(7):
+                weekday = int(weekday_arg)
+            else:
+                return jsonify({"error": get_translation("api.delivery.error.invalid_weekday")}), 400
+            return jsonify(
+                {"weekday": weekday_arg, "time_slots": get_delivery_service().get_slots_offered_on_weekday(weekday)}
+            )
+
         target_date_str = request.args.get("date")
 
         if not target_date_str:

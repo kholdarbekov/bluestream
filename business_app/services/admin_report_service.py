@@ -22,7 +22,6 @@ from shared.enums import (
     DriverCashSessionStatus,
     PaymentMethod,
     PaymentStatus,
-    SubscriptionFrequency,
     UserRole,
 )
 from business_app.utils.exceptions import ValidationError
@@ -745,16 +744,15 @@ class AdminReportService:
         )
 
         status_breakdown = [
-            {"status": status, "count": count, "total_value": float(total_value or 0)}
+            # The enum itself is not JSON: the report answered 500 whenever any subscription existed.
+            {"status": getattr(status, "value", status), "count": count, "total_value": float(total_value or 0)}
             for status, count, total_value in by_status
         ]
 
-        mrr = (
-            db.session.query(func.sum(Subscription.billing_amount))
-            .filter_by(status="active", billing_cycle=SubscriptionFrequency.MONTHLY)
-            .scalar()
-            or 0
-        )
+        # What the active subscriptions bring in a month: the one MRR rule (spec 2026-10-23 §4.2).
+        from business_app.services.subscription_service import SubscriptionService
+
+        mrr = SubscriptionService.monthly_recurring_revenue()
 
         return {
             "summary": {

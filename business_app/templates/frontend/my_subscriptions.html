@@ -85,7 +85,7 @@
 }
 
 @media (max-width: 768px) {
-    .subscription-overview .col-md-4 {
+    .subscription-overview .col-md-6 {
         margin-bottom: 20px;
     }
 
@@ -116,7 +116,7 @@
 <!-- Subscription Overview -->
 <div class="subscription-overview mb-4">
     <div class="row">
-        <div class="col-md-4">
+        <div class="col-md-6">
             <div class="card stat-card">
                 <div class="card-body text-center">
                     <i class="far fa-sync-alt fa-2x text-primary mb-3"></i>
@@ -125,21 +125,12 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
             <div class="card stat-card">
                 <div class="card-body text-center">
                     <i class="far fa-calendar-alt fa-2x text-success mb-3"></i>
                     <h3 class="text-success" id="nextDeliveryCount">0</h3>
                     <p class="text-muted">{{ 'Deliveries This Month'|t }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card stat-card">
-                <div class="card-body text-center">
-                    <i class="far fa-money-bill fa-2x text-warning mb-3"></i>
-                    <h3 class="text-warning"><span id="monthlySavings">0</span></h3>
-                    <p class="text-muted">{{ 'Monthly Savings'|t }}</p>
                 </div>
             </div>
         </div>
@@ -289,7 +280,7 @@
         'products_failed': 'Failed to load products' | t,
         'products': 'Products' | t,
         'next_delivery': 'Next delivery' | t,
-        'next_billing': 'Next billing' | t,
+        'time_to_be_confirmed': 'Time to be confirmed' | t,
         'started': 'Started' | t,
         'payment_method': 'Payment Method' | t,
         'auto_renew': 'Auto-renew' | t,
@@ -311,7 +302,7 @@
         'details_failed': 'Failed to load subscription details' | t,
         'status': 'Status' | t,
         'subscription_id': 'Subscription ID' | t,
-        'delivery_frequency': 'Delivery frequency' | t,
+        'frequency_label': 'Delivery frequency' | t,
         'delivery_information': 'Delivery Information' | t,
         'time_slot': 'Time Slot' | t,
         'recent_orders': 'Recent Orders' | t,

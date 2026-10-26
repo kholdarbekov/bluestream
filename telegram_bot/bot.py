@@ -669,7 +669,6 @@ class WaterBusinessBot:
             # Statistics and logs
             CallbackQueryHandler(subscription_handlers.view_subscription_statistics, pattern="^subscription_statistics$"),
             CallbackQueryHandler(subscription_handlers.view_subscription_logs, pattern=r"^view_logs_\d+$"),
-            CallbackQueryHandler(subscription_handlers.retry_failed_billing, pattern=r"^retry_billing_\d+$"),
 
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
@@ -1199,10 +1198,6 @@ class WaterBusinessBot:
         subscription_creation_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(subscription_handlers.create_subscription_start, pattern="^create_subscription$")],
             states={
-                subscription_handlers.SELECT_PRODUCTS: [
-                    CallbackQueryHandler(subscription_handlers.select_products, pattern="^subscription_custom$"),
-                    CallbackQueryHandler(subscription_handlers.select_products, pattern="^subscription_use_template$"),
-                ],
                 subscription_handlers.SELECT_QUANTITY: [
                     CallbackQueryHandler(subscription_handlers.select_quantity, pattern="^sub_product_"),
                     # Handle "add more items" button on product list
@@ -1223,8 +1218,17 @@ class WaterBusinessBot:
                     # Handle "done with items" - proceed to frequency selection
                     CallbackQueryHandler(subscription_handlers.items_selection_done, pattern="^sub_items_done$"),
                 ],
+                # Waiting for the FREQUENCY tap; the day and slot steps follow it, then the address.
                 subscription_handlers.SELECT_ADDRESS: [
-                    CallbackQueryHandler(subscription_handlers.select_address, pattern="^subscription_freq_"),
+                    CallbackQueryHandler(subscription_handlers.choose_frequency, pattern="^subscription_freq_"),
+                ],
+                subscription_handlers.SELECT_DAY: [
+                    CallbackQueryHandler(subscription_handlers.select_day, pattern=r"^subscription_day_\d+$"),
+                    CallbackQueryHandler(subscription_handlers.back_to_frequency_selection, pattern="^back_to_sub_frequency$"),
+                ],
+                subscription_handlers.SELECT_SLOT: [
+                    CallbackQueryHandler(subscription_handlers.select_time_slot, pattern=r"^subscription_slot_(\d+|any)$"),
+                    CallbackQueryHandler(subscription_handlers.back_to_day_selection, pattern="^back_to_sub_day$"),
                 ],
                 subscription_handlers.SELECT_PAYMENT: [
                     CallbackQueryHandler(subscription_handlers.select_payment, pattern="^addr_"),
@@ -1317,6 +1321,12 @@ class WaterBusinessBot:
         self.application.add_handler(CallbackQueryHandler(
             subscription_handlers.update_frequency_confirm,
             pattern=r"^subfreq_[a-z]+_\d+$",
+        ))
+        # The delivery day of a changed weekly / biweekly / monthly frequency; the frequency and the
+        # subscription ride the callback (`subday_<frequency>_<day>_<id>`) for the same reasons.
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.update_frequency_day_confirm,
+            pattern=r"^subday_[a-z]+_\d+_\d+$",
         ))
         self.application.add_handler(CallbackQueryHandler(
             subscription_handlers.change_payment_method_confirm,

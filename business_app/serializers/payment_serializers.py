@@ -30,15 +30,6 @@ class OrderInfoSchema(BaseModel):
     total_amount: MoneyFloat
 
 
-class SubscriptionInfoSchema(BaseModel):
-    """Subscription information for payment"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    billing_cycle: str
-
-
 class PaymentRefundSchema(BaseModel):
     """Payment refund schema"""
 
@@ -86,7 +77,6 @@ class PaymentSchema(BaseModel):
 
     # Related objects
     order: Optional[OrderInfoSchema] = None
-    subscription: Optional[SubscriptionInfoSchema] = None
     refunds: Optional[List[PaymentRefundSchema]] = None
 
 

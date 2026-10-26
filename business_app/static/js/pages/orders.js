@@ -22,6 +22,12 @@
         });
     }
 
+    // A discount row is drawn only from the server's own figure; the page decides nothing.
+    function discountRow(label, amount) {
+        if (!(parseFloat(amount) > 0)) return '';
+        return '<div class="d-flex justify-content-between mb-2"><span>' + escapeHtml(label) + '</span><span class="font-weight-medium">\u2212' + formatAmount(amount) + '</span></div>';
+    }
+
     function formatAmount(amount) {
         var intAmount = Math.floor(parseFloat(amount) || 0);
         var formatted = intAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -289,6 +295,9 @@
             '<div class="card h-100"><div class="card-body">' +
             '<div class="d-flex justify-content-between mb-2"><span>' + escapeHtml(PAGE_DATA.i18n.subtotal) + '</span><span class="font-weight-medium">' + formatAmount(order.subtotal || order.total_amount) + '</span></div>' +
             '<div class="d-flex justify-content-between mb-2"><span>' + escapeHtml(PAGE_DATA.i18n.delivery_fee) + '</span><span class="font-weight-medium">' + formatAmount(order.delivery_fee || 0) + '</span></div>' +
+            discountRow(PAGE_DATA.i18n.tier_discount, order.tier_discount) +
+            discountRow(PAGE_DATA.i18n.subscription_discount, order.discount_amount) +
+            discountRow(PAGE_DATA.i18n.reward_discount, order.loyalty_discount) +
             '<div class="d-flex justify-content-between mb-2"><span>' + escapeHtml(PAGE_DATA.i18n.tax) + '</span><span class="font-weight-medium">' + formatAmount(order.tax_amount || 0) + '</span></div>' +
             '<hr>' +
             '<div class="d-flex justify-content-between h5 mb-0"><span class="font-weight-bold">' + escapeHtml(PAGE_DATA.i18n.total) + '</span><span class="font-weight-bold text-primary">' + formatAmount(order.total_amount) + '</span></div>' +

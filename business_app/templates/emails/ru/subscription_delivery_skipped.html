@@ -1,0 +1,28 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Доставка пропущена - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Доставка пропущена</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Доставка по вашей подписке <strong>{{ subscription_name }}</strong> на <strong>{{ skipped_dates }}</strong> пропущена: {{ reason }}.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Следующая доставка</th>
+        <td>{{ next_delivery_date }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

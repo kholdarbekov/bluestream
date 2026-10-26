@@ -138,7 +138,9 @@ def test_quote_falls_back_to_default_program_when_no_account_exists(db, sample_u
 
     assert LoyaltyPoints.query.filter_by(user_id=sample_user.id).first() is None
 
-    quote = LoyaltyService().quote_tier_discount(sample_user, Decimal("10000"), PaymentMethod.CASH)
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user, Decimal("10000"), PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    )
 
     assert quote.tier_name == "Bronze"
     assert quote.percentage == Decimal("3.0")

@@ -4,6 +4,9 @@
  * Steps: Products -> Schedule -> Address -> Payment -> Review
  */
 
+// The builder's words in the visitor's language, rendered by index.html (#subscription-constructor-data).
+const CONSTRUCTOR_I18N = ((typeof getPageData === 'function' && getPageData('subscription-constructor-data')) || {}).i18n || {};
+
 class SubscriptionConstructor {
     constructor() {
         this.currentStep = 1;
@@ -12,11 +15,13 @@ class SubscriptionConstructor {
         // Subscription data
         this.selectedProducts = new Map(); // productId -> {product, quantity}
         this.selectedFrequency = null;
-        this.selectedDay = null;
+        this.selectedWeekday = null;      // backend convention: 0 = Monday (see weekdayFromJsDay)
+        this.selectedDayOfMonth = null;   // 1-31, monthly only
         this.selectedTimeSlot = null;
         this.selectedAddress = null;
         this.selectedPaymentMethod = null;
         this.subscriptionName = '';  // User-editable subscription name
+        this.preview = null;         // the backend's quote for the review step (deliveries_per_month, monthly cost)
 
         // Available options
         this.products = [];
@@ -60,7 +65,8 @@ class SubscriptionConstructor {
             currentStep: this.currentStep,
             selectedProducts: Array.from(this.selectedProducts.entries()),
             selectedFrequency: this.selectedFrequency,
-            selectedDay: this.selectedDay,
+            selectedWeekday: this.selectedWeekday,
+            selectedDayOfMonth: this.selectedDayOfMonth,
             selectedTimeSlot: this.selectedTimeSlot,
             selectedAddress: this.selectedAddress,
             selectedPaymentMethod: this.selectedPaymentMethod,
@@ -86,7 +92,8 @@ class SubscriptionConstructor {
             this.currentStep = state.currentStep || 1;
             this.selectedProducts = new Map(state.selectedProducts || []);
             this.selectedFrequency = state.selectedFrequency;
-            this.selectedDay = state.selectedDay;
+            this.selectedWeekday = state.selectedWeekday ?? null;
+            this.selectedDayOfMonth = state.selectedDayOfMonth ?? null;
             this.selectedTimeSlot = state.selectedTimeSlot;
             this.selectedAddress = state.selectedAddress;
             this.selectedPaymentMethod = state.selectedPaymentMethod;
@@ -104,11 +111,13 @@ class SubscriptionConstructor {
         this.currentStep = 1;
         this.selectedProducts = new Map();
         this.selectedFrequency = null;
-        this.selectedDay = null;
+        this.selectedWeekday = null;
+        this.selectedDayOfMonth = null;
         this.selectedTimeSlot = null;
         this.selectedAddress = null;
         this.selectedPaymentMethod = null;
         this.subscriptionName = '';
+        this.preview = null;
 
         // Reset UI to initial state
         this.resetUI();
@@ -152,47 +161,53 @@ class SubscriptionConstructor {
         }
     }
 
-    async loadTimeSlots() {
-        try {
-            // Get today's date in YYYY-MM-DD format
-            const today = new Date().toISOString().split('T')[0];
-
-            const response = await apiRequest(`/delivery/time-slots?date=${today}`, {
-                method: 'GET'
-            });
-
-            // Parse JSON from the response
-            const data = await response.json();
-
-            if (data && data.time_slots) {
-                // Map backend response to our format
-                this.timeSlots = data.time_slots.map(slot => ({
-                    id: slot.id,
-                    label: `${slot.start_time} - ${slot.end_time}`,
-                    value: slot.time_range || `${slot.start_time}-${slot.end_time}`,
-                    available: slot.is_available,
-                    fee: slot.total_fee
-                }));
-                this.renderTimeSlots();
-            } else {
-                // Fallback to default time slots
-                this.timeSlots = this.getDefaultTimeSlots();
-                this.renderTimeSlots();
-            }
-        } catch (error) {
-            console.error('Error loading time slots:', error);
-            this.timeSlots = this.getDefaultTimeSlots();
-            this.renderTimeSlots();
-        }
+    // JS Date.getDay() counts from Sunday (0 = Sunday ... 6 = Saturday); the backend's
+    // delivery_day_of_week counts from Monday (0 = Monday ... 6 = Sunday). The day buttons carry the JS
+    // number in data-day, and this is the ONE place it becomes the backend's.
+    static weekdayFromJsDay(jsDay) {
+        return (jsDay + 6) % 7;
     }
 
-    getDefaultTimeSlots() {
-        return [
-            { id: 1, label: '09:00 - 12:00', value: '09:00-12:00' },
-            { id: 2, label: '12:00 - 15:00', value: '12:00-15:00' },
-            { id: 3, label: '15:00 - 18:00', value: '15:00-18:00' },
-            { id: 4, label: '18:00 - 21:00', value: '18:00-21:00' }
-        ];
+    usesWeekday() {
+        return this.selectedFrequency === 'weekly' || this.selectedFrequency === 'biweekly';
+    }
+
+    usesDayOfMonth() {
+        return this.selectedFrequency === 'monthly';
+    }
+
+    // The slots a recurring delivery can pick: the ones offered on the chosen weekday, otherwise every
+    // active slot (daily and monthly, or a weekday not chosen yet). No date exists yet, so no capacity
+    // or fee is shown: a subscription order never pays a slot fee.
+    timeSlotsQuery() {
+        const weekday = this.usesWeekday() && this.selectedWeekday !== null ? this.selectedWeekday : 'any';
+        return `/delivery/time-slots?weekday=${weekday}`;
+    }
+
+    async loadTimeSlots() {
+        try {
+            const response = await apiRequest(this.timeSlotsQuery(), { method: 'GET' });
+            const data = await response.json();
+            if (!response.ok || !data || !Array.isArray(data.time_slots)) {
+                throw new Error('Failed to load time slots');
+            }
+            this.timeSlots = data.time_slots.map(slot => ({
+                id: slot.id,
+                label: `${slot.start_time} - ${slot.end_time}`,
+                value: slot.time_range || `${slot.start_time}-${slot.end_time}`
+            }));
+        } catch (error) {
+            // No invented slot ids: a made-up id would be refused at creation.
+            console.error('Error loading time slots:', error);
+            this.timeSlots = [];
+            this.showError('Failed to load delivery time slots');
+        }
+        // A slot chosen for another weekday may not be offered on this one.
+        if (this.selectedTimeSlot !== null && !this.timeSlots.some(slot => slot.id === this.selectedTimeSlot)) {
+            this.selectedTimeSlot = null;
+            this.saveState();
+        }
+        this.renderTimeSlots();
     }
 
     async loadAddresses() {
@@ -295,7 +310,7 @@ class SubscriptionConstructor {
             <option value="">Select a time slot (optional)</option>
             ${this.timeSlots.map(slot => `
                 <option value="${slot.id}" ${this.selectedTimeSlot === slot.id ? 'selected' : ''}>
-                    ${slot.label}${slot.fee ? ` (+${this.formatPrice(slot.fee)} UZS)` : ''}
+                    ${slot.label}
                 </option>
             `).join('')}
         `;
@@ -316,14 +331,14 @@ class SubscriptionConstructor {
             // CRITICAL FIX: Use jQuery .on() to catch the event from Nice Select
             // We use .off() first to ensure we don't add multiple listeners if this runs twice
             $(select).off('change.subscription').on('change.subscription', (e) => {
-                this.selectedTimeSlot = e.target.value;
+                this.selectedTimeSlot = e.target.value ? parseInt(e.target.value, 10) : null;
                 this.saveState();
             });
         } else {
             // Fallback for vanilla JS if jQuery fails to load
             if (!select.dataset.listenerAttached) {
                 select.addEventListener('change', (e) => {
-                    this.selectedTimeSlot = e.target.value;
+                    this.selectedTimeSlot = e.target.value ? parseInt(e.target.value, 10) : null;
                     this.saveState();
                 });
                 select.dataset.listenerAttached = 'true';
@@ -418,14 +433,9 @@ class SubscriptionConstructor {
             });
         });
 
-        // Calculate monthly estimate
-        let monthlyMultiplier = 1;
-        if (this.selectedFrequency === 'daily') monthlyMultiplier = 30;
-        else if (this.selectedFrequency === 'weekly') monthlyMultiplier = 4;
-        else if (this.selectedFrequency === 'biweekly') monthlyMultiplier = 2;
-        else if (this.selectedFrequency === 'monthly') monthlyMultiplier = 1;
-
-        const estimatedMonthlyCost = subtotal * monthlyMultiplier;
+        // The monthly estimate is the backend's (loadPreview): the deliveries-per-month figure and the
+        // cost are never worked out here.
+        const quote = this.preview;
 
         // Get selected address and payment method
         const address = this.selectedAddress;
@@ -508,10 +518,10 @@ class SubscriptionConstructor {
                                 <span style="font-size: 14px; color: #595959; font-weight: 500;">Frequency</span>
                                 <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.getFrequencyName(this.selectedFrequency)}</span>
                             </div>
-                            ${this.selectedDay !== null ? `
+                            ${this.deliveryDayLabel() ? `
                                 <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #d9f7be;">
                                     <span style="font-size: 14px; color: #595959; font-weight: 500;">Delivery Day</span>
-                                    <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.getDayName(this.selectedDay)}</span>
+                                    <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.deliveryDayLabel()}</span>
                                 </div>
                             ` : ''}
                             <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #d9f7be;">
@@ -588,11 +598,11 @@ class SubscriptionConstructor {
                                 <div>
                                     <div style="font-size: 15px; color: rgba(255,255,255,0.9); margin-bottom: 6px; font-weight: 500;">Estimated Monthly Cost</div>
                                     <div style="font-size: 12px; color: rgba(255,255,255,0.7);">
-                                        Based on ${monthlyMultiplier} ${monthlyMultiplier === 1 ? 'delivery' : 'deliveries'}/month
+                                        ${quote ? `Based on ${this.formatDeliveriesPerMonth(quote.deliveries_per_month)} deliveries/month` : CONSTRUCTOR_I18N.preview_after_sign_in}
                                     </div>
                                 </div>
                                 <div style="font-size: 28px; font-weight: 700; color: white; text-align: right;">
-                                    ${this.formatPrice(estimatedMonthlyCost)}
+                                    ${quote ? this.formatPrice(quote.estimated_monthly_cost) : '&mdash;'}
                                     <div style="font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.8); margin-top: 2px;">UZS</div>
                                 </div>
                             </div>
@@ -667,6 +677,15 @@ class SubscriptionConstructor {
             }
         });
 
+        // Day of the month (monthly)
+        const monthDaySelect = document.getElementById('month-day-select');
+        if (monthDaySelect) {
+            monthDaySelect.addEventListener('change', (e) => {
+                this.selectedDayOfMonth = e.target.value ? parseInt(e.target.value, 10) : null;
+                this.saveState();
+            });
+        }
+
         // Time slot selection (dropdown)
         const timeSlotSelect = document.getElementById('time-slots-select');
         if (timeSlotSelect) {
@@ -727,23 +746,25 @@ class SubscriptionConstructor {
         option.classList.add('selected');
         this.selectedFrequency = option.dataset.frequency;
 
-        // Show/hide day selector
+        // Show the day chooser this frequency uses, and forget the one it does not
         const daySelector = document.getElementById('day-selector');
-        if (this.selectedFrequency === 'weekly' || this.selectedFrequency === 'biweekly') {
-            daySelector.style.display = 'block';
-        } else {
-            daySelector.style.display = 'none';
-            this.selectedDay = null;
-        }
+        const monthDaySelector = document.getElementById('month-day-selector');
+        if (daySelector) daySelector.style.display = this.usesWeekday() ? 'block' : 'none';
+        if (monthDaySelector) monthDaySelector.style.display = this.usesDayOfMonth() ? 'block' : 'none';
+        if (!this.usesWeekday()) this.selectedWeekday = null;
+        if (!this.usesDayOfMonth()) this.selectedDayOfMonth = null;
 
         this.saveState();
+        // The slots offered depend on the weekday
+        return this.loadTimeSlots();
     }
 
     selectDay(btn) {
         document.querySelectorAll('.day-btn').forEach(el => el.classList.remove('selected'));
         btn.classList.add('selected');
-        this.selectedDay = parseInt(btn.dataset.day);
+        this.selectedWeekday = SubscriptionConstructor.weekdayFromJsDay(parseInt(btn.dataset.day, 10));
         this.saveState();
+        return this.loadTimeSlots();
     }
 
     selectTimeSlot(slot) {
@@ -829,6 +850,7 @@ class SubscriptionConstructor {
             } else if (step === 4) {
                 await this.loadPaymentMethods();
             } else if (step === 5) {
+                await this.loadPreview();
                 this.renderReview();
                 // Attach event listener for subscription name input
                 setTimeout(() => {
@@ -928,8 +950,12 @@ class SubscriptionConstructor {
                     this.showError('Please select a delivery frequency');
                     return false;
                 }
-                if ((this.selectedFrequency === 'weekly' || this.selectedFrequency === 'biweekly') && this.selectedDay === null) {
+                if (this.usesWeekday() && this.selectedWeekday === null) {
                     this.showError('Please select a delivery day');
+                    return false;
+                }
+                if (this.usesDayOfMonth() && this.selectedDayOfMonth === null) {
+                    this.showError(CONSTRUCTOR_I18N.select_day_of_month);
                     return false;
                 }
                 if (!this.selectedTimeSlot) {
@@ -986,22 +1012,7 @@ class SubscriptionConstructor {
             // Use the subscription name (either user-edited or auto-generated)
             const finalName = this.subscriptionName || this.generateSubscriptionName();
 
-            const subscriptionData = {
-                name: finalName,
-                description: `Custom subscription with ${this.selectedProducts.size} product(s)`,
-                billing_cycle: this.selectedFrequency,
-                delivery_frequency: this.selectedFrequency,
-                delivery_day_of_week: this.selectedDay,
-                delivery_time_slot_id: this.selectedTimeSlot,  // Now sends integer ID (or null)
-                delivery_address_id: this.selectedAddress.id,
-                payment_method: this.selectedPaymentMethod,
-                auto_renew: true,
-                discount_percentage: 0,
-                items: Array.from(this.selectedProducts.values()).map(({ product, quantity }) => ({
-                    product_id: product.id,
-                    quantity: quantity
-                }))
-            };
+            const subscriptionData = this.buildSubscriptionBody(finalName);
 
             const response = await apiRequest('/subscriptions/', {
                 method: 'POST',
@@ -1025,6 +1036,64 @@ class SubscriptionConstructor {
         } finally {
             this.hideLoading();
         }
+    }
+
+    // The exact body POST /subscriptions/ gets: ONE `frequency`, the day that frequency uses
+    // (delivery_day_of_week 0 = Monday, or delivery_day_of_month), and the chosen slot.
+    buildSubscriptionBody(name) {
+        const body = {
+            name: name,
+            description: `Custom subscription with ${this.selectedProducts.size} product(s)`,
+            frequency: this.selectedFrequency,
+            delivery_time_slot_id: this.selectedTimeSlot,
+            delivery_address_id: this.selectedAddress.id,
+            payment_method: this.selectedPaymentMethod,
+            auto_renew: true,
+            items: Array.from(this.selectedProducts.values()).map(({ product, quantity }) => ({
+                product_id: product.id,
+                quantity: quantity
+            }))
+        };
+        if (this.usesWeekday()) body.delivery_day_of_week = this.selectedWeekday;
+        if (this.usesDayOfMonth()) body.delivery_day_of_month = this.selectedDayOfMonth;
+        return body;
+    }
+
+    // The backend's quote for this basket on this frequency (deliveries per month, monthly cost).
+    // It needs a signed-in customer; without one the review shows no estimate.
+    async loadPreview() {
+        this.preview = null;
+        if (!this.isAuthenticated) return;
+        try {
+            const response = await apiRequest('/subscriptions/preview', {
+                method: 'POST',
+                body: JSON.stringify({
+                    frequency: this.selectedFrequency,
+                    items: Array.from(this.selectedProducts.values()).map(({ product, quantity }) => ({
+                        product_id: product.id,
+                        quantity: quantity
+                    }))
+                })
+            });
+            const result = await response.json();
+            if (response.ok && result.success && result.data && result.data.preview) {
+                this.preview = result.data.preview;
+            }
+        } catch (error) {
+            console.error('Error loading subscription preview:', error);
+        }
+    }
+
+    formatDeliveriesPerMonth(count) {
+        return String(Math.round(Number(count) * 10) / 10);
+    }
+
+    deliveryDayLabel() {
+        if (this.usesWeekday() && this.selectedWeekday !== null) return this.getDayName(this.selectedWeekday);
+        if (this.usesDayOfMonth() && this.selectedDayOfMonth !== null) {
+            return String(CONSTRUCTOR_I18N.day_of_month).replace('{day}', this.selectedDayOfMonth);
+        }
+        return '';
     }
 
     // ============================================
@@ -1090,17 +1159,10 @@ class SubscriptionConstructor {
         return slot ? slot.label : null;
     }
 
-    getDayName(dayNumber) {
-        const days = {
-            0: 'Sunday',
-            1: 'Monday',
-            2: 'Tuesday',
-            3: 'Wednesday',
-            4: 'Thursday',
-            5: 'Friday',
-            6: 'Saturday'
-        };
-        return days[dayNumber] || '';
+    // Takes the backend's weekday (0 = Monday).
+    getDayName(weekday) {
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        return days[weekday] || '';
     }
 
     formatPrice(price) {

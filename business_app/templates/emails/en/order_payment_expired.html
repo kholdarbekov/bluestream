@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Order cancelled - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Order cancelled</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Order <strong>#{{ order_number }}</strong> was not paid by {{ deadline }}, so we cancelled it.</p>
+</div>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

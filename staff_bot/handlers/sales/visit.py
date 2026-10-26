@@ -1678,8 +1678,8 @@ class VisitHandler(SalesHubHandler):
         if line:
             lines.append(line)
         # What the store was CHARGED, not what the quote said: `create_order`
-        # is the only call that bills, and a tier discount or a contract price
-        # can move the number between the two. `format_currency` is the same
+        # is the only call that bills, and a contract price can move the
+        # number between the two. `format_currency` is the same
         # helper the confirm card and the outlet card's receivable use, so the
         # agent reads one shape of money everywhere. Absent on the 409's
         # `details.order`? No -- `serialize_order_brief` carries it too, which

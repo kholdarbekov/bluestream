@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Your subscription order is placed - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Your subscription order is placed</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Your subscription created order <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Order Number</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Delivery</th>
+        <td>{{ delivery_date }}, {% if window %}{{ window }}{% else %}time to be confirmed{% endif %}</td>
+    </tr>
+    {% for item in items %}
+    <tr>
+        <th>{{ item.name }}</th>
+        <td>× {{ item.qty }}</td>
+    </tr>
+    {% endfor %}
+    <tr>
+        <th>Total</th>
+        <td>{{ total }} UZS</td>
+    </tr>
+</table>
+
+{% if payment == "cash" %}
+{% if prepaid_applied %}<p>{{ prepaid_applied }} UZS of your prepaid balance is applied.</p>{% endif %}
+<p>{% if amount_due %}Pay <strong>{{ amount_due }} UZS</strong> to the driver at the door.{% else %}Nothing to pay at the door.{% endif %}</p>
+{% elif payment == "company_account" %}
+<p>Charged to your company account.</p>
+{% elif payment == "online_unpaid" %}
+<p>Please pay by {{ deadline }}. An order not paid by then is cancelled.</p>
+{% if pay_url %}
+<p style="text-align: center;">
+    <a href="{{ pay_url }}" class="btn-primary">Pay now</a>
+</p>
+{% endif %}
+{% elif payment == "online_paid" %}
+<p>Paid.</p>
+{% endif %}
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

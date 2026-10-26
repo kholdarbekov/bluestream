@@ -44,7 +44,9 @@ def ineligible_entity(db, program):
 
 
 def test_no_tier_discount(db, ineligible_entity):
-    quote = LoyaltyService().quote_tier_discount(ineligible_entity, Decimal("54000"), PaymentMethod.CASH)
+    quote = LoyaltyService().quote_tier_discount(
+        ineligible_entity, Decimal("54000"), PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    )
     assert quote.amount == Decimal("0.00")
 
 

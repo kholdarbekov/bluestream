@@ -5,7 +5,6 @@ This file should be placed in business_app/api/payments.py
 
 import business_app.models.order as order_models
 import business_app.models.payment as payment_models
-import business_app.models.subscription as subscription_models
 import business_app.models.user as user_models
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -21,7 +20,6 @@ except ImportError:
     UTC = timezone.utc
 
 from business_app.utils.service_factory import get_payment_service, get_notification_service, get_order_service
-from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
 from shared.redis_keyspace import RedisKeyspace
 from business_app.serializers.payment_serializers import (
@@ -68,7 +66,6 @@ Payment = payment_models.Payment
 CreditCard = payment_models.CreditCard
 Order = order_models.Order
 User = user_models.User
-Subscription = subscription_models.Subscription
 
 
 def _get_webhook_idempotency_guard(payment_service):
@@ -404,53 +401,6 @@ def create_payment():
     except Exception as e:
         current_app.logger.error(f"Create payment error: {e}")
         return internal_error_response(message=get_translation("api.payments.error.create_failed"))
-
-
-@payments_bp.route("/subscription", methods=["POST"])
-@jwt_required()
-@validate_json(["subscription_id", "payment_method"])
-def create_subscription_payment():
-    """Create a payment for subscription billing"""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
-
-        subscription_id = data.get("subscription_id")
-        payment_method = data.get("payment_method")
-
-        # Validate subscription
-        subscription = Subscription.query.filter_by(id=subscription_id, user_id=current_user_id).first()
-
-        if not subscription:
-            return not_found_response(message=get_translation("api.payments.error.subscription_not_found"))
-
-        # Create subscription payment
-        payment_data = {
-            "subscription_id": subscription_id,
-            "user_id": current_user_id,
-            "amount": subscription.billing_amount,
-            "currency": "UZS",
-            "payment_method": PaymentMethodType(payment_method),
-            "description": f'Subscription payment for {subscription.get_translated("name", get_current_language())}',
-            "is_recurring": True,
-            "return_url": data.get("return_url"),
-            "cancel_url": data.get("cancel_url"),
-            "metadata": {
-                "subscription_name": subscription.get_translated("name", get_current_language()),
-                "billing_cycle": subscription.billing_cycle,
-            },
-        }
-
-        payment = get_payment_service().create_payment(payment_data)
-        payment_link = get_payment_service().get_payment_link(payment)
-
-        return created_response(data={"payment": serialize_payment(payment), "payment_link": payment_link})
-
-    except ValueError as e:
-        return error_response(message=str(e))
-    except Exception as e:
-        current_app.logger.error(f"Create subscription payment error: {e}")
-        return internal_error_response(message=get_translation("api.payments.error.subscription_create_failed"))
 
 
 @payments_bp.route("/<int:payment_id>/status", methods=["GET"])

@@ -510,7 +510,9 @@ def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
     # bump used to live at this spot — a THIRD copy of the tier table, keyed
     # on attributes `User` does not have. Tier percentages come from
     # `LoyaltyTierConfig.discount_percentage`, read live, and reduce the ORDER
-    # TOTAL on the COD rail — never a catalogue price. Do not restore it.
+    # TOTAL of the customer's own bot or website order on the COD rail
+    # (`LoyaltyService.quote_tier_discount`) — never a catalogue price. Do not
+    # restore it.
 
     contract_price_at_checkout = False
     user_id = getattr(user, "id", None)

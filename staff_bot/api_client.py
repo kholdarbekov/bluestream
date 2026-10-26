@@ -1018,9 +1018,10 @@ class StaffAPIClient:
                                    payment_method: Optional[str] = None) -> APIResponse:
         """Price the basket before the agent confirms it.
 
-        The RAIL travels with it: `create_order` quotes a live tier discount
-        per payment method, so a quote that omitted the rail read one total to
-        the shopkeeper while the store was charged another.
+        The RAIL travels with it: a contract customer's price follows the
+        payment method (contract dual pricing), so a quote that omitted the
+        rail read one total to the shopkeeper while the store was charged
+        another.
         """
         return await self._make_request(
             'POST', f'/api/v1/staff/sales/outlets/{outlet_id}/order-estimate',

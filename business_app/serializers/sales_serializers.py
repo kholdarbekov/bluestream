@@ -207,8 +207,8 @@ class OrderItemPayload(_Payload):
 
 class OrderEstimatePayload(_Payload):
     items: List[OrderItemPayload] = Field(..., min_length=1)
-    # The rail the agent has chosen, when they have. The loyalty tier discount is a COD-only
-    # benefit `create_order` prices live, so a quote taken without the rail cannot equal the
+    # The rail the agent has chosen, when they have. A contract customer's price follows the
+    # payment method (contract dual pricing), so a quote taken without the rail cannot equal the
     # charge. Optional: a quote taken before the rail step keeps the rail-less pricing, and the
     # VALUE is validated by `VisitService._rail` -- the same gate the order itself goes through.
     payment_method: Optional[str] = None

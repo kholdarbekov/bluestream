@@ -747,11 +747,10 @@ def my_subscriptions():
         overview_data = {
             "active_count": len(active_subscriptions),
             "deliveries_this_month": subscription_service.get_monthly_deliveries_count(current_user_id),
-            "monthly_savings": subscription_service.calculate_monthly_savings(current_user_id),
         }
     except Exception as e:
         print(f"Error getting subscription overview: {e}")
-        overview_data = {"active_count": len(active_subscriptions), "deliveries_this_month": 0, "monthly_savings": 0}
+        overview_data = {"active_count": len(active_subscriptions), "deliveries_this_month": 0}
 
     return render_template(
         "frontend/my_subscriptions.html",
@@ -2313,7 +2312,8 @@ def public_loyalty_feed():
         "description": (
             "Aqua Club is the Aqua Element customer loyalty programme. Customers "
             "earn AquaCoins on every delivered, paid order, climb tiers for higher "
-            "earn multipliers and tier discounts, and redeem AquaCoins for rewards. "
+            "earn multipliers and tier discounts on orders placed in our Telegram bot or "
+            "on our website, and redeem AquaCoins for rewards. "
             "AquaCoins are reward points, not cash, and are not exchangeable for money."
         ),
         "url": _absolute_public_url("/api/public/loyalty.json"),

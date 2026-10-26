@@ -500,15 +500,19 @@ class VisitService:
         The operator estimator replays exactly the pricing `create_order` charges, so the figure
         the agent reads out and the figure the store is charged cannot diverge. Writes nothing.
 
-        The RAIL is part of that price: the loyalty tier discount is a COD-only benefit that
-        `create_order` quotes live, so a quote that did not know the rail omitted it and the
-        confirm screen's total was not the total charged. Optional because the bot may quote
-        before the rail step; validated by the same gate the order uses when it is supplied.
+        The RAIL is part of that price: a contract customer's line price follows the payment
+        method (contract dual pricing), so a quote that did not know the rail was not the total
+        charged. Optional because the bot may quote before the rail step; validated by the same
+        gate the order uses when it is supplied. The quote carries the `sales_agent` source the
+        order will carry, so the tier decision gives it no tier discount, exactly as it gives the
+        order none (spec 2026-10-23).
         """
         VisitService._assert_orderable(outlet)
         VisitService._assert_line_quantities(items)
         rail = VisitService._rail(payment_method) if payment_method is not None else None
-        return StaffService.estimate_phone_order(outlet.user_id, {"items": items}, payment_method=rail)
+        return StaffService.estimate_phone_order(
+            outlet.user_id, {"items": items}, payment_method=rail, order_source=ORDER_SOURCE_SALES_AGENT
+        )
 
     @staticmethod
     def place_order(visit: Visit, payload: Dict[str, Any], agent_user_id: int) -> Tuple[Order, str]:

@@ -4,17 +4,12 @@
     document.addEventListener('DOMContentLoaded', function () {
         var frequencyOptions = document.querySelectorAll('.frequency-option');
         var previewFrequency = document.getElementById('preview-frequency');
-        var previewSavings = document.getElementById('preview-savings');
         var selectedFrequency = null;
 
         function updatePreview() {
             if (!selectedFrequency) return;
 
             previewFrequency.textContent = PAGE_DATA.frequency_labels[selectedFrequency];
-
-            var discounts = { daily: 5, weekly: 10, biweekly: 15, monthly: 20 };
-            var discount = discounts[selectedFrequency] || 0;
-            previewSavings.textContent = discount + '%';
         }
 
         frequencyOptions.forEach(function (option) {

@@ -1,5 +1,6 @@
 import pytest
 from datetime import UTC, datetime, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 
 from business_app import db as _db
@@ -21,9 +22,9 @@ def _make_address(db, user):
 def _make_subscription(db, user, addr, product, *, number, status=SubscriptionStatus.ACTIVE):
     sub = Subscription(
         subscription_number=number, user_id=user.id, status=status, name="Standard",
-        billing_cycle=SubscriptionFrequency.MONTHLY, billing_amount=Decimal("30000.00"),
-        next_billing_date=datetime.now(UTC) + timedelta(days=7),
-        delivery_frequency=SubscriptionFrequency.WEEKLY, delivery_address_id=addr.id,
+        frequency=SubscriptionFrequency.MONTHLY, billing_amount=Decimal("30000.00"),
+        next_delivery_date=(local_date() + timedelta(days=7)),
+        delivery_address_id=addr.id,
         payment_method=PaymentMethod.CASH, start_date=datetime.now(UTC),
     )
     db.session.add(sub)
@@ -49,8 +50,7 @@ class TestAdminCreateUpdateEndpoints:
             json={
                 "user_id": sample_user.id,
                 "name": "Weekly Water",
-                "billing_cycle": "monthly",
-                "delivery_frequency": "weekly",
+                "frequency": "monthly",
                 "delivery_address_id": addr.id,
                 "payment_method": "cash",
                 "items": [{"product_id": sample_product.id, "quantity": 2}],
@@ -72,8 +72,8 @@ class TestAdminCreateUpdateEndpoints:
             "/api/v1/admin/subscriptions",
             headers=auth_headers,  # customer JWT
             json={
-                "user_id": sample_user.id, "name": "Weekly Water", "billing_cycle": "monthly",
-                "delivery_frequency": "weekly", "delivery_address_id": addr.id,
+                "user_id": sample_user.id, "name": "Weekly Water", "frequency": "monthly",
+                "delivery_address_id": addr.id,
                 "payment_method": "cash", "items": [{"product_id": sample_product.id, "quantity": 2}],
             },
         )
@@ -118,19 +118,19 @@ class TestAdminCreateUpdateEndpoints:
         )
         assert float(Subscription.query.get(sub.id).billing_amount) == 12345.0
 
-    def test_list_filters_by_billing_cycle(
+    def test_list_filters_by_frequency(
         self, client, db, admin_auth_headers, sample_user, sample_product
     ):
         addr = _make_address(db, sample_user)
         _make_subscription(db, sample_user, addr, sample_product, number="SUB-E3")
         resp = client.get(
-            "/api/v1/admin/subscriptions?billing_cycle=monthly", headers=admin_auth_headers
+            "/api/v1/admin/subscriptions?frequency=monthly", headers=admin_auth_headers
         )
         assert resp.status_code == 200
         numbers = [s["subscription_number"] for s in resp.get_json()["data"]["items"]]
         assert "SUB-E3" in numbers
         resp2 = client.get(
-            "/api/v1/admin/subscriptions?billing_cycle=daily", headers=admin_auth_headers
+            "/api/v1/admin/subscriptions?frequency=daily", headers=admin_auth_headers
         )
         numbers2 = [s["subscription_number"] for s in resp2.get_json()["data"]["items"]]
         assert "SUB-E3" not in numbers2

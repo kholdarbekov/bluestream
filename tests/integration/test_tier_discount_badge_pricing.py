@@ -31,7 +31,9 @@ def _silver_badge_below_floor(db, user):
 def test_cash_quote_uses_the_badge(db, sample_user):
     _silver_badge_below_floor(db, sample_user)
 
-    quote = LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH)
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    )
 
     assert quote.tier_name == "Silver"
     assert quote.percentage == TIER_RATE
@@ -41,7 +43,9 @@ def test_cash_quote_uses_the_badge(db, sample_user):
 def test_click_quote_stays_zero(db, sample_user):
     _silver_badge_below_floor(db, sample_user)
 
-    quote = LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CLICK)
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CLICK, order_source="web", is_subscription_order=False
+    )
 
     assert quote.amount == Decimal("0.00")
     assert quote.tier_name is None

@@ -38,7 +38,6 @@ def test_subscriptions_api_delegates_user_scoped_operations_to_service():
         "get_subscription_statistics_for_user(",
         "skip_next_delivery_for_user(",
         "change_payment_method_for_user(",
-        "validate_retry_billing_for_user(",
     ]
 
     for method in delegated_methods:
@@ -52,4 +51,5 @@ def test_subscription_service_contains_user_scoped_entrypoints():
     assert "def update_subscription_for_user(" in text
     assert "def skip_next_delivery_for_user(" in text
     assert "def change_payment_method_for_user(" in text
-    assert "def validate_retry_billing_for_user(" in text
+    # The retry-billing route and its validator are gone (spec 2026-10-23 §4.7): nothing bills.
+    assert "def validate_retry_billing_for_user(" not in text

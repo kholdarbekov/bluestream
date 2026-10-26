@@ -12,21 +12,21 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import adminService from '../services/adminService';
-import { formatDate, formatDateTime } from '../utils/dateUtils';
 import EmptyState from '../components/common/EmptyState';
-import { buildSubscriptionPayload } from '../utils/subscriptionPayload';
+import { buildSubscriptionPayload, usesDayOfMonth, usesWeekday } from '../utils/subscriptionPayload';
+import { formatUpcomingDelivery } from '../utils/subscriptionDisplay';
 
 const DEFAULT_PAGE = { page: 1, per_page: 20 };
 const STATUS_COLORS = { active: 'green', paused: 'orange', cancelled: 'red', expired: 'default', trial: 'blue' };
 const STATUS_OPTIONS = ['active', 'paused', 'cancelled', 'expired', 'trial'];
 const FREQUENCY_OPTIONS = ['daily', 'weekly', 'biweekly', 'monthly'];
-const FREQUENCY_RANK = { daily: 1, weekly: 2, biweekly: 3, monthly: 4 };
+// 0 = Monday: the backend's weekday convention, shown by name so nobody types a number.
+const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 const mapDetailToForm = (d) => ({
   name: d.name,
   description: d.description,
-  billing_cycle: d.billing_cycle,
-  delivery_frequency: d.delivery_frequency,
+  frequency: d.frequency,
   delivery_day_of_week: d.delivery_day_of_week,
   delivery_day_of_month: d.delivery_day_of_month,
   delivery_time_slot_id: d.delivery_time_slot_id ?? d.delivery_time_slot?.id,
@@ -38,8 +38,7 @@ const mapDetailToForm = (d) => ({
   start_date: d.start_date ? dayjs(d.start_date) : null,
   end_date: d.end_date ? dayjs(d.end_date) : null,
   billing_amount: d.billing_amount,
-  next_billing_date: d.next_billing_date ? dayjs(d.next_billing_date) : null,
-  last_billing_date: d.last_billing_date ? dayjs(d.last_billing_date) : null,
+  next_delivery_date: d.next_delivery_date ? dayjs(d.next_delivery_date) : null,
   override_edit_any_status: false,
   override_manual_billing_amount: false,
   override_manual_billing_dates: false,
@@ -51,7 +50,7 @@ const Subscriptions = () => {
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState();
-  const [billingCycle, setBillingCycle] = useState();
+  const [frequencyFilter, setFrequencyFilter] = useState();
   const [pagination, setPagination] = useState(DEFAULT_PAGE);
 
   const [modal, setModal] = useState({ open: false, subscription: null });
@@ -62,7 +61,7 @@ const Subscriptions = () => {
 
   const [form] = Form.useForm();
   const watchedUserId = Form.useWatch('user_id', form);
-  const watchedDeliveryFreq = Form.useWatch('delivery_frequency', form);
+  const watchedFrequency = Form.useWatch('frequency', form);
   const watchedItems = Form.useWatch('items', form);
   const manualAmount = Form.useWatch('override_manual_billing_amount', form);
   const manualDates = Form.useWatch('override_manual_billing_dates', form);
@@ -71,9 +70,9 @@ const Subscriptions = () => {
   const formUserId = isEdit ? modal.subscription.user_id : watchedUserId;
 
   const listQuery = useQuery({
-    queryKey: ['admin-subscriptions', pagination, search, status, billingCycle],
+    queryKey: ['admin-subscriptions', pagination, search, status, frequencyFilter],
     queryFn: () => adminService.getSubscriptions({
-      page: pagination.page, per_page: pagination.per_page, search, status, billing_cycle: billingCycle,
+      page: pagination.page, per_page: pagination.per_page, search, status, frequency: frequencyFilter,
     }),
     placeholderData: keepPreviousData,
   });
@@ -136,24 +135,24 @@ const Subscriptions = () => {
   const createMutation = useMutation({
     mutationFn: (payload) => adminService.createSubscription(payload),
     onSuccess: () => {
-      message.success(t('created', { defaultValue: 'Subscription created' }));
+      message.success(t('sub_created', { defaultValue: 'Subscription created' }));
       setModal({ open: false, subscription: null });
       form.resetFields();
       invalidateList();
     },
-    onError: (e) => message.error(e.response?.data?.message || t('create_failed', { defaultValue: 'Failed to create subscription' })),
+    onError: (e) => message.error(e.response?.data?.message || t('sub_create_failed', { defaultValue: 'Failed to create subscription' })),
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, payload }) => adminService.updateSubscription(id, payload),
     onSuccess: () => {
-      message.success(t('updated', { defaultValue: 'Subscription updated' }));
+      message.success(t('sub_updated', { defaultValue: 'Subscription updated' }));
       setModal({ open: false, subscription: null });
       form.resetFields();
       invalidateList();
       invalidateDetail();
     },
-    onError: (e) => message.error(e.response?.data?.message || t('update_failed', { defaultValue: 'Failed to update subscription' })),
+    onError: (e) => message.error(e.response?.data?.message || t('sub_update_failed', { defaultValue: 'Failed to update subscription' })),
   });
 
   const lifecycleMutation = useMutation({
@@ -163,8 +162,14 @@ const Subscriptions = () => {
       if (action === 'cancel') return adminService.cancelSubscription(id, { cancellation_reason: 'Cancelled by administrator' });
       return adminService.processSubscriptionBilling(id);
     },
-    onSuccess: () => {
-      message.success(t('action_done', { defaultValue: 'Done' }));
+    onSuccess: (response, { action }) => {
+      // "Create next order now" answers 200 even when it created nothing (a refusal, an outage, or the
+      // order already exists): say why, never "Done".
+      if (action === 'bill' && !response?.data?.created_order_ids?.length) {
+        message.warning(response?.message || t('sub_no_order_created', { defaultValue: 'No order was created' }));
+      } else {
+        message.success(t('action_done', { defaultValue: 'Done' }));
+      }
       invalidateList();
       invalidateDetail();
     },
@@ -198,8 +203,7 @@ const Subscriptions = () => {
     setModal({ open: true, subscription: null });
     form.resetFields();
     form.setFieldsValue({
-      billing_cycle: 'monthly',
-      delivery_frequency: 'weekly',
+      frequency: 'weekly',
       payment_method: 'cash',
       auto_renew: true,
       discount_percentage: 0,
@@ -222,35 +226,29 @@ const Subscriptions = () => {
     else createMutation.mutate(payload);
   };
 
-  const billingDisabled = (value) => {
-    if (!watchedDeliveryFreq) return false;
-    // eslint-disable-next-line security/detect-object-injection
-    return FREQUENCY_RANK[value] < FREQUENCY_RANK[watchedDeliveryFreq];
-  };
-
   const columns = useMemo(() => ([
     { title: t('number', { defaultValue: 'Number' }), dataIndex: 'subscription_number', key: 'subscription_number' },
     {
-      title: t('customer', { defaultValue: 'Customer' }), key: 'customer',
+      title: t('sub_customer', { defaultValue: 'Customer' }), key: 'customer',
       render: (_, r) => (<div><div>{r.user_name}</div><Typography.Text type="secondary">{r.user_email}</Typography.Text></div>),
     },
     {
-      title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status', width: 110,
+      title: t('sub_status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status', width: 110,
       // eslint-disable-next-line security/detect-object-injection
       render: (v) => <Tag color={STATUS_COLORS[v] || 'default'}>{v}</Tag>,
     },
-    { title: t('billing_cycle', { defaultValue: 'Billing' }), dataIndex: 'billing_cycle', key: 'billing_cycle', width: 100 },
+    { title: t('frequency', { defaultValue: 'Frequency' }), dataIndex: 'frequency', key: 'frequency', width: 100 },
     {
       title: t('billing_amount', { defaultValue: 'Amount' }), dataIndex: 'billing_amount', key: 'billing_amount', width: 110,
       render: (v) => Number(v || 0).toLocaleString(),
     },
     {
-      title: t('next_billing', { defaultValue: 'Next Billing' }), dataIndex: 'next_billing_date', key: 'next_billing_date', width: 130,
-      render: (v) => (v ? formatDate(v) : '-'),
+      title: t('next_delivery', { defaultValue: 'Next delivery' }), key: 'upcoming_delivery', width: 210,
+      render: (_, r) => formatUpcomingDelivery(r, t('time_to_be_confirmed', { defaultValue: 'time to be confirmed' })),
     },
-    { title: t('items', { defaultValue: 'Items' }), dataIndex: 'items_count', key: 'items_count', width: 70 },
+    { title: t('sub_items', { defaultValue: 'Items' }), dataIndex: 'items_count', key: 'items_count', width: 70 },
     {
-      title: t('actions', { defaultValue: 'Actions' }), key: 'actions', width: 110, fixed: 'right',
+      title: t('sub_actions', { defaultValue: 'Actions' }), key: 'actions', width: 110, fixed: 'right',
       render: (_, record) => (
         <Space>
           <Button type="text" icon={<EyeOutlined />} onClick={() => setDrawerId(record.id)} />
@@ -261,9 +259,9 @@ const Subscriptions = () => {
   ]), [t]);
 
   const itemColumns = [
-    { title: t('product', { defaultValue: 'Product' }), dataIndex: 'product_name', key: 'product_name' },
+    { title: t('sub_product', { defaultValue: 'Product' }), dataIndex: 'product_name', key: 'product_name' },
     {
-      title: t('quantity', { defaultValue: 'Qty' }), dataIndex: 'quantity', key: 'quantity', width: 170,
+      title: t('sub_quantity', { defaultValue: 'Qty' }), dataIndex: 'quantity', key: 'quantity', width: 170,
       render: (v, item) => (
         <Space>
           <InputNumber
@@ -283,7 +281,7 @@ const Subscriptions = () => {
               payload: { quantity: qtyDrafts[item.id] ?? v },
             })}
           >
-            {t('save', { defaultValue: 'Save' })}
+            {t('sub_save', { defaultValue: 'Save' })}
           </Button>
         </Space>
       ),
@@ -308,13 +306,13 @@ const Subscriptions = () => {
       <Card>
         <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
           <Space wrap>
-            <Input.Search allowClear placeholder={t('search_placeholder', { defaultValue: 'Search number / name / customer' })}
+            <Input.Search allowClear placeholder={t('sub_search_placeholder', { defaultValue: 'Search number / name / customer' })}
               style={{ width: 260 }} onSearch={(v) => { setSearch(v); setPagination(DEFAULT_PAGE); }} />
-            <Select allowClear placeholder={t('status', { defaultValue: 'Status' })} style={{ width: 150 }}
+            <Select allowClear placeholder={t('sub_status', { defaultValue: 'Status' })} style={{ width: 150 }}
               value={status} onChange={(v) => { setStatus(v); setPagination(DEFAULT_PAGE); }}
               options={STATUS_OPTIONS.map((s) => ({ value: s, label: s }))} />
-            <Select allowClear placeholder={t('billing_cycle', { defaultValue: 'Billing cycle' })} style={{ width: 150 }}
-              value={billingCycle} onChange={(v) => { setBillingCycle(v); setPagination(DEFAULT_PAGE); }}
+            <Select allowClear placeholder={t('frequency', { defaultValue: 'Frequency' })} style={{ width: 150 }}
+              value={frequencyFilter} onChange={(v) => { setFrequencyFilter(v); setPagination(DEFAULT_PAGE); }}
               options={FREQUENCY_OPTIONS.map((f) => ({ value: f, label: f }))} />
           </Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -333,7 +331,7 @@ const Subscriptions = () => {
         <Form form={form} layout="vertical" onFinish={onFinish}>
           <Divider orientation="left">{t('section_details', { defaultValue: 'Details' })}</Divider>
           {!isEdit && (
-            <Form.Item name="user_id" label={t('customer', { defaultValue: 'Customer' })} rules={[{ required: true }]}>
+            <Form.Item name="user_id" label={t('sub_customer', { defaultValue: 'Customer' })} rules={[{ required: true }]}>
               <Select showSearch filterOption={false} placeholder={t('search_customer', { defaultValue: 'Search customer…' })}
                 onSearch={setUserSearch} loading={usersQuery.isLoading}
                 onChange={() => form.setFieldsValue({ delivery_address_id: undefined })}
@@ -342,12 +340,12 @@ const Subscriptions = () => {
           )}
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="name" label={t('name', { defaultValue: 'Name' })} rules={[{ required: true, min: 3 }]}>
+              <Form.Item name="name" label={t('sub_name', { defaultValue: 'Name' })} rules={[{ required: true, min: 3 }]}>
                 <Input />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="description" label={t('description', { defaultValue: 'Description' })}>
+              <Form.Item name="description" label={t('sub_description', { defaultValue: 'Description' })}>
                 <Input />
               </Form.Item>
             </Col>
@@ -363,7 +361,7 @@ const Subscriptions = () => {
                       <Row gutter={8} key={field.key} align="middle">
                         <Col span={11}>
                           <Form.Item name={[field.name, 'product_id']} rules={[{ required: true }]}>
-                            <Select showSearch optionFilterProp="label" placeholder={t('product', { defaultValue: 'Product' })}
+                            <Select showSearch optionFilterProp="label" placeholder={t('sub_product', { defaultValue: 'Product' })}
                               options={products.map((p) => ({ value: p.id, label: p.name }))}
                               onChange={(productId) => {
                                 const path = ['items', field.name, 'quantity'];
@@ -376,7 +374,7 @@ const Subscriptions = () => {
                           <Form.Item name={[field.name, 'quantity']} rules={[{ required: true }]}>
                             <InputNumber
                               min={minQtyFor(watchedItems?.[field.name]?.product_id)}
-                              style={{ width: '100%' }} placeholder={t('quantity', { defaultValue: 'Qty' })} />
+                              style={{ width: '100%' }} placeholder={t('sub_quantity', { defaultValue: 'Qty' })} />
                           </Form.Item>
                         </Col>
                         <Col span={5}>
@@ -400,11 +398,6 @@ const Subscriptions = () => {
 
           <Divider orientation="left">{t('section_billing', { defaultValue: 'Billing' })}</Divider>
           <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="billing_cycle" label={t('billing_cycle', { defaultValue: 'Billing cycle' })} rules={[{ required: true }]}>
-                <Select options={FREQUENCY_OPTIONS.map((f) => ({ value: f, label: f, disabled: billingDisabled(f) }))} />
-              </Form.Item>
-            </Col>
             <Col span={8}>
               <Form.Item name="payment_method" label={t('payment_method', { defaultValue: 'Payment method' })} rules={[{ required: true }]}>
                 <Select
@@ -435,24 +428,30 @@ const Subscriptions = () => {
           <Divider orientation="left">{t('section_delivery', { defaultValue: 'Delivery schedule' })}</Divider>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="delivery_frequency" label={t('delivery_frequency', { defaultValue: 'Delivery frequency' })} rules={[{ required: true }]}>
+              <Form.Item name="frequency" label={t('frequency', { defaultValue: 'Frequency' })} rules={[{ required: true }]}>
                 <Select options={FREQUENCY_OPTIONS.map((f) => ({ value: f, label: f }))} />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="delivery_day_of_week" label={t('day_of_week', { defaultValue: 'Day of week (0=Mon)' })}>
-                <InputNumber min={0} max={6} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="delivery_day_of_month" label={t('day_of_month', { defaultValue: 'Day of month' })}>
-                <InputNumber min={1} max={31} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
+            {usesWeekday(watchedFrequency) && (
+              <Col span={8}>
+                <Form.Item name="delivery_day_of_week" label={t('day_of_week', { defaultValue: 'Delivery day' })}>
+                  <Select options={WEEKDAYS.map((name, index) => ({
+                    value: index, label: t(`weekday_${index}`, { defaultValue: name.charAt(0).toUpperCase() + name.slice(1) }),
+                  }))} />
+                </Form.Item>
+              </Col>
+            )}
+            {usesDayOfMonth(watchedFrequency) && (
+              <Col span={8}>
+                <Form.Item name="delivery_day_of_month" label={t('day_of_month', { defaultValue: 'Day of month' })}>
+                  <InputNumber min={1} max={31} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            )}
           </Row>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="delivery_address_id" label={t('address', { defaultValue: 'Delivery address' })} rules={[{ required: true }]}>
+              <Form.Item name="delivery_address_id" label={t('sub_address', { defaultValue: 'Delivery address' })} rules={[{ required: true }]}>
                 <Select loading={addressesQuery.isLoading} placeholder={t('select_address', { defaultValue: 'Select address' })}
                   options={addresses.map((a) => ({ value: a.id, label: a.full_address || a.title || `#${a.id}` }))} />
               </Form.Item>
@@ -496,18 +495,13 @@ const Subscriptions = () => {
                   </Form.Item>
                 </Col>
               </Row>
-              <Form.Item name="override_manual_billing_dates" label={t('override_dates', { defaultValue: 'Manual billing dates' })} valuePropName="checked">
+              <Form.Item name="override_manual_billing_dates" label={t('override_dates', { defaultValue: 'Set next delivery date' })} valuePropName="checked">
                 <Switch />
               </Form.Item>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item name="next_billing_date" label={t('next_billing', { defaultValue: 'Next billing date' })}>
-                    <DatePicker showTime disabled={!manualDates} style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item name="last_billing_date" label={t('last_billing', { defaultValue: 'Last billing date' })}>
-                    <DatePicker showTime disabled={!manualDates} style={{ width: '100%' }} />
+                  <Form.Item name="next_delivery_date" label={t('next_delivery_date', { defaultValue: 'Next delivery date' })}>
+                    <DatePicker disabled={!manualDates} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -516,7 +510,7 @@ const Subscriptions = () => {
 
           <Form.Item style={{ marginTop: 16, marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={closeModal}>{t('cancel', { defaultValue: 'Cancel' })}</Button>
+              <Button onClick={closeModal}>{t('sub_cancel', { defaultValue: 'Cancel' })}</Button>
               <Button type="primary" htmlType="submit" loading={createMutation.isPending || updateMutation.isPending}>
                 {isEdit ? t('submit_update', { defaultValue: 'Update' }) : t('submit_create', { defaultValue: 'Create' })}
               </Button>
@@ -530,17 +524,18 @@ const Subscriptions = () => {
         {drawerId && (
           <>
             <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label={t('customer', { defaultValue: 'Customer' })} span={2}>
+              <Descriptions.Item label={t('sub_customer', { defaultValue: 'Customer' })} span={2}>
                 {detail.user?.name} {detail.user?.phone ? `(${detail.user.phone})` : ''}
               </Descriptions.Item>
-              <Descriptions.Item label={t('status', { defaultValue: 'Status' })}>
+              <Descriptions.Item label={t('sub_status', { defaultValue: 'Status' })}>
                 <Tag color={STATUS_COLORS[detail.status] || 'default'}>{detail.status}</Tag>
               </Descriptions.Item>
-              <Descriptions.Item label={t('billing_cycle', { defaultValue: 'Billing' })}>{detail.billing_cycle}</Descriptions.Item>
+              <Descriptions.Item label={t('frequency', { defaultValue: 'Frequency' })}>{detail.frequency}</Descriptions.Item>
               <Descriptions.Item label={t('billing_amount', { defaultValue: 'Amount' })}>{Number(detail.billing_amount || 0).toLocaleString()}</Descriptions.Item>
               <Descriptions.Item label={t('payment_method', { defaultValue: 'Payment method' })}>{detail.payment_method || '—'}</Descriptions.Item>
-              <Descriptions.Item label={t('delivery_frequency', { defaultValue: 'Delivery' })}>{detail.delivery_frequency}</Descriptions.Item>
-              <Descriptions.Item label={t('next_billing', { defaultValue: 'Next billing' })}>{detail.next_billing_date ? formatDateTime(detail.next_billing_date) : '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('next_delivery', { defaultValue: 'Next delivery' })}>
+                {formatUpcomingDelivery(detail, t('time_to_be_confirmed', { defaultValue: 'time to be confirmed' }))}
+              </Descriptions.Item>
               <Descriptions.Item label={t('total_orders', { defaultValue: 'Orders generated' })}>{detail.total_orders_generated ?? 0}</Descriptions.Item>
             </Descriptions>
 
@@ -560,9 +555,9 @@ const Subscriptions = () => {
                   {t('cancel_sub', { defaultValue: 'Cancel' })}
                 </Button>
               </Popconfirm>
-              <Popconfirm title={t('bill_now_confirm', { defaultValue: 'Generate an order and bill now?' })}
+              <Popconfirm title={t('bill_now_confirm', { defaultValue: 'Create the next order now?' })}
                 onConfirm={() => lifecycleMutation.mutate({ action: 'bill', id: drawerId })}>
-                <Button icon={<DollarOutlined />} disabled={detail.status === 'cancelled'}>{t('bill_now', { defaultValue: 'Process billing now' })}</Button>
+                <Button icon={<DollarOutlined />} disabled={detail.status === 'cancelled'}>{t('bill_now', { defaultValue: 'Create next order now' })}</Button>
               </Popconfirm>
             </Space>
 
@@ -571,7 +566,7 @@ const Subscriptions = () => {
               dataSource={detail.items || []} loading={detailQuery.isLoading} />
             <Space style={{ marginTop: 12 }} wrap>
               <Select showSearch optionFilterProp="label" style={{ width: 240 }}
-                placeholder={t('product', { defaultValue: 'Product' })} value={addItemValue.product_id}
+                placeholder={t('sub_product', { defaultValue: 'Product' })} value={addItemValue.product_id}
                 onChange={(v) => setAddItemValue((s) => ({ product_id: v, quantity: Math.max(s.quantity || 0, minQtyFor(v)) }))}
                 options={products.map((p) => ({ value: p.id, label: p.name }))} />
               <InputNumber min={minQtyFor(addItemValue.product_id)} value={addItemValue.quantity}

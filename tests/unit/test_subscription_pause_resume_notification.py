@@ -6,9 +6,11 @@ resume_subscription read ``subscription.frequency`` → AttributeError (crash);
 pause wrote ``subscription.pause_until`` (phantom, silently lost); and
 NotificationService.send_subscription_notification read plan/frequency/
 total_amount (all phantom) → crash whenever a subscription notification fired.
+(`frequency` is a real column again since the single-frequency change, plan 2026-10-24.)
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -33,10 +35,9 @@ def _make_subscription(db, user, *, status, number):
         user_id=user.id,
         status=status,
         name="Standard Weekly",
-        billing_cycle=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         billing_amount=Decimal("50000.00"),
-        next_billing_date=datetime.now(UTC) + timedelta(days=7),
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        next_delivery_date=(local_date() + timedelta(days=7)),
         delivery_address_id=addr.id,
         payment_method=PaymentMethod.CARD,
         start_date=datetime.now(UTC),
@@ -50,27 +51,29 @@ def _make_subscription(db, user, *, status, number):
 
 @pytest.mark.unit
 class TestSubscriptionPauseResume:
-    def test_pause_sets_pause_end_date(self, app, db, sample_user):
+    """The live, user-scoped pause and resume (the legacy uncalled copies are gone)."""
+
+    def test_pause_records_the_pause(self, app, db, sample_user):
         with app.app_context():
             sub = _make_subscription(db, sample_user, status=SubscriptionStatus.ACTIVE, number="SUB-P1")
-            until = datetime.now(UTC) + timedelta(days=14)
 
-            SubscriptionService().pause_subscription(sub.id, pause_until=until)
+            SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id, "Away")
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.PAUSED
-            assert refreshed.pause_end_date is not None
+            assert (refreshed.pause_reason, refreshed.paused_at is not None) == ("Away", True)
 
-    def test_resume_recalculates_billing_without_crashing(self, app, db, sample_user):
+    def test_resume_dates_the_next_delivery_without_crashing(self, app, db, sample_user):
         with app.app_context():
             sub = _make_subscription(db, sample_user, status=SubscriptionStatus.PAUSED, number="SUB-R1")
 
-            SubscriptionService().resume_subscription(sub.id)
+            with patch("business_app.tasks.subscription_tasks.create_subscription_delivery_task.delay"):
+                SubscriptionService().resume_subscription_for_user(sub.id, sample_user.id)
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.ACTIVE
-            assert refreshed.resume_date is not None
-            assert isinstance(refreshed.next_billing_date, datetime)
+            assert refreshed.paused_at is None
+            assert isinstance(refreshed.next_delivery_date, date)
 
 
 @pytest.mark.unit

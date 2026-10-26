@@ -26,12 +26,13 @@ from business_app.models.product import Product
 from business_app.models.sales import Outlet, SalesAgentProfile
 from business_app.models.sales_visits import OrderConfirmationRequest
 from business_app.models.user import User
+from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.order_service import OrderService
 from business_app.services.sales import agent_order_confirmation_service as confirmation_module
 from business_app.services.sales.replenishment_service import ReplenishmentService
 from business_app.services.sales.visit_service import VisitService
 from business_app.utils.delivery_window import local_now
-from shared.enums import CorporateContractTrackingMode, OrderStatus
+from shared.enums import CorporateContractTrackingMode, OrderStatus, PaymentMethod
 from tests.integration.test_staff_sales_outlets_api import BOT_PAYLOAD, OUTLETS
 from tests.unit.test_outlet_dedupe import PIN
 from tests.integration.reorder_reminder_builders import add_order_lines, delivered_order, make_product
@@ -911,16 +912,16 @@ def test_a_visit_with_nothing_to_count_still_reaches_the_order_screen(
     assert closed.status_code == 200, closed.get_data(as_text=True)
 
 
-def test_the_quote_and_the_charge_agree_on_the_cod_tier_discount(
+def test_the_quote_and_the_charge_agree_with_no_tier_discount_on_agent_orders(
     client, sales_agent_auth_headers, flagged_product, db
 ):
     """C27: the confirm screen's total is the total the store is charged.
 
-    `order_estimate` replayed pricing through `price_phone_order`, which hard-codes
-    `tier_discount = 0`, while `create_order` quotes a LIVE tier discount for the rail. An
-    `individual` outlet gets an INDIVIDUAL customer account, which is loyalty-eligible, so the
-    agent read one number out to the shopkeeper and the shop was charged another -- and the
-    shop's own bot showed the second one. The rail now travels with the quote.
+    An `individual` outlet gets an INDIVIDUAL customer account, which is loyalty-eligible and here
+    holds a tier with a live rate. The tier discount is a perk of the customer's own bot or website
+    order (spec 2026-10-23), so the agent's quote and the order `create_order` charges both ask
+    `quote_tier_discount` with the `sales_agent` source and both carry none: the number the agent
+    reads out is the number the shop's own bot shows.
     """
     created = client.post(OUTLETS, json=INDIVIDUAL_PAYLOAD, headers=sales_agent_auth_headers)
     assert created.status_code == 201, created.get_data(as_text=True)
@@ -938,7 +939,7 @@ def test_the_quote_and_the_charge_agree_on_the_cod_tier_discount(
     )
     assert quoted.status_code == 200, quoted.get_data(as_text=True)
     estimate = quoted.get_json()["data"]["estimate"]
-    assert estimate["tier_discount"] > 0  # the discount is really in play, not a vacuous match
+    assert estimate["tier_discount"] == 0.0
 
     placed = client.post(
         f"{VISITS}/{visit_id}/order",
@@ -948,10 +949,14 @@ def test_the_quote_and_the_charge_agree_on_the_cod_tier_discount(
     assert placed.status_code == 201, placed.get_data(as_text=True)
     assert placed.get_json()["data"]["order"]["total_amount"] == estimate["total_amount"]
     order = Order.query.get(placed.get_json()["data"]["order"]["id"])
-    assert float(order.tier_discount) == estimate["tier_discount"]
+    assert float(order.tier_discount) == 0.0
+    assert float(order.total_amount) == estimate["total_amount"]
+    # Not a vacuous zero: the same basket as the customer's own website order would carry the tier.
+    assert LoyaltyService().quote_tier_discount(
+        order.user, order.subtotal, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount > 0
 
-    # The OTHER rail an agent may take is not a COD rail, so it must quote no discount at all --
-    # proving the quote reads the rail rather than always applying the benefit.
+    # The OTHER rail an agent may take quotes no discount either.
     business = client.post(
         f"{OUTLETS}/{outlet['id']}/order-estimate",
         json={"items": basket, "payment_method": "business_account"},

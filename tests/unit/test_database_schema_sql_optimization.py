@@ -26,7 +26,7 @@ def test_expected_indexes_and_constraints_exist(db):
     # `delivery_date` — the column the release sweep filters on — carries its
     # own index instead.
     assert "idx_orders_delivery_date" in _index_names(inspector, "orders")
-    assert "idx_subscriptions_status_next_billing" in _index_names(inspector, "subscriptions")
+    assert "idx_subscriptions_status_next_billing" not in _index_names(inspector, "subscriptions")
     assert "idx_subscriptions_status_next_delivery" in _index_names(inspector, "subscriptions")
     assert "idx_campaign_usage_campaign_user" in _index_names(inspector, "campaign_usage")
     assert "idx_campaign_usage_order_id" in _index_names(inspector, "campaign_usage")

@@ -387,6 +387,24 @@
                                     {% endif %}
                                 </span>
                             </div>
+                            {% if order.tier_discount and order.tier_discount > 0 %}
+                            <div class="total-row">
+                                <span>{{ 'Tier discount (bot & website perk)'|t }}:</span>
+                                <span class="amount">−{{ "{:,.0f}".format(order.tier_discount) }} UZS</span>
+                            </div>
+                            {% endif %}
+                            {% if order.discount_amount and order.discount_amount > 0 %}
+                            <div class="total-row">
+                                <span>{{ 'Subscription discount'|t }}:</span>
+                                <span class="amount">−{{ "{:,.0f}".format(order.discount_amount) }} UZS</span>
+                            </div>
+                            {% endif %}
+                            {% if order.loyalty_discount and order.loyalty_discount > 0 %}
+                            <div class="total-row">
+                                <span>{{ 'Reward discount'|t }}:</span>
+                                <span class="amount">−{{ "{:,.0f}".format(order.loyalty_discount) }} UZS</span>
+                            </div>
+                            {% endif %}
                             <div class="total-row final">
                                 <span>{{ 'Total'|t }}:</span>
                                 <span class="amount">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>

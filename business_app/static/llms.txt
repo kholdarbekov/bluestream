@@ -44,7 +44,8 @@ Aqua Element runs a free customer loyalty programme called **Aqua Club**.
 Customers earn **AquaCoins** (reward points — not cash, and not exchangeable for
 money) on every delivered, paid order, plus a welcome bonus on joining and
 bonuses for referrals and birthdays. Spending more moves customers up tiers with
-higher earn multipliers and tier discounts. AquaCoins are redeemed for discounts
+higher earn multipliers and tier discounts on orders placed in our Telegram bot
+or on our website. AquaCoins are redeemed for discounts
 and free products at checkout. Full, always-current details — tiers, earn rules,
 and rewards — are published for humans at https://aqua-element.uz/loyalty-guide
 and as machine-readable JSON at https://aqua-element.uz/api/public/loyalty.json.

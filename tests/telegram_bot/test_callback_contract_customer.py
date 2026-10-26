@@ -92,6 +92,7 @@ from handlers.subscriptions import (
 )
 from keyboards import (
     product_page_callback,
+    CustomerNoticeKeyboards,
     DeliverySummaryKeyboards,
     LanguageKeyboards,
     MenuKeyboards,
@@ -772,7 +773,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     add(
         "SubscriptionKeyboards.subscription_list",
         SubscriptionKeyboards.subscription_list(
-            [{"id": 12, "status": "active", "name": "Haftalik", "delivery_frequency": "weekly"}],
+            [{"id": 12, "status": "active", "name": "Haftalik", "frequency": "weekly"}],
             lang,
         ),
     )
@@ -781,9 +782,21 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
             f"SubscriptionKeyboards.subscription_actions({status})",
             SubscriptionKeyboards.subscription_actions(12, status, lang),
         )
+    for frequency in ("weekly", "biweekly", "monthly"):
+        add(
+            f"SubscriptionKeyboards.day_picker({frequency}, creation)",
+            SubscriptionKeyboards.day_picker(frequency, lang),
+        )
+        add(
+            f"SubscriptionKeyboards.day_picker({frequency}, edit)",
+            SubscriptionKeyboards.day_picker(frequency, lang, subscription_id=12),
+        )
     add(
-        "SubscriptionKeyboards.subscription_creation_options",
-        SubscriptionKeyboards.subscription_creation_options(lang),
+        "SubscriptionKeyboards.time_slot_picker",
+        SubscriptionKeyboards.time_slot_picker(
+            [{"id": 5, "name": "Morning", "time_range": "10:00-12:00"}, {"id": 6, "time_range": "18:00-20:00"}],
+            lang,
+        ),
     )
     add("SubscriptionKeyboards.quantity_selector", SubscriptionKeyboards.quantity_selector(lang, min_order_qty=1))
     add(
@@ -883,6 +896,15 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
 
     for reorder_order_id in (9001, None):
         add(f"DeliverySummaryKeyboards.summary(reorder={reorder_order_id})", DeliverySummaryKeyboards.summary(lang, 51, reorder_order_id))
+
+    # -- customer notices (plan 2026-10-24 Task 3) -----------------------------
+    # Pay now + View order (an unpaid Click order), View order alone; a notice without an order has no buttons.
+    for pay_now in (True, False):
+        add(
+            f"CustomerNoticeKeyboards.notice(pay_now={pay_now})",
+            CustomerNoticeKeyboards.notice(lang, order_id=51, pay_now=pay_now),
+        )
+    assert CustomerNoticeKeyboards.notice(lang, order_id=None, pay_now=False) is None
 
     return out
 

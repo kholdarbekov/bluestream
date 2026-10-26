@@ -1018,7 +1018,7 @@ class BusinessAPIClient:
     async def pause_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Pause subscription"""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/pause',
-                                       user_token=user_token)
+                                       user_token=user_token, data={})
 
     async def resume_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Resume subscription"""
@@ -1069,10 +1069,11 @@ class BusinessAPIClient:
         return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/logs',
                                        user_token=user_token)
 
-    async def get_subscription_templates(self, user_token: str) -> APIResponse:
-        """Get predefined subscription templates"""
-        return await self._make_request('GET', '/api/v1/subscriptions/templates',
-                                       user_token=user_token)
+    async def get_subscription_time_slots(self, user_token: str, weekday) -> APIResponse:
+        """The active delivery slots a recurring delivery can pick: those offered on `weekday`
+        (0 = Monday), or every active slot for `'any'` (monthly and daily have no weekday to ask)."""
+        return await self._make_request('GET', '/api/v1/delivery/time-slots',
+                                       user_token=user_token, params={'weekday': weekday})
 
     async def preview_subscription(self, user_token: str, preview_data: Dict) -> APIResponse:
         """Preview subscription cost before creating"""
@@ -1095,11 +1096,6 @@ class BusinessAPIClient:
         """Change subscription payment method"""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/change-payment-method',
                                        user_token=user_token, data=payment_data)
-
-    async def retry_billing(self, user_token: str, subscription_id: int) -> APIResponse:
-        """Retry failed billing for subscription"""
-        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/retry-billing',
-                                       user_token=user_token)
 
     # Loyalty methods
     async def get_loyalty_points(self, user_token: str) -> APIResponse:

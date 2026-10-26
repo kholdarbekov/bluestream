@@ -111,29 +111,3 @@ def test_perform_bulk_action_cancel_uses_actor_id_without_order_ownership(order_
 
     assert result == [{'order_id': order.id, 'success': True}]
     cancel_order_mock.assert_called_once_with(order.id, reason='Bulk cancellation', actor_user_id=admin_user.id)
-
-
-def test_create_subscription_order_delegates_to_subscription_service(order_service, sample_user):
-    subscription_result = {
-        'id': 55,
-        'status': 'active',
-        'delivery_frequency': 'weekly',
-        'next_delivery_date': None,
-        'created_at': datetime.now(UTC).isoformat(),
-    }
-
-    with patch('business_app.utils.service_factory.get_subscription_service') as get_service:
-        get_service.return_value.create_subscription.return_value = subscription_result
-
-        result = order_service.create_subscription_order(
-            {
-                'user_id': sample_user.id,
-                'delivery_address_id': 123,
-                'frequency': 'weekly',
-                'start_date': datetime.now(UTC).isoformat(),
-                'payment_method': 'cash',
-            },
-            [{'product_id': 1, 'quantity': 1}],
-        )
-
-    assert result['id'] == 55

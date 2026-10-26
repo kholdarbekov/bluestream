@@ -1153,7 +1153,11 @@ const LoyaltyPrograms = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="discount_percentage" label={t('ui.loyalty.discount', { defaultValue: 'Discount' })}>
+              <Form.Item
+                name="discount_percentage"
+                label={t('ui.loyalty.discount', { defaultValue: 'Discount' })}
+                extra={t('ui.loyalty.discount_help', { defaultValue: 'Taken off cash-on-delivery orders customers place themselves in the Telegram bot or on the website. Not applied to orders entered by staff (admin, call centre, sales agents) or to subscription orders.' })}
+              >
                 <InputNumber min={0} max={100} style={{ width: '100%' }} />
               </Form.Item>
             </Col>

@@ -1,0 +1,28 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Delivery skipped - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Delivery skipped</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>The delivery of your subscription <strong>{{ subscription_name }}</strong> on <strong>{{ skipped_dates }}</strong> was skipped because {{ reason }}.</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Next Delivery</th>
+        <td>{{ next_delivery_date }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

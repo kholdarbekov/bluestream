@@ -1,6 +1,7 @@
 """Integration tests for address management API endpoints."""
 
 from datetime import datetime, UTC, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 
 import pytest
@@ -100,10 +101,9 @@ class TestAddressesAPI:
             subscription_number='SUB-ADDR-TEST-1',
             user_id=sample_user.id,
             name='Address lock test',
-            billing_cycle=SubscriptionFrequency.WEEKLY,
+            frequency=SubscriptionFrequency.WEEKLY,
             billing_amount=Decimal('15000.00'),
-            next_billing_date=datetime.now(UTC) + timedelta(days=7),
-            delivery_frequency=SubscriptionFrequency.WEEKLY,
+            next_delivery_date=(local_date() + timedelta(days=7)),
             delivery_address_id=linked["id"],
             start_date=datetime.now(UTC),
             payment_method=PaymentMethod.CARD,

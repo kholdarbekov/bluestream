@@ -3272,7 +3272,11 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 657 -> 659: GET /api/v1/orders/reorder-info (orders.get_reorder_info) and POST
     # /api/v1/cart/fill-from-order/<int:order_id> (cart.fill_cart_from_order) -- the customer bot's
     # Order water / Order again. Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 659
+    # 659 -> 655: the subscription single-frequency switch (plan 2026-10-24 Task 2) deleted GET
+    # /api/v1/subscriptions/templates, POST /api/v1/subscriptions/<int:subscription_id>/retry-billing,
+    # POST /api/v1/orders/subscription and POST /api/v1/payments/subscription. Unrelated to
+    # place-merge; only the estate-wide count moved.
+    assert len(routes) == 655
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

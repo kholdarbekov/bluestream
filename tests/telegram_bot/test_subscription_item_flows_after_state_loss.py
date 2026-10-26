@@ -48,7 +48,7 @@ async def bot(monkeypatch):
     harness.backend.route(
         "GET", f"/api/v1/subscriptions/{SUB_ID}",
         lambda _c: {"data": {"subscription": {
-            "id": SUB_ID, "status": "active", "delivery_frequency": "weekly",
+            "id": SUB_ID, "status": "active", "frequency": "weekly",
         }}},
     )
     harness.backend.route(

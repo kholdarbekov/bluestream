@@ -8,7 +8,7 @@ from i18n import i18n
 from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
 from flow_exit import ITEM_MANAGEMENT_KEYS, SUBSCRIPTION_CREATION_KEYS, UPDATE_ITEM_KEYS
-from utils import user_middleware, get_auth_token
+from utils import format_date, user_middleware, get_auth_token
 from shared.constants import SUBSCRIPTION_STATUS_ICONS
 # `BaseHandler._ack` is why every ack below goes through `self._ack`: answering
 # a callback is cosmetic and must never abort the step. Every handler here works
@@ -19,12 +19,33 @@ from handlers.base import BaseHandler
 from handlers.products import ProductHandlers
 
 
-# Conversation states for subscription creation
+# Conversation states for subscription creation. SELECT_ADDRESS is the state that waits for the
+# FREQUENCY tap (its handler, `choose_frequency`, used to show the address list straight away); SELECT_DAY
+# and SELECT_SLOT are the delivery day and time-slot steps between the frequency and the address.
 (SELECT_PRODUCTS, SELECT_QUANTITY, SELECT_FREQUENCY, SELECT_ADDRESS,
  SELECT_START_DATE, SELECT_PAYMENT, CONFIRM_SUBSCRIPTION) = range(7)
 
 # Conversation states for item management
 (ITEM_ACTION, ITEM_SELECT_PRODUCT, ITEM_SELECT_QUANTITY) = range(7, 10)
+
+(SELECT_DAY, SELECT_SLOT) = range(10, 12)
+
+# The frequencies whose delivery day is a weekday (0 = Monday); monthly's is a day of the month.
+_WEEKDAY_FREQUENCIES = ('weekly', 'biweekly')
+
+
+def _upcoming_text(upcoming, language: str) -> str | None:
+    """"29.10.2026, 10:00–12:00" from the backend's `upcoming_delivery`, or "29.10.2026 (time to be
+    confirmed)" when it has no window; ``None`` when there is nothing upcoming. The bot only prints what
+    the backend published: it works no dates out (spec 2026-10-23 §9). The date reads dd.mm.yyyy, by the
+    bot's one date rule (`utils.format_date`), as in the order notices."""
+    if not upcoming or not upcoming.get('date'):
+        return None
+    day = format_date(upcoming['date']) or upcoming['date']
+    start, end = upcoming.get('window_start'), upcoming.get('window_end')
+    if start and end:
+        return f"{day}, {start}–{end}"
+    return f"{day} ({i18n.get('telegram.subscription.time_to_be_confirmed', language)})"
 
 
 def _subscription_id(query_data) -> int | None:
@@ -132,22 +153,17 @@ class SubscriptionHandlers(BaseHandler):
 
             # Build details text
             status_emoji = SUBSCRIPTION_STATUS_ICONS.get(subscription.get('status'), '❓')
-            status_key = f"subscription_status_{subscription.get('status')}"
-            frequency_key = f"frequency_{subscription.get('delivery_frequency')}"
+            status_key = f"telegram.subscription.status_{subscription.get('status')}"
 
             details_text = f"🔄 {i18n.get('telegram.subscription.details_title', language)}\n\n"
             details_text += f"{status_emoji} {i18n.get('telegram.subscription.status', language)}: "
             details_text += f"{i18n.get(status_key, language)}\n"
             details_text += f"📅 {i18n.get('telegram.subscription.frequency', language)}: "
-            details_text += f"{i18n.get(frequency_key, language)}\n"
+            details_text += f"{SubscriptionKeyboards.frequency_label(subscription.get('frequency'), language)}\n"
 
-            if subscription.get('next_delivery_date'):
-                details_text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: "
-                details_text += f"{subscription['next_delivery_date']}\n"
-
-            if subscription.get('next_billing_date'):
-                details_text += f"💳 {i18n.get('telegram.subscription.next_billing', language)}: "
-                details_text += f"{subscription['next_billing_date']}\n"
+            upcoming_text = _upcoming_text(subscription.get('upcoming_delivery'), language)
+            if upcoming_text:
+                details_text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: {upcoming_text}\n"
 
             if items:
                 details_text += f"\n📦 {i18n.get('telegram.subscription.items', language)}:\n"
@@ -173,9 +189,7 @@ class SubscriptionHandlers(BaseHandler):
     async def create_subscription_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start subscription creation flow"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             # Initialize context
             context.user_data['subscription_creation'] = {
@@ -186,23 +200,6 @@ class SubscriptionHandlers(BaseHandler):
                 'payment_method': None
             }
 
-            # Check for templates
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return ConversationHandler.END
-
-                templates_response = await client.get_subscription_templates(user_token)
-                if templates_response.success and templates_response.data.get('templates'):
-                    # Show templates option
-                    text = i18n.get('telegram.subscription.create_template_or_custom', language)
-                    keyboard = SubscriptionKeyboards.subscription_creation_options(language)
-                    await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
-                    await self._ack(query)
-                    return SELECT_PRODUCTS
-
-            # No templates, go straight to product selection
             return await self.select_products(update, context)
 
         except Exception as e:
@@ -292,24 +289,136 @@ class SubscriptionHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="add_item_with_quantity")
             return ConversationHandler.END
 
-    async def select_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Select delivery address"""
+    async def choose_frequency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The frequency tap (`subscription_freq_<frequency>`): remember ONE frequency, forget any day
+        and slot chosen for a previous one, and ask the delivery day (weekly, biweekly, monthly) or go
+        straight to the time slot (daily, whose days are the slot's)."""
         try:
-            query = update.callback_query
             language = await i18n.get_user_language(update.effective_user.id)
+            creation = context.user_data['subscription_creation']
+            creation['frequency'] = update.callback_query.data.split('_')[2]
+            for stale in ('delivery_day', 'delivery_time_slot_id', 'delivery_time_range', 'slot_choices'):
+                creation.pop(stale, None)
 
-            # Save frequency - parse from callback data (format: subscription_freq_daily)
-            frequency = query.data.split('_')[2]
+            if creation['frequency'] == 'daily':
+                return await self._show_slot_selection(update, context, language)
+            return await self._show_day_selection(update, context, language)
 
-            # Map frequency to both billing_cycle and delivery_frequency
-            # For subscriptions, typically these are the same
-            context.user_data['subscription_creation']['billing_cycle'] = frequency
-            context.user_data['subscription_creation']['delivery_frequency'] = frequency
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="choose_frequency")
+            return ConversationHandler.END
+
+    async def _show_frequency_selection(self, update: Update, language: str):
+        """The frequency screen: after the items, and again from either Back below."""
+        query = update.callback_query
+        await self._edit_or_replace_callback_message(
+            query,
+            text=i18n.get('telegram.subscription.select_frequency', language),
+            reply_markup=SubscriptionKeyboards.subscription_frequency(language),
+        )
+        await self._ack(query)
+        return SELECT_ADDRESS
+
+    async def _show_day_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str):
+        """The delivery-day step of creation. Returns the next state."""
+        frequency = context.user_data['subscription_creation']['frequency']
+        key = 'select_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'select_day_of_month'
+        query = update.callback_query
+        await self._edit_or_replace_callback_message(
+            query,
+            text=i18n.get(f'telegram.subscription.{key}', language),
+            reply_markup=SubscriptionKeyboards.day_picker(frequency, language),
+        )
+        await self._ack(query)
+        return SELECT_DAY
+
+    async def select_day(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The day tap (`subscription_day_<n>`): a weekday (0 = Monday) or a day of the month."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            creation = context.user_data['subscription_creation']
+            creation['delivery_day'] = int(update.callback_query.data.rsplit('_', 1)[1])
+            for stale in ('delivery_time_slot_id', 'delivery_time_range', 'slot_choices'):
+                creation.pop(stale, None)
+
+            return await self._show_slot_selection(update, context, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="select_day")
+            return ConversationHandler.END
+
+    async def _show_slot_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str):
+        """The time-slot step of creation: the slots the backend offers on the chosen weekday (every
+        active slot when the day is not a weekday). No slot offered means no screen: the order is dated
+        and its time confirmed later. Returns the next state."""
+        query = update.callback_query
+        creation = context.user_data['subscription_creation']
+        weekday = creation['delivery_day'] if creation['frequency'] in _WEEKDAY_FREQUENCIES else 'any'
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return ConversationHandler.END
+
+            response = await client.get_subscription_time_slots(user_token, weekday)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return ConversationHandler.END
+
+        slots = (response.data or {}).get('time_slots', [])
+        if not slots:
+            return await self._show_address_selection(update, context, language)
+
+        creation['slot_choices'] = {str(slot['id']): slot.get('time_range') for slot in slots}
+        await self._edit_or_replace_callback_message(
+            query,
+            text=i18n.get('telegram.subscription.select_time_slot', language),
+            reply_markup=SubscriptionKeyboards.time_slot_picker(slots, language),
+        )
+        await self._ack(query)
+        return SELECT_SLOT
+
+    async def select_time_slot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The slot tap (`subscription_slot_<id>` or `subscription_slot_any`)."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            creation = context.user_data['subscription_creation']
+            choice = update.callback_query.data.rsplit('_', 1)[1]
+            if choice == 'any':
+                creation.pop('delivery_time_slot_id', None)
+                creation['delivery_time_range'] = i18n.get('telegram.subscription.any_time', language)
+            else:
+                creation['delivery_time_slot_id'] = int(choice)
+                creation['delivery_time_range'] = creation.get('slot_choices', {}).get(choice)
 
             return await self._show_address_selection(update, context, language)
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="select_address")
+            await self._handle_error(update, exc=e, operation="select_time_slot")
+            return ConversationHandler.END
+
+    async def back_to_frequency_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Back from the day picker: the frequency screen again."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            return await self._show_frequency_selection(update, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="back_to_frequency_selection")
+            return ConversationHandler.END
+
+    async def back_to_day_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Back from the slot picker: the day picker, or the frequency screen for a daily subscription
+        (it has no day to go back to)."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            if context.user_data['subscription_creation']['frequency'] == 'daily':
+                return await self._show_frequency_selection(update, language)
+            return await self._show_day_selection(update, context, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="back_to_day_selection")
             return ConversationHandler.END
 
     async def back_to_address_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -433,10 +542,8 @@ class SubscriptionHandlers(BaseHandler):
                 # Prepare preview data - only send fields required by SubscriptionPreviewRequest
                 subscription_data = context.user_data['subscription_creation']
                 preview_data = {
-                    'billing_cycle': subscription_data.get('billing_cycle'),
-                    'delivery_frequency': subscription_data.get('delivery_frequency'),
-                    'items': subscription_data.get('items', []),
-                    'discount_percentage': subscription_data.get('discount_percentage', 0.0)
+                    'frequency': subscription_data.get('frequency'),
+                    'items': subscription_data.get('items', [])
                 }
                 response = await client.preview_subscription(user_token, preview_data)
 
@@ -452,8 +559,15 @@ class SubscriptionHandlers(BaseHandler):
             for item in preview.get('items', []):
                 text += f"  • {item.get('product_name')} x{item.get('quantity')}\n"
             text += f"\n📅 {i18n.get('telegram.subscription.frequency', language)}: "
-            preview_frequency_key = f"frequency_{preview.get('delivery_frequency')}"
-            text += f"{i18n.get(preview_frequency_key, language)}\n"
+            text += f"{SubscriptionKeyboards.frequency_label(subscription_data.get('frequency'), language)}\n"
+            if subscription_data.get('delivery_day') is not None:
+                day = subscription_data['delivery_day']
+                day_text = (SubscriptionKeyboards.weekday_label(day, language)
+                            if subscription_data['frequency'] in _WEEKDAY_FREQUENCIES else str(day))
+                text += f"🗓 {i18n.get('telegram.subscription.delivery_day', language)}: {day_text}\n"
+            if subscription_data.get('delivery_time_range'):
+                text += (f"🕘 {i18n.get('telegram.subscription.delivery_time', language)}: "
+                         f"{subscription_data['delivery_time_range']}\n")
             text += f"💰 {i18n.get('telegram.subscription.total', language)}: "
             text += f"{preview.get('total_amount')} {i18n.get('telegram.currency.uzs', language)}\n"
 
@@ -494,19 +608,24 @@ class SubscriptionHandlers(BaseHandler):
                 context_data = context.user_data['subscription_creation']
 
                 # Generate subscription name from first product or use default
-                subscription_name = f"Subscription - {context_data.get('billing_cycle', 'weekly').title()}"
+                frequency = context_data.get('frequency')
+                subscription_name = f"Subscription - {(frequency or 'weekly').title()}"
 
                 subscription_data = {
                     'name': subscription_name,
-                    'billing_cycle': context_data.get('billing_cycle'),
-                    'delivery_frequency': context_data.get('delivery_frequency'),
+                    'frequency': frequency,
                     'delivery_address_id': context_data.get('address_id'),  # Map address_id to delivery_address_id
                     'payment_method': context_data.get('payment_method'),
                     'items': context_data.get('items', []),
                     'auto_renew': True,
-                    'delivery_time_slot_id': context_data.get('delivery_time_slot_id'),  # Optional: user preference
-                    'discount_percentage': context_data.get('discount_percentage', 0.0)
                 }
+                # The day and the slot are the customer's choices (spec §2.9): a weekday (0 = Monday) for
+                # weekly and biweekly, a day of the month for monthly, an optional slot for every frequency.
+                if context_data.get('delivery_day') is not None:
+                    day_field = 'delivery_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'delivery_day_of_month'
+                    subscription_data[day_field] = context_data['delivery_day']
+                if context_data.get('delivery_time_slot_id'):
+                    subscription_data['delivery_time_slot_id'] = context_data['delivery_time_slot_id']
 
                 # Add optional fields if present
                 if context_data.get('start_date'):
@@ -520,12 +639,13 @@ class SubscriptionHandlers(BaseHandler):
                     await self._handle_api_error(update, response.error, language)
                     return ConversationHandler.END
 
-                subscription = response.data.get('subscription', {})
+                subscription = (response.data or {}).get('data', {}).get('subscription', {})
 
             text = f"✅ {i18n.get('telegram.subscription.created_success', language)}\n\n"
-            text += f"🆔 {i18n.get('telegram.subscription.id', language)}: {subscription.get('id')}\n"
-            text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: "
-            text += f"{subscription.get('next_delivery_date')}"
+            text += f"🆔 {i18n.get('telegram.subscription.id', language)}: {subscription.get('id')}"
+            upcoming_text = _upcoming_text(subscription.get('upcoming_delivery'), language)
+            if upcoming_text:
+                text += f"\n🚚 {i18n.get('telegram.subscription.next_delivery', language)}: {upcoming_text}"
 
             keyboard = [[
                 InlineKeyboardButton(
@@ -575,13 +695,7 @@ class SubscriptionHandlers(BaseHandler):
                 return SELECT_QUANTITY
 
             # Proceed to frequency selection
-            text = i18n.get('telegram.subscription.select_frequency', language)
-            keyboard = SubscriptionKeyboards.subscription_frequency(language)
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
-            await self._ack(query)
-
-            return SELECT_ADDRESS
+            return await self._show_frequency_selection(update, language)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="items_selection_done")
@@ -1086,11 +1200,12 @@ class SubscriptionHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="change_frequency")
 
     async def update_frequency_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Confirm frequency update"""
+        """A new frequency was tapped (`subfreq_<frequency>_<sub_id>`). Daily needs nothing more and is
+        saved; weekly, biweekly and monthly need a delivery day (a changed cadence with no day would
+        deliver on whatever day the schedule finds first), so the day picker comes next and saves both."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             # `subfreq_<frequency>_<sub_id>`. The subject rides the callback, not
             # `editing_subscription_id`: the Application has no `persistence`, so
@@ -1100,36 +1215,66 @@ class SubscriptionHandlers(BaseHandler):
             frequency = query.data.split('_')[1]
             sub_id = _subscription_id(query.data)
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
+            if frequency == 'daily':
+                await self._save_frequency(update, context, sub_id, {'frequency': frequency}, language)
+                return
 
-                update_data = {'frequency': frequency}
-                response = await client.update_subscription(user_token, sub_id, update_data)
-
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-            text = f"✅ {i18n.get('telegram.subscription.frequency_updated_successfully', language)}"
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.subscription.view', language),
-                    callback_data=f'subscription_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            key = 'select_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'select_day_of_month'
+            await self._edit_or_replace_callback_message(
+                query,
+                text=i18n.get(f'telegram.subscription.{key}', language),
+                reply_markup=SubscriptionKeyboards.day_picker(frequency, language, subscription_id=sub_id),
+            )
             await self._ack(query)
-
-            # Clear context
-            if 'editing_subscription_id' in context.user_data:
-                del context.user_data['editing_subscription_id']
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="update_frequency_confirm")
+
+    async def update_frequency_day_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """The day for a changed frequency (`subday_<frequency>_<day>_<sub_id>`): save both."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            _, frequency, day, _sub = update.callback_query.data.split('_')
+            sub_id = _subscription_id(update.callback_query.data)
+            day_field = 'delivery_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'delivery_day_of_month'
+            await self._save_frequency(
+                update, context, sub_id, {'frequency': frequency, day_field: int(day)}, language
+            )
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="update_frequency_day_confirm")
+
+    async def _save_frequency(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sub_id: int,
+                              update_data: dict, language: str):
+        """PUT the frequency change, then confirm it. The backend recomputes the next delivery (§4.6)."""
+        query = update.callback_query
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+
+            response = await client.update_subscription(user_token, sub_id, update_data)
+
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+
+        text = f"✅ {i18n.get('telegram.subscription.frequency_updated_successfully', language)}"
+        keyboard = [[
+            InlineKeyboardButton(
+                i18n.get('telegram.subscription.view', language),
+                callback_data=f'subscription_{sub_id}'
+            )
+        ]]
+
+        await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await self._ack(query)
+
+        # Clear context
+        if 'editing_subscription_id' in context.user_data:
+            del context.user_data['editing_subscription_id']
 
     async def change_payment_method_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show payment method selection"""
@@ -1239,7 +1384,6 @@ class SubscriptionHandlers(BaseHandler):
             text += f"📦 {i18n.get('telegram.subscription.total_deliveries', language)}: {stats.get('total_deliveries', 0)}\n"
             text += f"💰 {i18n.get('telegram.subscription.total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
             text += f"💵 {i18n.get('telegram.subscription.average_order', language)}: {stats.get('average_order_value', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
-            text += f"💚 {i18n.get('telegram.subscription.total_savings', language)}: {stats.get('total_savings', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
 
             if stats.get('most_ordered_product'):
                 text += f"\n⭐ {i18n.get('telegram.subscription.favorite_product', language)}: {stats['most_ordered_product']}\n"
@@ -1310,35 +1454,6 @@ class SubscriptionHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="view_subscription_logs")
-
-    async def retry_failed_billing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Retry failed billing for subscription"""
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            sub_id = _subscription_id(query.data)
-
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
-
-                response = await client.retry_billing(user_token, sub_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-            text = f"✅ {i18n.get('telegram.subscription.billing_retry_initiated', language)}"
-            await self._ack(query, text, show_alert=True)
-
-            # Refresh subscription details
-            await self.subscription_details(update, context)
-
-        except Exception as e:
-            await self._handle_error(update, exc=e, operation="retry_failed_billing")
 
     # ========== HELPER METHODS ==========
 
@@ -1498,3 +1613,5 @@ subscription_handlers.CONFIRM_SUBSCRIPTION = CONFIRM_SUBSCRIPTION
 subscription_handlers.ITEM_ACTION = ITEM_ACTION
 subscription_handlers.ITEM_SELECT_PRODUCT = ITEM_SELECT_PRODUCT
 subscription_handlers.ITEM_SELECT_QUANTITY = ITEM_SELECT_QUANTITY
+subscription_handlers.SELECT_DAY = SELECT_DAY
+subscription_handlers.SELECT_SLOT = SELECT_SLOT

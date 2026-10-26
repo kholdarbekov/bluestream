@@ -1144,7 +1144,9 @@ def test_edit_preview_totals_dicts_publish_every_line_the_total_subtracts(
     unit_price = Decimal(str(sample_product.base_price))
     quantity = 4
     subtotal = unit_price * Decimal(quantity)
-    tier_discount = LoyaltyService().quote_tier_discount(sample_user, subtotal, PaymentMethod.CASH).amount
+    tier_discount = LoyaltyService().quote_tier_discount(
+        sample_user, subtotal, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount
     assert tier_discount > Decimal("0.00")  # the seeded rate is actually doing something
 
     order = _seed_order_with_item(

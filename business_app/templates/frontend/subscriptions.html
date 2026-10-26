@@ -571,6 +571,7 @@
     border-radius: 50px;
     text-transform: uppercase;
     transition: all 0.3s ease;
+    margin: 6px;
 }
 
 .preview-cta .theme-btn:hover {
@@ -914,16 +915,16 @@
 
             <div class="stats-row">
                 <div class="stat-box">
-                    <span class="stat-number">10,000+</span>
-                    <span class="stat-label">{{ 'Active Subscriptions'|t }}</span>
+                    <span class="stat-number">{{ 'Auto'|t }}</span>
+                    <span class="stat-label">{{ 'Orders placed for you'|t }}</span>
                 </div>
                 <div class="stat-box">
                     <span class="stat-number">100%</span>
                     <span class="stat-label">{{ 'Satisfaction Rate'|t }}</span>
                 </div>
                 <div class="stat-box">
-                    <span class="stat-number">24/7</span>
-                    <span class="stat-label">{{ 'Delivery Available'|t }}</span>
+                    <span class="stat-number">{{ 'Free'|t }}</span>
+                    <span class="stat-label">{{ 'Delivery on every order'|t }}</span>
                 </div>
             </div>
         </div>
@@ -981,10 +982,10 @@
         <div class="features-grid">
             <div class="feature-card">
                 <div class="feature-icon">
-                    <i class="fal fa-badge-percent"></i>
+                    <i class="fal fa-calendar-check"></i>
                 </div>
-                <h4>{{ 'Save Money'|t }}</h4>
-                <p>{{ 'Get up to 20% discount on subscription orders compared to one-time purchases. The more you subscribe, the more you save.'|t }}</p>
+                <h4>{{ 'Never Run Out'|t }}</h4>
+                <p>{{ 'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.'|t }}</p>
             </div>
 
             <div class="feature-card">
@@ -992,7 +993,7 @@
                     <i class="fal fa-truck"></i>
                 </div>
                 <h4>{{ 'Free Delivery'|t }}</h4>
-                <p>{{ 'Enjoy complimentary delivery on all subscription orders. No minimum order requirements or hidden fees.'|t }}</p>
+                <p>{{ 'Delivery is always free, on subscription deliveries as on every order.'|t }}</p>
             </div>
 
             <div class="feature-card">
@@ -1016,7 +1017,7 @@
                     <i class="fal fa-star"></i>
                 </div>
                 <h4>{{ 'Loyalty Rewards'|t }}</h4>
-                <p>{{ 'Earn bonus AquaCoins on subscription orders. Redeem for discounts, free products, and exclusive perks.'|t }}</p>
+                <p>{{ 'Earn AquaCoins on every subscription delivery at your tier\'s rate, and redeem them for rewards.'|translate(current_language) }}</p>
             </div>
 
             <div class="feature-card">
@@ -1057,7 +1058,6 @@
                 <ul class="use-case-list">
                     <li>{{ 'Bulk pricing available'|t }}</li>
                     <li>{{ 'Multiple coolers'|t }}</li>
-                    <li>{{ 'Invoice billing'|t }}</li>
                 </ul>
             </div>
 
@@ -1092,13 +1092,13 @@
         <div class="sec-title centred">
             <span>{{ 'Build Your Plan'|t }}</span>
             <h2>{{ 'Preview Your Subscription'|t }}</h2>
-            <p class="subtitle">{{ 'Choose a delivery frequency below to see estimated costs and savings'|t }}</p>
+            <p class="subtitle">{{ 'Choose a delivery frequency below to preview your schedule'|t }}</p>
         </div>
 
         <div class="builder-container">
             <div class="builder-info-box">
                 <h3><i class="fal fa-info-circle"></i> {{ 'How to Create Your Subscription'|t }}</h3>
-                <p>{{ 'First, browse our shop and add products to your cart. Then select "Subscribe" at checkout to set up recurring deliveries with your preferred schedule.'|t }}</p>
+                <p>{{ 'Build your subscription with the subscription builder on our home page, or start one in our Telegram bot. Pick your products and schedule, and we place every order for you.'|t }}</p>
             </div>
 
             <div class="builder-step">
@@ -1128,24 +1128,23 @@
             </div>
 
             <div class="subscription-preview">
-                <h3>{{ 'Estimated Subscription Savings'|t }}</h3>
+                <h3>{{ 'Your Delivery Schedule'|t }}</h3>
                 <div class="preview-details">
                     <div class="preview-item">
                         <div class="label">{{ 'Delivery Frequency'|t }}</div>
                         <div class="value" id="preview-frequency">{{ 'Select above'|t }}</div>
                     </div>
-                    <div class="preview-item">
-                        <div class="label">{{ 'Your Savings'|t }}</div>
-                        <div class="value" id="preview-savings">0%</div>
-                    </div>
                 </div>
 
                 <div class="preview-cta">
-                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
-                        {{ 'Browse Products to Subscribe'|t }} <i class="fal fa-arrow-right"></i>
+                    <a href="{{ url_for('frontend.index') }}#subscription-constructor" class="theme-btn btn-one">
+                        {{ 'Open the Subscription Builder'|t }} <i class="fal fa-arrow-right"></i>
+                    </a>
+                    <a href="{{ company_telegram_bot_url }}" class="theme-btn btn-two" target="_blank" rel="noopener noreferrer">
+                        {{ 'Subscribe in Telegram'|t }} <i class="fab fa-telegram-plane"></i>
                     </a>
                     <p style="margin-top: 15px; font-size: 14px; color: #666;">
-                        {{ 'Select your products, then choose subscription at checkout'|t }}
+                        {{ 'Create your subscription on our website or in our Telegram bot'|t }}
                     </p>
                 </div>
             </div>
@@ -1181,7 +1180,7 @@
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime through your account.'|t }}</p>
+                        <p>{{ 'Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1193,7 +1192,7 @@
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'You can pause your subscription anytime for up to 3 months, perfect for vacations or extended travel. You can also skip individual deliveries with 48 hours notice. Both options are available through your online account or by contacting our support team.'|t }}</p>
+                        <p>{{ 'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip your next delivery in the Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1213,11 +1212,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'How much can I save with a subscription?'|t }}</h4>
+                    <h4>{{ 'What do I get with a subscription?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus AquaCoins (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.'|t }}</p>
+                        <p>{{ 'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most. Delivery is always free, and you earn AquaCoins on every subscription delivery at your tier\'s rate. Subscription deliveries are billed at the regular price.'|translate(current_language) }}</p>
                     </div>
                 </div>
             </li>
@@ -1229,7 +1228,7 @@
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'We accept credit/debit cards, Payme, Click, and cash on delivery. For automatic billing, you can securely save your payment method. Business subscribers can also use invoice billing with NET 30 terms after credit approval.'|t }}</p>
+                        <p>{{ 'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in our Telegram bot.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1241,7 +1240,7 @@
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Yes, you can update your delivery address anytime through your account. Changes made at least 48 hours before your next scheduled delivery will take effect immediately. For last-minute changes, please contact our support team.'|t }}</p>
+                        <p>{{ 'Your subscription delivers to the address you chose when you created it. If you need a different address, message us in our Telegram bot and we will update it for you.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1253,7 +1252,7 @@
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'If automatic payment fails, we\'ll notify you immediately via email and SMS. You\'ll have 48 hours to update your payment method. After 3 failed payment attempts, your subscription will be automatically paused until payment is resolved. No penalties or fees apply.'|translate(current_language) }}</p>
+                        <p>{{ 'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If you run into a problem with a payment, message us in our Telegram bot and we will help.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1265,7 +1264,7 @@
 <section class="cta-section">
     <div class="auto-container">
         <h2>{{ 'Ready to Start Your Subscription?'|t }}</h2>
-        <p>{{ 'Join thousands of satisfied customers enjoying convenient, reliable water delivery'|t }}</p>
+        <p>{{ 'Let your water orders take care of themselves, and never run out.'|t }}</p>
         <div class="cta-buttons">
             <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-primary">
                 {{ 'Browse Products'|t }}

@@ -242,10 +242,22 @@ class CartService:
             ):
                 loyalty_dec = loyalty_service._compute_reward_discount(reward, subtotal_dec)
 
-        # The ONE place that decides whether a tier discount applies.
-        quote = loyalty_service.quote_tier_discount(user, subtotal_dec, payment_method)
+        # The ONE place that decides whether a tier discount applies. The estimate prices the
+        # customer's own checkout (web checkout.js and the bot are its only clients), whose source
+        # is always in SELF_SERVICE_ORDER_SOURCES (enforced by the CreateOrderRequest.source
+        # validator in order_serializers.py), and a checkout never creates a subscription
+        # order; `web` stands for both.
+        quote = loyalty_service.quote_tier_discount(
+            user, subtotal_dec, payment_method, order_source="web", is_subscription_order=False
+        )
         on_cod = is_cod_rail(payment_method)
-        cod_quote = quote if on_cod else loyalty_service.quote_tier_discount(user, subtotal_dec, PaymentMethod.CASH)
+        cod_quote = (
+            quote
+            if on_cod
+            else loyalty_service.quote_tier_discount(
+                user, subtotal_dec, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+            )
+        )
 
         # Clamped LAST (design §4.4) through the SAME function `create_order`
         # clamps with — not a re-derived expression — so the headroom bound

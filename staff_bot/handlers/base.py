@@ -307,6 +307,8 @@ class BaseHandler:
         # the backend publishes `min_amount`.
         'ORDER_MIN_AMOUNT': 'staff.error.api.order_min_amount',
         'ORDER_STOCK_UNAVAILABLE': 'staff.error.api.stock_unavailable',
+        # A product deactivated or deleted mid-visit: the same "change the basket" copy.
+        'ORDER_PRODUCT_UNAVAILABLE': 'staff.error.api.stock_unavailable',
         # Try-out task and pickup flows (TryoutService), reached both by a
         # driver's own try-out screens and by the sales agent's field try-out
         # (`OutletService` re-raises its OWN item refusals as

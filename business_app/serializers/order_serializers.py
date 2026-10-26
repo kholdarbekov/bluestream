@@ -6,7 +6,7 @@ This file contains Pydantic models for order-related data serialization
 from datetime import datetime, date
 from typing import Dict, Any, Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.delivery_window import format_delivery_window
@@ -17,6 +17,7 @@ from business_app.utils.payment_projection import (
     paid_amount,
 )
 from business_app.models.order import Order, OrderItem, is_free_reward_item
+from business_app.utils.constants import SELF_SERVICE_ORDER_SOURCES
 from business_app.serializers.types import MoneyFloat
 
 
@@ -117,7 +118,7 @@ class OrderSchema(BaseModel):
     delivery_fee: MoneyFloat = Field(default=0)
     discount_amount: MoneyFloat = Field(default=0)  # subscription %
     loyalty_discount: MoneyFloat = Field(default=0)  # redeemed reward
-    tier_discount: MoneyFloat = Field(default=0)  # loyalty tier, COD rail only
+    tier_discount: MoneyFloat = Field(default=0)  # loyalty tier: customer's own bot/web order, COD rail
     total_amount: MoneyFloat
 
     # Order details
@@ -167,6 +168,14 @@ class CreateOrderRequest(BaseModel):
     reward_id: Optional[int] = Field(default=None, ge=1)
     source: str = Field(default="web")
     special_instructions: Optional[str] = None
+
+    @field_validator("source")
+    @classmethod
+    def source_is_a_self_service_channel(cls, value: str) -> str:
+        """The customer endpoints serve only the bot and the website; staff entry has its own routes."""
+        if value not in SELF_SERVICE_ORDER_SOURCES:
+            raise ValueError(f"source must be one of {sorted(SELF_SERVICE_ORDER_SOURCES)}")
+        return value
 
 
 class UpdateOrderRequest(BaseModel):

@@ -1104,14 +1104,15 @@ def get_client_order_estimate(user_id):
         raise ValidationError("Request body is required", error_code="STAFF_REQUEST_BODY_REQUIRED")
 
     # The operator's quote on a chosen method is what `create_phone_order` charges: the same
-    # method parse, the same pricing call, and like the phone order no tier discount (spec 2026-10-09 §4.3).
+    # method parse, the same pricing call, and the same `phone` source, for which the one tier
+    # decision gives no tier discount (spec 2026-10-23).
     payment_method = StaffService.parse_phone_order_method(data.get("payment_method"))
     return success_response(
         StaffService.estimate_phone_order(
             user_id,
             data,
             payment_method=payment_method.value if payment_method is not None else None,
-            include_tier_discount=False,
+            order_source="phone",
         )
     )
 

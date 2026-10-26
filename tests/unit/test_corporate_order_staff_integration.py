@@ -110,10 +110,14 @@ def test_order_service_create_order_supports_business_account_and_reserve(
     # ARCH-008: order_service.create_order now wraps the multi-step flow in
     # `atomic_transaction()`; inner payment initialization passes
     # `commit=False` so the outer block stays in charge of the commit.
+    # An ordinary order keeps its creation-time notices; only a subscription order passes False
+    # (its own notice replaces them, spec 2026-10-23 §9).
     initialize_payment.assert_called_once_with(
         order.id,
         metadata={'consume_marking_codes': False},
         commit=False,
+        trigger_notifications=True,
+        notify_confirmation=True,
     )
 
 

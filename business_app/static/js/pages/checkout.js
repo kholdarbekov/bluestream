@@ -322,8 +322,8 @@
         var cardContainer = document.getElementById('card-input-container');
         if (cardContainer) cardContainer.style.display = 'none';
 
-        // The tier discount attaches to the COD rail only, so the rail changes
-        // the price. Re-quote rather than adjust the number on screen.
+        // The rail changes the price (bot/website perk, paid on delivery).
+        // Re-quote rather than adjust the number on screen.
         refreshEstimate();
     }
 

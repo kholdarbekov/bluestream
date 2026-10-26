@@ -1,6 +1,7 @@
 """Unit tests for profile/address/merge methods extracted to AuthService."""
 
 from datetime import datetime, UTC, timedelta
+from business_app.utils.local_windows import local_date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -84,10 +85,9 @@ def test_delete_user_address_blocks_subscription_linked_address(auth_service, db
         subscription_number='SUB-AUTH-SERVICE-ADDR-1',
         user_id=sample_user.id,
         name='Auth service address lock',
-        billing_cycle=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         billing_amount=Decimal('20000.00'),
-        next_billing_date=datetime.now(UTC) + timedelta(days=7),
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        next_delivery_date=(local_date() + timedelta(days=7)),
         delivery_address_id=linked.id,
         start_date=datetime.now(UTC),
         payment_method=PaymentMethod.CARD,

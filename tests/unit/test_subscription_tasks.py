@@ -1,119 +1,47 @@
-"""Regression tests for subscription task date filtering."""
+"""Subscription Celery tasks: the daily job and the first-order task (spec 2026-10-23 §4.3)."""
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from business_app import db
+from business_app.models.delivery import Delivery
 from business_app.models.order import Order
-from business_app.models.payment import Payment
 from business_app.models.subscription import Subscription, SubscriptionItem
-from business_app.models.user import UserAddress
 from business_app.services.subscription_service import SubscriptionService
 from business_app.tasks.subscription_tasks import (
-    cancel_subscription_deliveries_task,
     create_subscription_delivery_task,
     generate_subscription_churn_prediction,
-    handle_failed_subscription_payments,
     process_daily_subscription_billing,
-    process_subscription_billing,
-    send_renewal_reminders,
 )
-from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, SubscriptionFrequency, SubscriptionStatus
+from business_app.utils.local_windows import local_date
+from shared.enums import OrderStatus, PaymentMethod, SubscriptionFrequency, SubscriptionStatus
 
 # Reused rather than re-declared: an ACTIVE cash subscription for 2 units of
-# sample_product, 10% discount, past next_billing_date, one item. See the
+# sample_product, 10% discount, past next_delivery_date, one item. See the
 # gotchas in that module's docstring for why the fixtures duplicate this
 # exact shape rather than a subtly different one.
 from tests.unit.test_subscription_order_parity import sample_subscription  # noqa: F401
-def _create_address(sample_user):
-    address = UserAddress(
-        user_id=sample_user.id,
-        title="Home",
-        full_address="Test address",
-        city="Tashkent",
-        country="Uzbekistan",
-        is_default=True,
+
+
+def test_the_daily_job_creates_the_orders_due_within_the_lead_and_no_others(
+    app, db, sample_user, sample_product, user_address
+):
+    """`next_delivery_date <= today + lead` (one day): tomorrow's order is created today, the day
+    after's is not."""
+    today = local_date()
+    due = _make_subscription(
+        db, sample_user, sample_product, user_address, next_delivery_date=today + timedelta(days=1)
     )
-    db.session.add(address)
-    db.session.commit()
-    return address
-
-
-def _create_subscription(sample_user, address, subscription_number, next_billing_date):
-    subscription = Subscription(
-        subscription_number=subscription_number,
-        user_id=sample_user.id,
-        status=SubscriptionStatus.ACTIVE,
-        name="Weekly Water",
-        description="Scheduled delivery",
-        billing_cycle=SubscriptionFrequency.MONTHLY,
-        billing_amount=Decimal("10000.00"),
-        next_billing_date=next_billing_date,
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
-        delivery_day_of_week=1,
-        delivery_address_id=address.id,
-        next_delivery_date=next_billing_date,
-        start_date=datetime.now(timezone.utc) - timedelta(days=7),
-        payment_method=PaymentMethod.CARD,
-    )
-    db.session.add(subscription)
-    db.session.commit()
-    return subscription
-
-
-def test_process_daily_subscription_billing_uses_end_of_day_cutoff(db, sample_user):
-    address = _create_address(sample_user)
-    due_today = _create_subscription(
-        sample_user,
-        address,
-        "SUB-DUE-TODAY",
-        datetime.now(timezone.utc).replace(hour=23, minute=0, second=0, microsecond=0),
-    )
-    _create_subscription(
-        sample_user,
-        address,
-        "SUB-DUE-TOMORROW",
-        (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=1, minute=0, second=0, microsecond=0),
+    later = _make_subscription(
+        db, sample_user, sample_product, user_address, next_delivery_date=today + timedelta(days=2)
     )
 
-    with patch("business_app.tasks.subscription_tasks.SubscriptionService") as subscription_service_cls:
-        subscription_service_cls.return_value.process_subscription_billing.return_value = {"success": True, "order_id": 1}
-        result = process_daily_subscription_billing()
+    result = process_daily_subscription_billing()
 
-    assert result["successful"] == 1
-    subscription_service_cls.return_value.process_subscription_billing.assert_called_once_with(due_today.id)
-
-
-def test_send_renewal_reminders_uses_billing_fields_and_day_range(db, sample_user):
-    address = _create_address(sample_user)
-    reminder_target = (datetime.now(timezone.utc) + timedelta(days=3)).replace(hour=12, minute=0, second=0, microsecond=0)
-    due_for_reminder = _create_subscription(
-        sample_user,
-        address,
-        "SUB-REMINDER",
-        reminder_target,
-    )
-    _create_subscription(
-        sample_user,
-        address,
-        "SUB-NO-REMINDER",
-        reminder_target + timedelta(days=1),
-    )
-
-    with patch("business_app.tasks.subscription_tasks.NotificationService") as notification_service_cls:
-        result = send_renewal_reminders()
-
-    assert result["sent_count"] == 1
-    notification_service_cls.return_value.send_notification.assert_called_once()
-    call_args = notification_service_cls.return_value.send_notification.call_args
-    assert call_args.args[0] == due_for_reminder.user_id
-    assert call_args.args[1] == "subscription_renewal_reminder"
-    template_data = call_args.kwargs["template_data"]
-    assert template_data["plan_name"] == due_for_reminder.name
-    assert template_data["amount"] == due_for_reminder.billing_amount
-    assert template_data["frequency"] == due_for_reminder.billing_cycle.value
+    assert (result["total_processed"], result["successful"], result["failed"]) == (1, 1, 0)
+    assert [o.delivery_date for o in Order.query.filter_by(subscription_id=due.id)] == [today + timedelta(days=1)]
+    assert Order.query.filter_by(subscription_id=later.id).count() == 0
 
 
 class TestCreateSubscriptionDeliveryTask:
@@ -136,17 +64,22 @@ class TestCreateSubscriptionDeliveryTask:
         assert result["success"] is True
         create_delivery.assert_not_called()
 
-    def test_skipped_billing_returns_without_key_error(self, app, db, sample_user):
-        # The already-billed skip returns success=True with NO order_id. Reading
-        # billing_result["order_id"] unconditionally raises KeyError.
-        with app.app_context(), patch.object(
-            SubscriptionService,
-            "process_subscription_billing",
-            return_value={"success": True, "skipped": True, "reason": "already_billed_this_cycle"},
-        ):
-            result = create_subscription_delivery_task(1)
+    def test_a_subscription_paused_before_the_worker_runs_gets_no_order_and_no_retry(
+        self, app, db, sample_user, sample_product, user_address, sample_subscription
+    ):
+        with app.app_context():
+            subscription = Subscription.query.get(sample_subscription.id)
+            subscription.status = SubscriptionStatus.PAUSED
+            db.session.commit()
 
-        assert result == {"success": True, "skipped": True, "reason": "already_billed_this_cycle"}
+            result = create_subscription_delivery_task(sample_subscription.id)
+
+            assert result == {
+                "success": False,
+                "subscription_id": sample_subscription.id,
+                "error": "Cannot create an order for an inactive subscription",
+            }
+            assert Order.query.filter_by(subscription_id=sample_subscription.id).count() == 0
 
     def test_returning_customer_cod_order_is_confirmed_with_a_delivery_and_the_task_does_not_raise(
         self, app, db, sample_user, sample_product, user_address, sample_subscription
@@ -173,11 +106,11 @@ class TestCreateSubscriptionDeliveryTask:
             assert result["success"] is True
             order = Order.query.get(result["order_id"])
             assert order.status is OrderStatus.CONFIRMED
-            assert order.delivery is not None
-            assert result["delivery_id"] == order.delivery.id
+            # Released now or held until its day (OrderScheduleService), but never two deliveries.
+            assert Delivery.query.filter_by(order_id=order.id).count() <= 1
 
 
-def _make_subscription(db, sample_user, sample_product, address):
+def _make_subscription(db, sample_user, sample_product, address, next_delivery_date=None):
     """A minimal ACTIVE cash subscription. Mirrors the `sample_subscription`
     fixture in test_subscription_order_parity.py — same shape, deliberately
     not reused as a fixture here because we need two independent instances
@@ -187,15 +120,14 @@ def _make_subscription(db, sample_user, sample_product, address):
         user_id=sample_user.id,
         name="Weekly Water",
         status=SubscriptionStatus.ACTIVE,
-        billing_cycle=SubscriptionFrequency.WEEKLY,
-        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        frequency=SubscriptionFrequency.WEEKLY,
         delivery_address_id=address.id,
         payment_method=PaymentMethod.CASH,
         auto_renew=True,
         discount_percentage=10.0,
         billing_amount=Decimal("0.00"),
         start_date=datetime.now(timezone.utc),
-        next_billing_date=datetime.now(timezone.utc) - timedelta(minutes=1),
+        next_delivery_date=next_delivery_date or local_date(),
     )
     db.session.add(subscription)
     db.session.flush()
@@ -235,29 +167,10 @@ def _make_order(db, sample_user, address, *, subscription_id):
     return order
 
 
-class TestCancelSubscriptionDeliveriesTask:
-    """`Order.subscription_id` is stamped atomically inside `create_order`
-    (Task 3) and is the sole authoritative link between a subscription and
-    its orders. The task used to filter on
-    `Order.notes.contains(f"Subscription order #{subscription_id}")` instead
-    — a SQL LIKE that would also match sibling ids sharing a numeric prefix
-    (#1 matching #10, #11, #100).
-
-    IMPORTANT DISCREPANCY vs. the task brief: `Order` has NO `notes` column
-    (only `delivery_notes`) and never has — grep/git-log confirm it back to
-    the "new architecture" commit. `Order.notes.contains(...)` therefore
-    raises `AttributeError` while *building* the query, unconditionally,
-    the instant this task runs for any existing subscription — regardless
-    of what any order's data looks like. So the bug is not merely "matches
-    too broadly", it's "always crashes" — this task has never completed
-    successfully. `create_order` also never persisted the write-side
-    `order_data["notes"]` payload (grep confirms it's read nowhere), so
-    the notes-matching mechanism was dead on both ends. Both tests below
-    therefore go RED against the old code via the same AttributeError, not
-    via a wrong-but-successful cancellation. The fix (trust subscription_id,
-    drop notes entirely) resolves both the crash and the never-realized
-    collision risk.
-    """
+class TestCancelTouchesOnlyItsOwnOrders:
+    """`Order.subscription_id` is the sole authoritative link between a subscription and its orders
+    (it once matched on a `notes` LIKE, which would also hit sibling ids sharing a numeric prefix).
+    Cancelling a subscription cancels its own unpaid upcoming orders and nothing else (§4.6)."""
 
     def test_cancels_only_orders_belonging_to_the_subscription(
         self, app, db, sample_user, sample_product, user_address
@@ -269,36 +182,25 @@ class TestCancelSubscriptionDeliveriesTask:
             order_a = _make_order(db, sample_user, user_address, subscription_id=sub_a.id)
             order_b = _make_order(db, sample_user, user_address, subscription_id=sub_b.id)
 
-            result = cancel_subscription_deliveries_task(sub_a.id)
+            outcome = SubscriptionService().cancel_subscription_for_user(sub_a.id, sample_user.id, "Moving")
 
-            refreshed_a = Order.query.get(order_a.id)
-            refreshed_b = Order.query.get(order_b.id)
+            assert Order.query.get(order_a.id).status is OrderStatus.CANCELLED
+            assert Order.query.get(order_b.id).status is OrderStatus.PENDING, "sibling's order was collateral damage"
+            assert [o["id"] for o in outcome["cancelled_orders"]] == [order_a.id]
 
-            assert refreshed_a.status is OrderStatus.CANCELLED
-            assert refreshed_b.status is OrderStatus.PENDING, "sibling subscription's order was collateral damage"
-            assert result["cancelled_deliveries"] == 1
-
-    def test_cancelling_a_sibling_subscription_matches_zero_orders(self, app, db, sample_user, sample_product, user_address):
-        """Direct pin: the task must key off `Order.subscription_id` alone.
-
-        B's order is the only order in the DB and it genuinely belongs to B
-        (subscription_id=sub_b.id). Cancelling A must not touch it — there
-        is nothing resembling a notes-based match possible here (see class
-        docstring for why "notes" isn't even a real column), which is
-        exactly the point: subscription_id is the only signal that may be
-        trusted, full stop.
-        """
+    def test_cancelling_a_sibling_subscription_matches_zero_orders(
+        self, app, db, sample_user, sample_product, user_address
+    ):
         with app.app_context():
             sub_a = _make_subscription(db, sample_user, sample_product, user_address)
             sub_b = _make_subscription(db, sample_user, sample_product, user_address)
 
             order_b = _make_order(db, sample_user, user_address, subscription_id=sub_b.id)
 
-            result = cancel_subscription_deliveries_task(sub_a.id)
+            outcome = SubscriptionService().cancel_subscription_for_user(sub_a.id, sample_user.id, "Moving")
 
-            refreshed_b = Order.query.get(order_b.id)
-            assert refreshed_b.status is OrderStatus.PENDING
-            assert result["cancelled_deliveries"] == 0
+            assert Order.query.get(order_b.id).status is OrderStatus.PENDING
+            assert outcome["cancelled_orders"] == []
 
 
 class TestPhantomTotalAmountReads:
@@ -311,32 +213,6 @@ class TestPhantomTotalAmountReads:
     surfaced as a crash — it silently dropped the affected subscription /
     zeroed out the counter instead.
     """
-
-    def test_handle_failed_subscription_payments_uses_billing_amount_not_phantom_total_amount(
-        self, app, db, sample_user, sample_product, user_address
-    ):
-        """Pre-fix: template_data={"amount": subscription.total_amount} raises
-        AttributeError while building the success-notification payload, which
-        is swallowed by the per-subscription try/except — so retry_count is
-        never incremented even though the retry genuinely succeeded.
-        """
-        subscription = _make_subscription(db, sample_user, sample_product, user_address)
-        subscription.failed_payment_count = 1
-        subscription.last_billing_date = datetime.now(timezone.utc)
-        subscription.billing_amount = Decimal("15000.00")
-        db.session.commit()
-
-        with (
-            patch("business_app.tasks.subscription_tasks.SubscriptionService") as subscription_service_cls,
-            patch("business_app.tasks.subscription_tasks.NotificationService") as notification_service_cls,
-        ):
-            subscription_service_cls.return_value.process_subscription_billing.return_value = {"success": True}
-
-            result = handle_failed_subscription_payments()
-
-        assert result["retry_count"] == 1
-        template_data = notification_service_cls.return_value.send_notification.call_args.kwargs["template_data"]
-        assert template_data["amount"] == 15000.0
 
     def test_generate_subscription_churn_prediction_uses_billing_amount_not_phantom_total_amount(
         self, app, db, sample_user
@@ -360,7 +236,7 @@ class TestPhantomTotalAmountReads:
             id=1,
             user_id=sample_user.id,
             failed_payment_count=3,
-            last_billing_date=datetime.now(timezone.utc) - timedelta(days=40),
+            last_delivery_date=(datetime.now(timezone.utc) - timedelta(days=40)).date(),
             plan=None,
             billing_amount=Decimal("20000.00"),
             user=sample_user,
@@ -381,115 +257,3 @@ class TestPhantomTotalAmountReads:
         assert "error" not in result
         assert len(result["predictions"]) == 1
         assert result["predictions"][0]["monthly_value"] == 20000.0
-
-
-class TestSubscriptionBilledNotificationPayload:
-    """Task 20 Part 2: the ``subscription_billed`` notification payload gains
-    ``order_number`` and ``payment_action_required`` — forward-looking data
-    for a future notification-template follow-up (the template itself is
-    explicitly descoped). Every access is guarded: neither the order nor its
-    payment is guaranteed to exist.
-    """
-
-    def test_flags_payment_action_required_for_unpaid_electronic_order(
-        self, app, db, sample_user, sample_product, user_address
-    ):
-        subscription = _make_subscription(db, sample_user, sample_product, user_address)
-
-        order = Order(
-            user_id=sample_user.id,
-            status=OrderStatus.PENDING,
-            payment_method=PaymentMethod.CLICK,
-            subtotal=Decimal("15000.00"),
-            total_amount=Decimal("15000.00"),
-            delivery_address_id=user_address.id,
-            subscription_id=subscription.id,
-        )
-        db.session.add(order)
-        db.session.commit()
-
-        payment = Payment(
-            order_id=order.id,
-            user_id=sample_user.id,
-            payment_method=PaymentMethod.CLICK,
-            amount=Decimal("15000.00"),
-            currency="UZS",
-            status=PaymentStatus.PENDING,
-            payment_id="sub_billed_test_click_unpaid",
-        )
-        db.session.add(payment)
-        db.session.commit()
-
-        with (
-            patch("business_app.tasks.subscription_tasks.SubscriptionService") as subscription_service_cls,
-            patch("business_app.tasks.subscription_tasks.NotificationService") as notification_service_cls,
-        ):
-            subscription_service_cls.return_value.process_subscription_billing.return_value = {
-                "success": True,
-                "order_id": order.id,
-                "amount": 15000.0,
-                "next_billing_date": subscription.next_billing_date.isoformat(),
-            }
-
-            process_subscription_billing(subscription.id)
-
-        call_args = notification_service_cls.return_value.send_notification.call_args
-        assert call_args.args[1] == "subscription_billed"
-        template_data = call_args.kwargs["template_data"]
-        assert template_data["order_number"] == order.order_number
-        assert template_data["payment_action_required"] is True
-
-    def test_no_payment_action_required_for_cash_order_with_no_payment_row(
-        self, app, db, sample_user, sample_product, user_address
-    ):
-        subscription = _make_subscription(db, sample_user, sample_product, user_address)
-
-        order = Order(
-            user_id=sample_user.id,
-            status=OrderStatus.PENDING,
-            payment_method=PaymentMethod.CASH,
-            subtotal=Decimal("15000.00"),
-            total_amount=Decimal("15000.00"),
-            delivery_address_id=user_address.id,
-            subscription_id=subscription.id,
-        )
-        db.session.add(order)
-        db.session.commit()
-
-        with (
-            patch("business_app.tasks.subscription_tasks.SubscriptionService") as subscription_service_cls,
-            patch("business_app.tasks.subscription_tasks.NotificationService") as notification_service_cls,
-        ):
-            subscription_service_cls.return_value.process_subscription_billing.return_value = {
-                "success": True,
-                "order_id": order.id,
-                "amount": 15000.0,
-                "next_billing_date": subscription.next_billing_date.isoformat(),
-            }
-
-            process_subscription_billing(subscription.id)
-
-        template_data = notification_service_cls.return_value.send_notification.call_args.kwargs["template_data"]
-        assert template_data["order_number"] == order.order_number
-        assert template_data["payment_action_required"] is False
-
-    def test_guards_against_a_missing_order(self, app, db, sample_user, sample_product, user_address):
-        subscription = _make_subscription(db, sample_user, sample_product, user_address)
-
-        with (
-            patch("business_app.tasks.subscription_tasks.SubscriptionService") as subscription_service_cls,
-            patch("business_app.tasks.subscription_tasks.NotificationService") as notification_service_cls,
-        ):
-            subscription_service_cls.return_value.process_subscription_billing.return_value = {
-                "success": True,
-                "order_id": 999999999,
-                "amount": 15000.0,
-                "next_billing_date": subscription.next_billing_date.isoformat(),
-            }
-
-            result = process_subscription_billing(subscription.id)
-
-        assert result["success"] is True
-        template_data = notification_service_cls.return_value.send_notification.call_args.kwargs["template_data"]
-        assert template_data["order_number"] is None
-        assert template_data["payment_action_required"] is False

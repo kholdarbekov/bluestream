@@ -109,4 +109,15 @@ describe('LoyaltyPrograms page — Tiers tab name translations', () => {
     expect(within(dialog).getByLabelText('Name (RU)')).toHaveValue('Золото');
     expect(within(dialog).getByLabelText('Name (UZ)')).toHaveValue('Oltin');
   });
+
+  it('tier modal says the discount applies only to self-placed bot/website orders', async () => {
+    await goToTiersTab();
+
+    fireEvent.click(screen.getByRole('button', { name: /Create Tier/ }));
+    await screen.findByRole('dialog');
+
+    expect(
+      await screen.findByText(/customers place themselves in the Telegram bot or on the website/i)
+    ).toBeInTheDocument();
+  });
 });

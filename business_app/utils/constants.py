@@ -41,9 +41,14 @@ class NotificationType(Enum):
     # Subscription notification types
     SUBSCRIPTION_REMINDER = "subscription_reminder"
     SUBSCRIPTION_CREATED = "subscription_created"
-    SUBSCRIPTION_RENEWAL = "subscription_renewal"
     SUBSCRIPTION_CANCELLED = "subscription_cancelled"
-    SUBSCRIPTION_CANCELLATION_SCHEDULED = "subscription_cancellation_scheduled"
+    # The customer notices of spec 2026-10-23 §9 (business_app/services/customer_notices.py). Telegram goes
+    # through the customer bot's /internal/customer-notice route; these types are the EMAIL half (a file
+    # template each, EmailTemplateService.TEMPLATE_MAPPING) and name the kind on that route.
+    SUBSCRIPTION_ORDER_CREATED = "subscription_order_created"
+    SUBSCRIPTION_DELIVERY_SKIPPED = "subscription_delivery_skipped"
+    SUBSCRIPTION_PAID_ORDER_KEPT = "subscription_paid_order_kept"
+    ORDER_PAYMENT_EXPIRED = "order_payment_expired"
 
     # Promotional notification types
     PROMOTIONAL = "promotional"
@@ -286,6 +291,11 @@ ORDER_SOURCE_PREFIXES = {
     "mobile": "MB",  # Mobile app orders (future)
     ORDER_SOURCE_SALES_AGENT: "SA",  # Sales-agent orders placed on a store's behalf at a visit
 }
+
+# The sources a customer's own checkout can carry: the Telegram bot and the website. Only these
+# are tier-discount eligible (`LoyaltyService.quote_tier_discount`, spec 2026-10-23 §2); an order
+# staff enter on the customer's behalf never is.
+SELF_SERVICE_ORDER_SOURCES = frozenset({"telegram", "web"})
 
 # Regex Patterns
 PATTERNS = {

@@ -225,17 +225,20 @@ def test_order_estimate_quotes_the_basket_through_the_operator_estimator(
     calls = []
     real_estimate = StaffService.estimate_phone_order
 
-    def spy(client_id, order_data, *, payment_method=None):
-        calls.append((client_id, order_data, payment_method))
-        return real_estimate(client_id, order_data, payment_method=payment_method)
+    def spy(client_id, order_data, *, payment_method=None, order_source):
+        calls.append((client_id, order_data, payment_method, order_source))
+        return real_estimate(client_id, order_data, payment_method=payment_method, order_source=order_source)
 
     monkeypatch.setattr(StaffService, "estimate_phone_order", staticmethod(spy))
 
     payload = OrderEstimatePayload(**{"items": [{"product_id": stock_product.id, "quantity": 8}]})
     estimate = VisitService.order_estimate(approved_outlet, payload.model_dump()["items"])
 
-    # No rail named: the quote keeps the rail-less pricing every operator phone-order caller gets.
-    assert calls == [(approved_outlet.user_id, {"items": [{"product_id": stock_product.id, "quantity": 8}]}, None)]
+    # No rail named: the quote keeps the rail-less pricing every operator phone-order caller gets,
+    # priced as the agent order it quotes, so the one tier decision sees the order's own channel.
+    assert calls == [
+        (approved_outlet.user_id, {"items": [{"product_id": stock_product.id, "quantity": 8}]}, None, "sales_agent")
+    ]
 
     # ...and a rail the agent chose travels all the way down to the estimator (C27).
     with_rail = OrderEstimatePayload(
@@ -244,7 +247,7 @@ def test_order_estimate_quotes_the_basket_through_the_operator_estimator(
     VisitService.order_estimate(
         approved_outlet, with_rail.model_dump()["items"], with_rail.model_dump()["payment_method"]
     )
-    assert calls[-1][2] == "cash"
+    assert calls[-1][2:] == ("cash", "sales_agent")
     assert estimate["client_id"] == approved_outlet.user_id
     assert [(i["product_id"], i["quantity"]) for i in estimate["items"]] == [(stock_product.id, 8)]
     assert isinstance(estimate["total_amount"], float)

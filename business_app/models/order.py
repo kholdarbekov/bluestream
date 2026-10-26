@@ -79,11 +79,14 @@ class Order(db.Model, TimestampMixin):
     discount_amount = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
     delivery_fee = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
     loyalty_discount = Column(Numeric(precision=10, scale=2), default=Decimal("0.00"))
-    # Loyalty TIER discount, granted only on the COD rail. Distinct from
+    # Loyalty TIER discount, granted only on the COD rail and only to the
+    # customer's own bot or website order (`LoyaltyService.quote_tier_discount`
+    # reads `order_source` and `is_subscription_order` below). Distinct from
     # discount_amount (subscription %) and loyalty_discount (redeemed reward):
-    # all three can co-exist on one order, and this one must never reach a
-    # Click fiscal receipt. The ck_orders_tier_discount_nonneg CHECK lives in
-    # migration a1b7c3d9e5f2, alongside the five sibling guards from b8e3c9f5d2a4.
+    # the reward can sit beside either (a subscription order never carries this
+    # one), and this one must never reach a Click fiscal receipt. The
+    # ck_orders_tier_discount_nonneg CHECK lives in migration a1b7c3d9e5f2,
+    # alongside the five sibling guards from b8e3c9f5d2a4.
     tier_discount = Column(
         Numeric(precision=10, scale=2),
         nullable=False,
@@ -119,7 +122,8 @@ class Order(db.Model, TimestampMixin):
     loyalty_points_earned = Column(Integer, default=0)
 
     # Order source tracking
-    order_source = Column(String(20), default="web")  # web, telegram, mobile, phone
+    # web, telegram, mobile, phone. Only SELF_SERVICE_ORDER_SOURCES may carry a tier discount.
+    order_source = Column(String(20), default="web")
 
     # Staff tracking (which operator/staff created the order, null for self-service)
     created_by_staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)

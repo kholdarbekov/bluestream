@@ -659,12 +659,8 @@ def get_admin_dashboard():
             and_(Subscription.status == SubscriptionStatus.CANCELLED.value, Subscription.updated_at >= current_start)
         ).count()
 
-        subscription_revenue_current = (
-            db.session.query(func.sum(Subscription.billing_amount))
-            .filter(Subscription.status == SubscriptionStatus.ACTIVE.value)
-            .scalar()
-            or 0
-        )
+        # What the active subscriptions bring in a month: the one MRR rule (spec 2026-10-23 §4.2).
+        subscription_revenue_current = SubscriptionService.monthly_recurring_revenue()
 
         # Loyalty metrics
         total_loyalty_members = LoyaltyPoints.query.count()
@@ -2791,8 +2787,9 @@ def get_order_details(order_id):
             "subtotal": float(getattr(order, "subtotal", order.total_amount)),
             "tax_amount": float(getattr(order, "tax_amount", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),
-            # Tier discount: granted at creation on the COD rail only, and zeroed
-            # if the order is later re-railed onto Click/Payme/card.
+            # Tier discount: granted on the COD rail to the customer's own bot or
+            # website order only (never a staff-entered or subscription order),
+            # and zeroed if the order is later re-railed onto Click/Payme/card.
             "tier_discount": float(getattr(order, "tier_discount", 0) or 0),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "payment_method": order.payment_method.value if order.payment_method else None,
@@ -4769,8 +4766,11 @@ def get_subscriptions():
         search = request.args.get("search", "").strip()
         status = request.args.get("status")  # active, paused, cancelled, expired
         user_id = request.args.get("user_id", type=int)
-        billing_cycle = request.args.get("billing_cycle")  # daily|weekly|biweekly|monthly
-        sort_by = request.args.get("sort_by", "created_at")  # created_at, next_billing_date, billing_amount
+        try:
+            frequency = SubscriptionService.frequency_filter(request.args.get("frequency"))
+        except ValidationError as e:
+            return validation_error_response(get_translation(e.message))
+        sort_by = request.args.get("sort_by", "created_at")  # created_at, next_delivery_date, billing_amount
 
         # Build query
         query = Subscription.query
@@ -4782,8 +4782,8 @@ def get_subscriptions():
         if user_id:
             query = query.filter_by(user_id=user_id)
 
-        if billing_cycle:
-            query = query.filter_by(billing_cycle=billing_cycle)
+        if frequency is not None:
+            query = query.filter_by(frequency=frequency)
 
         if search:
             search_term = f"%{search}%"
@@ -4798,8 +4798,8 @@ def get_subscriptions():
             )
 
         # Apply sorting
-        if sort_by == "next_billing_date":
-            query = query.order_by(Subscription.next_billing_date.desc())
+        if sort_by == "next_delivery_date":
+            query = query.order_by(Subscription.next_delivery_date.desc())
         elif sort_by == "billing_amount":
             query = query.order_by(Subscription.billing_amount.desc())
         else:  # Default: created_at
@@ -4820,16 +4820,7 @@ def get_subscriptions():
                 "status": sub.status.value if hasattr(sub.status, "value") else sub.status,
                 "name": sub.name,
                 "description": sub.description,
-                "billing_cycle": (
-                    sub.billing_cycle.value if hasattr(sub.billing_cycle, "value") else str(sub.billing_cycle)
-                ),
                 "billing_amount": float(sub.billing_amount),
-                "next_billing_date": sub.next_billing_date.isoformat() if sub.next_billing_date else None,
-                "delivery_frequency": (
-                    sub.delivery_frequency.value
-                    if hasattr(sub.delivery_frequency, "value")
-                    else str(sub.delivery_frequency)
-                ),
                 "auto_renew": sub.auto_renew,
                 "paused_at": sub.paused_at.isoformat() if sub.paused_at else None,
                 "pause_reason": sub.pause_reason,
@@ -4838,6 +4829,7 @@ def get_subscriptions():
                 "total_amount_billed": float(sub.total_amount_billed),
                 "items_count": len(sub.subscription_items),
                 "created_at": sub.created_at.isoformat() if sub.created_at else None,
+                **SubscriptionService.published_schedule(sub),
             }
             subscriptions_data.append(sub_dict)
 
@@ -4883,6 +4875,7 @@ def get_subscription(subscription_id):
                 "order_number": o.order_number,
                 "status": o.status.value if hasattr(o.status, "value") else o.status,
                 "total_amount": float(o.total_amount),
+                "delivery_date": o.delivery_date.isoformat() if o.delivery_date else None,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             }
             for o in recent_orders
@@ -4912,19 +4905,7 @@ def get_subscription(subscription_id):
             "status": subscription.status.value if hasattr(subscription.status, "value") else subscription.status,
             "name": subscription.name,
             "description": subscription.description,
-            "billing_cycle": (
-                subscription.billing_cycle.value
-                if hasattr(subscription.billing_cycle, "value")
-                else str(subscription.billing_cycle)
-            ),
             "billing_amount": float(subscription.billing_amount),
-            "next_billing_date": subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
-            "last_billing_date": subscription.last_billing_date.isoformat() if subscription.last_billing_date else None,
-            "delivery_frequency": (
-                subscription.delivery_frequency.value
-                if hasattr(subscription.delivery_frequency, "value")
-                else str(subscription.delivery_frequency)
-            ),
             "delivery_day_of_week": subscription.delivery_day_of_week,
             "delivery_day_of_month": subscription.delivery_day_of_month,
             "delivery_time_slot_id": subscription.delivery_time_slot_id,
@@ -4956,6 +4937,7 @@ def get_subscription(subscription_id):
             "recent_logs": logs,
             "created_at": subscription.created_at.isoformat() if subscription.created_at else None,
             "updated_at": subscription.updated_at.isoformat() if subscription.updated_at else None,
+            **SubscriptionService.published_schedule(subscription),
         }
 
         return success_response(data={"subscription": subscription_data})
@@ -5030,9 +5012,7 @@ def update_subscription_admin(subscription_id):
                         subscription.status.value if hasattr(subscription.status, "value") else subscription.status
                     ),
                     "billing_amount": float(subscription.billing_amount),
-                    "next_billing_date": (
-                        subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
-                    ),
+                    **SubscriptionService.published_schedule(subscription),
                 }
             },
             message="Subscription updated successfully",
@@ -5169,25 +5149,14 @@ def pause_subscription_admin(subscription_id):
     try:
         data = request.get_json() or {}
         pause_reason = data.get("pause_reason", "Paused by administrator")
-        resume_date = data.get("resume_date")
 
-        subscription_service = SubscriptionService()
-
-        # Convert resume_date string to datetime if provided
-        resume_dt = None
-        if resume_date:
-            try:
-                resume_dt = datetime.fromisoformat(resume_date.replace("Z", "+00:00"))
-            except:  # noqa: E722
-                return validation_error_response("Invalid resume_date format. Use ISO format.")
-
-        # Pause subscription (audit-logged with the acting admin)
-        paused_sub = subscription_service.admin_pause_subscription(
+        # The customer's rule (spec 2026-10-23 §4.6): unpaid upcoming orders cancelled, a paid one kept.
+        outcome = SubscriptionService().admin_pause_subscription(
             subscription_id=subscription_id,
             actor_user_id=g.current_user_id,
             reason=pause_reason,
-            resume_date=resume_dt,
         )
+        paused_sub = outcome["subscription"]
 
         current_app.logger.info(f"Subscription paused by admin: {subscription_id}")
 
@@ -5195,10 +5164,18 @@ def pause_subscription_admin(subscription_id):
             data={
                 "subscription_number": paused_sub.subscription_number,
                 "status": paused_sub.status.value if hasattr(paused_sub.status, "value") else paused_sub.status,
+                "cancelled_orders": outcome["cancelled_orders"],
+                "kept_orders": outcome["kept_orders"],
             },
             message="Subscription paused successfully",
         )
 
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
     except Exception as e:
         current_app.logger.error(f"Pause subscription error: {e}")
         return internal_error_response(f"Failed to pause subscription: {str(e)}")
@@ -5223,10 +5200,17 @@ def resume_subscription_admin(subscription_id):
             data={
                 "subscription_number": resumed_sub.subscription_number,
                 "status": resumed_sub.status.value if hasattr(resumed_sub.status, "value") else resumed_sub.status,
+                **SubscriptionService.published_schedule(resumed_sub),
             },
             message="Subscription resumed successfully",
         )
 
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
     except Exception as e:
         current_app.logger.error(f"Resume subscription error: {e}")
         return internal_error_response(f"Failed to resume subscription: {str(e)}")
@@ -5241,15 +5225,13 @@ def cancel_subscription_admin(subscription_id):
         data = request.get_json() or {}
         cancellation_reason = data.get("cancellation_reason", "Cancelled by administrator")
 
-        subscription_service = SubscriptionService()
-
-        # Cancel subscription (audit-logged with the acting admin)
-        cancelled_sub = subscription_service.admin_cancel_subscription(
+        # Always immediate; a paid upcoming order still stays (spec 2026-10-23 §4.6, §2.7).
+        outcome = SubscriptionService().admin_cancel_subscription(
             subscription_id=subscription_id,
             actor_user_id=g.current_user_id,
             reason=cancellation_reason,
-            immediate=True,
         )
+        cancelled_sub = outcome["subscription"]
 
         current_app.logger.info(f"Subscription cancelled by admin: {subscription_id}")
 
@@ -5259,10 +5241,18 @@ def cancel_subscription_admin(subscription_id):
                 "status": (
                     cancelled_sub.status.value if hasattr(cancelled_sub.status, "value") else cancelled_sub.status
                 ),
+                "cancelled_orders": outcome["cancelled_orders"],
+                "kept_orders": outcome["kept_orders"],
             },
             message="Subscription cancelled successfully",
         )
 
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
     except Exception as e:
         current_app.logger.error(f"Cancel subscription error: {e}")
         return internal_error_response(f"Failed to cancel subscription: {str(e)}")
@@ -5272,17 +5262,31 @@ def cancel_subscription_admin(subscription_id):
 @jwt_required()
 @validate_admin_action(["manage_orders"])
 def process_subscription_billing_admin(subscription_id):
-    """Manually trigger billing for a subscription"""
+    """Admin "Create next order now" (spec 2026-10-23 §9): the order for the next delivery, dated and windowed
+    by the schedule rule, whatever the lead window; then the clock advances. The same function as the daily job.
+    For a delivery not yet due, a refusal or a failure changes nothing and the message says so (final review
+    I3); the page shows it as a warning."""
     try:
-        subscription_service = SubscriptionService()
+        result = SubscriptionService().create_next_order(subscription_id, due_only=False)
 
-        # Process billing
-        result = subscription_service.process_subscription_billing(subscription_id)
+        current_app.logger.info(f"Next subscription order created by admin: {subscription_id}: {result}")
 
-        current_app.logger.info(f"Subscription billing processed by admin: {subscription_id}")
+        if result.get("created_order_ids"):
+            message = "Next order created"
+        elif result.get("skipped"):
+            message = f"No order created: {result.get('reason')}"
+        else:
+            message = f"No order created: {result.get('error')}"
+        if not result.get("created_order_ids") and not result.get("advanced"):
+            message += " Nothing was changed."
+        return success_response(data=result, message=message)
 
-        return success_response(data=result, message="Billing processed successfully")
-
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(getattr(e, "message", str(e)))
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(getattr(e, "message", str(e)))
     except Exception as e:
         current_app.logger.error(f"Process subscription billing error: {e}")
         return internal_error_response(f"Failed to process billing: {str(e)}")

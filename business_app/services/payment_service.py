@@ -306,9 +306,9 @@ class PaymentService:
             raise ValidationError("Payment method cannot be changed once the order has left delivery")
 
         # THE PRICE FOLLOWS THE RAIL: a contract line's price (spec 2026-10-09 §5.2 #1) and the
-        # COD-only loyalty tier discount.
+        # loyalty tier discount (see `LoyaltyService.quote_tier_discount`).
         #
-        # It is a COD-only benefit and must never reach a Click fiscal receipt:
+        # It needs a COD rail (plus a customer-placed bot/web order) so it must never reach a Click fiscal receipt:
         # build_click_fiscalization_payload asserts
         # received_card == to_tiyin(order.total_amount) while filling per-item
         # Discount from `loyalty_discount` ALONE, so a tier-discounted total on
@@ -393,8 +393,13 @@ class PaymentService:
         trigger_notifications: bool = True,
         allow_order_confirmation: bool = True,
         commit: bool = True,
+        notify_confirmation: bool = True,
     ) -> Optional[Payment]:
-        """Create or finalize the canonical payment record for an order."""
+        """Create or finalize the canonical payment record for an order.
+
+        `trigger_notifications=False` sends no payment confirmation; `notify_confirmation=False` sends no generic
+        "confirmed" status notice for the confirmation a completed payment triggers. A subscription order passes
+        both: its own creation notice tells the customer instead (spec 2026-10-23 §9)."""
         order = Order.query.options(
             joinedload(Order.payment),
             joinedload(Order.order_items),
@@ -480,6 +485,7 @@ class PaymentService:
                 payment,
                 trigger_notifications=trigger_notifications,
                 allow_order_confirmation=allow_order_confirmation,
+                notify_confirmation=notify_confirmation,
             )
 
         if payment_method == PaymentMethod.BUSINESS_ACCOUNT and payment.consume_marking_codes:
@@ -1259,8 +1265,9 @@ class PaymentService:
         *,
         trigger_notifications: bool = True,
         allow_order_confirmation: bool = True,
+        notify_confirmation: bool = True,
     ):
-        """Handle successful payment"""
+        """Handle successful payment. The two notice flags are `initialize_order_payment`'s."""
         self._sync_completed_prepayment_projection(payment)
 
         # Update order status
@@ -1289,7 +1296,7 @@ class PaymentService:
             from .order_service import OrderService
 
             order_service = OrderService()
-            order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
+            order_service.update_order_status(order.id, OrderStatus.CONFIRMED, notify=notify_confirmation)
 
         # Award purchase AquaCoins if this payment completes an order that was
         # already delivered (e.g. a prepaid payment settled after delivery). The

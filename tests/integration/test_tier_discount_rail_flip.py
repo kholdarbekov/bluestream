@@ -116,7 +116,9 @@ def test_moving_onto_cod_grants_the_discount_and_reprices_the_payment(
     order = _reload(order.id)
     payment = Payment.query.filter_by(order_id=order.id).one()
 
-    expected = LoyaltyService().quote_tier_discount(customer, order.subtotal, PaymentMethod.CASH).amount
+    expected = LoyaltyService().quote_tier_discount(
+        customer, order.subtotal, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount
     assert expected > Decimal("0.00")
     assert Decimal(str(order.tier_discount)) == expected
     assert Decimal(str(order.total_amount)) == compute_order_total(

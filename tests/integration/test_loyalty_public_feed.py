@@ -100,6 +100,9 @@ class TestPublicLoyaltyFeed:
                 f"the feed description names {rail_term!r}, re-qualifying the tier "
                 "discount by payment rail — see the comment above before changing it"
             )
+        # The channel the perk belongs to is named, still without a rail.
+        assert "Telegram bot" in data["description"]
+        assert "website" in data["description"]
         # The per-tier rate is still published, unchanged.
         assert data["tiers"][1]["tierDiscountPercent"] == 6
 

@@ -2695,7 +2695,7 @@ class StaffService:
         order_data: Dict[str, Any],
         *,
         payment_method: Optional[str] = None,
-        include_tier_discount: Optional[bool] = None,
+        order_source: str,
     ) -> Dict[str, Any]:
         """🔴 THE ONE PLACE A PHONE ORDER IS PRICED. Do not grow a second one.
 
@@ -2729,8 +2729,8 @@ class StaffService:
         ``payment_method`` is OPTIONAL because not every caller knows the rail yet: the
         operator's order screen quotes a basket before the rail is picked, so it passes
         nothing and gets today's answer unchanged. A caller that DOES know it (the sales
-        agent's confirm screen, where the rail was chosen a screen earlier) gets the same
-        live COD tier discount ``create_order`` will charge — see below.
+        agent's confirm screen, where the rail was chosen a screen earlier) gets the tier
+        discount the same decision ``create_order`` charges with gives — see below.
 
         Raises:
             NotFoundError: a requested product does not exist.
@@ -2738,10 +2738,10 @@ class StaffService:
 
         ``payment_method`` prices every line through THE contract rule (spec 2026-10-09 §4.1):
         bank-transfer price on business_account, cash price on cash, the catalogue otherwise or
-        while the method is still unknown. ``include_tier_discount`` defaults to "a method was
-        named" (the sales agent's confirm screen, whose order `create_order` charges with the tier
-        discount). The OPERATOR passes False: phone orders have never carried the tier discount, and
-        the operator's quote must equal `create_phone_order`'s charge.
+        while the method is still unknown. ``order_source`` is the channel of the order being
+        priced (``phone`` for the operator, ``sales_agent`` for the agent's confirm screen); the
+        tier discount is `quote_tier_discount`'s answer for it, which for every staff channel is
+        none (spec 2026-10-23), so the quote equals the charge by the rule, not by a hard-coded zero.
         """
         from business_app.models.product import Product
         from business_app.services.corporate_contract_service import CorporateContractService
@@ -2798,19 +2798,21 @@ class StaffService:
         discount_amount = Decimal("0.00")
         loyalty_discount = Decimal("0.00")
         tier_discount = Decimal("0.00")
-        if include_tier_discount is None:
-            include_tier_discount = payment_method is not None
-        if include_tier_discount and payment_method is not None:
+        if payment_method is not None:
             # The SAME expression `create_order` charges with (order_service.py, the
-            # `quote_tier_discount` + `clamp_tier_discount` pair), not a second one: the tier
-            # rate is admin-configurable and read live, so a quote that hard-coded zero told the
-            # customer one total while the order took another. Only reached when the caller
-            # named the rail, so every existing caller's numbers are untouched.
+            # `quote_tier_discount` + `clamp_tier_discount` pair), not a second one: whether the
+            # tier applies is that one decision's to make, so a quote that hard-coded its own answer
+            # could tell the customer one total while the order took another. Only reached when the
+            # caller named the rail.
             from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
 
             client = User.query.get(client_id)
             tier_discount = clamp_tier_discount(
-                LoyaltyService().quote_tier_discount(client, subtotal, payment_method).amount,
+                LoyaltyService()
+                .quote_tier_discount(
+                    client, subtotal, payment_method, order_source=order_source, is_subscription_order=False
+                )
+                .amount,
                 subtotal=subtotal,
                 discount_amount=discount_amount,
                 loyalty_discount=loyalty_discount,
@@ -2854,7 +2856,7 @@ class StaffService:
         order_data: Dict[str, Any],
         *,
         payment_method: Optional[str] = None,
-        include_tier_discount: Optional[bool] = None,
+        order_source: str,
     ) -> Dict[str, Any]:
         """READ-ONLY client-scoped quote for a phone-order basket.
 
@@ -2880,7 +2882,7 @@ class StaffService:
         from business_app.services.corporate_contract_service import PRICING_SOURCE_FALLBACK
 
         pricing = StaffService.price_phone_order(
-            client_id, order_data, payment_method=payment_method, include_tier_discount=include_tier_discount
+            client_id, order_data, payment_method=payment_method, order_source=order_source
         )
 
         return {
@@ -2960,7 +2962,7 @@ class StaffService:
         corporate_service = CorporateContractService()
         # Coverage first (spec 2026-10-09 §4.2): the business-account default and its validator
         # read each line's contract_id / contract_product_price_id, which do not depend on the method.
-        coverage_lines = StaffService.price_phone_order(client_id, order_data)["items"]
+        coverage_lines = StaffService.price_phone_order(client_id, order_data, order_source="phone")["items"]
 
         # Map payment method: the SAME parse the operator's order-estimate route makes.
         payment_method_str = order_data.get("payment_method")
@@ -2989,13 +2991,13 @@ class StaffService:
 
         # Then the price, on the method the order will carry. The pricing lives in
         # `price_phone_order`, the SAME call the operator's order-estimate endpoint makes (with the
-        # same include_tier_discount=False), so the figure quoted on the phone and the figure charged
+        # same order_source="phone"), so the figure quoted on the phone and the figure charged
         # here are one expression. Do NOT re-inline this loop.
         pricing = StaffService.price_phone_order(
             client_id,
             order_data,
             payment_method=payment_method.value if payment_method is not None else None,
-            include_tier_discount=False,
+            order_source="phone",
         )
         order_items = pricing["items"]
         subtotal = pricing["subtotal"]
@@ -3005,6 +3007,7 @@ class StaffService:
         # order states the same breakdown the operator was quoted.
         discount_amount = pricing["discount_amount"]
         loyalty_discount = pricing["loyalty_discount"]
+        tier_discount = pricing["tier_discount"]
 
         # ARCH-006: phone orders open as CONFIRMED, so the address + staff
         # creator invariants must hold before insert.
@@ -3021,6 +3024,7 @@ class StaffService:
             delivery_fee=delivery_fee,
             discount_amount=discount_amount,
             loyalty_discount=loyalty_discount,
+            tier_discount=tier_discount,
             total_amount=total_amount,
             delivery_address_id=delivery_address_id,
             payment_method=payment_method,

@@ -171,8 +171,9 @@ class TestPaymentLifecycleRules:
         ) as notify_delay:
             payment_service._handle_successful_payment(sample_payment)
 
+        # The generic "confirmed" notice goes out unless a caller sends its own (spec 2026-10-23 §9).
         order_service_cls.return_value.update_order_status.assert_called_once_with(
-            sample_payment.order.id, OrderStatus.CONFIRMED
+            sample_payment.order.id, OrderStatus.CONFIRMED, notify=True
         )
         notify_delay.assert_called_once_with(sample_payment.id)
 

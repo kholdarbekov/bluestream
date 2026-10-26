@@ -213,25 +213,3 @@ def extract_filters_from_request(filter_model: Type[BaseModel]) -> Dict[str, Any
     except ValidationError:
         # Return empty dict if validation fails - let the endpoint handle it
         return {}
-
-
-def serialize_database_model(model_instance, schema_class: Type[BaseModel]) -> Dict[str, Any]:
-    """
-    Serialize a database model instance using a Pydantic schema
-
-    Args:
-        model_instance: SQLAlchemy model instance
-        schema_class: Pydantic schema class
-
-    Returns:
-        Serialized dictionary
-    """
-    try:
-        return schema_class.model_validate(model_instance).model_dump()
-    except Exception:
-        # Fallback to basic serialization
-        return {
-            attr: getattr(model_instance, attr)
-            for attr in dir(model_instance)
-            if not attr.startswith("_") and not callable(getattr(model_instance, attr))
-        }

@@ -247,3 +247,11 @@ def test_no_web_quote_source_key_hardcodes_a_tier_name(name):
         _assert_no_tier_name(
             f"{source_key!r} (web island {name!r})", language, BACKEND_TRANSLATIONS[source_key][language]
         )
+
+
+def test_web_tier_row_uses_the_website_discount_key_and_the_old_literal_is_gone():
+    """The reworded web label is a NEW English-literal key (the `| t` filter
+    looks the English text up verbatim), so the old key must be deleted from the
+    seed rather than orphaned."""
+    assert _resolve_web_source_key("tier_discount_line") == "{tier} website discount ({percent}%)"
+    assert "{tier} discount ({percent}%)" not in BACKEND_TRANSLATIONS

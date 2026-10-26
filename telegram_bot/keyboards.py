@@ -1015,7 +1015,7 @@ class SubscriptionKeyboards:
         for sub in subscriptions:
             icon = SUBSCRIPTION_STATUS_ICONS.get(sub['status'], DEFAULT_STATUS_ICON)
             buttons.append([{
-                'text': f"{icon} {sub['name']} - {sub['delivery_frequency']}",
+                'text': f"{icon} {sub['name']} - {SubscriptionKeyboards.frequency_label(sub.get('frequency'), language)}",
                 'callback_data': f"subscription_{sub['id']}"
             }])
 
@@ -1060,13 +1060,56 @@ class SubscriptionKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def subscription_creation_options(language: str = 'en') -> InlineKeyboardMarkup:
-        """Options for creating subscription (template or custom)"""
+    def frequency_label(frequency: Optional[str], language: str = 'en') -> str:
+        """The seeded name of a frequency (`daily`, `weekly`, `biweekly`, `monthly`), never the raw enum."""
+        return i18n.get(f'telegram.subscription.frequency_{frequency}', language)
+
+    @staticmethod
+    def weekday_label(weekday: int, language: str = 'en') -> str:
+        """The seeded name of a weekday, 0 = Monday (the backend's convention, Python's `weekday()`)."""
+        return i18n.get(f'telegram.subscription.weekday_{weekday}', language)
+
+    @staticmethod
+    def day_picker(frequency: str, language: str = 'en', subscription_id: int = None) -> InlineKeyboardMarkup:
+        """The delivery day: a weekday for weekly and biweekly (0 = Monday), a day of the month for monthly.
+
+        Two screens render this, in separate callback namespaces for the reason `subscription_frequency`
+        gives: CREATION (`subscription_id=None`) emits `subscription_day_<n>`, claimed inside the creation
+        conversation's SELECT_DAY state and Back to the frequency list; EDIT emits
+        `subday_<frequency>_<n>_<id>`, claimed top level, carrying everything the update needs so it
+        survives the restart that empties `user_data`.
+        """
+        def day_callback(day: int) -> str:
+            if subscription_id is None:
+                return f'subscription_day_{day}'
+            return f'subday_{frequency}_{day}_{subscription_id}'
+
+        if frequency == 'monthly':
+            days = [{'text': str(day), 'callback_data': day_callback(day)} for day in range(1, 32)]
+            buttons = [days[i:i + 7] for i in range(0, len(days), 7)]
+        else:
+            weekdays = [
+                {'text': SubscriptionKeyboards.weekday_label(day, language), 'callback_data': day_callback(day)}
+                for day in range(7)
+            ]
+            buttons = [weekdays[i:i + 2] for i in range(0, len(weekdays), 2)]
+        back = 'back_to_sub_frequency' if subscription_id is None else f'change_frequency_{subscription_id}'
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back}])
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def time_slot_picker(slots: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
+        """The delivery time slot of a new subscription: the slots the backend offered for the chosen day,
+        then "any time" (the slot is optional; the order is dated and its time confirmed later)."""
         buttons = [
-            [{'text': i18n.get('telegram.subscription.use_template', language), 'callback_data': 'subscription_use_template'}],
-            [{'text': i18n.get('telegram.subscription.create_custom', language), 'callback_data': 'subscription_custom'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
+            [{
+                'text': f"{slot.get('name')} · {slot.get('time_range')}" if slot.get('name') else str(slot.get('time_range')),
+                'callback_data': f"subscription_slot_{slot['id']}",
+            }]
+            for slot in slots
         ]
+        buttons.append([{'text': i18n.get('telegram.subscription.any_time', language), 'callback_data': 'subscription_slot_any'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_sub_day'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -1641,6 +1684,33 @@ class ReorderKeyboards:
                 'callback_data': continue_callback,
             }],
         ])
+
+
+class CustomerNoticeKeyboards:
+    """The buttons on a customer notice (plan 2026-10-24 Task 3; spec 2026-10-23 §9).
+
+    Built here, not in the webhook, so the callback-contract test
+    (tests/telegram_bot/test_callback_contract_customer.py) harvests every callback it can emit.
+    """
+
+    @staticmethod
+    def notice(language: str, *, order_id: Optional[int], pay_now: bool) -> Optional[InlineKeyboardMarkup]:
+        """Pay now (an unpaid Click order: `retry_payment`'s own `payment_retry_<id>`, which re-checks the
+        order is still payable and builds the Click link) above View order. None for a notice without an
+        order (a skipped delivery)."""
+        if order_id is None:
+            return None
+        rows = []
+        if pay_now:
+            rows.append([{
+                'text': i18n.get('telegram.payment.pay_now', language),
+                'callback_data': f'payment_retry_{order_id}',
+            }])
+        rows.append([{
+            'text': i18n.get('telegram.payment.view_order', language),
+            'callback_data': f'order_{order_id}',
+        }])
+        return KeyboardBuilder.build_inline_keyboard(rows)
 
 
 class DeliverySummaryKeyboards:

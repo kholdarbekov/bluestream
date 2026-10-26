@@ -171,6 +171,14 @@ CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS = _int("CUSTOMER_SEGMENT_MEDIUM_VALUE_UZS", 25
 
 # ─── Subscriptions ──────────────────────────────────────────────────────
 SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS = _int("SUBSCRIPTION_FAILED_PAYMENT_MAX_ATTEMPTS", 3)
+# Days between creating a subscription order and delivering it (spec 2026-10-23 §4.2, §6.1): each
+# order is created the day before its delivery, so a new subscription's first delivery, and the
+# first one after a resume, is never sooner than tomorrow. Read only by subscription_schedule.
+SUBSCRIPTION_ORDER_LEAD_DAYS = _int("SUBSCRIPTION_ORDER_LEAD_DAYS", 1)
+# Hours an unpaid Click order has before `cancel_abandoned_orders` cancels it (spec 2026-10-23 §4.5). A
+# subscription order also waits for the end of its delivery window, never less than this. Read only by
+# OrderService.payment_deadline and the sweep's candidate query.
+CLICK_PAYMENT_WINDOW_HOURS = _int("CLICK_PAYMENT_WINDOW_HOURS", 24)
 
 # ─── Bot token lifecycle (shared by telegram_bot + staff_bot) ───────────
 TOKEN_REFRESH_BUFFER_SECONDS = _int("TOKEN_REFRESH_BUFFER_SECONDS", 300)  # refresh this long before expiry

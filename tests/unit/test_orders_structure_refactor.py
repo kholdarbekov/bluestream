@@ -37,7 +37,6 @@ def test_orders_api_delegates_migrated_flows_to_order_service():
         "get_order_tracking_for_user(",
         "perform_bulk_action(",
         "export_orders(",
-        "create_subscription_order(",
     ]
 
     for method in delegated_methods:
@@ -59,7 +58,6 @@ def test_orders_api_targeted_routes_do_not_contain_query_calls():
         "track_order",
         "bulk_order_action",
         "export_orders",
-        "create_subscription_order",
     ]
 
     for function_name in functions:
@@ -74,4 +72,5 @@ def test_order_service_contains_orders_api_entrypoints():
     assert "def get_user_order_statistics(" in text
     assert "def submit_order_feedback_for_user(" in text
     assert "def repeat_order_for_user(" in text
-    assert "def create_subscription_order(" in text
+    # The legacy POST /orders/subscription and its service method are gone (spec 2026-10-23 §9).
+    assert "def create_subscription_order(" not in text

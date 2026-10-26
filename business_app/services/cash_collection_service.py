@@ -3847,7 +3847,8 @@ class CashCollectionService:
         order.payment_method = PaymentMethod.CASH
 
         # THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #5): from here a contract customer pays
-        # the contract CASH price, and a loyalty-eligible customer the COD tier discount. Re-priced
+        # the contract CASH price, and a loyalty-eligible customer's own bot or website order gains
+        # the COD tier discount (never a staff-entered or subscription order, spec 2026-10-23). Re-priced
         # BEFORE the outstanding is re-derived, so the cash about to be allocated settles the cash
         # total. A late Click debit for the original amount is still recognised: Case C quotes this
         # order back on Click (ClickPaymentProviderService._expected_complete_amount).

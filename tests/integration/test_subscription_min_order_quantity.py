@@ -78,14 +78,12 @@ def _create_payload(product_id, quantity, address_id):
     """The body the Telegram bot posts (telegram_bot/handlers/subscriptions.py)."""
     return {
         "name": "Subscription - Weekly",
-        "billing_cycle": "weekly",
-        "delivery_frequency": "weekly",
+        "frequency": "weekly",
         "delivery_address_id": address_id,
         "payment_method": "cash",
         "items": [{"product_id": product_id, "quantity": quantity}],
         "auto_renew": True,
         "delivery_time_slot_id": None,
-        "discount_percentage": 0.0,
     }
 
 
@@ -121,7 +119,7 @@ class TestCustomerCreate:
         sub_id = resp.get_json()["data"]["subscription"]["id"]
 
         with app.app_context():
-            result = SubscriptionService().process_subscription_billing(sub_id)
+            result = SubscriptionService().create_next_order(sub_id)
 
         assert result["success"] is True, result
         order = Order.query.filter_by(subscription_id=sub_id).one()
@@ -134,8 +132,7 @@ class TestCustomerCreate:
             "/api/v1/subscriptions/preview",
             headers=auth_headers,
             json={
-                "billing_cycle": "weekly",
-                "delivery_frequency": "weekly",
+                "frequency": "weekly",
                 "items": [{"product_id": min_two_product.id, "quantity": 1}],
             },
         )
@@ -220,8 +217,7 @@ class TestAdmin:
             json={
                 "user_id": user.id,
                 "name": "Weekly Water",
-                "billing_cycle": "monthly",
-                "delivery_frequency": "weekly",
+                "frequency": "monthly",
                 "delivery_address_id": address.id,
                 "payment_method": "cash",
                 "items": [{"product_id": product_id, "quantity": quantity}],

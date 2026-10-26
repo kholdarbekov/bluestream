@@ -264,7 +264,7 @@
                                 {% endif %}
                                 <div class="table-header">
                                     <h4>{{ plan.name }}</h4>
-                                    <div class="price">{{ plan.price|format_price }}<span>/{{ plan.billing_cycle|translate(current_language) }}</span></div>
+                                    <div class="price">{{ plan.price|format_price }}<span>/{{ plan.period|translate(current_language) }}</span></div>
                                 </div>
                                 <div class="table-content">
                                     <ul class="feature-list">
@@ -566,6 +566,11 @@
                             <div style="margin-bottom: 40px;">
                                 <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_frequency'|t }}</h4>
                                 <div class="frequency-options">
+                                    <div class="frequency-option" data-frequency="daily">
+                                        <div class="frequency-icon">🗓️</div>
+                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.daily'|t }}</div>
+                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.daily_desc'|t }}</div>
+                                    </div>
                                     <div class="frequency-option" data-frequency="weekly">
                                         <div class="frequency-icon">📅</div>
                                         <div class="frequency-name">{{ 'landing.custom_subscription.frequency.weekly'|t }}</div>
@@ -596,6 +601,17 @@
                                     <button type="button" class="day-btn" data-day="6">{{ 'landing.custom_subscription.day.saturday'|t }}</button>
                                     <button type="button" class="day-btn" data-day="0">{{ 'landing.custom_subscription.day.sunday'|t }}</button>
                                 </div>
+                            </div>
+
+                            <!-- Day of the month (monthly) -->
+                            <div class="schedule-selector" id="month-day-selector" style="display: none; margin-bottom: 40px;">
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_day_of_month'|t }}</h4>
+                                <select id="month-day-select" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e5e5; border-radius: 8px; font-size: 16px; font-weight: 500; color: #333; background: #fff; cursor: pointer;">
+                                    <option value="">{{ 'landing.custom_subscription.select_day_of_month'|t }}</option>
+                                    {% for day_number in range(1, 32) %}
+                                    <option value="{{ day_number }}">{{ day_number }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
 
                             <!-- Time Slot Selection -->
@@ -838,6 +854,15 @@
 {% endblock %}
 
 {% block extra_js %}
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{# The builder's own words, in the visitor's language. `{day}` is filled in by the script. #}
+{{ render_page_data({
+    'i18n': {
+        'day_of_month': 'Day {day} of the month' | t,
+        'preview_after_sign_in': 'Shown once you are signed in' | t,
+        'select_day_of_month': 'Please select a day of the month' | t,
+    }
+}, element_id='subscription-constructor-data') }}
 <script src="{{ url_for('static', filename='js/custom-index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/subscription-constructor.js') }}"></script>
 {% endblock %}

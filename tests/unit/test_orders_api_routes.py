@@ -111,37 +111,6 @@ def test_repeat_order_route_uses_repeat_order_for_user(client, app, db, sample_u
     service.repeat_order_for_user.assert_called_once_with(created_order.id, str(sample_user.id))
 
 
-def test_create_subscription_order_accepts_service_dict_response(client, app, sample_user, monkeypatch):
-    service = Mock()
-    service.get_user_or_raise.return_value = sample_user
-    service.create_subscription_order.return_value = {
-        'id': 42,
-        'status': 'active',
-        'delivery_frequency': 'weekly',
-        'next_delivery_date': None,
-        'created_at': datetime.now(UTC).isoformat(),
-    }
-    notification_service = Mock()
-
-    monkeypatch.setattr('business_app.api.orders.get_order_service', lambda: service)
-    monkeypatch.setattr('business_app.api.orders.get_notification_service', lambda: notification_service)
-
-    response = client.post(
-        '/api/v1/orders/subscription',
-        headers=_auth_headers(app, sample_user.id),
-        json={
-            'items': [{'product_id': 1, 'quantity': 2}],
-            'frequency': 'weekly',
-            'delivery_address_id': 10,
-            'auto_pay': True,
-        },
-    )
-
-    assert response.status_code == 201
-    data = response.get_json()
-    assert data['data']['subscription']['id'] == 42
-
-
 def test_retry_payment_route_returns_payment_url(client, app, db, sample_user, monkeypatch):
     created_order = _create_order(db, sample_user.id)
     created_order.payment_method = PaymentMethod.CLICK

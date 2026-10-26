@@ -12,6 +12,12 @@
             .replace(/'/g, '&#39;');
     }
 
+    // A discount row is drawn only from the server's own figure; the page decides nothing.
+    function discountRow(label, amount) {
+        if (!(parseFloat(amount) > 0)) return '';
+        return '<div class="order-summary-row"><span class="label">' + escapeHtml(label) + '</span><span class="value">\u2212' + formatOrderAmount(amount) + '</span></div>';
+    }
+
     function formatOrderAmount(amount) {
         if (!amount) return '0 UZS';
         return Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' UZS';
@@ -169,6 +175,9 @@
             '<div class="card h-100"><div class="card-body">' +
             '<div class="order-summary-row"><span class="label">' + escapeHtml(PAGE_DATA.i18n.subtotal) + '</span><span class="value">' + formatOrderAmount(order.subtotal || order.total_amount) + '</span></div>' +
             '<div class="order-summary-row"><span class="label">' + escapeHtml(PAGE_DATA.i18n.delivery_fee) + '</span><span class="value">' + formatOrderAmount(order.delivery_fee || 0) + '</span></div>' +
+            discountRow(PAGE_DATA.i18n.tier_discount, order.tier_discount) +
+            discountRow(PAGE_DATA.i18n.subscription_discount, order.discount_amount) +
+            discountRow(PAGE_DATA.i18n.reward_discount, order.loyalty_discount) +
             '<div class="order-summary-row"><span class="label">' + escapeHtml(PAGE_DATA.i18n.tax) + '</span><span class="value">' + formatOrderAmount(order.tax_amount || 0) + '</span></div>' +
             '<div class="order-summary-total"><span class="label">' + escapeHtml(PAGE_DATA.i18n.total) + '</span><span class="value">' + formatOrderAmount(order.total_amount) + '</span></div>' +
             '</div></div></div></div>' +

@@ -113,7 +113,8 @@ async def test_a_cash_order_covered_by_the_prepaid_balance_reads_as_one_sum(bot,
         "<b>To'lov usuli:</b> 💰 Naqd pul\n"
         "\n"
         "• Aqua Element 19L × 8 — 120,000 UZS\n"
-        "Gold chegirma −3% 🏷 — −3,600 UZS\n"
+        + uz("telegram.orders.estimate_tier_line", tier_name="Gold", percentage=3, amount="3,600")
+        + "\n"
         "Oldindan to'langan qoldiq — −116,400 UZS\n"
         "────────────────\n"
         "<b>💰 To'lash: 0 UZS</b>\n"
@@ -131,7 +132,8 @@ async def test_a_balance_that_covers_part_leaves_no_balance_after_line(bot, shop
     await reach_confirmation(bot, user, HOME, "cash")
 
     assert bot.telegram.last_shown().text.endswith(
-        "Gold chegirma −3% 🏷 — −3,600 UZS\n"
+        uz("telegram.orders.estimate_tier_line", tier_name="Gold", percentage=3, amount="3,600")
+        + "\n"
         "Oldindan to'langan qoldiq — −50,000 UZS\n"
         "────────────────\n"
         "<b>💰 To'lash: 66,400 UZS</b>"

@@ -135,7 +135,9 @@ docker compose exec postgres psql -U postgres -d bluestream_db -c \
    ORDER BY key, language;"
 ```
 
-Expect six rows reading the new, conditional copy — not the old unconditional one:
+**First deploy (2026-08-27) only.** Expect six rows reading the conditional copy that seed wrote
+then — not the old unconditional one. The 2026-10-23 seed rewrote these values again, so this list
+is superseded for these keys by the value check in §9:
 - `label_discount` → en `cash-order discount`, uz `naqd buyurtma chegirmasi`,
   ru `скидка за оплату наличными`.
 - `perk_discount` → en `{pct}% off when you pay cash on delivery`,
@@ -145,8 +147,8 @@ Expect six rows reading the new, conditional copy — not the old unconditional 
 If any row instead reads as a bare "discount"/"chegirma"/"скидка" with no mention of cash or
 delivery, that update did not commit — `/loyalty-guide` is still making the pre-deploy promise for
 that language, and step 6's `#lg-cod-discount` check below will not catch it (it checks that the
-new section exists, not that the old copy nearby was corrected). Do not move on until all six read
-as above.
+new section exists, not that the old copy nearby was corrected). On the first deploy, do not move on
+until all six read as above.
 
 ## 3. Flush caches — two of them, and they are not the same thing
 
@@ -208,9 +210,9 @@ docker compose restart business_app telegram_bot celery_worker
 - `celery_worker` — renders notification copy (e.g. the COD-cap breach notice) from the same
   in-process catalogue.
 
-`staff_bot` needs **no** restart for this feature: the driver surface takes no new copy and no new
-arithmetic — `expected_cash_to_collect` already follows the discounted total through
-`net_open_receivable_amount`.
+`staff_bot` needs **no** restart for the first (2026-08-27) deploy: the driver surface takes no new
+copy and no new arithmetic — `expected_cash_to_collect` already follows the discounted total through
+`net_open_receivable_amount`. (2026-10-23 deploy: see §9, which restarts `staff_bot`.)
 
 ## 5. Rebuild the admin UI
 
@@ -231,21 +233,29 @@ curl -s "http://localhost:5000/loyalty-guide?lang=uz" | grep -c 'id="lg-cod-disc
 curl -s "http://localhost:5000/loyalty-guide?lang=ru" | grep -o 'loyalty_guide\.[a-z_.]*' | sort -u
 ```
 
-Expect: the first two print the condition sentence; the third prints `1`; the fourth prints
+Expect: the first two print the condition sentence (in English, after the 2026-10-23 seed, it reads
+`Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery — in cash or by card transfer to the driver.`);
+the third prints `1`; the fourth prints
 **nothing** — any `loyalty_guide.*` token surviving into the rendered Russian HTML means step 2
 did not actually commit for that key, and a customer is looking at a raw key right now.
 
 Then confirm the discount behaves, not just that it's described:
 
-- **A COD order carries a non-zero `tier_discount`.** Place (or find) a real order on the `cash`
-  rail for a customer who qualifies for a tier with a rate above zero, then:
+- **A bot or web cash order carries a non-zero `tier_discount`.** Place (or find) a real order in
+  the customer Telegram bot or on the website, on the `cash` rail, for a customer who qualifies for
+  a tier with a rate above zero, then:
   ```bash
   docker compose exec postgres psql -U postgres -d bluestream_db -c \
     "SELECT id, payment_method, subtotal, tier_discount, total_amount FROM orders
      ORDER BY id DESC LIMIT 20;"
   ```
   (`orders` has no timestamp column — `id DESC` is the recency proxy used elsewhere in this
-  codebase.) The COD row's `tier_discount` should be non-zero and `total_amount` should reflect it.
+  codebase.) The bot/web cash row's `tier_discount` should be non-zero and `total_amount` should
+  reflect it.
+- **An admin, operator-phone, sales-agent or subscription cash order carries zero.** For the same
+  customer's tier, place one of each on the `cash` rail (admin order, operator phone order,
+  sales-agent order, and a subscription that bills) and run the same query. Every one of those rows
+  must show `tier_discount = 0.00`. A non-zero value on any of them means the rule is leaking.
 - **A Click/Payme/card order carries zero.** Same query, same customer's tier, a non-COD order —
   `tier_discount` must be `0.00`.
 - **The debt cap's amount arm behaves.** The cap now refuses COD only when a customer's linked
@@ -266,16 +276,6 @@ Then confirm the discount behaves, not just that it's described:
   Expect `tier_discount = 0.00` and `total_amount` back to the undiscounted figure —
   `rail_pricing.reprice_order_for_rail` → `loyalty_service.tier_discount_for_rail` runs on both
   transitions, and neither `business_account` nor `click` is a COD rail.
-
-Two more channels publish prices but are **out of scope for this deploy** — only touch them if the
-owner has actually decided to:
-- **Operator phone orders currently do not carry the discount at all**, by design —
-  `StaffService.price_phone_order` publishes `tier_discount: 0.00` unconditionally, pending a
-  follow-up task that was scoped and never built. This is a known gap, not something this deploy
-  broke. If the owner wants phone orders discounted too, that's separate follow-up work, not a step
-  here; if not, no action is needed, but keep announcement copy from implying the discount applies
-  "however you order."
-
 ## 7. Set production's tier percentages before announcing
 
 Every public surface in this deploy publishes whatever is in `loyalty_tier_configs` live — dev's
@@ -342,3 +342,113 @@ as an exact restoration of the old behaviour.
   rate going forward) — the schema downgrade does not resolve it.
 - The translation rows and cache entries added in this deploy are inert if the code is reverted —
   no cleanup needed for those on rollback.
+
+## 9. 2026-10-23 self-service-only
+
+The tier discount now applies only to cash-on-delivery orders the customer places themselves, in
+the Telegram bot or on the website. It never applies to admin, operator-phone, sales-agent or
+subscription orders. The earlier sections describe the first version of this feature, so use this
+section for the rule as it now stands. There is no migration. The decision lives in one place,
+`LoyaltyService.quote_tier_discount`.
+
+Steps, in order:
+
+1. **Pre-deploy checks on prod.**
+   - Read the live values of the keys in step 2's two lists. The seed upserts, so it overwrites any
+     admin edit made on prod. Note any value you want to keep. The old row
+     `'{tier} discount ({percent}%)'` is replaced by a new key, `'{tier} website discount ({percent}%)'`,
+     so an admin edit on the old row does not carry over to the new one.
+   - Count legacy orders that carry a tier discount the new rule would not give:
+     ```bash
+     docker compose exec postgres psql -U postgres -d bluestream_db -c \
+       "SELECT order_source, is_subscription_order, count(*) FROM orders
+        WHERE tier_discount > 0
+          AND (order_source IS NULL OR order_source NOT IN ('web','telegram') OR is_subscription_order)
+        GROUP BY 1,2;"
+     ```
+     Rows returned keep their stored tier discount until their payment method is re-priced. Nothing
+     rewrites them at deploy time.
+2. **Seed translations.** Run `scripts/seed_backend_translations.py`. It is the only seeder this
+   change touches (the §2 prepayment seeder is unaffected), and it carries both the customer copy
+   and the staff copy. Expect 6 keys x 3 languages = 18 NEW rows:
+   - `ui.loyalty.discount_help`
+   - `loyalty_guide.faq.q10`
+   - `loyalty_guide.faq.a10`
+   - `{tier} website discount ({percent}%)`
+   - `Tier discount (bot & website perk)`
+   - `Subscription discount`
+
+   and 8 keys x 3 languages = 24 UPDATED rows:
+   - `api.loyalty.tier_discount_condition`
+   - `loyalty_guide.tier.label_discount`
+   - `loyalty_guide.tier.perk_discount`
+   - `loyalty_guide.tier.discount_footnote`
+   - `telegram.loyalty.tier_cod_perk`
+   - `telegram.orders.estimate_tier_line`
+   - `telegram.orders.order_tier_discount_line`
+   - `ui.orders.tier_discount`
+
+   The seeder may also add or update other rows from earlier, unrelated commits that were never
+   seeded on prod (dev saw `telegram.orders.estimate_prepaid_*`, `telegram.products.unit_price_label`
+   and `telegram.products.type_quantity_hint`). That is expected.
+3. **Restart the services that run the changed code or hold translations in memory.**
+   ```bash
+   docker compose restart business_app telegram_bot staff_bot celery_worker
+   ```
+   The customer bot keeps its catalogue in memory. Reloading it with `POST /internal/reload-translations`
+   is an alternative to restarting `telegram_bot`. `celery_worker` DOES need the restart: subscription
+   billing runs in Celery (`business_app/tasks/subscription_tasks.py` imports `OrderService` at module
+   load), and the worker loads its source when it starts. A worker that is not restarted keeps the
+   old `create_order` and `quote_tier_discount`, so every subscription it bills after the deploy would
+   still get the tier discount. `celery_beat` is not restarted here, matching §4.
+4. **Rebuild the admin UI.**
+   ```bash
+   docker compose build admin_ui && docker compose up -d admin_ui
+   ```
+   `admin_ui/src/pages/LoyaltyPrograms.js` gained the help text (`ui.loyalty.discount_help`) and
+   `admin_ui/src/pages/Orders.js` changed a fallback. Both are code changes in a compiled bundle, so
+   the reseed alone will not show them.
+5. **Flush the caches.** Run the §3 flush. It clears the translation cache and the
+   `GET /api/v1/loyalty/tiers` response cache, which has a 1 h TTL. Without the flush, the stale
+   payload is served for up to an hour. Separately, nginx caches JS for 1 h (§3), so `orders.js` and
+   `order-detail-modal.js` may show no tier-discount rows for up to an hour. That fixes itself.
+6. **Check the seeded values.** Most keys are updates of existing rows. The seeder counts them under
+   "Existing translations updated", not "New translations added". An update that silently no-ops
+   leaves no dent in either counter, so check the values:
+   ```bash
+   docker compose exec postgres psql -U postgres -d bluestream_db -c \
+     "SELECT key, language, value FROM translations WHERE key IN
+      ('ui.loyalty.discount_help','loyalty_guide.faq.q10','loyalty_guide.faq.a10',
+       '{tier} website discount ({percent}%)','Tier discount (bot & website perk)',
+       'Subscription discount','api.loyalty.tier_discount_condition',
+       'loyalty_guide.tier.label_discount','loyalty_guide.tier.perk_discount',
+       'loyalty_guide.tier.discount_footnote','telegram.loyalty.tier_cod_perk',
+       'telegram.orders.estimate_tier_line','telegram.orders.order_tier_discount_line',
+       'ui.orders.tier_discount') ORDER BY key, language;"
+   ```
+   The `en` values the seed must have written, copied from `scripts/seed_backend_translations.py`:
+   - `ui.loyalty.discount_help`: `Taken off cash-on-delivery orders customers place themselves in the Telegram bot or on the website. Not applied to orders entered by staff (admin, call centre, sales agents) or to subscription orders.`
+   - `loyalty_guide.faq.q10`: `Which orders get my tier discount?`
+   - `loyalty_guide.faq.a10`: `Every order you place yourself in our Telegram bot or on our website and pay on delivery — in cash or by card transfer to the driver. It's taken off automatically at checkout: our thank-you for ordering in the bot or on the website.`
+   - `{tier} website discount ({percent}%)`: `{tier} website discount ({percent}%)`
+   - `Tier discount (bot & website perk)`: `Tier discount (bot & website perk)`
+   - `Subscription discount`: `Subscription discount`
+   - `loyalty_guide.tier.label_discount`: `bot & website discount`
+   - `loyalty_guide.tier.perk_discount`: `{pct}% off orders you place in our bot or on our website, paid on delivery`
+   - `loyalty_guide.tier.discount_footnote`: `* Your tier discount is a perk of ordering in our Telegram bot or on our website: it's taken off automatically when you place the order yourself and pay on delivery — in cash or by card transfer to the driver. Subscription deliveries keep their own subscription price; your tier perk is there whenever you place an extra order in the bot or on the website.`
+   - `api.loyalty.tier_discount_condition`: `Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery — in cash or by card transfer to the driver.`
+   - `telegram.loyalty.tier_cod_perk`: `{pct}% off every order you place here in the bot or on our website, paid on delivery`
+   - `telegram.orders.estimate_tier_line`: `{tier_name} bot discount −{percentage}% 🏷 — −{amount} UZS`
+   - `telegram.orders.order_tier_discount_line`: `🏷 Tier discount (bot & website perk) — −{amount} UZS`
+   - `ui.orders.tier_discount`: `Tier discount (customer's bot/web order)`
+
+   If any row still reads the first-deploy copy (`cash-order discount`, `when you pay cash on delivery`),
+   the update did not commit. Do not move on.
+7. **Run the §6 checks.** A bot or web cash order must show `tier_discount > 0`. An admin, operator-phone
+   or sales-agent cash order must show `0.00`. For subscriptions, inspect an order billed by the
+   worker (the daily billing task or `/subscriptions/<id>/retry`) and confirm `0.00`. Do not rely on
+   the admin "bill now" route alone: it bills inside `business_app`, which runs the new code even if
+   the worker was never restarted, so it can pass while the worker is still stale.
+
+Copy note: the customer-facing copy frames the discount as a perk of ordering in the bot or on the
+website. Do not let announcement copy imply it applies "however you order."

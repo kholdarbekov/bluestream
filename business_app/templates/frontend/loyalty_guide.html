@@ -22,6 +22,8 @@
 {% set _ = faq.items.append({'q': 'loyalty_guide.faq.q7' | t, 'a': 'loyalty_guide.faq.a7' | t}) %}
 {% if handbook.consecutive_strike_rules %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q9' | t, 'a': 'loyalty_guide.faq.a9' | t}) %}{% endif %}
 {% if handbook.surprise.enabled %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q8' | t, 'a': 'loyalty_guide.faq.a8' | t}) %}{% endif %}
+{# Which orders get the tier discount: same condition as the tier-grid footnote (some tier carries a rate). #}
+{% if handbook.tiers | selectattr('discount_percentage', 'gt', 0) | list %}{% set _ = faq.items.append({'q': 'loyalty_guide.faq.q10' | t, 'a': 'loyalty_guide.faq.a10' | t}) %}{% endif %}
 
 {% block extra_meta %}
 {% set faq_schema = namespace(items=[]) %}
@@ -262,9 +264,9 @@
             {# Omitted, not replaced, at 0% — mirrors the perk bullet below.
                `.lg-tier__stats` is a plain flex row (no fixed two-column
                grid), so one remaining stat never looks like a dangling gap.
-               The discount is a cash-on-delivery-only benefit (see checkout);
-               the `*` ties to the fine-print footnote below the tier grid via
-               aria-describedby, rather than a title-attribute tooltip that a
+               The discount is a perk of orders the customer places themselves in
+               the bot or on the website (see checkout); the `*` ties to the
+               fine-print footnote below the tier grid via aria-describedby, rather than a title-attribute tooltip that a
                touch-device customer could never see. #}
             {% if tier.discount_percentage > 0 %}
             {% set tier_ns.has_discount = true %}

@@ -991,7 +991,8 @@ class ClickPaymentProviderService:
 
             # THE PRICE FOLLOWS THE RAIL (spec 2026-10-09 §5.2 #6): the catalogue price for a contract line, and
             # THE TIER DISCOUNT FOLLOWS THE RAIL — including back onto Click.
-            # A tier discount is a COD-only benefit and must never reach a
+            # A tier discount needs a COD rail (plus a customer-placed bot/web
+            # order, see `LoyaltyService.quote_tier_discount`), so it must never reach a
             # Click fiscal receipt: build_click_fiscalization_payload prices
             # received_card off order.total_amount while filling per-item
             # Discount from loyalty_discount ALONE, so a tier-discounted total

@@ -48,8 +48,8 @@
     }
 
     // `discountCondition` is a preformatted, already-translated sentence from
-    // GET /loyalty/tiers. The rate is a COD-rail benefit; the browser never
-    // holds its own copy of that rule.
+    // GET /loyalty/tiers. The rate is a perk of orders placed in the bot or on
+    // the website; the browser never holds its own copy of that rule.
     function renderMembershipTiers(tiers, discountCondition) {
         var container = document.getElementById('membershipTiersContainer');
 

@@ -6,7 +6,7 @@ WHY THIS FILE EXISTS
 *edit* branch — reached from a subscription card's "Edit" button — was never
 driven by any test, and every screen in it was broken in production:
 
-* ``billing_history_<id>``, ``change_payment_<id>`` and ``retry_billing_<id>``
+* ``billing_history_<id>``, ``change_payment_<id>`` and ``retry_billing_<id>`` (since removed)
   all parsed their id with ``split('_')[3]`` on a THREE-segment callback, so
   every tap raised ``IndexError`` and answered with the generic error toast.
   100% failure, every customer, no restart involved.
@@ -82,7 +82,7 @@ async def bot(monkeypatch):
                     "subscription": {
                         "id": sid,
                         "status": "active",
-                        "delivery_frequency": "weekly",
+                        "frequency": "weekly",
                     }
                 }
             },
@@ -190,37 +190,14 @@ async def test_the_change_payment_button_opens_the_picker(bot, user):
     )
 
 
-async def test_the_retry_billing_button_reaches_the_backend(bot, user):
-    """`retry_billing_12` — same off-by-one."""
-    errors = collect_errors(bot)
-
-    await bot.send(user.tap(f"retry_billing_{SUB_ID}"))
-
-    assert not errors, f"the tap still raises: {errors}"
-    assert f"{SUBSCRIPTION}/retry-billing" in endpoints(bot, "POST")
+# The retry-billing button is gone (plan 2026-10-24 Task 4): no order is ever "billed", the next one is
+# simply created. tests/telegram_bot/test_subscription_single_frequency_journeys.py asserts no card offers
+# it and that its callback is claimed by nothing.
 
 
 # ---------------------------------------------------------------------------
 # The delegation crash the index fix alone does not reach
 # ---------------------------------------------------------------------------
-
-
-async def test_retrying_billing_then_refreshes_that_subscriptions_card(bot, user):
-    """`retry_failed_billing` ends with `await self.subscription_details(...)`,
-    which re-parsed the SAME callback with `split('_')[1]` -> `int('billing')`.
-
-    Fixing only the `[3]` index leaves this ValueError in place, so the customer
-    sees the retry toast and then the error toast.
-    """
-    errors = collect_errors(bot)
-
-    await bot.send(user.tap(f"retry_billing_{SUB_ID}"))
-
-    assert not errors, f"the refresh still raises: {errors}"
-    assert SUBSCRIPTION in endpoints(bot, "GET"), (
-        "the subscription card was never refreshed after the retry"
-    )
-    assert "SUBSCRIPTION-DETAILS" in last_text(bot)
 
 
 async def test_skipping_a_delivery_then_refreshes_that_subscriptions_card(bot, user):
@@ -259,9 +236,9 @@ async def test_choosing_a_new_frequency_updates_that_subscription(bot, user):
     assert frequency_buttons, f"the screen offers no frequency buttons: {buttons(bot)}"
     bot.telegram.reset()
 
-    await bot.send(user.tap(f"subfreq_monthly_{SUB_ID}"))
+    await bot.send(user.tap(f"subfreq_daily_{SUB_ID}"))
 
-    assert payload_for(bot, "PUT", SUBSCRIPTION) == {"frequency": "monthly"}
+    assert payload_for(bot, "PUT", SUBSCRIPTION) == {"frequency": "daily"}
     assert last_text(bot) == "✅ FREQUENCY-UPDATED"
 
 
@@ -344,3 +321,16 @@ async def test_the_edit_screens_do_not_hijack_subscription_creation(bot, user):
                 "update_frequency_confirm",
                 "change_payment_method_confirm",
             }, f"{callback!r} is claimed by the edit flow as well as creation"
+
+
+# ---------------------------------------------------------------------------
+# Pause must carry a JSON body: the endpoint is body-validated, so no body is a 400
+# ---------------------------------------------------------------------------
+
+
+async def test_pausing_sends_an_empty_json_body_not_none(bot, user):
+    bot.backend.route("POST", f"{SUBSCRIPTION}/pause", lambda _c: {"success": True, "data": {}})
+
+    await bot.send(user.tap(f"pause_sub_{SUB_ID}"))
+
+    assert payload_for(bot, "POST", f"{SUBSCRIPTION}/pause") == {}

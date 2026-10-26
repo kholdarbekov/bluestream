@@ -21,6 +21,7 @@ from business_app.services.loyalty_service import (
     TierDiscountQuote,
     clamp_tier_discount,
 )
+from business_app.utils.constants import ORDER_SOURCE_PREFIXES
 from shared.enums import EntitySubtype, PaymentMethod, UserType
 
 from datetime import UTC, datetime, timedelta
@@ -55,7 +56,9 @@ def _tier(db, program, *, name, rate, min_points=0, display_order=0):
 def test_cash_rail_quotes_the_resolved_tier_s_live_rate(db, sample_user, program):
     _tier(db, program, name="Base", rate=LOW_RATE)
 
-    quote = LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH)
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    )
 
     assert isinstance(quote, TierDiscountQuote)
     assert quote.percentage == LOW_RATE
@@ -69,7 +72,12 @@ def test_rate_comes_from_the_tier_the_member_actually_resolves_to(db, sample_use
     _tier(db, program, name="Upper", rate=HIGH_RATE, min_points=500, display_order=1)
 
     # 0 qualifying points -> Base, not Upper.
-    assert LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH).percentage == LOW_RATE
+    assert (
+        LoyaltyService()
+        .quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False)
+        .percentage
+        == LOW_RATE
+    )
 
 
 @pytest.mark.parametrize(
@@ -86,7 +94,9 @@ def test_rate_comes_from_the_tier_the_member_actually_resolves_to(db, sample_use
 def test_non_cod_rails_quote_nothing(db, sample_user, program, method):
     _tier(db, program, name="Base", rate=LOW_RATE)
 
-    quote = LoyaltyService().quote_tier_discount(sample_user, BASIS, method)
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, method, order_source="web", is_subscription_order=False
+    )
 
     assert quote.amount == Decimal("0.00")
     assert quote.percentage == Decimal("0")
@@ -96,11 +106,15 @@ def test_non_cod_rails_quote_nothing(db, sample_user, program, method):
 def test_zero_percent_tier_quotes_nothing(db, sample_user, program):
     _tier(db, program, name="Base", rate=Decimal("0"))
 
-    assert LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH).amount == Decimal("0.00")
+    assert LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount == Decimal("0.00")
 
 
 def test_no_tier_configured_quotes_nothing(db, sample_user, program):
-    assert LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH).amount == Decimal("0.00")
+    assert LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount == Decimal("0.00")
 
 
 def test_loyalty_ineligible_entity_quotes_nothing(db, sample_user, program):
@@ -124,15 +138,55 @@ def test_loyalty_ineligible_entity_quotes_nothing(db, sample_user, program):
     db.session.commit()
 
     assert LoyaltyService().is_user_loyalty_eligible(sample_user) is False
-    assert LoyaltyService().quote_tier_discount(sample_user, BASIS, PaymentMethod.CASH).amount == Decimal("0.00")
+    assert LoyaltyService().quote_tier_discount(
+        sample_user, BASIS, PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    "order_source, is_subscription_order, eligible",
+    [
+        ("telegram", False, True),
+        ("web", False, True),
+        ("telegram", True, False),
+        ("web", True, False),
+        ("admin", False, False),
+        ("phone", False, False),
+        ("sales_agent", False, False),
+        ("api", False, False),
+        ("mobile", False, False),
+        (None, False, False),
+    ],
+)
+def test_only_the_customers_own_bot_or_web_orders_get_the_tier(
+    db, sample_user, program, order_source, is_subscription_order, eligible
+):
+    """Gate 1 (spec 2026-10-23 §2): the customer placed it in the bot or on the website, and it is
+    not a subscription order. Staff-entered orders and subscription deliveries never carry it."""
+    _tier(db, program, name="Base", rate=LOW_RATE)
+
+    quote = LoyaltyService().quote_tier_discount(
+        sample_user,
+        BASIS,
+        PaymentMethod.CASH,
+        order_source=order_source,
+        is_subscription_order=is_subscription_order,
+    )
+
+    assert (quote.amount > Decimal("0.00")) is eligible
+
+
+def test_every_order_source_is_classified():
+    classified = {"telegram", "web", "admin", "phone", "sales_agent", "api", "mobile"}
+    assert set(ORDER_SOURCE_PREFIXES) <= classified  # a new source must be added to the parametrize above
 
 
 def test_negative_basis_never_produces_a_negative_quote(db, sample_user, program):
     _tier(db, program, name="Base", rate=LOW_RATE)
 
-    assert LoyaltyService().quote_tier_discount(sample_user, Decimal("-500.00"), PaymentMethod.CASH).amount == Decimal(
-        "0.00"
-    )
+    assert LoyaltyService().quote_tier_discount(
+        sample_user, Decimal("-500.00"), PaymentMethod.CASH, order_source="web", is_subscription_order=False
+    ).amount == Decimal("0.00")
 
 
 class TestClampTierDiscount:

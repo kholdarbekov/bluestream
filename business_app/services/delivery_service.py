@@ -555,6 +555,28 @@ class DeliveryService:
 
         return slots_data
 
+    def get_slots_offered_on_weekday(self, weekday: Optional[int]) -> List[Dict[str, Any]]:
+        """The active delivery slots a RECURRING delivery can pick (a subscription's day-and-slot chooser).
+
+        `weekday` is Python's `weekday()` (0 = Monday): only the slots offered that weekday. `None` lists
+        every active slot, for a subscription whose delivery day is not a weekday (monthly) or is set by
+        the slot itself (daily). No date means no capacity count; a single date is what
+        `get_time_slot_availability` answers. The slot's own fees are not repeated here: a subscription
+        order never applies them (`subscription_schedule.window_for`)."""
+        slots = DeliveryTimeSlot.query.filter_by(is_active=True).order_by(DeliveryTimeSlot.start_time).all()
+        return [
+            {
+                "id": slot.id,
+                "name": slot.name,
+                "start_time": slot.start_time,
+                "end_time": slot.end_time,
+                "time_range": f"{slot.start_time}-{slot.end_time}",
+                "available_days": list(slot.available_days or []),
+            }
+            for slot in slots
+            if weekday is None or weekday in (slot.available_days or ())
+        ]
+
     def track_delivery(self, tracking_code: str) -> Dict[str, Any]:
         """Get delivery tracking information"""
         delivery = Delivery.query.filter_by(tracking_code=tracking_code).first()

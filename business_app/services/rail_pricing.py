@@ -15,6 +15,9 @@ Which lines move:
   * never covered              -> unchanged (a regular customer's price never depended on the method);
   * loyalty reward line        -> unchanged (a gift at 0 must never be billed).
 The subtotal moves by the changed lines only; `delivery_fee` and `discount_amount` stay as stored.
+The tier discount is re-quoted by `loyalty_service.tier_discount_for_rail` with the order's own
+channel: a move onto cash grants it only to the customer's own bot or website order, never to a
+staff-entered or subscription one (spec 2026-10-23).
 """
 
 from dataclasses import dataclass
@@ -140,7 +143,7 @@ def quote_order_for_rail(order: Order, payment_method: PaymentMethodLike) -> Rai
     discount_amount = Decimal(str(order.discount_amount or 0))
     loyalty_discount = Decimal(str(order.loyalty_discount or 0))
     tier_discount = tier_discount_for_rail(
-        order.user,
+        order,
         subtotal=subtotal,
         discount_amount=discount_amount,
         loyalty_discount=loyalty_discount,

@@ -48,8 +48,10 @@ def compute_order_total(
         discount_amount: the SUBSCRIPTION percentage discount.
         delivery_fee: the delivery charge.
         loyalty_discount: a REDEEMED REWARD's discount.
-        tier_discount: the loyalty-tier COD discount. Callers that cannot yet
-            produce one pass ``Decimal("0.00")``.
+        tier_discount: the loyalty-tier discount, as
+            ``LoyaltyService.quote_tier_discount`` decided it (the customer's own
+            bot or website order, COD rail). Callers that cannot yet produce one
+            pass ``Decimal("0.00")``.
 
     Keyword-only on purpose: five same-typed money arguments in a row are
     exactly the shape that gets silently transposed at a call site, and

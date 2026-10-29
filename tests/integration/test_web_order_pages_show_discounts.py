@@ -81,19 +81,34 @@ def test_order_confirmation_shows_subscription_and_reward_rows_from_the_order(ap
 
 
 def test_web_order_renderers_use_only_server_discount_fields():
+    """The order details are the shared modal's (orders.js opens it, spec 2026-10-26 §12), and it draws each
+    discount row from the label the server publishes for that order, only when there is one."""
+    modal = (ROOT / "business_app/static/js/pages/order-detail-modal.js").read_text()
+    for field in ("labels.tier_discount", "labels.subscription_discount", "labels.reward_discount"):
+        assert field in modal, field
     for path in ("business_app/static/js/pages/orders.js", "business_app/static/js/pages/order-detail-modal.js"):
         src = (ROOT / path).read_text()
-        for field in ("order.tier_discount", "order.discount_amount", "order.loyalty_discount"):
-            assert field in src, (path, field)
         for forbidden in ("order_source", "is_subscription_order", "payment_method === 'cash'"):
             assert forbidden not in src, (path, forbidden)
+    assert "function displayOrderDetail" not in (ROOT / "business_app/static/js/pages/orders.js").read_text()
+
+
+def test_the_order_modal_labels_carry_a_discount_row_only_when_there_is_one(app, db, customer, sample_product, user_address):
+    """`GET /orders/<id>` publishes the modal's labels: a subscription or reward row only for a non-zero amount."""
+    admin = make_staff(db, UserRole.ADMIN, "+998901119943")
+    order = _admin_order(app, admin, customer, user_address, sample_product, "cash")
+    plain = app.test_client().get(f"/api/v1/orders/{order.id}", headers=customer_headers(app, customer)).get_json()
+    assert (plain["data"]["labels"]["subscription_discount"], plain["data"]["labels"]["reward_discount"]) == (None, None)
+
+    order.discount_amount = Decimal("1234.00")
+    db.session.commit()
+    labels = app.test_client().get(f"/api/v1/orders/{order.id}", headers=customer_headers(app, customer)).get_json()
+    assert labels["data"]["labels"]["subscription_discount"] is not None
+    assert labels["data"]["labels"]["reward_discount"] is None
 
 
 def test_order_page_i18n_carries_the_discount_labels():
-    for path in (
-        "business_app/templates/frontend/orders.html",
-        "business_app/templates/frontend/partials/order_detail_modal.html",
-    ):
+    for path in ("business_app/templates/frontend/partials/order_detail_modal.html",):
         src = (ROOT / path).read_text()
         assert "'tier_discount': 'Tier discount (bot & website perk)' | t" in src, path
         assert "'subscription_discount': 'Subscription discount' | t" in src, path

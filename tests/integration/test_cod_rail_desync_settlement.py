@@ -105,13 +105,13 @@ def _deliver_with_cash(driver, delivery, amount):
 
 
 @pytest.mark.integration
-def test_pay_now_on_cod_order_keeps_order_rail_in_sync(
+def test_pay_now_on_a_cod_order_is_refused_and_moves_neither_rail(
     matrix_app, db, order_with_address, auth_headers
 ):
-    """POST /payments/create switching a COD order to Click must move BOTH rails.
+    """POST /payments/create switching a COD order to Click is refused, and leaves BOTH rails on cash.
 
-    Leaving orders.payment_method == cash is what stranded prod TG_000401_26.
-    """
+    Moving one rail and not the other is what stranded prod TG_000401_26; a customer moves neither now: there
+    is no cash -> Click switch (spec 2026-10-27 §4.3, D4)."""
     from business_app.services.cash_collection_service import CashCollectionService
 
     order = order_with_address
@@ -119,21 +119,19 @@ def test_pay_now_on_cod_order_keeps_order_rail_in_sync(
     db.session.commit()
     cod_payment = CashCollectionService().ensure_cod_payment_for_order(order)
     db.session.commit()
-    payment_id = cod_payment.id
+    order_id, payment_id = order.id, cod_payment.id
 
-    client = matrix_app.test_client()
-    resp = client.post(
+    resp = matrix_app.test_client().post(
         "/api/v1/payments/create",
-        json={"order_id": order.id, "payment_method": "click"},
+        json={"order_id": order_id, "payment_method": "click"},
         headers=auth_headers,
     )
-    assert resp.status_code == 201, resp.get_json()
 
+    assert resp.status_code == 400, resp.get_json()
+    assert resp.get_json()["data"]["error_code"] == "RAIL_MOVE_NOT_ALLOWED"
     db.session.expire_all()
-    fresh_order = Order.query.get(order.id)
-    fresh_payment = Payment.query.get(payment_id)
-    assert fresh_payment.payment_method == PaymentMethod.CLICK
-    assert fresh_order.payment_method == PaymentMethod.CLICK
+    order, payment = Order.query.get(order_id), Payment.query.get(payment_id)
+    assert (order.payment_method, payment.payment_method) == (PaymentMethod.CASH, PaymentMethod.CASH)
 
 
 # --------------------------------------------------------------------------- #

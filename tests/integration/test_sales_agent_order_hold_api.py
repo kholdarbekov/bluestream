@@ -1043,7 +1043,7 @@ def test_t_hold_9_the_store_cancelling_its_unpaid_held_order_closes_the_hold(
 ):
     cancelled = client.post(
         f"/api/v1/orders/{held.order_id}/cancel",
-        json={"reason": "Ordered twice by mistake"},
+        json={"expected_via": "cancel"},
         headers=_token_headers(app, held.outlet.user_id),
     )
 
@@ -1074,7 +1074,7 @@ def test_t_hold_9_the_store_cannot_cancel_a_paid_held_order(
 
     response = client.post(
         f"/api/v1/orders/{second['order']['id']}/cancel",
-        json={"reason": "Changed our mind"},
+        json={"expected_via": "cancel"},
         headers=_token_headers(app, workplace.user_id),
     )
 
@@ -1144,7 +1144,7 @@ def test_t_hold_14_a_store_cancel_after_the_approval_cancels_an_ordinary_order(
 
     cancelled = client.post(
         f"/api/v1/orders/{held.order_id}/cancel",
-        json={"reason": "Ordered twice by mistake"},
+        json={"expected_via": "cancel"},
         headers=_token_headers(app, held.outlet.user_id),
     )
 

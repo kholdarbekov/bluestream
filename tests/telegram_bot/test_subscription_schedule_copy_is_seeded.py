@@ -22,6 +22,20 @@ KEYS = (
     + ["telegram.subscription.select_time_slot", "telegram.subscription.any_time"]
     + ["telegram.subscription.delivery_day", "telegram.subscription.delivery_time"]
     + ["telegram.subscription.time_to_be_confirmed"]
+    # The bot reading the backend's published answers (plan 2026-10-26 Task 5).
+    + [f"telegram.subscription.{n}" for n in (
+        "cancel_button", "cancel_confirm", "cancel_confirm_yes", "cancel_confirm_no", "skip_stale",
+        "change_time_slot", "select_new_time_slot", "no_time_slots",
+        "schedule_updated_successfully", "items_updated_successfully", "preview_title", "save_change",
+    )]
+    # The card's money line reads the backend's estimate (final fix wave F4).
+    + ["telegram.subscription.per_delivery"]
+    # The card prints the backend's published words around the bot's own labels, and the history screen (step 4 Task 14).
+    + [f"telegram.subscription.{n}" for n in (
+        "next_dates", "if_resume", "date_skipped", "per_month", "payment", "orders", "history_title", "history_empty",
+    )]
+    # Items the backend publishes as unavailable are left out, and both screens say so (re-review G10).
+    + [f"telegram.subscription.{n}" for n in ("item_not_included", "some_unavailable_note", "none_available_note")]
     + [f"telegram.subscription.weekday_{n}" for n in range(7)]
     + [f"telegram.subscription.status_{s}" for s in ("active", "paused", "cancelled", "expired", "trial")]
     + [f"telegram.subscription.frequency_{f}" for f in ("daily", "weekly", "biweekly", "monthly")]

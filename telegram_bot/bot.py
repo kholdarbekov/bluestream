@@ -653,22 +653,54 @@ class WaterBusinessBot:
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^menu_subscriptions$"),
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^back_to_subscriptions$"),
             CallbackQueryHandler(subscription_handlers.subscription_details, pattern="^subscription_\\d+$"),
-            CallbackQueryHandler(subscription_handlers.subscription_actions, pattern="^(pause|resume|cancel)_sub_"),
-            CallbackQueryHandler(subscription_handlers.skip_delivery, pattern=r"^skip_sub_\d+$"),
-            CallbackQueryHandler(subscription_handlers.view_billing_history, pattern=r"^billing_history_\d+$"),
+            CallbackQueryHandler(subscription_handlers.subscription_actions, pattern=r"^(pause|resume)_sub_\d+$"),
+            # Pause and cancel ask first, with the consequence the backend published; only
+            # `confirmpause_sub_<id>_<state>` / `confirmcancel_sub_<id>_<state>` write, carrying the
+            # `expected_state` the card showed. A `confirmcancel_sub_<id>` from before the state rode the
+            # callback is still claimed so it asks again instead of spinning.
+            CallbackQueryHandler(subscription_handlers.pause_subscription_confirmed, pattern=r"^confirmpause_sub_\d+_[0-9a-f]{16}$"),
+            CallbackQueryHandler(subscription_handlers.cancel_subscription_prompt, pattern=r"^cancel_sub_\d+$"),
+            CallbackQueryHandler(subscription_handlers.cancel_subscription_confirmed, pattern=r"^confirmcancel_sub_\d+(_[0-9a-f]{16})?$"),
+            # `skip_sub_<id>_<yyyy-mm-dd>`: the date the button named; it asks the reason, and
+            # `skip_sub_<id>_<yyyy-mm-dd>_<reason|none>` writes. A card from before the date rode the
+            # callback (`skip_sub_<id>`) is still claimed so it can be refreshed instead of spinning.
+            CallbackQueryHandler(subscription_handlers.skip_delivery, pattern=r"^skip_sub_\d+(_\d{4}-\d{2}-\d{2})?$"),
+            CallbackQueryHandler(
+                subscription_handlers.skip_delivery,
+                pattern=r"^skip_sub_\d+_\d{4}-\d{2}-\d{2}_[a-z_]+$",
+            ),
 
             # Subscription item management
             CallbackQueryHandler(subscription_handlers.manage_subscription_items, pattern=r"^manage_items_\d+$"),
             CallbackQueryHandler(subscription_handlers.remove_item_confirm, pattern="^remove_item_"),
+            # An items change is previewed (`add_item_` / `update_item_` / `remove_item_` end on the preview), then
+            # saved by `subitems_<op>_<sub>_<product>_<qty>_<state>`, which carries the preview's `expected_state`.
+            CallbackQueryHandler(
+                subscription_handlers.items_save_confirmed,
+                pattern=r"^subitems_(add|set|del)_\d+_\d+_\d+_[0-9a-f]{16}$",
+            ),
 
             # Subscription editing
             CallbackQueryHandler(subscription_handlers.edit_subscription_menu, pattern=r"^edit_sub_\d+$"),
             CallbackQueryHandler(subscription_handlers.change_frequency, pattern=r"^change_frequency_\d+$"),
             CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern=r"^change_payment_\d+$"),
+            CallbackQueryHandler(subscription_handlers.change_address_menu, pattern=r"^change_address_\d+$"),
+            CallbackQueryHandler(subscription_handlers.change_time_slot_menu, pattern=r"^change_slot_\d+$"),
+            # `subslot_<slot>_<id>` is the legacy slot button (it named no schedule): it opens the picker and
+            # writes nothing. The schedule buttons are `subsched_` (preview) and `subschedok_` (save).
+            CallbackQueryHandler(subscription_handlers.change_time_slot_menu, pattern=r"^subslot_\d+_\d+$"),
+            CallbackQueryHandler(
+                subscription_handlers.schedule_preview,
+                pattern=r"^subsched_(daily|weekly|biweekly|monthly)_(\d+|x)_(\d+|any)_\d+$",
+            ),
+            CallbackQueryHandler(
+                subscription_handlers.schedule_save_confirmed,
+                pattern=r"^subschedok_(daily|weekly|biweekly|monthly)_(\d+|x)_(\d+|any)_\d+_[0-9a-f]{16}$",
+            ),
 
-            # Statistics and logs
-            CallbackQueryHandler(subscription_handlers.view_subscription_statistics, pattern="^subscription_statistics$"),
-            CallbackQueryHandler(subscription_handlers.view_subscription_logs, pattern=r"^view_logs_\d+$"),
+            # Order history (`view_logs_<id>` is the old Activity log button: it opens page 1)
+            CallbackQueryHandler(subscription_handlers.subscription_history, pattern=r"^subhist_\d+_\d+$"),
+            CallbackQueryHandler(subscription_handlers.subscription_history, pattern=r"^view_logs_\d+$"),
 
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
@@ -1331,6 +1363,23 @@ class WaterBusinessBot:
         self.application.add_handler(CallbackQueryHandler(
             subscription_handlers.change_payment_method_confirm,
             pattern=r"^subpay_[a-z_]+_\d+$",
+        ))
+        # `subpay_` shows the consequence and only `subpayok_<method>_<sub>_<state>` writes. The address change is
+        # previewed the same way: `subaddr_<address>_<sub>`, the method asked for when the old one is not offered
+        # there (`subaddrpay_<method>_<address>_<sub>`), then `subaddrok_<address>_<method|keep>_<sub>_<state>`.
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.change_payment_method_saved,
+            pattern=r"^subpayok_[a-z_]+_\d+_[0-9a-f]{16}$",
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.change_address_preview, pattern=r"^subaddr_\d+_\d+$",
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.change_address_payment, pattern=r"^subaddrpay_[a-z_]+_\d+_\d+$",
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            subscription_handlers.change_address_confirmed,
+            pattern=r"^subaddrok_\d+_([a-z_]+|keep)_\d+_[0-9a-f]{16}$",
         ))
 
         # Item quantity update conversation

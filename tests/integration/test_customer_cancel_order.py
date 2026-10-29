@@ -11,9 +11,10 @@ Order 1277 (TG_000508_26) is why. Its Cancel button was drawn while the order wa
 the customer tapped it after the delivery had failed, and it ended an order that was only
 waiting for a new date. The rule is now one backend predicate,
 `OrderService.customer_cancel_block_code`. `GET /orders` and `GET /orders/<id>` publish it
-as `can_customer_cancel`, and `POST /orders/<id>/cancel` enforces it on locked rows. Every
-test drives those routes the way the bot and the web call them: neither client sends a
-body with the cancel POST.
+as `can_customer_cancel` and `customer_actions.cancel`, and `POST /orders/<id>/cancel` enforces
+it on locked rows. Every test drives those routes the way the bot and the web call them: the
+cancel POST carries the `expected_via` the screen showed, `{"expected_via": "cancel"}` for these
+one-off orders (spec 2026-10-27 §5.2).
 """
 
 import inspect
@@ -152,6 +153,11 @@ def _headers(app, user):
     with app.app_context():
         token = create_access_token(identity=str(user.id))
     return {"Authorization": f"Bearer {token}"}
+
+
+def _cancel(client, order_id, headers):
+    """The customer's Cancel, as both clients send it for a one-off order (spec 2026-10-27 §5.2)."""
+    return client.post(CANCEL_URL.format(order_id=order_id), headers=headers, json={"expected_via": "cancel"})
 
 
 def _seed(db, customer, driver, case):
@@ -423,12 +429,24 @@ def test_the_cancel_a_customer_is_offered_is_the_cancel_the_backend_allows(
     assert [row["can_customer_cancel"] for row in listed if row["id"] == order.id] == [
         published["can_customer_cancel"]
     ], "the list the web draws Cancel from must agree with the detail"
+    # The published Cancel (spec 2026-10-27 §5.1): a one-off order is cancelled on its own, with no reasons.
+    cancel = published["customer_actions"]["cancel"]
+    assert [row["customer_actions"]["cancel"] for row in listed if row["id"] == order.id] == [cancel]
+    allowed = case.refused is None
+    assert {key: cancel[key] for key in ("allowed", "refusal", "via", "subscription_id", "reasons")} == {
+        "allowed": allowed,
+        "refusal": case.refused,
+        "via": "cancel" if allowed else None,
+        "subscription_id": None,
+        "reasons": [],
+    }
+    assert (cancel["label"] is not None, cancel["confirm_text"] is not None) == (allowed, allowed)
     # A row the cascade must leave as it was (a final row under an allowed PENDING cancel):
     # its history, its driver and its timestamp, read before the POST.
     left_alone = case.refused is None and delivery is not None and case.delivery_after is case.delivery_status
     before = _delivery_untouched(delivery) if left_alone else None
 
-    response = client.post(CANCEL_URL.format(order_id=order.id), headers=headers)
+    response = _cancel(client, order.id, headers)
     body = response.get_json()
     db.session.expire_all()
 
@@ -504,7 +522,7 @@ def test_a_driver_pickup_this_session_has_not_seen_is_still_refused(
     customer_told.clear()
     staff_told.forget()
 
-    response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+    response = _cancel(client, order.id, _headers(app, sample_user))
 
     body = response.get_json()
     assert response.status_code == 400, body
@@ -560,7 +578,7 @@ def test_after_the_driver_accepts_the_customer_still_cancels_and_the_drivers_car
     customer_told.clear()
     staff_told.forget()
 
-    response = client.post(CANCEL_URL.format(order_id=order.id), headers=customer_headers)
+    response = _cancel(client, order.id, customer_headers)
 
     body = response.get_json()
     assert response.status_code == 200, body
@@ -744,7 +762,7 @@ def test_a_write_that_read_the_order_before_the_customer_cancelled_cannot_bring_
     case = Case(f"stale-{writer.name}", OS.CONFIRMED, False, PS.PENDING, DS.ASSIGNED, None)
     order, delivery = _seed(db, sample_user, delivery_driver, case)
     order_id, delivery_id = order.id, delivery.id
-    cancelled = client.post(CANCEL_URL.format(order_id=order_id), headers=_headers(app, sample_user))
+    cancelled = _cancel(client, order_id, _headers(app, sample_user))
     assert cancelled.status_code == 200, cancelled.get_json()
     histories_before = (
         DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).count(),
@@ -966,12 +984,12 @@ def test_bulk_process_refuses_a_cancelled_order_and_still_processes_the_next(
 def test_another_customers_order_is_not_found_and_left_alone(
     app, client, db, sample_user, second_sample_user, delivery_driver, customer_told
 ):
-    """Ownership is checked on the locked row: a foreign id answers exactly like a missing one."""
+    """Ownership is checked before anything is locked or decided: a foreign id answers exactly like a missing one."""
     order, _delivery = _seed(
         db, sample_user, delivery_driver, Case("foreign", OS.PENDING, False, PS.PENDING, None, None)
     )
 
-    response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, second_sample_user))
+    response = _cancel(client, order.id, _headers(app, second_sample_user))
 
     assert response.status_code == 404, response.get_json()
     assert response.get_json()["success"] is False

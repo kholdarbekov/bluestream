@@ -1,0 +1,854 @@
+{
+ "case": "subscription_leftover_paused",
+ "exchanges": {
+  "cancel": {
+   "body": {
+    "expected_via": "cancel"
+   },
+   "method": "POST",
+   "path": "/api/v1/orders/1/cancel",
+   "response": {
+    "data": {
+     "order": {
+      "can_customer_cancel": false,
+      "confirmed_at": null,
+      "created_at": "<wall-clock>",
+      "customer_actions": {
+       "cancel": {
+        "allowed": false,
+        "confirm_text": null,
+        "label": null,
+        "reasons": [],
+        "refusal": "NOT_CANCELLABLE",
+        "subscription_id": 1,
+        "via": null
+       },
+       "confirm": {
+        "allowed": false,
+        "label": null
+       },
+       "pay": {
+        "allowed": false,
+        "amount_label": null,
+        "deadline_label": null,
+        "expected_amount": null,
+        "label": null,
+        "refusal": "order_closed"
+       }
+      },
+      "customer_cancel_via": null,
+      "delivered_at": null,
+      "delivery_address": {
+       "apartment_number": null,
+       "city": "Tashkent",
+       "country": "Uzbekistan",
+       "delivery_instructions": null,
+       "district": null,
+       "floor_number": null,
+       "full_address": "1 Test St, Tashkent",
+       "id": 1,
+       "is_business": false,
+       "is_default": true,
+       "landmark": null,
+       "latitude": 41.3111,
+       "longitude": 69.2797,
+       "postal_code": null,
+       "street_address": "1 Test St",
+       "title": null
+      },
+      "delivery_date": "2026-10-30",
+      "delivery_fee": 0.0,
+      "delivery_notes": null,
+      "delivery_window": {
+       "end": null,
+       "kind": "anytime",
+       "label": "anytime",
+       "start": null
+      },
+      "discount_amount": 0.0,
+      "display_status": "cancelled",
+      "id": 1,
+      "is_paid": false,
+      "is_urgent": false,
+      "loyalty_discount": 0.0,
+      "loyalty_points_used": 0,
+      "order_number": "TG_000001_26",
+      "order_source": "web",
+      "paid_at": null,
+      "payment_method": "click",
+      "promo_code_used": null,
+      "special_instructions": null,
+      "status": "cancelled",
+      "subscription_id": 1,
+      "tax_amount": 0.0,
+      "tier_discount": 0.0,
+      "total_amount": 30000.0,
+      "updated_at": "<wall-clock>",
+      "user_id": 1
+     },
+     "via": "cancel"
+    },
+    "message": "Order cancelled successfully",
+    "success": true
+   },
+   "status": 200
+  }
+ },
+ "language": "en",
+ "order_id": 1,
+ "requests": {
+  "GET /api/v1/orders/1": {
+   "body": {
+    "data": {
+     "delivery": {
+      "actual_delivery_time": null,
+      "current_location_lat": null,
+      "current_location_lng": null,
+      "customer_feedback": null,
+      "customer_rating": null,
+      "delivery_attempts": 1,
+      "delivery_person_name": null,
+      "delivery_person_phone": null,
+      "estimated_delivery_time": null,
+      "failed_delivery_reason": null,
+      "id": 1,
+      "last_location_update": null,
+      "status": "rescheduled",
+      "tracking_number": "TRK<stamp>"
+     },
+     "labels": {
+      "delivery_fee": "0 so'm",
+      "items": {
+       "1": "30 000 so'm"
+      },
+      "placed_on": "Wednesday, 28 October",
+      "reward_discount": null,
+      "subscription_discount": null,
+      "subtotal": "30 000 so'm",
+      "tax": null,
+      "tier_discount": null,
+      "total": "30 000 so'm"
+     },
+     "order": {
+      "can_customer_cancel": true,
+      "confirmed_at": null,
+      "created_at": "<wall-clock>",
+      "customer_actions": {
+       "cancel": {
+        "allowed": true,
+        "confirm_text": "Cancel this order?",
+        "label": "Cancel order",
+        "reasons": [],
+        "refusal": null,
+        "subscription_id": 1,
+        "via": "cancel"
+       },
+       "confirm": {
+        "allowed": false,
+        "label": null
+       },
+       "pay": {
+        "allowed": true,
+        "amount_label": "30 000 so'm",
+        "deadline_label": "Pay by 23:59 on Friday.",
+        "expected_amount": "30000.00",
+        "label": "Pay 30 000 so'm",
+        "refusal": null
+       }
+      },
+      "customer_cancel_via": "order",
+      "delivered_at": null,
+      "delivery_address": {
+       "apartment_number": null,
+       "city": "Tashkent",
+       "country": "Uzbekistan",
+       "delivery_instructions": null,
+       "district": null,
+       "floor_number": null,
+       "full_address": "1 Test St, Tashkent",
+       "id": 1,
+       "is_business": false,
+       "is_default": true,
+       "landmark": null,
+       "latitude": 41.3111,
+       "longitude": 69.2797,
+       "postal_code": null,
+       "street_address": "1 Test St",
+       "title": null
+      },
+      "delivery_date": "2026-10-30",
+      "delivery_fee": 0.0,
+      "delivery_info": {
+       "actual_delivery_time": null,
+       "current_location_lat": null,
+       "current_location_lng": null,
+       "customer_feedback": null,
+       "customer_rating": null,
+       "delivery_attempts": 1,
+       "delivery_person_name": null,
+       "delivery_person_phone": null,
+       "estimated_delivery_time": null,
+       "failed_delivery_reason": null,
+       "id": 1,
+       "last_location_update": null,
+       "status": "rescheduled",
+       "tracking_number": "TRK<stamp>"
+      },
+      "delivery_notes": null,
+      "delivery_window": {
+       "end": null,
+       "kind": "anytime",
+       "label": "anytime",
+       "start": null
+      },
+      "discount_amount": 0.0,
+      "display_status": "pending",
+      "id": 1,
+      "is_paid": false,
+      "is_urgent": false,
+      "loyalty_discount": 0.0,
+      "loyalty_points_used": 0,
+      "order_items": [
+       {
+        "id": 1,
+        "is_reward": false,
+        "product_id": 1,
+        "product_name": "Pure Water 19L",
+        "product_sku": null,
+        "quantity": 2,
+        "total_price": 30000.0,
+        "unit_price": 15000.0
+       }
+      ],
+      "order_number": "TG_000001_26",
+      "order_source": "web",
+      "paid_at": null,
+      "payment_info": {
+       "amount": 30000.0,
+       "amount_collected": 0.0,
+       "amount_paid": 0.0,
+       "collection_events_count": 0,
+       "currency": "UZS",
+       "fiscalization": null,
+       "fiscalization_status": null,
+       "id": 1,
+       "is_payable": true,
+       "last_collected_at": null,
+       "net_outstanding_amount": 30000.0,
+       "outstanding_amount": 30000.0,
+       "paid_at": null,
+       "payable_payment_link": null,
+       "payment_link": null,
+       "payment_method": "click",
+       "payment_provider": "click",
+       "payment_status": "pending",
+       "provider_transaction_id": null,
+       "transaction_id": null
+      },
+      "payment_method": "click",
+      "promo_code_used": null,
+      "special_instructions": null,
+      "status": "pending",
+      "subscription_id": 1,
+      "tax_amount": 0.0,
+      "tier_discount": 0.0,
+      "total_amount": 30000.0,
+      "updated_at": "<wall-clock>",
+      "user_id": 1
+     },
+     "payment_timeline": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "customer_id": 1,
+      "customer_name": "Test User",
+      "customer_phone": "+998901234567",
+      "order_id": 1,
+      "order_number": "TG_000001_26",
+      "outstanding_amount": 30000.0,
+      "payment_id": 1,
+      "status": "pending",
+      "timeline": [
+       {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "outstanding_amount": 30000.0,
+        "status": "pending",
+        "timestamp": "<wall-clock>",
+        "type": "payment_created"
+       }
+      ]
+     },
+     "timeline": [
+      {
+       "is_current": true,
+       "notes": null,
+       "status": "created",
+       "timestamp": "<wall-clock>"
+      }
+     ]
+    },
+    "message": "Order retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/orders/?page=1&per_page=10": {
+   "body": {
+    "data": {
+     "orders": [
+      {
+       "can_customer_cancel": true,
+       "confirmed_at": null,
+       "created_at": "<wall-clock>",
+       "customer_actions": {
+        "cancel": {
+         "allowed": true,
+         "confirm_text": "Cancel this order?",
+         "label": "Cancel order",
+         "reasons": [],
+         "refusal": null,
+         "subscription_id": 1,
+         "via": "cancel"
+        },
+        "confirm": {
+         "allowed": false,
+         "label": null
+        },
+        "pay": {
+         "allowed": true,
+         "amount_label": "30 000 so'm",
+         "deadline_label": "Pay by 23:59 on Friday.",
+         "expected_amount": "30000.00",
+         "label": "Pay 30 000 so'm",
+         "refusal": null
+        }
+       },
+       "customer_cancel_via": "order",
+       "delivered_at": null,
+       "delivery_address": {
+        "apartment_number": null,
+        "city": "Tashkent",
+        "country": "Uzbekistan",
+        "delivery_instructions": null,
+        "district": null,
+        "floor_number": null,
+        "full_address": "1 Test St, Tashkent",
+        "id": 1,
+        "is_business": false,
+        "is_default": true,
+        "landmark": null,
+        "latitude": 41.3111,
+        "longitude": 69.2797,
+        "postal_code": null,
+        "street_address": "1 Test St",
+        "title": null
+       },
+       "delivery_date": "2026-10-30",
+       "delivery_fee": 0.0,
+       "delivery_notes": null,
+       "delivery_window": {
+        "end": null,
+        "kind": "anytime",
+        "label": "anytime",
+        "start": null
+       },
+       "discount_amount": 0.0,
+       "display_status": "pending",
+       "id": 1,
+       "is_paid": false,
+       "is_urgent": false,
+       "loyalty_discount": 0.0,
+       "loyalty_points_used": 0,
+       "order_items": [
+        {
+         "id": 1,
+         "is_reward": false,
+         "product_id": 1,
+         "product_name": "Pure Water 19L",
+         "product_sku": null,
+         "quantity": 2,
+         "total_price": 30000.0,
+         "unit_price": 15000.0
+        }
+       ],
+       "order_number": "TG_000001_26",
+       "order_source": "web",
+       "paid_at": null,
+       "payment_info": {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "amount_paid": 0.0,
+        "collection_events_count": 0,
+        "currency": "UZS",
+        "fiscalization": null,
+        "fiscalization_status": null,
+        "id": 1,
+        "is_payable": true,
+        "last_collected_at": null,
+        "net_outstanding_amount": 30000.0,
+        "outstanding_amount": 30000.0,
+        "paid_at": null,
+        "payable_payment_link": null,
+        "payment_link": null,
+        "payment_method": "click",
+        "payment_provider": "click",
+        "payment_status": "pending",
+        "provider_transaction_id": null,
+        "transaction_id": null
+       },
+       "payment_method": "click",
+       "promo_code_used": null,
+       "special_instructions": null,
+       "status": "pending",
+       "subscription_id": 1,
+       "tax_amount": 0.0,
+       "tier_discount": 0.0,
+       "total_amount": 30000.0,
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ],
+     "pagination": {
+      "has_next": false,
+      "has_prev": false,
+      "page": 1,
+      "pages": 1,
+      "per_page": 10,
+      "total": 1
+     }
+    },
+    "message": "Orders retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/orders?page=1&per_page=10": {
+   "body": {
+    "data": {
+     "orders": [
+      {
+       "can_customer_cancel": true,
+       "confirmed_at": null,
+       "created_at": "<wall-clock>",
+       "customer_actions": {
+        "cancel": {
+         "allowed": true,
+         "confirm_text": "Cancel this order?",
+         "label": "Cancel order",
+         "reasons": [],
+         "refusal": null,
+         "subscription_id": 1,
+         "via": "cancel"
+        },
+        "confirm": {
+         "allowed": false,
+         "label": null
+        },
+        "pay": {
+         "allowed": true,
+         "amount_label": "30 000 so'm",
+         "deadline_label": "Pay by 23:59 on Friday.",
+         "expected_amount": "30000.00",
+         "label": "Pay 30 000 so'm",
+         "refusal": null
+        }
+       },
+       "customer_cancel_via": "order",
+       "delivered_at": null,
+       "delivery_address": {
+        "apartment_number": null,
+        "city": "Tashkent",
+        "country": "Uzbekistan",
+        "delivery_instructions": null,
+        "district": null,
+        "floor_number": null,
+        "full_address": "1 Test St, Tashkent",
+        "id": 1,
+        "is_business": false,
+        "is_default": true,
+        "landmark": null,
+        "latitude": 41.3111,
+        "longitude": 69.2797,
+        "postal_code": null,
+        "street_address": "1 Test St",
+        "title": null
+       },
+       "delivery_date": "2026-10-30",
+       "delivery_fee": 0.0,
+       "delivery_notes": null,
+       "delivery_window": {
+        "end": null,
+        "kind": "anytime",
+        "label": "anytime",
+        "start": null
+       },
+       "discount_amount": 0.0,
+       "display_status": "pending",
+       "id": 1,
+       "is_paid": false,
+       "is_urgent": false,
+       "loyalty_discount": 0.0,
+       "loyalty_points_used": 0,
+       "order_items": [
+        {
+         "id": 1,
+         "is_reward": false,
+         "product_id": 1,
+         "product_name": "Pure Water 19L",
+         "product_sku": null,
+         "quantity": 2,
+         "total_price": 30000.0,
+         "unit_price": 15000.0
+        }
+       ],
+       "order_number": "TG_000001_26",
+       "order_source": "web",
+       "paid_at": null,
+       "payment_info": {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "amount_paid": 0.0,
+        "collection_events_count": 0,
+        "currency": "UZS",
+        "fiscalization": null,
+        "fiscalization_status": null,
+        "id": 1,
+        "is_payable": true,
+        "last_collected_at": null,
+        "net_outstanding_amount": 30000.0,
+        "outstanding_amount": 30000.0,
+        "paid_at": null,
+        "payable_payment_link": null,
+        "payment_link": null,
+        "payment_method": "click",
+        "payment_provider": "click",
+        "payment_status": "pending",
+        "provider_transaction_id": null,
+        "transaction_id": null
+       },
+       "payment_method": "click",
+       "promo_code_used": null,
+       "special_instructions": null,
+       "status": "pending",
+       "subscription_id": 1,
+       "tax_amount": 0.0,
+       "tier_discount": 0.0,
+       "total_amount": 30000.0,
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ],
+     "pagination": {
+      "has_next": false,
+      "has_prev": false,
+      "page": 1,
+      "pages": 1,
+      "per_page": 10,
+      "total": 1
+     }
+    },
+    "message": "Orders retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/1": {
+   "body": {
+    "data": {
+     "billing_info": {
+      "next_billing_amount": "30000.00",
+      "payment_method": "click",
+      "subscription_id": 1
+     },
+     "subscription": {
+      "allowed_actions": {
+       "cancel": {
+        "allowed": true,
+        "block_reason": null,
+        "cancel_lines": [],
+        "coins_line": "Your AquaCoins stay with you.",
+        "confirm_label": "Cancel subscription",
+        "confirm_text": "We won't place any more automatic orders.",
+        "keep_label": "Keep subscription",
+        "kept_lines": [],
+        "kept_orders": [],
+        "label": "Cancel subscription",
+        "will_cancel_orders": []
+       },
+       "edit": {
+        "allowed": true,
+        "block_reason": null
+       },
+       "expected_state": "451d224a7d308d2b",
+       "pause": {
+        "allowed": false,
+        "block_reason": "This subscription isn't running right now, so there's nothing to pause.",
+        "label": null
+       },
+       "pay": {
+        "allowed": false,
+        "block_reason": "There's nothing to pay right now.",
+        "label": null
+       },
+       "remove_item": {
+        "allowed": false,
+        "block_reason": "A subscription needs at least one product. Need a break instead? Pause."
+       },
+       "resume": {
+        "allowed": true,
+        "block_reason": null,
+        "label": "Resume deliveries",
+        "resume_preview": "2026-10-29",
+        "resume_preview_label": "Thursday, 29 October"
+       },
+       "skip": {
+        "allowed": false,
+        "block_reason": "You can skip a delivery while the subscription is active.",
+        "label": null
+       }
+      },
+      "auto_renew": true,
+      "billing_amount": 30000.0,
+      "cancelled_at_label": null,
+      "created_at": "<wall-clock>",
+      "deliveries_per_month": 4.333333333333333,
+      "delivery_address_id": 1,
+      "delivery_address_label": "1 Test St, Tashkent",
+      "delivery_day_of_month": null,
+      "delivery_day_of_week": 3,
+      "delivery_time_slot": {
+       "available_days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "delivery_fee": "0.00",
+       "end_time": "12:00",
+       "id": 1,
+       "is_active": true,
+       "is_premium": false,
+       "max_orders": 50,
+       "name": "Morning",
+       "premium_fee": "0.00",
+       "start_time": "10:00",
+       "time_range": "10:00-12:00"
+      },
+      "delivery_time_slot_id": 1,
+      "description": "",
+      "discount_percentage": 0.0,
+      "end_date": null,
+      "estimated_per_delivery": 30000.0,
+      "estimated_per_delivery_label": "30 000 so'm",
+      "estimated_per_month": 130000.0,
+      "estimated_per_month_label": "130 000 so'm",
+      "failed_billing_attempts": 0,
+      "frequency": "weekly",
+      "id": 1,
+      "items_availability": "all",
+      "kept_order_note": null,
+      "last_delivery_date": "2026-10-29",
+      "name": "Home water",
+      "next_delivery_date": "2026-11-05",
+      "pause_end_date": null,
+      "pause_start_date": null,
+      "paused_at": "<wall-clock>",
+      "paused_at_label": "28 October",
+      "payment_method": "click",
+      "payment_method_label": "Click",
+      "payment_method_warning": null,
+      "schedule_sentence": "Every Thursday, 10:00–12:00",
+      "start_date": "2026-10-26T05:00:00",
+      "status": "paused",
+      "subscription_items": [
+       {
+        "available": true,
+        "id": 1,
+        "line_total_label": "30 000 so'm",
+        "min_order_quantity": 1,
+        "product": {
+         "barcode": null,
+         "base_price": 15000.0,
+         "category": {
+          "created_at": "<wall-clock>",
+          "description": "Water products",
+          "icon_url": null,
+          "id": 1,
+          "is_active": true,
+          "name": "Water",
+          "sort_order": 0,
+          "updated_at": "<wall-clock>"
+         },
+         "category_id": 1,
+         "created_at": "<wall-clock>",
+         "current_price": 15000.0,
+         "description": "Premium pure water in 19L bottle",
+         "discount_price": null,
+         "expire_days": 180,
+         "fiscal_profile": null,
+         "id": 1,
+         "images": [],
+         "in_sales_stock_check": false,
+         "ingredients": null,
+         "is_active": true,
+         "is_featured": false,
+         "is_returnable_bottle": false,
+         "is_tryout_eligible": true,
+         "max_stock_level": 500,
+         "meta_description": null,
+         "meta_title": null,
+         "min_order_quantity": 1,
+         "min_stock_level": 10,
+         "name": "Pure Water 19L",
+         "nutrition_facts": {},
+         "requires_prescription": false,
+         "returnable_bottles_per_unit": 0.0,
+         "short_description": null,
+         "size": "19L",
+         "sku": null,
+         "slug": null,
+         "stock_caps_purchase": true,
+         "stock_quantity": 100,
+         "track_inventory": true,
+         "tracks_returnable_bottles": false,
+         "updated_at": "<wall-clock>",
+         "volume": 19.0,
+         "volume_unit": "L",
+         "weight": null,
+         "weight_unit": "kg"
+        },
+        "product_id": 1,
+        "product_name": "Pure Water 19L",
+        "quantity": 2,
+        "subscription_id": 1,
+        "total_price": 30000.0,
+        "unit_price": 15000.0,
+        "unit_price_label": "15 000 so'm"
+       }
+      ],
+      "summary_sentence": "Every Thursday, 10:00–12:00. Since 26 October.",
+      "time_kind": "window",
+      "time_label": "10:00–12:00",
+      "total_amount_billed": 30000.0,
+      "upcoming_dates": [
+       {
+        "date": "2026-10-29",
+        "label_long": "Thursday, 29 October",
+        "label_short": "Thu 29 Oct",
+        "state": "planned"
+       }
+      ],
+      "upcoming_delivery": null,
+      "updated_at": "<wall-clock>",
+      "user_id": 1
+     }
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/1/items": {
+   "body": {
+    "data": {
+     "items": [
+      {
+       "available": true,
+       "id": 1,
+       "line_total_label": "30 000 so'm",
+       "min_order_quantity": 1,
+       "product": {
+        "barcode": null,
+        "base_price": 15000.0,
+        "category": {
+         "created_at": "<wall-clock>",
+         "description": "Water products",
+         "icon_url": null,
+         "id": 1,
+         "is_active": true,
+         "name": "Water",
+         "sort_order": 0,
+         "updated_at": "<wall-clock>"
+        },
+        "category_id": 1,
+        "created_at": "<wall-clock>",
+        "current_price": 15000.0,
+        "description": "Premium pure water in 19L bottle",
+        "discount_price": null,
+        "expire_days": 180,
+        "fiscal_profile": null,
+        "id": 1,
+        "images": [],
+        "in_sales_stock_check": false,
+        "ingredients": null,
+        "is_active": true,
+        "is_featured": false,
+        "is_returnable_bottle": false,
+        "is_tryout_eligible": true,
+        "max_stock_level": 500,
+        "meta_description": null,
+        "meta_title": null,
+        "min_order_quantity": 1,
+        "min_stock_level": 10,
+        "name": "Pure Water 19L",
+        "nutrition_facts": {},
+        "requires_prescription": false,
+        "returnable_bottles_per_unit": 0.0,
+        "short_description": null,
+        "size": "19L",
+        "sku": null,
+        "slug": null,
+        "stock_caps_purchase": true,
+        "stock_quantity": 100,
+        "track_inventory": true,
+        "tracks_returnable_bottles": false,
+        "updated_at": "<wall-clock>",
+        "volume": 19.0,
+        "volume_unit": "L",
+        "weight": null,
+        "weight_unit": "kg"
+       },
+       "product_id": 1,
+       "product_name": "Pure Water 19L",
+       "quantity": 2,
+       "subscription_id": 1,
+       "total_price": 30000.0,
+       "unit_price": 15000.0,
+       "unit_price_label": "15 000 so'm"
+      }
+     ]
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "tracking_island": {
+   "customer_actions": {
+    "cancel": {
+     "allowed": true,
+     "confirm_text": "Cancel this order?",
+     "label": "Cancel order",
+     "reasons": [],
+     "refusal": null,
+     "subscription_id": 1,
+     "via": "cancel"
+    },
+    "confirm": {
+     "allowed": false,
+     "label": null
+    },
+    "pay": {
+     "allowed": true,
+     "amount_label": "30 000 so'm",
+     "deadline_label": "Pay by 23:59 on Friday.",
+     "expected_amount": "30000.00",
+     "label": "Pay 30 000 so'm",
+     "refusal": null
+    }
+   },
+   "id": 1
+  }
+ }
+}

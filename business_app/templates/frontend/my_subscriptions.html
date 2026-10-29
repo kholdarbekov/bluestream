@@ -1,270 +1,64 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'subscriptions' %}
 
-{% block cabinet_title %}{{ 'My Subscriptions'|t }}{% endblock %}
+{#
+  /my-subscriptions: the SHELL only (spec 2026-10-26 §12). The strip, the selected subscription's body and
+  the empty state are rendered by ONE renderer, static/js/pages/my-subscriptions.js, from the API's published
+  fields; this template carries the containers and, in the page-data island, every word the renderer adds
+  around those fields (`cabinet.subs.*`, island key = the key without that prefix). The consequence sentences
+  and the action labels are the API's own (spec 2026-10-27 §16 M3), never island words. Styles: css/pages/
+  my-subscriptions.css, scoped under .subs (UX brief tokens).
+#}
+
+{% block cabinet_title %}{{ 'cabinet.subs.title'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
 <li>{{ 'landing.nav.subscriptions'|t }}</li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<style>
-.stat-card {
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.3s;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-}
-
-.subscription-card {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-    overflow: hidden;
-    transition: transform 0.3s;
-    cursor: pointer;
-}
-
-.subscription-card:hover {
-    transform: translateY(-2px);
-}
-
-.subscription-header {
-    background: #f8f9fa;
-    padding: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.subscription-body {
-    padding: 20px;
-}
-
-.subscription-footer {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-top: 1px solid #eee;
-}
-
-.subscription-status {
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: uppercase;
-}
-
-.status-active { background: #f6ffed; color: #52c41a; }
-.status-paused { background: #fff7e6; color: #fa8c16; }
-.status-cancelled { background: #fff2f0; color: #ff4d4f; }
-
-.delivery-item {
-    background: #f8f9fa;
-    border-radius: 6px;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-left: 4px solid #1890ff;
-}
-
-.delivery-item.urgent { border-left-color: #ff4d4f; }
-.delivery-item.upcoming { border-left-color: #52c41a; }
-
-.delivery-details {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.delivery-date {
-    font-weight: bold;
-    color: #1890ff;
-}
-
-@media (max-width: 768px) {
-    .subscription-overview .col-md-6 {
-        margin-bottom: 20px;
-    }
-
-    .delivery-details {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .delivery-details .btn {
-        margin-top: 10px;
-        width: 100%;
-    }
-}
-</style>
+<link href="{{ url_for('static', filename='css/pages/my-subscriptions.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block cabinet_content %}
-<!-- Subscriptions Header -->
-<div class="content-header mb-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h2><i class="far fa-sync-alt"></i> {{ 'My Subscriptions'|t }}</h2>
-        <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
-            <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
-        </a>
-    </div>
-</div>
+<div class="subs" id="subs">
+    {# The one custom glyph: a 19 L bottle, drawn by every waterline, strip card and item thumbnail. #}
+    <svg class="subs-defs" width="0" height="0" aria-hidden="true" focusable="false">
+        <defs>
+            <symbol id="subs-bottle" viewBox="0 0 22 34">
+                <rect x="8" y="1" width="6" height="3.5" rx="1"/>
+                <path d="M8.5 4.5h5v3.2c0 .6.3 1.1.8 1.4l2.6 1.6c1.4.9 2.2 2.4 2.2 4V30a3 3 0 0 1-3 3H5.9a3 3 0 0 1-3-3V14.7c0-1.6.8-3.1 2.2-4l2.6-1.6c.5-.3.8-.8.8-1.4z"/>
+            </symbol>
+        </defs>
+    </svg>
 
-<!-- Subscription Overview -->
-<div class="subscription-overview mb-4">
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card stat-card">
-                <div class="card-body text-center">
-                    <i class="far fa-sync-alt fa-2x text-primary mb-3"></i>
-                    <h3 class="text-primary" id="activeSubscriptionsCount">0</h3>
-                    <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card stat-card">
-                <div class="card-body text-center">
-                    <i class="far fa-calendar-alt fa-2x text-success mb-3"></i>
-                    <h3 class="text-success" id="nextDeliveryCount">0</h3>
-                    <p class="text-muted">{{ 'Deliveries This Month'|t }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+    <div id="subs-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-<!-- Active Subscriptions -->
-<div class="active-subscriptions mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-check-circle"></i> {{ 'Active Subscriptions'|t }}</h5>
+    <nav class="subs-strip-nav" id="subs-strip-nav" aria-label="{{ 'cabinet.subs.strip.label'|t }}" hidden>
+        <ul class="subs-strip" id="subs-strip"></ul>
+    </nav>
+
+    <section id="subscription" class="subs-body" aria-labelledby="sub-h" aria-busy="true">
+        <div class="subs-skeleton" id="subs-skeleton" aria-hidden="true">
+            <span class="subs-skeleton__bar subs-skeleton__bar--title"></span>
+            <span class="subs-skeleton__bar"></span>
+            <span class="subs-skeleton__card"></span>
         </div>
-        <div class="card-body">
-            <div class="subscriptions-list" id="activeSubscriptionsList">
-                <div class="text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading your subscriptions...'|t }}</p>
-                </div>
-            </div>
+        <p class="sr-only">{{ 'cabinet.subs.loading'|t }}</p>
+    </section>
+
+    {# The page's only two modals (UX brief): Cancel, and the product picker. The script fills their content
+       from the selected subscription's published answers. #}
+    <div class="modal fade subs-modal" id="subs-cancel-modal" tabindex="-1" role="dialog"
+         aria-labelledby="subs-cancel-title" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content" id="subs-cancel-content"></div>
         </div>
     </div>
-</div>
-
-<!-- Upcoming Deliveries -->
-<div class="upcoming-deliveries mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-truck"></i> {{ 'Upcoming Deliveries'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="deliveries-list" id="upcomingDeliveriesList">
-                <div class="text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading upcoming deliveries...'|t }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Paused/Cancelled Subscriptions -->
-<div class="inactive-subscriptions">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-pause-circle"></i> {{ 'Paused & Cancelled Subscriptions'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="inactive-subscriptions-list" id="inactiveSubscriptionsList">
-                <div class="text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading inactive subscriptions...'|t }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Subscription Management Modal -->
-<div class="modal fade" id="subscriptionModal" tabindex="-1" role="dialog" aria-labelledby="subscriptionModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Manage Subscription'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body" id="subscriptionModalContent">
-                <!-- Subscription details will be loaded here -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
-                <button type="button" class="btn btn-warning" id="pauseSubscriptionBtn" style="display: none;">
-                    <i class="far fa-pause"></i> {{ 'Pause Subscription'|t }}
-                </button>
-                <button type="button" class="btn btn-success" id="resumeSubscriptionBtn" style="display: none;">
-                    <i class="far fa-play"></i> {{ 'Resume Subscription'|t }}
-                </button>
-                <button type="button" class="btn btn-primary" id="modifySubscriptionBtn" style="display: none;">
-                    <i class="far fa-edit"></i> {{ 'Modify Plan'|t }}
-                </button>
-                <button type="button" class="btn btn-danger" id="cancelSubscriptionBtn" style="display: none;">
-                    <i class="far fa-times"></i> {{ 'Cancel Subscription'|t }}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modify Subscription Modal -->
-<div class="modal fade" id="modifyModal" tabindex="-1" role="dialog" aria-labelledby="modifyModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="modifyModalLabel">{{ 'Modify Subscription'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <form id="modifySubscriptionForm">
-                    <div class="form-group">
-                        <label for="newPlan">{{ 'Select New Plan'|t }}</label>
-                        <select class="form-control" id="newPlan" required>
-                            <option value="">{{ 'Choose Plan'|t }}</option>
-                            <option value="basic">Basic Plan - $29/month</option>
-                            <option value="premium">Premium Plan - $49/month</option>
-                            <option value="business">Business Plan - $99/month</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="newQuantity">{{ 'Number of Bottles per Delivery'|t }}</label>
-                        <input type="number" class="form-control" id="newQuantity" min="1" max="50" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="newFrequency">{{ 'Delivery Frequency'|t }}</label>
-                        <select class="form-control" id="newFrequency" required>
-                            <option value="">{{ 'Choose Frequency'|t }}</option>
-                            <option value="weekly">{{ 'Weekly'|t }}</option>
-                            <option value="biweekly">{{ 'Bi-weekly'|t }}</option>
-                            <option value="monthly">{{ 'Monthly'|t }}</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="effectiveDate">{{ 'Changes Effective From'|t }}</label>
-                        <input type="date" class="form-control" id="effectiveDate" required>
-                    </div>
-                    <input type="hidden" id="subscriptionIdToModify">
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|t }}</button>
-                <button type="button" class="btn btn-primary" id="confirmModifyBtn">{{ 'Update Subscription'|t }}</button>
-            </div>
+    <div class="modal fade subs-modal" id="subs-picker-modal" tabindex="-1" role="dialog"
+         aria-labelledby="subs-picker-title" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" role="document">
+            <div class="modal-content" id="subs-picker-content"></div>
         </div>
     </div>
 </div>
@@ -272,54 +66,71 @@
 
 
 {% block cabinet_extra_js %}
+{# The shared order modal, here (after base.js) rather than in the content: its script reads getPageData and
+   apiRequest as it loads. Rows and the hero's order link open it. #}
+{% include 'frontend/partials/order_detail_modal.html' %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
+{% set subs_copy = {} %}
+{% for key in [
+    'load_failed', 'retry',
+    'strip.next', 'strip.cancelled_on', 'strip.show_cancelled', 'strip.hide_cancelled', 'strip.new',
+    'chip.paused', 'chip.cancelled', 'chip.on_the_way',
+    'jump.label', 'jump.orders',
+    'section.items', 'section.schedule', 'section.address', 'section.payment', 'section.orders',
+    'change', 'change_label.items', 'change_label.schedule', 'change_label.address', 'change_label.payment',
+    'hero.label', 'hero.window_days', 'hero.order', 'hero.will_place',
+    'hero.paused_since', 'hero.paused', 'hero.paused_note',
+    'hero.cancelled_on', 'hero.cancelled', 'hero.cancelled_note',
+    'hero.date_window',
+    'hero.on_the_way_note', 'hero.none_available', 'hero.not_included', 'hero.no_date',
+    'wl.label', 'wl.item', 'wl.state.placed', 'wl.state.planned', 'wl.state.skipped', 'wl.state.on_the_way',
+    'wl.legend.placed', 'wl.legend.planned', 'wl.legend.skipped', 'wl.legend.on_the_way', 'wl.if_resume',
+    'items.qty_price', 'items.per_delivery', 'items.per_month', 'items.benefit', 'items.benefit_free',
+    'items.unavailable', 'items.unavailable_none', 'items.not_included', 'items.unknown_product',
+    'payment.note.click', 'payment.note.cash', 'payment.note.business_account',
+    'orders.pay', 'orders.pay_label', 'orders.more', 'orders.showing', 'orders.empty_planned', 'orders.empty',
+    'orders.load_failed', 'orders.keep',
+    'footer.help', 'footer.help_link',
+    'empty.title', 'empty.body', 'empty.cta',
+    'frequency.daily', 'frequency.weekly', 'frequency.biweekly', 'frequency.monthly',
+    'busy.paying', 'busy.skipping', 'busy.pausing', 'busy.resuming', 'busy.cancelling', 'busy.saving',
+    'busy.loading',
+    'error.action', 'error.pay', 'error.save', 'error.preview',
+    'skip.reasons', 'skip.reason_text', 'skip.done', 'skip.done_plain',
+    'pause.done', 'resume.done', 'resume.done_plain',
+    'cancel.title', 'cancel.alternatives',
+    'cancel.pause_instead', 'cancel.less_often', 'cancel.reason', 'cancel.close', 'cancel.done',
+    'edit.unsaved', 'edit.discard', 'edit.save', 'edit.checking', 'edit.new_total', 'edit.dirty_guard',
+    'edit.saved', 'edit.saved_schedule', 'edit.saved_items', 'edit.saved_payment', 'edit.saved_address',
+    'items.edit_note', 'items.fewer', 'items.more', 'items.quantity', 'items.remove', 'items.last_item',
+    'items.add',
+    'picker.title', 'picker.add', 'picker.empty', 'picker.failed',
+    'schedule.how_often', 'schedule.which_day', 'schedule.day_of_month', 'schedule.choose_day',
+    'schedule.short_months', 'schedule.time', 'schedule.hint.daily', 'schedule.hint.weekly',
+    'schedule.hint.biweekly', 'schedule.hint.monthly', 'schedule.slot_missing', 'schedule.slot_missing_plain',
+    'schedule.slots_failed', 'slot.window', 'slot.any',
+    'address.legend', 'address.add', 'address.method_legend', 'address.load_failed',
+    'payment.legend', 'payment.methods_failed',
+] %}{% set _ = subs_copy.update({key: ('cabinet.subs.' ~ key)|t}) %}{% endfor %}
+{# The backend's own display labels the editors name things with (one wording per language, B11): the
+   weekday chips and the payment methods. #}
+{% set weekday_names = [] %}{% set weekday_short_names = [] %}
+{% for day in range(7) %}
+{% set _ = weekday_names.append(('web.display_labels.weekday.' ~ day)|t) %}
+{% set _ = weekday_short_names.append(('web.display_labels.weekday_short.' ~ day)|t) %}
+{% endfor %}
+{% set method_labels = {} %}
+{% for method in ['click', 'cash', 'business_account', 'card', 'payme'] %}
+{% set _ = method_labels.update({method: ('web.display_labels.payment_method.' ~ method)|t}) %}
+{% endfor %}
 {{ render_page_data({
-    'subscriptions_url': url_for('frontend.subscriptions'),
-    'i18n': {
-        'no_products': 'No products' | t,
-        'products_failed': 'Failed to load products' | t,
-        'products': 'Products' | t,
-        'next_delivery': 'Next delivery' | t,
-        'time_to_be_confirmed': 'Time to be confirmed' | t,
-        'started': 'Started' | t,
-        'payment_method': 'Payment Method' | t,
-        'auto_renew': 'Auto-renew' | t,
-        'subscription': 'Subscription' | t,
-        'manage': 'Manage' | t,
-        'pause': 'Pause' | t,
-        'resume': 'Resume' | t,
-        'urgent': 'Urgent' | t,
-        'scheduled': 'Scheduled' | t,
-        'reschedule': 'Reschedule' | t,
-        'no_active': 'No Active Subscriptions' | t,
-        'no_active_hint': 'You dont have any active subscriptions' | t,
-        'browse_plans': 'Browse Plans' | t,
-        'load_failed': 'Failed to load subscriptions' | t,
-        'no_upcoming': 'No upcoming deliveries' | t,
-        'load_deliveries_failed': 'Failed to load deliveries' | t,
-        'no_inactive': 'No paused or cancelled subscriptions' | t,
-        'load_inactive_failed': 'Failed to load inactive subscriptions' | t,
-        'details_failed': 'Failed to load subscription details' | t,
-        'status': 'Status' | t,
-        'subscription_id': 'Subscription ID' | t,
-        'frequency_label': 'Delivery frequency' | t,
-        'delivery_information': 'Delivery Information' | t,
-        'time_slot': 'Time Slot' | t,
-        'recent_orders': 'Recent Orders' | t,
-        'no_orders': 'No orders yet' | t,
-        'update_success': 'Subscription updated successfully!' | t,
-        'update_failed': 'Failed to update subscription' | t,
-        'pause_confirm': 'Are you sure you want to pause this subscription?' | t,
-        'pause_success': 'Subscription paused successfully' | t,
-        'pause_failed': 'Failed to pause subscription' | t,
-        'resume_success': 'Subscription resumed successfully' | t,
-        'resume_failed': 'Failed to resume subscription' | t,
-        'cancel_confirm': 'Are you sure you want to cancel this subscription? This action cannot be undone.' | t,
-        'cancel_reason_prompt': 'Please provide a reason for cancellation (optional)' | t,
-        'cancel_success': 'Subscription cancelled successfully' | t,
-        'cancel_failed': 'Failed to cancel subscription' | t,
-        'reschedule_coming_soon': 'Delivery rescheduling feature coming soon!' | t,
-    },
+    'builder_url': url_for('frontend.index') ~ '#subscription-constructor',
+    'addresses_url': url_for('frontend.addresses'),
+    'help_url': company_telegram_bot_url,
+    'i18n': subs_copy,
+    'weekday_names': weekday_names,
+    'weekday_short_names': weekday_short_names,
+    'method_labels': method_labels,
 }) }}
 <script src="{{ url_for('static', filename='js/pages/my-subscriptions.js') }}"></script>
 {% endblock %}

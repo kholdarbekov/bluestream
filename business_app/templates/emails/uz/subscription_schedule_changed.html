@@ -1,0 +1,47 @@
+{% extends "emails/base.html" %}
+{# NATIVE-READ (plan 2026-10-27 Task 7): the title, every sentence and the row label below. #}
+
+{% block title %}Yetkazib berish jadvalingiz o'zgardi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Yetkazib berish jadvalingiz o'zgardi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p><strong>{{ subscription_name }}</strong> obunangizning yetkazib berish jadvali o'zgardi.</p>
+</div>
+
+{% for change in changes %}
+{% if change == "time_cleared" %}
+<p>{{ old_window }} yetkazib berish vaqti endi taklif qilinmaydi, shuning uchun buyurtmalaringiz kunning istalgan vaqtida keltiriladi.</p>
+{% elif change == "time_changed" %}
+<p>Yetkazib berish vaqtingiz endi {{ new_window }} (avval {{ old_window }} edi).</p>
+{% elif change == "day_moved" %}
+<p>Haftaning bu kunida ({{ old_weekday_label }}) endi yetkazib bermaymiz. Yangi yetkazib berish kuningiz: {{ new_weekday_label }}.</p>
+{% elif change == "date_moved" %}
+<p>Haftaning bu kunida ({{ old_weekday_label }}) endi yetkazib bermaymiz, shuning uchun keyingi yetkazib berish navbatdagi yetkazib berish kuniga o'tadi.</p>
+{% elif change == "days_added" %}
+<p>Yangi yetkazib berish kunlari: {{ added_weekdays_label }}. Kundalik yetkazib berishlaringiz endi shu kunlarda ham keladi.</p>
+{% endif %}
+{% endfor %}
+
+{% if next_delivery_date %}
+<table class="details-table">
+    <tr>
+        <th>Keyingi yetkazib berish</th>
+        <td>{{ next_delivery_date }}</td>
+    </tr>
+</table>
+{% endif %}
+
+<p>Yetkazib berish kuni va vaqtini obunangizda o'zgartirishingiz mumkin.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizga yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

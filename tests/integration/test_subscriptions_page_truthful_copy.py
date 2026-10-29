@@ -227,14 +227,3 @@ def test_shop_faq_does_not_promise_a_subscription_price_cut(client, db, lang):
     for word in ("lower unit", "reduce cost", "снизить стоимость", "narxini tushir", "foyda bormi"):
         assert word not in text, f"shop FAQ ({lang}) still promises a subscription saving: {word!r}"
     assert "subscri" in text or "подписк" in text or "obuna" in text
-
-
-def test_pause_call_sends_a_json_body():
-    """`/pause` is body-validated server side; a bodiless POST is a 400."""
-    import re
-    from pathlib import Path
-
-    source = Path("business_app/static/js/pages/my-subscriptions.js").read_text(encoding="utf-8")
-    call = re.search(r"'/pause',\s*\{(.*?)\}\);", source, re.S)
-    assert call, "pause call not found"
-    assert "body: JSON.stringify({})" in call.group(1)

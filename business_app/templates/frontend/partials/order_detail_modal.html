@@ -1,6 +1,9 @@
 {#
   Order Detail Modal Partial
-  Shared component used by both my_account.html and orders.html
+  Shared component used by my_account.html, orders.html and my_subscriptions.html.
+
+  Include it AFTER the base scripts (in `cabinet_extra_js`): its script reads getPageData, apiRequest and
+  jQuery as it loads. Inside the content block it ran before them and threw.
 
   Include this in your template with:
   {% include 'frontend/partials/order_detail_modal.html' %}
@@ -32,6 +35,10 @@
 /* Not an order status: a failed delivery waiting for a new date (F15). The label is a
    sentence, so it is not capitalized word by word like the one-word statuses. */
 .order-status.status-awaiting_new_date { background: #fff3cd; color: #856404; text-transform: none; }
+
+/* order-actions.js draws into the modal, the My orders cards and the tracking page. */
+.order-actions__confirm { text-align: left; }
+.order-actions__confirm .btn { min-height: 44px; margin: 0 8px 8px 0; }
 
 /* Modal Order Items Styling */
 .modal-order-items {
@@ -286,12 +293,12 @@
                 <!-- Order details will be loaded dynamically -->
             </div>
             <div class="modal-footer">
+                {# Pay, Cancel/Skip/Decline and Confirm: drawn here by order-actions.js from the order's
+                   `customer_actions` (spec 2026-10-27 §5.3), the same answer the cards and the tracking page draw. #}
+                <div class="w-100" id="orderDetailActions"></div>
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
                 <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
                     <i class="far fa-redo"></i> {{ 'Reorder Items'|t }}
-                </button>
-                <button type="button" class="btn btn-danger" id="cancelOrderBtn" style="display: none;">
-                    <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
                 </button>
             </div>
         </div>
@@ -310,6 +317,8 @@
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
     'cart_url': url_for('frontend.cart'),
+    'subscriptions_url': url_for('frontend.my_subscriptions'),
+    'order_actions': order_actions_words(),
     'i18n': {
         'details_failed': 'Failed to load order details' | t,
         'order': 'Order' | t,
@@ -332,13 +341,11 @@
         'tracking_number': 'Tracking Number' | t,
         'track_package': 'Track Package' | t,
         'delivery_location': 'Delivery Location' | t,
-        'cancel_confirm': 'Are you sure you want to cancel this order?' | t,
-        'cancel_success': 'Order cancelled successfully' | t,
-        'cancel_failed': 'Failed to cancel order' | t,
         'adding_to_cart': 'Adding items to cart...' | t,
         'items_added': 'Items added to cart!' | t,
         'add_failed': 'Failed to add items to cart' | t,
         'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
     },
 }, element_id='order-detail-modal-data') }}
+<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pages/order-detail-modal.js') }}"></script>

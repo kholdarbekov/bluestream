@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Union
 from flask import jsonify
 from pydantic import BaseModel, Field, ConfigDict
 
+from business_app.utils.exceptions import STATE_CHANGED_MESSAGE_KEY
+
 
 class APIResponse(BaseModel):
     """Standard API response model"""
@@ -292,6 +294,17 @@ def conflict_response(message: str = "Resource already exists"):
     return error_response(message=message, status_code=409)
 
 
+def state_changed_response():
+    """409 for a customer write whose screen is stale (`exceptions.StateChangedError`, spec 2026-10-27 §16 M2):
+    "This changed. Refresh to see the latest." in the request's language, and `data.reason_code` STATE_CHANGED for
+    the clients to branch on."""
+    from business_app.utils.translations import get_translation
+
+    return error_response(
+        message=get_translation(STATE_CHANGED_MESSAGE_KEY), status_code=409, data={"reason_code": "STATE_CHANGED"}
+    )
+
+
 def internal_error_response(message: str = "Internal server error", error_id: str = None):
     """
     Create a 500 Internal Server Error response
@@ -324,5 +337,6 @@ __all__ = [
     "forbidden_response",
     "validation_error_response",
     "conflict_response",
+    "state_changed_response",
     "internal_error_response",
 ]

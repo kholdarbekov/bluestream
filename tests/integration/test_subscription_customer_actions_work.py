@@ -11,7 +11,7 @@ Driven through the HTTP endpoints with the bodies the clients actually send.
 
 import json
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -21,6 +21,7 @@ from business_app.models.user import UserAddress
 from business_app.tasks.subscription_tasks import process_daily_subscription_billing
 from business_app.utils.local_windows import local_date
 from shared.enums import SubscriptionFrequency
+from tests.integration.test_subscription_action_guards import _state
 
 BASE = "/api/v1/subscriptions"
 
@@ -63,6 +64,15 @@ def _sub(db, sub_id):
     return db.session.get(Subscription, sub_id)
 
 
+def _published(client, auth_headers, sub_id):
+    return client.get(f"{BASE}/{sub_id}", headers=auth_headers).get_json()["data"]["subscription"]
+
+
+def _skip_date(client, auth_headers, sub_id):
+    """The date the skip button names: `allowed_actions.skip.date` (spec 2026-10-26 §12)."""
+    return _published(client, auth_headers, sub_id)["allowed_actions"]["skip"]["date"]
+
+
 def _assert_json_ok(resp):
     assert resp.status_code != 500, resp.get_data(as_text=True)
     assert resp.is_json
@@ -72,8 +82,10 @@ def _assert_json_ok(resp):
 
 @pytest.mark.integration
 class TestPauseResume:
-    def test_pause_with_the_empty_body_both_clients_send(self, client, db, auth_headers, sub_id):
-        resp = client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={})
+    def test_pause_with_the_state_the_screen_showed(self, client, db, auth_headers, sub_id):
+        """Both clients send back the `expected_state` they were published (spec 2026-10-27 §16 M2)."""
+        token = _state(client, sub_id, auth_headers)
+        resp = client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": token})
 
         body = _assert_json_ok(resp)
         assert body["data"]["subscription"]["id"] == sub_id
@@ -87,7 +99,8 @@ class TestPauseResume:
         assert _sub(db, sub_id).status == SubscriptionStatus.ACTIVE
 
     def test_resume_after_pause(self, client, db, auth_headers, sub_id):
-        _assert_json_ok(client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={}))
+        token = _state(client, sub_id, auth_headers)
+        _assert_json_ok(client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": token}))
 
         body = _assert_json_ok(client.post(f"{BASE}/{sub_id}/resume", headers=auth_headers))
 
@@ -109,10 +122,17 @@ class TestEdit:
         db.session.add(other)
         db.session.commit()
 
-        resp = client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={"delivery_address_id": other.id})
+        resp = client.put(
+            f"{BASE}/{sub_id}",
+            headers=auth_headers,
+            json={"delivery_address_id": other.id, "expected_state": _state(client, sub_id, auth_headers)},
+        )
 
-        _assert_json_ok(resp)
+        body = _assert_json_ok(resp)
         assert _sub(db, sub_id).delivery_address_id == other.id
+        # No order is placed yet, so none moves and none stays (spec 2026-10-27 §17 Q6).
+        assert body["data"]["subscription"]["delivery_address_id"] == other.id
+        assert (body["data"]["moved_orders"], body["data"]["orders_at_old_address"]) == ([], [])
 
     def test_turn_auto_renew_off(self, client, db, auth_headers, sub_id):
         resp = client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={"auto_renew": False})
@@ -124,15 +144,39 @@ class TestEdit:
 @pytest.mark.integration
 class TestChangePaymentMethod:
     def test_bots_exact_body(self, client, db, auth_headers, sub_id):
-        """telegram_bot: `payment_data = {'payment_method': payment_method}`."""
+        """telegram_bot: `payment_data = {'payment_method': payment_method}`, with the `expected_state` its screen
+        was drawn from (spec 2026-10-27 §16 M2)."""
         resp = client.post(
             f"{BASE}/{sub_id}/change-payment-method",
             headers=auth_headers,
-            json={"payment_method": "click"},
+            json={"payment_method": "click", "expected_state": _state(client, sub_id, auth_headers)},
         )
 
         _assert_json_ok(resp)
         assert _sub(db, sub_id).payment_method.value == "click"
+
+    def test_it_tells_the_customer_what_changed(self, client, db, auth_headers, sub_id, sample_user):
+        """The one `payment_method_changed` notice, sent by the service after the commit (the address PUT's re-pick
+        sends the same one)."""
+        with patch("business_app.services.subscription_service.get_notification_service") as notifier:
+            resp = client.post(
+                f"{BASE}/{sub_id}/change-payment-method",
+                headers=auth_headers,
+                json={"payment_method": "click", "expected_state": _state(client, sub_id, auth_headers)},
+            )
+
+        _assert_json_ok(resp)
+        assert notifier.return_value.send_notification.call_args_list == [
+            call(
+                sample_user.id,
+                "payment_method_changed",
+                template_data={
+                    "subscription_name": "Subscription - Weekly",
+                    "old_method": "cash",
+                    "new_method": "click",
+                },
+            )
+        ]
 
 
 @pytest.mark.integration
@@ -148,7 +192,10 @@ class TestSkipNextDelivery:
     ):
         original = self._make_due_tomorrow(db, sub_id)
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        # The date the client shows (spec 2026-10-26 §12): the one `allowed_actions.skip` publishes.
+        named = _skip_date(client, auth_headers, sub_id)
+        assert named == original.isoformat()
+        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": named})
 
         body = _assert_json_ok(resp)
         new_date = _sub(db, sub_id).next_delivery_date
@@ -169,21 +216,36 @@ class TestSkipNextDelivery:
         assert Order.query.filter_by(subscription_id=sub_id).count() == 1
 
     def test_skip_on_a_paused_subscription_is_refused(self, client, db, auth_headers, sub_id):
-        _assert_json_ok(client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={}))
+        token = _state(client, sub_id, auth_headers)
+        _assert_json_ok(client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": token}))
         before = _sub(db, sub_id).next_delivery_date
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        resp = client.post(
+            f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": before.isoformat()}
+        )
 
         assert resp.status_code == 400
+        assert resp.get_json()["message"] == _published(client, auth_headers, sub_id)["allowed_actions"]["skip"][
+            "block_reason"
+        ]
         assert _sub(db, sub_id).next_delivery_date == before
 
 
 @pytest.mark.integration
 class TestChangeFrequencySaves:
     def test_bots_exact_frequency_body_is_saved(self, client, db, auth_headers, sub_id):
-        """telegram_bot update_frequency_confirm sends exactly `{'frequency': X}`. It used to be refused
-        (step 1) because nothing could save it; now it is the one frequency (plan Task 2)."""
-        resp = client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={"frequency": "monthly"})
+        """telegram_bot `update_frequency_day_confirm` sends the frequency with the day it uses. It used to be
+        refused (step 1) because nothing could save it; now it is the one frequency (plan Task 2). Monthly
+        without its day is refused (spec 2026-10-26 B9)."""
+        resp = client.put(
+            f"{BASE}/{sub_id}",
+            headers=auth_headers,
+            json={
+                "frequency": "monthly",
+                "delivery_day_of_month": 15,
+                "expected_state": _state(client, sub_id, auth_headers),
+            },
+        )
 
         body = _assert_json_ok(resp)
         after = _sub(db, sub_id)

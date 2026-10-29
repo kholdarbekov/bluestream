@@ -57,7 +57,9 @@ class TestSubscriptionPauseResume:
         with app.app_context():
             sub = _make_subscription(db, sample_user, status=SubscriptionStatus.ACTIVE, number="SUB-P1")
 
-            SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id, "Away")
+            SubscriptionService().pause_subscription_for_user(
+                sub.id, sample_user.id, "Away", expected_state=SubscriptionService.state_token(sub)
+            )
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.PAUSED

@@ -606,8 +606,10 @@ class OrderPaymentMethodEditService:
 
             reprice_order_for_rail(order, PaymentMethod.CLICK, actor_user_id=actor_user_id, reason=reason)
 
-            # 2. Flip method and reset the payment to a fresh online obligation.
+            # 2. Flip method and reset the payment to a fresh online obligation. The order is payable on Click
+            #    from now, so its payment deadline counts from the move (spec 2026-10-27 §4.4).
             order.payment_method = PaymentMethod.CLICK
+            PaymentService.open_click_payment_window(order)
             if payment is not None:
                 payment.payment_method = PaymentMethod.CLICK
                 payment.status = PaymentStatus.PENDING

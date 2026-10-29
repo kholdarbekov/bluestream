@@ -276,9 +276,16 @@
 .action-buttons {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    align-items: start;
     gap: 15px;
     margin-top: 20px;
 }
+/* The published actions take the full row; the container is hidden while it draws nothing (order-actions.js). */
+#orderActions { grid-column: 1 / -1; }
+#orderActions[hidden] { display: none; }
+
+.order-actions__confirm { text-align: left; }
+.order-actions__confirm .btn { min-height: 44px; margin: 0 8px 8px 0; }
 
 .refresh-notice {
     background: #e3f2fd;
@@ -521,12 +528,9 @@
 
                     <!-- Action Buttons -->
                     <div class="action-buttons">
-                        {# F5: the backend's answer, the one POST /orders/<id>/cancel enforces. #}
-                        {% if can_customer_cancel %}
-                        <button data-action="cancel-order" class="theme-btn btn-three">
-                            <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
-                        </button>
-                        {% endif %}
+                        {# Pay, Cancel/Skip/Decline and Confirm are drawn here by order-actions.js from the
+                           backend's `customer_actions` (spec 2026-10-27 §5.3), the answer the API publishes. #}
+                        <div id="orderActions" class="order-actions" data-order-id="{{ order.id }}"></div>
                         <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
                             <i class="far fa-list"></i> {{ 'All Orders'|t }}
                         </a>
@@ -550,15 +554,13 @@
         'address': delivery.delivery_address_line1 if map_enabled else '',
     },
     'auto_refresh': true if auto_refresh else false,
-    'order_id': order.id,
+    'order': {'id': order.id, 'customer_actions': customer_actions},
+    'order_actions': order_actions_words(),
+    'subscriptions_url': url_for('frontend.my_subscriptions'),
     'i18n': {
         'delivery_location': 'Delivery Location' | t,
-        'confirm_cancel': 'Are you sure you want to cancel this order?' | t,
-        'prompt_reason': 'Please provide a reason for cancellation (optional)' | t,
-        'cancel_success': 'Order cancelled successfully' | t,
-        'cancel_failed': 'Failed to cancel order' | t,
-        'error': 'An error occurred. Please try again.' | t,
     },
 }) }}
+<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pages/order-tracking.js') }}"></script>
 {% endblock %}

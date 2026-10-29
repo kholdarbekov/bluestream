@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 
 SUB_ID = 12
-PRODUCTS = "/api/v1/products"
+CATALOG = "/api/v1/subscriptions/products"
 
 TRANSLATIONS = {
     "telegram.subscription.flow_timed_out": "SUBSCRIPTION-SESSION-EXPIRED",
@@ -39,10 +39,11 @@ TRANSLATIONS = {
 @pytest.fixture
 async def bot(monkeypatch):
     harness = await build_bot_harness(monkeypatch, translations=TRANSLATIONS)
+    # The picker reads the subscription catalog (`GET /subscriptions/products`, re-review G6).
     harness.backend.route(
-        "GET", PRODUCTS,
+        "GET", CATALOG,
         lambda _c: {"data": {"items": [
-            {"id": 7, "name": "Aqua Element 19L", "base_price": 25000},
+            {"id": 7, "product_name": "Aqua Element 19L", "unit_price_label": "25 000 so'm"},
         ]}},
     )
     harness.backend.route(
@@ -50,10 +51,6 @@ async def bot(monkeypatch):
         lambda _c: {"data": {"subscription": {
             "id": SUB_ID, "status": "active", "frequency": "weekly",
         }}},
-    )
-    harness.backend.route(
-        "GET", f"/api/v1/subscriptions/{SUB_ID}/items",
-        lambda _c: {"data": {"items": []}},
     )
     return harness
 

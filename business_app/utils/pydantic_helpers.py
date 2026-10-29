@@ -3,12 +3,12 @@ Pydantic Helper Functions for Flask API Integration
 """
 
 from functools import wraps
-from typing import Type, Any, Dict, Optional
+from typing import Type, Any, Dict, Iterable, Optional
 from flask import request, jsonify
 from pydantic import BaseModel, ValidationError
 
 
-def validate_json_with_model(model_class: Type[BaseModel]):
+def validate_json_with_model(model_class: Type[BaseModel], message_key: Optional[str] = None):
     """
     Decorator to validate JSON request data using a Pydantic model
 
@@ -17,18 +17,28 @@ def validate_json_with_model(model_class: Type[BaseModel]):
     def create_order():
         # request.validated_json contains the validated data
         validated_data = request.validated_json
+
+    `message_key`: a refused body also carries `message`, that key translated in the request's language,
+    the field every customer page shows (spec 2026-10-26 §5 B12). The other fields stay as they are.
     """
+
+    def refused(body: Dict[str, Any]):
+        if message_key:
+            from business_app.utils.translations import get_translation
+
+            body = {"success": False, "message": get_translation(message_key), **body}
+        return jsonify(body), 400
 
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not request.is_json:
-                return jsonify({"error": "Content-Type must be application/json"}), 400
+                return refused({"error": "Content-Type must be application/json"})
 
             try:
                 json_data = request.get_json()
                 if json_data is None:
-                    return jsonify({"error": "Invalid JSON data"}), 400
+                    return refused({"error": "Invalid JSON data"})
 
                 # Validate using Pydantic model
                 validated_data = model_class(**json_data)
@@ -47,13 +57,25 @@ def validate_json_with_model(model_class: Type[BaseModel]):
                     message = error["msg"]
                     errors.append(f"{field}: {message}")
 
-                return jsonify({"error": "Validation failed", "validation_errors": errors, "details": e.errors()}), 400
+                return refused({"error": "Validation failed", "validation_errors": errors, "details": e.errors()})
             except Exception as e:
-                return jsonify({"error": f"Request processing failed: {str(e)}"}), 400
+                return refused({"error": f"Request processing failed: {str(e)}"})
 
         return decorated_function
 
     return decorator
+
+
+def dump_changes(model: BaseModel, *, clearable: Iterable[str] = (), exclude: Iterable[str] = ()) -> Dict[str, Any]:
+    """The fields a body changes: `model_dump(exclude_none=True, exclude=exclude)`, plus an explicit `None` for each
+    `clearable` field the body carried (`model_fields_set`), so a null clears it and a missing key leaves it.
+    Narrow on purpose: a blanket `exclude_unset` would let `{"name": null}` through to the
+    service (spec 2026-10-27 §6.1)."""
+    changes = model.model_dump(exclude_none=True, exclude=set(exclude))
+    for field in clearable:
+        if field in model.model_fields_set:
+            changes[field] = getattr(model, field)
+    return changes
 
 
 def serialize_response(data: Any, model_class: Optional[Type[BaseModel]] = None) -> Dict[str, Any]:

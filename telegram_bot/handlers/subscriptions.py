@@ -1,13 +1,22 @@
 """
 Subscription management handlers with complete implementation
 """
+import re
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from i18n import i18n
-from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
+from keyboards import (
+    SubscriptionKeyboards, MenuKeyboards, ProductKeyboards,
+    address_confirm_callback, address_method_callback, items_save_callback, parse_address_confirm_callback,
+    parse_address_method_callback, parse_items_save_callback, parse_payment_save_callback, parse_schedule_callback,
+    payment_save_callback, schedule_callback,
+)
 from api_client import api_client
 from flow_exit import ITEM_MANAGEMENT_KEYS, SUBSCRIPTION_CREATION_KEYS, UPDATE_ITEM_KEYS
+from menu_keyboard import send_menu_keyboard
+
 from utils import format_date, user_middleware, get_auth_token
 from shared.constants import SUBSCRIPTION_STATUS_ICONS
 # `BaseHandler._ack` is why every ack below goes through `self._ack`: answering
@@ -35,25 +44,71 @@ _WEEKDAY_FREQUENCIES = ('weekly', 'biweekly')
 
 
 def _upcoming_text(upcoming, language: str) -> str | None:
-    """"29.10.2026, 10:00–12:00" from the backend's `upcoming_delivery`, or "29.10.2026 (time to be
-    confirmed)" when it has no window; ``None`` when there is nothing upcoming. The bot only prints what
-    the backend published: it works no dates out (spec 2026-10-23 §9). The date reads dd.mm.yyyy, by the
-    bot's one date rule (`utils.format_date`), as in the order notices."""
+    """"29.10.2026, 10:00–12:00" from the backend's `upcoming_delivery`: its date and its published
+    `time_label` (a window, "Any time" or "Time to be confirmed", all finished words); ``None`` when there is
+    nothing upcoming. The bot works no dates or times out (spec 2026-10-23 §9). The date reads dd.mm.yyyy, by
+    the bot's one date rule (`utils.format_date`), as in the order notices."""
     if not upcoming or not upcoming.get('date'):
         return None
     day = format_date(upcoming['date']) or upcoming['date']
-    start, end = upcoming.get('window_start'), upcoming.get('window_end')
-    if start and end:
-        return f"{day}, {start}–{end}"
-    return f"{day} ({i18n.get('telegram.subscription.time_to_be_confirmed', language)})"
+    time_label = upcoming.get('time_label')
+    return f"{day}, {time_label}" if time_label else day
+
+
+def _item_line(item, language: str, *, priced: bool) -> str:
+    """One subscription item, "  • Aqua 19L x2", as the backend published it. An item the backend marks
+    ``available: False`` (a product no longer sold, or deleted) is left out of every order (spec 2026-10-26
+    §8.5), so it says "Not included" instead of a price; otherwise the items screen (``priced``) adds the
+    line's published label (the one price rule, B10)."""
+    line = f"  • {SubscriptionKeyboards.item_name(item, language)} x{item.get('quantity', 1)}"
+    if item.get('available') is False:
+        return f"{line} - {i18n.get('telegram.subscription.item_not_included', language)}"
+    if priced and item.get('line_total_label'):
+        return f"{line} - {item['line_total_label']}"
+    return line
+
+
+def _availability_note(subscription, language: str) -> str | None:
+    """Why some or all items will not come, from the backend's ``items_availability`` (§8.5): ``some``, the rest
+    is delivered without them; ``none``, nothing can be ordered until the items change. ``None`` for ``all``."""
+    availability = (subscription or {}).get('items_availability')
+    if availability == 'some':
+        return i18n.get('telegram.subscription.some_unavailable_note', language)
+    if availability == 'none':
+        return i18n.get('telegram.subscription.none_available_note', language)
+    return None
+
+
+# The ids and tokens ride the callbacks, and a state token can be all digits, so `_subscription_id`'s scan from the
+# right would read it as the id. The shapes that carry one are parsed whole.
+_SKIP_CALLBACK = re.compile(
+    r'^skip_sub_(\d+)(?:_(\d{4}-\d{2}-\d{2})(?:_([a-z_]+))?)?$'
+)
+_STATE_CALLBACK = re.compile(r'^confirm(pause|cancel)_sub_(\d+)(?:_([0-9a-f]{16}))?$')
+_HISTORY_CALLBACK = re.compile(r'^(?:subhist_(\d+)_(\d+)|view_logs_(\d+))$')
+
+
+def _published(subscription, action: str) -> dict | None:
+    """The card's published ``allowed_actions.<action>`` when it is allowed, else ``None``."""
+    published = ((subscription or {}).get('allowed_actions') or {}).get(action)
+    return published if isinstance(published, dict) and published.get('allowed') else None
+
+
+def _confirm_text(published: dict, *, coins: bool = False) -> str:
+    """The consequence the backend published for a pause or a cancel, one sentence per line:
+    ``confirm_text``, what stays, what is cancelled, and for a cancel the AquaCoins line. Finished words."""
+    lines = [published.get('confirm_text'), *(published.get('kept_lines') or []), *(published.get('cancel_lines') or [])]
+    if coins:
+        lines.append(published.get('coins_line'))
+    return "\n".join(line for line in lines if line)
 
 
 def _subscription_id(query_data) -> int | None:
     """The subscription id trailing a subscription callback; ``None`` when absent.
 
     ONE parser for every shape these screens emit — ``subscription_7``,
-    ``edit_sub_7``, ``skip_sub_7``, ``billing_history_7``, ``change_payment_7``,
-    ``retry_billing_7``, ``manage_items_7``, ``view_logs_7``,
+    ``edit_sub_7``, ``skip_sub_7_2026-11-06``, ``confirmcancel_sub_7``, ``change_payment_7``,
+    ``change_slot_7``, ``subslot_5_7``, ``manage_items_7``, ``view_logs_7``,
     ``subfreq_weekly_7``, ``subpay_business_account_7`` — the same way
     ``handlers/orders.py`` keeps exactly one ``_cancelling_order_id``.
 
@@ -124,65 +179,129 @@ class SubscriptionHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="subscriptions_menu")
 
-    async def subscription_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show subscription details with real API data"""
+    async def subscription_details(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, subscription_id: int | None = None,
+        *, deep_link: bool = False,
+    ):
+        """Show subscription details with real API data.
+
+        ``subscription_id`` may be passed explicitly (an order's skip lands here, and so does a
+        `/start sub_<id>` link); otherwise it is parsed from the callback data. ``deep_link``
+        sends the screen as a new message, and answers a subscription this account does not own
+        (404) "not found" with the main menu (spec 2026-10-27 §16 M5).
+        """
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            subscription_id = _subscription_id(query.data)
+            if subscription_id is None:
+                subscription_id = _subscription_id(query.data)
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
+            response = await self._read_card(update, context, subscription_id, language)
+            if response is None:
+                return
+            if not response.success:
+                if deep_link and response.status_code == 404:
+                    await send_menu_keyboard(
+                        context.bot, update.effective_chat.id, user_id,
+                        i18n.get('telegram.deep_link.not_found', language), language,
+                    )
                     return
+                await self._handle_api_error(update, response.error, language)
+                return
 
-                # Get subscription details
-                response = await client.get_subscription(user_token, subscription_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
+            subscription = response.data.get('data', {}).get("subscription", {})
 
-                subscription = response.data.get('data', {}).get("subscription", {})
+            # The buttons are the actions the backend published as allowed; the bot checks no status itself.
+            keyboard = SubscriptionKeyboards.subscription_actions(
+                subscription_id, subscription.get('allowed_actions'), language
+            )
 
-                # Get subscription items
-                items_response = await client.get_subscription_items(user_token, subscription_id)
-                items = items_response.data.get("data", {}).get('items', []) if items_response.success else []
-
-            # Build details text
-            status_emoji = SUBSCRIPTION_STATUS_ICONS.get(subscription.get('status'), '❓')
-            status_key = f"telegram.subscription.status_{subscription.get('status')}"
-
-            details_text = f"🔄 {i18n.get('telegram.subscription.details_title', language)}\n\n"
-            details_text += f"{status_emoji} {i18n.get('telegram.subscription.status', language)}: "
-            details_text += f"{i18n.get(status_key, language)}\n"
-            details_text += f"📅 {i18n.get('telegram.subscription.frequency', language)}: "
-            details_text += f"{SubscriptionKeyboards.frequency_label(subscription.get('frequency'), language)}\n"
-
-            upcoming_text = _upcoming_text(subscription.get('upcoming_delivery'), language)
-            if upcoming_text:
-                details_text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: {upcoming_text}\n"
-
-            if items:
-                details_text += f"\n📦 {i18n.get('telegram.subscription.items', language)}:\n"
-                for item in items:
-                    product_name = item.get('product', {}).get('name', i18n.get('telegram.common.unknown', language))
-                    quantity = item.get('quantity', 1)
-                    details_text += f"  • {product_name} x{quantity}\n"
-
-            if subscription.get('billing_amount'):
-                details_text += f"\n💰 {i18n.get('telegram.subscription.amount', language)}: "
-                details_text += f"{subscription['billing_amount']} {i18n.get('telegram.currency.uzs', language)}\n"
-
-            keyboard = SubscriptionKeyboards.subscription_actions(subscription_id, subscription['status'], language)
-
-            await self._edit_or_replace_callback_message(query, text=details_text, reply_markup=keyboard)
+            await self._show(update, self._card_text(subscription, language), reply_markup=keyboard)
             await self._ack(query)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="subscription_details")
+
+    async def _read_card(self, update, context, subscription_id: int, language: str):
+        """One read of the subscription (`GET /subscriptions/<id>`): the card, with its published
+        `allowed_actions` and the `expected_state` they carry. ``None`` when the customer could not be signed in
+        (the error is already shown); otherwise the response, for the caller to read or refuse."""
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return None
+            return await client.get_subscription(user_token, subscription_id)
+
+    @staticmethod
+    def _card_text(subscription: dict, language: str) -> str:
+        """The subscription card, in the backend's published words (spec 2026-10-27 §5.3): the schedule sentence,
+        the next delivery with its time and payment note, the next dates (a skipped one marked), the items, the
+        per-delivery and per-month figures, the payment method. The bot adds only its icons and labels."""
+        get = lambda key: i18n.get(f'telegram.subscription.{key}', language)  # noqa: E731
+        status = subscription.get('status')
+        lines = [
+            f"🔄 {get('details_title')}",
+            "",
+            f"{SUBSCRIPTION_STATUS_ICONS.get(status, '❓')} {get('status')}: "
+            f"{i18n.get(f'telegram.subscription.status_{status}', language)}",
+        ]
+        if subscription.get('schedule_sentence'):
+            lines.append(f"📅 {subscription['schedule_sentence']}")
+
+        upcoming = subscription.get('upcoming_delivery') or {}
+        delivery = _upcoming_text(upcoming, language)
+        if delivery:
+            lines.append(f"🚚 {get('next_delivery')}: {delivery}")
+        # The payment note, what Pay settles when it is another delivered order (the note under the Pay the card
+        # offers), and what a paused or cancelled card still delivers; each said once. The Pay note stands on its
+        # own: Pay can settle a delivered order on a card with no delivery coming (paused, cancelled).
+        pay = _published(subscription, 'pay') or {}
+        notes = []
+        for note in (upcoming.get('payment_note') if delivery else None, pay.get('note'),
+                     upcoming.get('kept_line') if delivery else None):
+            if note and note not in notes:
+                notes.append(note)
+        lines.extend(f"   {note}" for note in notes)
+
+        # The website's rule (my-subscriptions.js `waterline`): when Resume is offered, the one date is what a
+        # resume today would give, not a delivery that is coming.
+        dates_label = get('if_resume') if _published(subscription, 'resume') else get('next_dates')
+        dates = [
+            f"{d['label_short']} ({get('date_skipped')})" if d.get('state') == 'skipped' else d['label_short']
+            for d in subscription.get('upcoming_dates') or []
+        ]
+        if dates:
+            lines.append(f"🗓 {dates_label}: {' · '.join(dates)}")
+
+        items = subscription.get('subscription_items') or []
+        if items:
+            lines.append("")
+            lines.append(f"📦 {get('items')}:")
+            lines.extend(_item_line(item, language, priced=False) for item in items)
+
+        # The backend's one estimate (spec 2026-10-26 §12, B10): the items at their current customer price, the
+        # figure the website shows. Never `billing_amount`, a stored figure nobody is charged. It leaves out what
+        # can no longer be delivered (§8.5), and the note says so.
+        money = []
+        if subscription.get('estimated_per_delivery_label'):
+            money.append(f"{get('per_delivery')}: {subscription['estimated_per_delivery_label']}")
+        if subscription.get('estimated_per_month_label'):
+            money.append(f"{get('per_month')}: {subscription['estimated_per_month_label']}")
+        if money:
+            lines.append("")
+            lines.append(f"💰 {' · '.join(money)}")
+        if subscription.get('payment_method_label'):
+            lines.append(f"💳 {get('payment')}: {subscription['payment_method_label']}")
+        if subscription.get('payment_method_warning'):
+            lines.append(f"⚠️ {subscription['payment_method_warning']}")
+        note = _availability_note(subscription, language)
+        if note:
+            lines.append("")
+            lines.append(f"⚠️ {note}")
+        return "\n".join(lines) + "\n"
 
     # ========== SUBSCRIPTION CREATION FLOW ==========
 
@@ -319,15 +438,33 @@ class SubscriptionHandlers(BaseHandler):
         await self._ack(query)
         return SELECT_ADDRESS
 
+    async def _delivery_weekdays(self, update: Update, context: ContextTypes.DEFAULT_TYPE, frequency: str):
+        """The weekdays the backend delivers on (`delivery_weekdays` on the time-slots answer, spec 2026-10-27
+        §6.4), for a weekly or biweekly day picker; ``None`` for monthly, which has no weekday. A failed call or a
+        missing field is ``None`` too, and the picker then offers all seven days: the schedule write checks the
+        day again, so the picker is a convenience, never the rule."""
+        if frequency not in _WEEKDAY_FREQUENCIES:
+            return None
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                return None
+            response = await client.get_subscription_time_slots(user_token, 'any', frequency)
+        days = (response.data or {}).get('delivery_weekdays') if response.success else None
+        return days if isinstance(days, list) and days else None
+
     async def _show_day_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str):
         """The delivery-day step of creation. Returns the next state."""
         frequency = context.user_data['subscription_creation']['frequency']
         key = 'select_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'select_day_of_month'
+        weekdays = await self._delivery_weekdays(update, context, frequency)
         query = update.callback_query
         await self._edit_or_replace_callback_message(
             query,
             text=i18n.get(f'telegram.subscription.{key}', language),
-            reply_markup=SubscriptionKeyboards.day_picker(frequency, language),
+            reply_markup=SubscriptionKeyboards.day_picker(
+                frequency, language, delivery_weekdays=weekdays if weekdays else range(7),
+            ),
         )
         await self._ack(query)
         return SELECT_DAY
@@ -361,13 +498,17 @@ class SubscriptionHandlers(BaseHandler):
                 await self._handle_auth_error(update, language)
                 return ConversationHandler.END
 
-            response = await client.get_subscription_time_slots(user_token, weekday)
+            response = await client.get_subscription_time_slots(user_token, weekday, creation['frequency'])
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return ConversationHandler.END
 
         slots = (response.data or {}).get('time_slots', [])
         if not slots:
+            # Nothing to choose: the order is dated and its time confirmed later, and the confirm says so in the
+            # same words as the Any time tile.
+            creation.pop('delivery_time_slot_id', None)
+            creation['delivery_time_range'] = i18n.get('telegram.subscription.any_time', language)
             return await self._show_address_selection(update, context, language)
 
         creation['slot_choices'] = {str(slot['id']): slot.get('time_range') for slot in slots}
@@ -502,7 +643,9 @@ class SubscriptionHandlers(BaseHandler):
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
 
-                methods_response = await client.get_payment_methods(user_token, context="subscription")
+                methods_response = await client.get_payment_methods(
+                    user_token, context="subscription", delivery_address_id=address_id
+                )
                 if not methods_response.success:
                     await self._handle_api_error(update, methods_response.error, language)
                     return ConversationHandler.END
@@ -545,7 +688,7 @@ class SubscriptionHandlers(BaseHandler):
                     'frequency': subscription_data.get('frequency'),
                     'items': subscription_data.get('items', [])
                 }
-                response = await client.preview_subscription(user_token, preview_data)
+                response = await client.preview_subscription(user_token, preview_data, language)
 
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
@@ -554,10 +697,12 @@ class SubscriptionHandlers(BaseHandler):
                 preview = response.data.get("data", {}).get('preview', {})
 
             # Build confirmation message
+            # What the quote publishes, in the customer's language (re-review admin-bot-backend-4): each line's
+            # translated name and label, and the per-delivery label, as the picker two screens back showed them.
             text = f"{i18n.get('telegram.subscription.confirm_title', language)}\n\n"
             text += f"📦 {i18n.get('telegram.subscription.items', language)}:\n"
             for item in preview.get('items', []):
-                text += f"  • {item.get('product_name')} x{item.get('quantity')}\n"
+                text += f"{_item_line(item, language, priced=True)}\n"
             text += f"\n📅 {i18n.get('telegram.subscription.frequency', language)}: "
             text += f"{SubscriptionKeyboards.frequency_label(subscription_data.get('frequency'), language)}\n"
             if subscription_data.get('delivery_day') is not None:
@@ -568,8 +713,7 @@ class SubscriptionHandlers(BaseHandler):
             if subscription_data.get('delivery_time_range'):
                 text += (f"🕘 {i18n.get('telegram.subscription.delivery_time', language)}: "
                          f"{subscription_data['delivery_time_range']}\n")
-            text += f"💰 {i18n.get('telegram.subscription.total', language)}: "
-            text += f"{preview.get('total_amount')} {i18n.get('telegram.currency.uzs', language)}\n"
+            text += f"💰 {i18n.get('telegram.subscription.total', language)}: {preview.get('total_amount_label', '')}\n"
 
             keyboard = [[
                 InlineKeyboardButton(
@@ -727,172 +871,258 @@ class SubscriptionHandlers(BaseHandler):
     # ========== SUBSCRIPTION ACTIONS ==========
 
     async def subscription_actions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle subscription actions (pause/resume/cancel/edit)"""
+        """`pause_sub_<id>` / `resume_sub_<id>`.
+
+        Pause reads the card afresh. When the backend says the pause cancels or keeps an order
+        (`pause.needs_confirm`) it draws that consequence and waits for `confirmpause_sub_<id>_<state>`; otherwise
+        it pauses at once with the state it just read, as the website does. Resume has no consequence to ask about.
+        """
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
-            action_data = query.data.split('_')
-            action = action_data[0]  # pause, resume, cancel, edit
-            sub_id = int(action_data[2])
+            action = query.data.split('_')[0]  # pause, resume
+            sub_id = _subscription_id(query.data)
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
-
-                if action == 'pause':
-                    response = await client.pause_subscription(user_token, sub_id)
-                    success_msg = i18n.get('telegram.subscription.paused_success', language)
-
-                elif action == 'resume':
+            if action == 'resume':
+                async with api_client as client:
+                    user_token = await get_auth_token(update, context, client)
+                    if not user_token:
+                        await self._handle_auth_error(update, language)
+                        return
                     response = await client.resume_subscription(user_token, sub_id)
-                    success_msg = i18n.get('telegram.subscription.resumed_success', language)
+                await self._finish_write(
+                    update, context, response, sub_id, language, 'telegram.subscription.resumed_success',
+                )
+                return
 
-                elif action == 'cancel':
-                    # Cancel immediately when user clicks cancel button
-                    cancel_data = {'immediate': True}
-                    response = await client.cancel_subscription(user_token, sub_id, cancel_data)
-                    success_msg = i18n.get('telegram.subscription.cancelled_success', language)
+            card = await self._read_card(update, context, sub_id, language)
+            if card is None:
+                return
+            if not card.success:
+                await self._handle_api_error(update, card.error, language)
+                return
+            subscription = card.data.get('data', {}).get('subscription', {})
+            pause = _published(subscription, 'pause')
+            if pause is None:
+                await self._stale(update, context, sub_id, language)
+                return
 
-                else:
-                    await self._ack(query, i18n.get('telegram.unknown_action', language))
-                    return
-
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-            await self._ack(query, success_msg)
-
-            # Return to subscriptions menu
-            await self.subscriptions_menu(update, context)
+            allowed = subscription['allowed_actions']
+            if pause.get('needs_confirm'):
+                await self._show(
+                    update, _confirm_text(pause),
+                    reply_markup=SubscriptionKeyboards.action_confirmation(sub_id, 'pause', allowed, language),
+                )
+                await self._ack(query)
+                return
+            await self._write_pause(update, context, sub_id, allowed['expected_state'], language)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="subscription_actions")
 
-    async def skip_delivery(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Skip next delivery"""
+    async def pause_subscription_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`confirmpause_sub_<id>_<state>`: the customer saw the consequence and said yes. The state the card
+        showed rides the callback, so the backend refuses (409) a pause the world has moved past."""
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            match = _STATE_CALLBACK.match(update.callback_query.data)
+            await self._write_pause(update, context, int(match.group(2)), match.group(3), language)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="pause_subscription_confirmed")
+
+    async def _write_pause(self, update, context, sub_id: int, expected_state: str, language: str):
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            response = await client.pause_subscription(user_token, sub_id, expected_state=expected_state)
+        await self._finish_write(update, context, response, sub_id, language, 'telegram.subscription.paused_success')
+
+    async def _finish_write(self, update, context, response, sub_id: int, language: str, success_key: str,
+                            then_items: bool = False):
+        """The end of every subscription write. 200: the success toast, then the card as it stands now.
+        409 ("This changed"): the backend's sentence as an alert, then the fresh card. Any other refusal: its
+        own message. `then_items`: the screen shown afterwards is the items screen, not the card."""
+        query = update.callback_query
+        if response.success:
+            await self._ack(query, i18n.get(success_key, language))
+        elif response.status_code == 409:
+            await self._ack(query, response.error, show_alert=True)
+        else:
+            await self._handle_api_error(update, response.error, language)
+            return
+        if then_items:
+            await self._show_items(update, context, sub_id, language)
+        else:
+            await self.subscription_details(update, context, subscription_id=sub_id)
+
+    async def _stale(self, update, context, sub_id: int, language: str):
+        """The card the customer tapped is out of date (the action is no longer offered): say so, show the card
+        as it is now."""
+        await self._ack(update.callback_query, i18n.get('telegram.subscription.skip_stale', language), show_alert=True)
+        await self.subscription_details(update, context, subscription_id=sub_id)
+
+    async def cancel_subscription_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`cancel_sub_<id>`, and an old `confirmcancel_sub_<id>` that carried no state: ask before cancelling,
+        with what the backend says the cancel will cancel and keep. Nothing is sent by this tap."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
+            language = await i18n.get_user_language(update.effective_user.id)
             sub_id = _subscription_id(query.data)
+
+            card = await self._read_card(update, context, sub_id, language)
+            if card is None:
+                return
+            if not card.success:
+                await self._handle_api_error(update, card.error, language)
+                return
+            subscription = card.data.get('data', {}).get('subscription', {})
+            cancel = _published(subscription, 'cancel')
+            if cancel is None:
+                await self._stale(update, context, sub_id, language)
+                return
+
+            await self._show(
+                update, _confirm_text(cancel, coins=True),
+                reply_markup=SubscriptionKeyboards.action_confirmation(
+                    sub_id, 'cancel', subscription['allowed_actions'], language,
+                ),
+            )
+            await self._ack(query)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="cancel_subscription_prompt")
+
+    async def cancel_subscription_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`confirmcancel_sub_<id>_<state>`: the customer said yes to the consequence they were shown. A button
+        from before the state rode the callback has nothing to send, so it asks again."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+            match = _STATE_CALLBACK.match(query.data)
+            if match is None or match.group(3) is None:
+                await self.cancel_subscription_prompt(update, context)
+                return
+            sub_id, state = int(match.group(2)), match.group(3)
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
+                response = await client.cancel_subscription(user_token, sub_id, expected_state=state)
+            await self._finish_write(update, context, response, sub_id, language, 'telegram.subscription.cancelled_success')
 
-                response = await client.skip_next_delivery(user_token, sub_id)
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="cancel_subscription_confirmed")
 
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
+    async def skip_delivery(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Skip the delivery the button named, in three taps' worth of shapes (`skip_sub_<id>_<yyyy-mm-dd>[_<reason>]`).
+
+        * dated: read the card, draw the backend's `skip.confirm_text` with its reasons;
+        * dated with a reason (or `none`): write it. The date rides the callback and is sent as
+          ``expected_date``: if the delivery changed meanwhile (paid, created, already skipped) the backend
+          answers 409 and skips nothing;
+        * dateless (a button from before the date rode the callback): nothing to send, so it is stale.
+        Either way the card is shown again, fresh."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+
+            match = _SKIP_CALLBACK.match(query.data or '')
+            if match is None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+            sub_id, expected_date, code = int(match.group(1)), match.group(2), match.group(3)
+
+            if expected_date is None:
+                await self._stale(update, context, sub_id, language)
+                return
+
+            if code is None:
+                card = await self._read_card(update, context, sub_id, language)
+                if card is None:
                     return
+                if not card.success:
+                    await self._handle_api_error(update, card.error, language)
+                    return
+                subscription = card.data.get('data', {}).get('subscription', {})
+                skip = _published(subscription, 'skip')
+                if skip is None or skip.get('date') != expected_date:
+                    await self._stale(update, context, sub_id, language)
+                    return
+                await self._show(
+                    update, skip['confirm_text'],
+                    reply_markup=SubscriptionKeyboards.action_confirmation(
+                        sub_id, 'skip', subscription['allowed_actions'], language,
+                    ),
+                )
+                await self._ack(query)
+                return
 
-            text = i18n.get('telegram.subscription.skip_success', language)
-            await self._ack(query, text)
-
-            # Show updated subscription details
-            await self.subscription_details(update, context)
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.skip_next_delivery(
+                    user_token, sub_id, expected_date, reason_code=None if code == 'none' else code,
+                )
+            await self._finish_write(update, context, response, sub_id, language, 'telegram.subscription.skip_success')
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="skip_delivery")
 
-    async def view_billing_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """View subscription billing history"""
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            sub_id = _subscription_id(query.data)
-
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
-
-                response = await client.get_billing_history(user_token, sub_id)
-
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-                history = response.data.get('billing_history', [])
-
-            text = f"{i18n.get('telegram.subscription.billing_history', language)}\n\n"
-
-            if not history:
-                text += i18n.get('telegram.subscription.no_billing_history', language)
-            else:
-                for record in history[:10]:  # Show last 10
-                    status_emoji = '✅' if record.get('status') == 'completed' else '❌'
-                    text += f"{status_emoji} {record.get('billing_date')} - "
-                    text += f"{record.get('amount')} {i18n.get('telegram.currency.uzs', language)}\n"
-
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.back', language),
-                    callback_data=f'subscription_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await self._ack(query)
-
-        except Exception as e:
-            await self._handle_error(update, exc=e, operation="view_billing_history")
-
     # ========== ITEM MANAGEMENT ==========
 
     async def manage_subscription_items(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show item management menu for subscription"""
+        """Show item management menu for subscription (`manage_items_<id>`)."""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            sub_id = _subscription_id(query.data)
-
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
-
-                # Get subscription items
-                response = await client.get_subscription_items(user_token, sub_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-                items = response.data.get("data", {}).get('items', [])
-
-            text = f"{i18n.get('telegram.subscription.manage_items', language)}\n\n"
-
-            if items:
-                text += f"{i18n.get('telegram.subscription.current_items', language)}:\n"
-                for item in items:
-                    product_name = item.get('product', {}).get('name', i18n.get('telegram.common.unknown', language))
-                    quantity = item.get('quantity', 1)
-                    price = item.get('unit_price', 0)
-                    text += f"  • {product_name} x{quantity} - {price * quantity} {i18n.get('telegram.currency.uzs', language)}\n"
-            else:
-                text += i18n.get('telegram.subscription.no_items', language)
-
-            keyboard = SubscriptionKeyboards.item_management_menu(sub_id, items, language)
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
-            await self._ack(query)
+            language = await i18n.get_user_language(update.effective_user.id)
+            await self._show_items(update, context, _subscription_id(update.callback_query.data), language)
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="manage_subscription_items")
+
+    async def _show_items(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sub_id: int, language: str):
+        """The item-management screen of ONE named subscription. Its buttons follow the ``allowed_actions``
+        the backend publishes on the subscription. Callers pass the id: the remove-item follow-up used to
+        re-parse its own callback and read the ITEM id as the subscription's."""
+        query = update.callback_query
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+
+            sub_response = await client.get_subscription(user_token, sub_id)
+            if not sub_response.success:
+                await self._handle_api_error(update, sub_response.error, language)
+                return
+            subscription = sub_response.data.get('data', {}).get('subscription', {})
+            allowed_actions = subscription.get('allowed_actions')
+            items = subscription.get('subscription_items') or []
+
+        text = f"{i18n.get('telegram.subscription.manage_items', language)}\n\n"
+
+        if items:
+            text += f"{i18n.get('telegram.subscription.current_items', language)}:\n"
+            for item in items:
+                # Each line at the backend's label (the one price rule, B10), or "Not included" (§8.5).
+                text += f"{_item_line(item, language, priced=True)}\n"
+            note = _availability_note(subscription, language)
+            if note:
+                text += f"\n⚠️ {note}\n"
+        else:
+            text += i18n.get('telegram.subscription.no_items', language)
+
+        keyboard = SubscriptionKeyboards.item_management_menu(sub_id, items, allowed_actions, language)
+
+        await self._edit_or_replace_callback_message(query, text=text, reply_markup=keyboard)
+        await self._ack(query)
 
     async def add_item_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start adding item to subscription"""
@@ -933,10 +1163,21 @@ class SubscriptionHandlers(BaseHandler):
                 )
                 return ConversationHandler.END
 
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return ConversationHandler.END
+                subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+            if subscription is None:
+                return ConversationHandler.END
+
+            # A product already in the subscription is changed from the item list, not added a second time.
             products = await self._fetch_and_display_products(
                 update, context, language,
                 header_key='telegram.subscription.select_product_to_add',
-                back_callback=f'manage_items_{sub_id}'
+                back_callback=f'manage_items_{sub_id}',
+                exclude_product_ids={item.get('product_id') for item in subscription.get('subscription_items') or []},
             )
             if products is None:
                 return ConversationHandler.END
@@ -976,7 +1217,7 @@ class SubscriptionHandlers(BaseHandler):
 
             quantity = int(query.data.split('_')[2])
             sub_id = context.user_data.get('editing_subscription_id')
-            if not sub_id:
+            if not sub_id or not context.user_data.get('adding_product_id'):
                 # The flow's SUBJECT is gone. Reading on would post to
                 # `/api/v1/subscriptions/None/items` — a URL the backend can
                 # only refuse, shown to the customer as though their
@@ -993,34 +1234,9 @@ class SubscriptionHandlers(BaseHandler):
                 return ConversationHandler.END
             product_id = context.user_data.get('adding_product_id')
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return ConversationHandler.END
+            await self._preview_items_change(update, context, sub_id, 'add', product_id, quantity, language)
 
-                item_data = {
-                    'product_id': product_id,
-                    'quantity': quantity
-                }
-
-                response = await client.add_subscription_item(user_token, sub_id, item_data)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return ConversationHandler.END
-
-            text = f"✅ {i18n.get('telegram.subscription.item_added_successfully', language)}"
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.subscription.back_to_items', language),
-                    callback_data=f'manage_items_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await self._ack(query)
-
-            # Clear context
+            # Clear context: the save carries everything it needs on its own callback.
             for name in ITEM_MANAGEMENT_KEYS:
                 context.user_data.pop(name, None)
 
@@ -1091,31 +1307,11 @@ class SubscriptionHandlers(BaseHandler):
                 return ConversationHandler.END
             item_id = context.user_data.get('editing_item_id')
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return ConversationHandler.END
+            product_id = await self._item_product_id(update, context, sub_id, item_id, language)
+            if product_id is not None:
+                await self._preview_items_change(update, context, sub_id, 'set', product_id, quantity, language)
 
-                item_data = {'quantity': quantity}
-                response = await client.update_subscription_item(user_token, sub_id, item_id, item_data)
-
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return ConversationHandler.END
-
-            text = f"✅ {i18n.get('telegram.subscription.item_updated_successfully', language)}"
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.subscription.back_to_items', language),
-                    callback_data=f'manage_items_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await self._ack(query)
-
-            # Clear context
+            # Clear context: the save carries everything it needs on its own callback.
             for name in UPDATE_ITEM_KEYS:
                 context.user_data.pop(name, None)
 
@@ -1126,37 +1322,119 @@ class SubscriptionHandlers(BaseHandler):
             return ConversationHandler.END
 
     async def remove_item_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Confirm and remove item from subscription"""
+        """`remove_item_<sub>_<item>`: preview the list without that item. Nothing is removed by this tap."""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             # Parse: remove_item_{sub_id}_{item_id}
-            parts = query.data.split('_')
+            parts = update.callback_query.data.split('_')
             sub_id = int(parts[2])
             item_id = int(parts[3])
+
+            product_id = await self._item_product_id(update, context, sub_id, item_id, language)
+            if product_id is not None:
+                await self._preview_items_change(update, context, sub_id, 'del', product_id, 0, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="remove_item_confirm")
+
+    @staticmethod
+    def _items_after(subscription: dict, op: str, product_id: int, quantity: int) -> list[dict]:
+        """The whole item list as it would stand after one change: the one builder for the preview and the save, so
+        what the customer confirmed is what is written. ``add`` appends the product (or sets its quantity when it
+        is already there), ``set`` changes the quantity of a product that is there, ``del`` drops it. Every other
+        line, an unavailable one included, is kept as the card published it."""
+        items = [
+            {'product_id': item['product_id'], 'quantity': item['quantity']}
+            for item in subscription.get('subscription_items') or []
+        ]
+        if op == 'del':
+            return [item for item in items if item['product_id'] != product_id]
+        for item in items:
+            if item['product_id'] == product_id:
+                item['quantity'] = quantity
+                return items
+        if op == 'add':
+            items.append({'product_id': product_id, 'quantity': quantity})
+        return items
+
+    async def _preview_items_change(self, update, context, sub_id: int, op: str, product_id: int, quantity: int,
+                                    language: str):
+        """Read the card, ask the backend what the list after this change would do, and show its words with a Save
+        carrying the preview's `expected_state`. Nothing is saved here. A refusal (the last item, a product below its
+        minimum) is the backend's own sentence and leaves the items as they are."""
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+            if subscription is None:
+                return
+            response = await client.preview_subscription_change(
+                user_token, sub_id, {'items': self._items_after(subscription, op, product_id, quantity)},
+            )
+        if not response.success:
+            await self._handle_api_error(update, response.error, language)
+            return
+
+        preview = (response.data or {}).get('data', {}).get('preview') or {}
+        lines = [i18n.get('telegram.subscription.preview_title', language), ""]
+        lines.extend(_item_line(item, language, priced=True) for item in preview.get('items') or [])
+        if preview.get('estimated_per_delivery_label'):
+            lines.append("")
+            lines.append(
+                f"{i18n.get('telegram.subscription.per_delivery', language)}: {preview['estimated_per_delivery_label']}"
+            )
+        if preview.get('kept_order_note'):
+            lines.append(preview['kept_order_note'])
+        await self._show(
+            update, "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    i18n.get('telegram.subscription.save_change', language),
+                    callback_data=items_save_callback(op, sub_id, product_id, quantity, preview.get('expected_state')),
+                )],
+                [InlineKeyboardButton(
+                    i18n.get('telegram.back', language), callback_data=f'manage_items_{sub_id}',
+                )],
+            ]),
+        )
+        await self._ack(update.callback_query)
+
+    async def items_save_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subitems_<op>_<sub>_<product>_<qty>_<state>`: save the list. The card is read again first and the one
+        change re-applied to it, so a line changed elsewhere is not overwritten from a stale copy; the backend still
+        answers 409 ("This changed") when the state the preview carried no longer holds. Either way the item list
+        is shown as it stands now."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+            parsed = parse_items_save_callback(query.data)
+            if parsed is None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+            op, sub_id, product_id, quantity, state = parsed
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-
-                response = await client.remove_subscription_item(user_token, sub_id, item_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
+                subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+                if subscription is None:
                     return
-
-            text = f"✅ {i18n.get('telegram.subscription.item_removed_successfully', language)}"
-            await self._ack(query, text)
-
-            # Return to item management
-            context.user_data['callback_query_data'] = f'manage_items_{sub_id}'
-            await self.manage_subscription_items(update, context)
+                response = await client.replace_subscription_items(
+                    user_token, sub_id, self._items_after(subscription, op, product_id, quantity),
+                    expected_state=state,
+                )
+            await self._finish_write(
+                update, context, response, sub_id, language,
+                'telegram.subscription.items_updated_successfully', then_items=True,
+            )
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="remove_item_confirm")
+            await self._handle_error(update, exc=e, operation="items_save_confirmed")
 
     # ========== SUBSCRIPTION EDITING ==========
 
@@ -1200,9 +1478,10 @@ class SubscriptionHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="change_frequency")
 
     async def update_frequency_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """A new frequency was tapped (`subfreq_<frequency>_<sub_id>`). Daily needs nothing more and is
-        saved; weekly, biweekly and monthly need a delivery day (a changed cadence with no day would
-        deliver on whatever day the schedule finds first), so the day picker comes next and saves both."""
+        """A new frequency was tapped (`subfreq_<frequency>_<sub_id>`). Nothing is written. Daily has no day, so the
+        slot is asked next; weekly, biweekly and monthly ask the delivery day first (a changed cadence with no day
+        would deliver on whatever day the schedule finds first), weekly and biweekly offering only the weekdays the
+        backend delivers on."""
         try:
             query = update.callback_query
             language = await i18n.get_user_language(update.effective_user.id)
@@ -1216,14 +1495,18 @@ class SubscriptionHandlers(BaseHandler):
             sub_id = _subscription_id(query.data)
 
             if frequency == 'daily':
-                await self._save_frequency(update, context, sub_id, {'frequency': frequency}, language)
+                await self._show_edit_slots(update, context, sub_id, frequency, None)
                 return
 
             key = 'select_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'select_day_of_month'
+            weekdays = await self._delivery_weekdays(update, context, frequency)
             await self._edit_or_replace_callback_message(
                 query,
                 text=i18n.get(f'telegram.subscription.{key}', language),
-                reply_markup=SubscriptionKeyboards.day_picker(frequency, language, subscription_id=sub_id),
+                reply_markup=SubscriptionKeyboards.day_picker(
+                    frequency, language, subscription_id=sub_id,
+                    delivery_weekdays=weekdays if weekdays else range(7),
+                ),
             )
             await self._ack(query)
 
@@ -1231,50 +1514,139 @@ class SubscriptionHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="update_frequency_confirm")
 
     async def update_frequency_day_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """The day for a changed frequency (`subday_<frequency>_<day>_<sub_id>`): save both."""
+        """The day for a changed frequency (`subday_<frequency>_<day>_<sub_id>`). Nothing is written: the slot is
+        asked next, for that day."""
         try:
-            language = await i18n.get_user_language(update.effective_user.id)
             _, frequency, day, _sub = update.callback_query.data.split('_')
-            sub_id = _subscription_id(update.callback_query.data)
-            day_field = 'delivery_day_of_week' if frequency in _WEEKDAY_FREQUENCIES else 'delivery_day_of_month'
-            await self._save_frequency(
-                update, context, sub_id, {'frequency': frequency, day_field: int(day)}, language
+            await self._show_edit_slots(
+                update, context, _subscription_id(update.callback_query.data), frequency, int(day),
             )
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="update_frequency_day_confirm")
 
-    async def _save_frequency(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sub_id: int,
-                              update_data: dict, language: str):
-        """PUT the frequency change, then confirm it. The backend recomputes the next delivery (§4.6)."""
+    async def _show_edit_slots(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sub_id: int,
+                               frequency: str, day: int | None):
+        """The slot step of a schedule edit: the slots the backend offers that schedule, then "Any time". The
+        weekday and the frequency go to the backend, which filters by its own rule, the very rule the save checks.
+        A day with no slot offers Any time alone instead of a dead end. Each button carries the whole schedule
+        (`subsched_<frequency>_<day>_<slot|any>_<sub>`) and asks for the preview; nothing is saved here."""
         query = update.callback_query
+        language = await i18n.get_user_language(update.effective_user.id)
 
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return
-
-            response = await client.update_subscription(user_token, sub_id, update_data)
-
+            weekday = day if frequency in _WEEKDAY_FREQUENCIES and day is not None else 'any'
+            response = await client.get_subscription_time_slots(user_token, weekday, frequency)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return
 
-        text = f"✅ {i18n.get('telegram.subscription.frequency_updated_successfully', language)}"
-        keyboard = [[
-            InlineKeyboardButton(
-                i18n.get('telegram.subscription.view', language),
-                callback_data=f'subscription_{sub_id}'
-            )
-        ]]
-
-        await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        slots = (response.data or {}).get('time_slots', [])
+        await self._edit_or_replace_callback_message(
+            query,
+            text=i18n.get('telegram.subscription.select_new_time_slot', language),
+            reply_markup=SubscriptionKeyboards.time_slot_picker(
+                slots, language, subscription_id=sub_id, frequency=frequency, day=day,
+            ),
+        )
         await self._ack(query)
 
-        # Clear context
-        if 'editing_subscription_id' in context.user_data:
-            del context.user_data['editing_subscription_id']
+    @staticmethod
+    def _schedule_changes(choice) -> dict:
+        """The body of both the preview and the save of a schedule change. The day field is left out for daily, and
+        Any time is an explicit ``None`` slot: the backend reads a missing slot as "keep the old one"."""
+        changes = {'frequency': choice.frequency}
+        if choice.frequency in _WEEKDAY_FREQUENCIES:
+            changes['delivery_day_of_week'] = choice.day
+        elif choice.frequency == 'monthly':
+            changes['delivery_day_of_month'] = choice.day
+        changes['delivery_time_slot_id'] = choice.slot_id
+        return changes
+
+    async def schedule_preview(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subsched_<frequency>_<day|x>_<slot|any>_<sub>`: ask the backend what this schedule would do and show its
+        words, with a Save that carries the preview's `expected_state`. Nothing is saved by this tap. A refusal
+        (a slot switched off meanwhile, a monthly day not chosen) is shown as the backend's own sentence."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+            choice = parse_schedule_callback(query.data)
+            if choice is None or choice.state is not None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.preview_subscription_change(
+                    user_token, choice.subscription_id, self._schedule_changes(choice),
+                )
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+
+            preview = (response.data or {}).get('data', {}).get('preview') or {}
+            lines = [i18n.get('telegram.subscription.preview_title', language), ""]
+            lines.extend(line for line in (
+                f"📅 {preview['schedule_sentence']}" if preview.get('schedule_sentence') else None,
+                preview.get('sentence'),
+            ) if line)
+            dates = " · ".join(d['label_short'] for d in preview.get('upcoming_dates') or [])
+            if dates:
+                lines.append(f"🗓 {i18n.get('telegram.subscription.next_dates', language)}: {dates}")
+            await self._show(
+                update, "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        i18n.get('telegram.subscription.save_change', language),
+                        callback_data=schedule_callback(
+                            choice.frequency, choice.day, choice.slot_id, choice.subscription_id,
+                            state=preview.get('expected_state'),
+                        ),
+                    )],
+                    [InlineKeyboardButton(
+                        i18n.get('telegram.back', language), callback_data=f'edit_sub_{choice.subscription_id}',
+                    )],
+                ]),
+            )
+            await self._ack(query)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="schedule_preview")
+
+    async def schedule_save_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subschedok_<frequency>_<day|x>_<slot|any>_<sub>_<state>`: save exactly what the preview showed. The
+        backend re-checks the schedule and answers 409 ("This changed") when the state moved; either way the card
+        is shown as it stands now."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+            choice = parse_schedule_callback(query.data)
+            if choice is None or choice.state is None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.update_subscription(
+                    user_token, choice.subscription_id, self._schedule_changes(choice), expected_state=choice.state,
+                )
+            await self._finish_write(
+                update, context, response, choice.subscription_id, language,
+                'telegram.subscription.schedule_updated_successfully',
+            )
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="schedule_save_confirmed")
 
     async def change_payment_method_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show payment method selection"""
@@ -1292,7 +1664,15 @@ class SubscriptionHandlers(BaseHandler):
                     await self._handle_auth_error(update, language)
                     return
 
-                methods_response = await client.get_payment_methods(user_token, context="subscription")
+                # The menu depends on the delivery address (the place arm of the cash cap), and the backend
+                # refuses a method the menu would not have offered: ask it the way the write will judge it.
+                subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+                if subscription is None:
+                    return
+
+                methods_response = await client.get_payment_methods(
+                    user_token, context="subscription", delivery_address_id=subscription.get('delivery_address_id')
+                )
                 if not methods_response.success:
                     await self._handle_api_error(update, methods_response.error, language)
                     return
@@ -1300,6 +1680,8 @@ class SubscriptionHandlers(BaseHandler):
             available_methods = (methods_response.data or {}).get('data', {}).get('available_methods', [])
 
             text = i18n.get('telegram.subscription.select_new_payment_method', language)
+            if subscription.get('payment_method_warning'):
+                text += f"\n\n⚠️ {subscription['payment_method_warning']}"
             # Reached from the subscription's edit menu, not from the creation
             # flow's address step, so Back goes back there.
             keyboard = SubscriptionKeyboards.payment_methods(
@@ -1314,100 +1696,229 @@ class SubscriptionHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="change_payment_method_menu")
 
     async def change_payment_method_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Confirm payment method change"""
+        """`subpay_<method>_<sub>`: the customer picked a method. Nothing is written: the card is read again and
+        the consequence shown (the kept order stays as it is), with a Save that carries the card's `expected_state`."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
-            # `subpay_<payment_method>_<sub_id>`, same reasoning as
-            # `update_frequency_confirm`. The rail is everything BETWEEN the
-            # prefix and the trailing id, because `business_account` contains an
-            # underscore of its own.
+            # The rail is everything BETWEEN the prefix and the trailing id, because `business_account` contains
+            # an underscore of its own.
             payment_method = '_'.join(query.data.split('_')[1:-1])
             sub_id = _subscription_id(query.data)
 
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
+            card = await self._read_card(update, context, sub_id, language)
+            if card is None:
+                return
+            if not card.success:
+                await self._handle_api_error(update, card.error, language)
+                return
+            subscription = card.data.get('data', {}).get('subscription', {})
+            if _published(subscription, 'edit') is None:
+                await self._stale(update, context, sub_id, language)
+                return
 
-                payment_data = {'payment_method': payment_method}
-                response = await client.change_payment_method(user_token, sub_id, payment_data)
-
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-            text = f"✅ {i18n.get('telegram.subscription.payment_method_updated_successfully', language)}"
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.subscription.view', language),
-                    callback_data=f'subscription_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            lines = [f"{i18n.get('telegram.subscription.new_payment_method', language)}: "
+                     f"{i18n.get(f'telegram.payment_{payment_method}', language)}"]
+            if subscription.get('kept_order_note'):
+                lines.append(subscription['kept_order_note'])
+            await self._show(
+                update, "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        i18n.get('telegram.subscription.save_change', language),
+                        callback_data=payment_save_callback(
+                            payment_method, sub_id, subscription['allowed_actions']['expected_state'],
+                        ),
+                    )],
+                    [InlineKeyboardButton(i18n.get('telegram.back', language), callback_data=f'change_payment_{sub_id}')],
+                ]),
+            )
             await self._ack(query)
-
-            # Clear context
-            if 'editing_subscription_id' in context.user_data:
-                del context.user_data['editing_subscription_id']
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="change_payment_method_confirm")
 
-    # ========== STATISTICS AND LOGS ==========
-
-    async def view_subscription_statistics(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """View subscription statistics"""
+    async def change_payment_method_saved(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subpayok_<method>_<sub>_<state>`: save the method the consequence screen named. The backend answers
+        409 ("This changed") when the state no longer holds; either way the card is shown as it stands now."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
+            parsed = parse_payment_save_callback(query.data)
+            if parsed is None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+            payment_method, sub_id, state = parsed
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-
-                response = await client.get_subscription_statistics(user_token)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-                stats = response.data.get('statistics', {})
-
-            text = f"📊 {i18n.get('telegram.subscription.statistics', language)}\n\n"
-            text += f"📦 {i18n.get('telegram.subscription.total_deliveries', language)}: {stats.get('total_deliveries', 0)}\n"
-            text += f"💰 {i18n.get('telegram.subscription.total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
-            text += f"💵 {i18n.get('telegram.subscription.average_order', language)}: {stats.get('average_order_value', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
-
-            if stats.get('most_ordered_product'):
-                text += f"\n⭐ {i18n.get('telegram.subscription.favorite_product', language)}: {stats['most_ordered_product']}\n"
-
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.back', language),
-                    callback_data='menu_subscriptions'
+                response = await client.change_payment_method(
+                    user_token, sub_id, {'payment_method': payment_method}, expected_state=state,
                 )
-            ]]
+            await self._finish_write(
+                update, context, response, sub_id, language,
+                'telegram.subscription.payment_method_updated_successfully',
+            )
 
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="change_payment_method_saved")
+
+    # ========== CHANGE ADDRESS ==========
+
+    async def change_address_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`change_address_<sub>`: the customer's saved addresses, the current one ticked. No address is created
+        here: adding one stays in the address screens (spec 2026-10-27 §7)."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+            sub_id = _subscription_id(query.data)
+
+            card = await self._read_card(update, context, sub_id, language)
+            if card is None:
+                return
+            if not card.success:
+                await self._handle_api_error(update, card.error, language)
+                return
+            subscription = card.data.get('data', {}).get('subscription', {})
+            if _published(subscription, 'edit') is None:
+                await self._stale(update, context, sub_id, language)
+                return
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                addresses = await client.get_user_addresses(user_token)
+            if not addresses.success:
+                await self._handle_api_error(update, addresses.error, language)
+                return
+
+            current = subscription.get('delivery_address_id')
+            rows = [
+                [InlineKeyboardButton(
+                    ("✓ " if address['id'] == current else "")
+                    + (address.get('title') or address.get('full_address') or i18n.get('telegram.common.address', language)),
+                    callback_data=f"subaddr_{address['id']}_{sub_id}",
+                )]
+                for address in (addresses.data or {}).get('data', {}).get('addresses') or []
+            ]
+            rows.append([InlineKeyboardButton(i18n.get('telegram.back', language), callback_data=f'edit_sub_{sub_id}')])
+            await self._show(
+                update, i18n.get('telegram.subscription.select_new_address', language),
+                reply_markup=InlineKeyboardMarkup(rows),
+            )
             await self._ack(query)
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="view_subscription_statistics")
+            await self._handle_error(update, exc=e, operation="change_address_menu")
 
-    async def view_subscription_logs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """View subscription activity logs"""
+    async def change_address_preview(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subaddr_<address>_<sub>`: ask the backend what moving to this address does, and show its words. A
+        method the new address does not offer is asked for here, from the preview's own menu (B8), before saving."""
+        await self._address_preview(update, context, *self._address_ids(update.callback_query.data), method=None)
+
+    async def change_address_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subaddrpay_<method>_<address>_<sub>`: the method picked for the new address; previewed again with it."""
+        parsed = parse_address_method_callback(update.callback_query.data)
+        if parsed is None:
+            await self._ack(update.callback_query)
+            return
+        method, address_id, sub_id = parsed
+        await self._address_preview(update, context, address_id, sub_id, method=method)
+
+    @staticmethod
+    def _address_ids(data: str) -> tuple[int, int]:
+        _, address_id, sub_id = data.split('_')
+        return int(address_id), int(sub_id)
+
+    @staticmethod
+    def _address_changes(address_id: int, method: str | None) -> dict:
+        changes = {'delivery_address_id': address_id}
+        if method is not None:
+            changes['payment_method'] = method
+        return changes
+
+    async def _address_preview(self, update, context, address_id: int, sub_id: int, *, method: str | None):
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.preview_subscription_change(
+                    user_token, sub_id, self._address_changes(address_id, method),
+                )
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+
+            preview = (response.data or {}).get('data', {}).get('preview') or {}
+            change = preview.get('address_change') or {}
+            if not change.get('payment_method_offered'):
+                await self._show(
+                    update, i18n.get('telegram.subscription.address_choose_method', language),
+                    reply_markup=SubscriptionKeyboards.payment_methods(
+                        change.get('payment_methods') or [], language, back_callback=f'change_address_{sub_id}',
+                        callback=lambda published: address_method_callback(published, address_id, sub_id),
+                    ),
+                )
+            else:
+                lines = [i18n.get('telegram.subscription.preview_title', language), "", *(preview.get('consequences') or [])]
+                await self._show(
+                    update, "\n".join(lines),
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            i18n.get('telegram.subscription.save_change', language),
+                            callback_data=address_confirm_callback(address_id, method, sub_id, preview['expected_state']),
+                        )],
+                        [InlineKeyboardButton(i18n.get('telegram.back', language), callback_data=f'change_address_{sub_id}')],
+                    ]),
+                )
+            await self._ack(update.callback_query)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="change_address_preview")
+
+    async def change_address_confirmed(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subaddrok_<address>_<method|keep>_<sub>_<state>`: save exactly what the preview showed (the address, and
+        the method asked for when the old one was not offered there). 409 ("This changed") shows the fresh card."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
+            parsed = parse_address_confirm_callback(query.data)
+            if parsed is None:
+                await self._ack(query, i18n.get('telegram.unknown_action', language))
+                return
+            address_id, method, sub_id, state = parsed
 
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.update_subscription(
+                    user_token, sub_id, self._address_changes(address_id, method), expected_state=state,
+                )
+            await self._finish_write(
+                update, context, response, sub_id, language, 'telegram.subscription.address_updated_successfully',
+            )
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="change_address_confirmed")
+
+    async def change_time_slot_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`change_slot_<id>`, and an old `subslot_<slot>_<id>` button (it named a slot but not the schedule, so it
+        writes nothing): the slot picker for THIS subscription's current schedule, the same screen a changed
+        frequency or day ends on."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
             sub_id = _subscription_id(query.data)
 
             async with api_client as client:
@@ -1415,50 +1926,83 @@ class SubscriptionHandlers(BaseHandler):
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
+                subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+            if subscription is None:
+                return
 
-                response = await client.get_subscription_logs(user_token, sub_id)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
+            frequency = subscription.get('frequency')
+            day_field = {'monthly': 'delivery_day_of_month'}.get(frequency, 'delivery_day_of_week')
+            await self._show_edit_slots(
+                update, context, sub_id, frequency,
+                None if frequency == 'daily' else subscription.get(day_field),
+            )
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="change_time_slot_menu")
+
+    # ========== ORDER HISTORY ==========
+
+    async def subscription_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """`subhist_<id>_<page>`: the orders this subscription placed, five to a page, as the website lists them
+        (spec 2026-10-27 §7 D19). An old `view_logs_<id>` button lands on page 1. Each row prints the backend's
+        date, status, amount and reason; an order that publishes `customer_actions` gets its Pay and its removal."""
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+
+            match = _HISTORY_CALLBACK.match(query.data or '')
+            sub_id = int(match.group(1) or match.group(3))
+            page = max(int(match.group(2) or 1), 1)
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
                     return
+                response = await client.get_subscription_history(user_token, sub_id, page)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
 
-                logs = response.data.get('data', {}).get('items', [])
+            body = response.data or {}
+            rows = (body.get('data') or {}).get('items') or []
+            meta = body.get('meta') or {}
 
-            text = f"📋 {i18n.get('telegram.subscription.activity_logs', language)}\n\n"
+            lines = [i18n.get('telegram.subscription.history_title', language), ""]
+            if not rows:
+                lines.append(i18n.get('telegram.subscription.history_empty', language))
+            for row in rows:
+                line = f"• {row.get('date_label')} · {(row.get('status') or {}).get('label')}"
+                if row.get('amount_label'):
+                    line += f" · {row['amount_label']}"
+                if row.get('order_number'):
+                    line += f" · {row['order_number']}"
+                if row.get('reason_label'):
+                    line += f"\n   {row['reason_label']}"
+                lines.append(line)
 
-            if not logs:
-                text += i18n.get('telegram.subscription.no_activity_logs', language)
-            else:
-                for log in logs[:10]:  # Show last 10
-                    action_icon = {
-                        'created': '✨',
-                        'updated': '✏️',
-                        'paused': '⏸️',
-                        'resumed': '▶️',
-                        'cancelled': '❌',
-                        'item_added': '➕',
-                        'item_removed': '➖',
-                        'delivery_skipped': '⏭️'
-                    }.get(log.get('action'), '📝')
-
-                    text += f"{action_icon} {log.get('details')} - {log.get('created_at')}\n"
-
-            keyboard = [[
-                InlineKeyboardButton(
-                    i18n.get('telegram.back', language),
-                    callback_data=f'subscription_{sub_id}'
-                )
-            ]]
-
-            await self._edit_or_replace_callback_message(query, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._show(
+                update, "\n".join(lines),
+                reply_markup=SubscriptionKeyboards.history(
+                    sub_id, rows, page, bool(meta.get('has_prev')), bool(meta.get('has_next')), language,
+                ),
+            )
             await self._ack(query)
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="view_subscription_logs")
+            await self._handle_error(update, exc=e, operation="subscription_history")
 
     # ========== HELPER METHODS ==========
 
-    async def _fetch_and_display_products(self, update, context, language, header_key, back_callback=None):
-        """Shared helper: fetch products from API and display selection keyboard.
+    async def _fetch_and_display_products(self, update, context, language, header_key, back_callback=None,
+                                          exclude_product_ids=frozenset()):
+        """Shared helper (create and Add item): the subscription catalog and its selection keyboard.
+
+        The list is the backend's subscription catalog (`GET /subscriptions/products`, spec 2026-10-26 B10):
+        every product a subscription can take, each at the price label the subscription will use. Never the
+        products API's checkout card, whose price is another rule. Every product is listed: none is cut off.
+
+        `exclude_product_ids` leaves out products the subscription already holds (the Add item picker).
 
         Returns list of products on success, or None on failure (error already shown).
         """
@@ -1470,24 +2014,26 @@ class SubscriptionHandlers(BaseHandler):
                 await self._handle_auth_error(update, language)
                 return None
 
-            response = await client.get_products(user_token, {'per_page': 20})
+            response = await client.get_subscription_products(user_token, language=language)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return None
 
-            products = response.data.get('data', {}).get('items', [])
+            products = [
+                product for product in response.data.get('data', {}).get('items', [])
+                if product.get('id') not in exclude_product_ids
+            ]
 
         # Build text
         products_text = i18n.get(header_key, language) + "\n\n"
-        for idx, product in enumerate(products[:10], 1):
-            price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
-            products_text += f"{idx}. {product['name']} - {price} UZS\n"
+        for idx, product in enumerate(products, 1):
+            products_text += f"{idx}. {product.get('product_name')} - {product.get('unit_price_label')}\n"
 
         # Build keyboard
         buttons = []
-        for product in products[:10]:
+        for product in products:
             buttons.append([InlineKeyboardButton(
-                f"➕ {product['name']}",
+                f"➕ {product.get('product_name')}",
                 callback_data=f"sub_product_{product['id']}"
             )])
 
@@ -1558,20 +2104,30 @@ class SubscriptionHandlers(BaseHandler):
         min_order_qty, _ceiling = ProductHandlers._purchase_bounds(product)
         return min_order_qty
 
+    async def _read_subscription(self, client, user_token: str, sub_id: int, update: Update, language: str):
+        """One subscription as the backend publishes it, or ``None`` with the customer already told."""
+        response = await client.get_subscription(user_token, sub_id)
+        if not response.success:
+            await self._handle_api_error(update, response.error, language)
+            return None
+        return (response.data or {}).get('data', {}).get('subscription') or {}
+
     async def _item_product_id(self, update, context, sub_id, item_id, language):
-        """The product of one subscription line, or None with the customer already told."""
+        """The product of one subscription line, read off the card's `subscription_items`, or None with the
+        customer already told."""
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return None
-            response = await client.get_subscription_items(user_token, sub_id)
-            if not response.success:
-                await self._handle_api_error(update, response.error, language)
-                return None
+            subscription = await self._read_subscription(client, user_token, sub_id, update, language)
+        if subscription is None:
+            return None
 
-        items = (response.data or {}).get('data', {}).get('items', [])
-        product_id = next((item.get('product_id') for item in items if item.get('id') == item_id), None)
+        product_id = next(
+            (item.get('product_id') for item in subscription.get('subscription_items') or [] if item.get('id') == item_id),
+            None,
+        )
         if product_id is None:
             await self._ack(
                 update.callback_query, i18n.get('telegram.error.product_error', language), show_alert=True

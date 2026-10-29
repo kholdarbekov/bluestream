@@ -1,0 +1,113 @@
+{
+ "case": "payment_pending",
+ "language": "en",
+ "order_id": 1,
+ "page": {
+  "html": "<section class=\"payment-pending-section\">\n<div class=\"auto-container\">\n<div class=\"pending-content\">\n<div class=\"pending-icon\">\n<i class=\"far fa-hourglass-half\"></i>\n</div>\n<h2>Payment Processing</h2>\n<p>Your payment is being processed. This may take a few moments.</p>\n<div class=\"order-info\">\n<div class=\"info-row\">\n<span class=\"info-label\">Order Number:</span>\n<span class=\"info-value\">TG_000001_26</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Total Amount:</span>\n<span class=\"info-value\">30,000 UZS</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Payment Method:</span>\n<span class=\"info-value\">\n                        \n                            Click\n                        \n                    </span>\n</div>\n</div>\n<div class=\"refresh-notice\">\n<i class=\"far fa-info-circle\"></i>\n                This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.\n            </div>\n<div class=\"action-buttons\">\n<button class=\"theme-btn btn-one\" data-action=\"check-payment-status\">\n<i class=\"far fa-sync\"></i> Check Status\n                </button>\n<a class=\"theme-btn btn-three\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "island": {
+   "cancel_url": "/payment/cancel?order_id=1",
+   "i18n": {
+    "failed": "Payment failed. Please try again.",
+    "timeout": "Payment verification is taking longer than expected. Please check your order status."
+   },
+   "order_actions": {
+    "confirmed": "Thanks! Your order is confirmed.",
+    "failed": "That didn't go through. Please try again.",
+    "keep": "Keep it",
+    "open_subscription": "Open the subscription",
+    "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
+    "reason_prompt": "Want to tell us why? (optional)",
+    "reason_text": "In a few words (optional)",
+    "switch_to_cash": "Pay with cash",
+    "try_again": "Try again",
+    "working": "One moment…"
+   },
+   "order_id": 1,
+   "order_page_url": "/order-tracking?order_id=1",
+   "payment_id": 1
+  }
+ },
+ "polls": {
+  "completed": {
+   "body": {
+    "data": {
+     "payment": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "collection_events_count": 0,
+      "created_at": "<wall-clock>",
+      "currency": "UZS",
+      "fiscalization_status": null,
+      "id": 1,
+      "last_collected_at": null,
+      "order_id": 1,
+      "outstanding_amount": 30000.0,
+      "payment_id": "<uuid>",
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "provider_transaction_id": null,
+      "status": "completed",
+      "user_id": 1
+     }
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "failed": {
+   "body": {
+    "data": {
+     "payment": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "collection_events_count": 0,
+      "created_at": "<wall-clock>",
+      "currency": "UZS",
+      "fiscalization_status": null,
+      "id": 1,
+      "last_collected_at": null,
+      "order_id": 1,
+      "outstanding_amount": 30000.0,
+      "payment_id": "<uuid>",
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "provider_transaction_id": null,
+      "status": "failed",
+      "user_id": 1
+     }
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "pending": {
+   "body": {
+    "data": {
+     "payment": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "collection_events_count": 0,
+      "created_at": "<wall-clock>",
+      "currency": "UZS",
+      "fiscalization_status": null,
+      "id": 1,
+      "last_collected_at": null,
+      "order_id": 1,
+      "outstanding_amount": 30000.0,
+      "payment_id": "<uuid>",
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "provider_transaction_id": null,
+      "status": "pending",
+      "user_id": 1
+     }
+    },
+    "success": true
+   },
+   "status": 200
+  }
+ }
+}

@@ -88,3 +88,50 @@ def test_the_per_date_query_the_web_checkout_uses_is_unchanged(client, slots):
     assert sorted(slot["id"] for slot in body["time_slots"]) == sorted([slots["morning"].id, slots["weekdays"].id])
     assert all("available_capacity" in slot for slot in body["time_slots"])
     assert client.get(URL).status_code == 400
+
+
+# --------------------------------------------------------------------------- delivery days (spec 2026-10-27 §6.4)
+
+
+def _choice(client, **query):
+    response = client.get(URL, query_string=query)
+    assert response.status_code == 200, response.get_json()
+    return response.get_json()
+
+
+def test_the_chooser_publishes_the_delivery_days(client, db, slots):
+    """The one place delivery days are published: the weekdays an active slot offers. The bot's and the website's
+    day pickers offer only these."""
+    slots["morning"].is_active = False  # weekdays [0-4] and saturday [5] stay active
+    db.session.commit()
+
+    anyday = _choice(client, weekday="any")
+    sunday = _choice(client, weekday="6")
+
+    assert anyday["delivery_weekdays"] == [0, 1, 2, 3, 4, 5]
+    assert sunday == {"weekday": "6", "time_slots": [], "delivery_weekdays": [0, 1, 2, 3, 4, 5]}
+
+
+def test_no_active_slot_publishes_every_day(client, db):
+    assert _choice(client, weekday="any") == {"weekday": "any", "time_slots": [], "delivery_weekdays": list(range(7))}
+
+    db.session.add(DeliveryTimeSlot(name="Off", start_time="10:00", end_time="12:00", is_active=False,
+                                    available_days=[0]))
+    db.session.commit()
+
+    assert _choice(client, weekday="any", frequency="daily")["delivery_weekdays"] == list(range(7))
+
+
+def test_monthly_offers_the_slots_that_cover_every_delivery_day(client, db, slots):
+    """A monthly date can land on any delivery day, so its slot must be offered on every delivery day; no longer on
+    every day of the week."""
+    slots["morning"].is_active = False
+    mon_to_sat = DeliveryTimeSlot(name="Mon-Sat", start_time="12:00", end_time="14:00", is_active=True,
+                                  available_days=[0, 1, 2, 3, 4, 5])
+    db.session.add(mon_to_sat)
+    db.session.commit()
+
+    monthly = _choice(client, weekday="any", frequency="monthly")
+
+    assert [slot["id"] for slot in monthly["time_slots"]] == [mon_to_sat.id]
+    assert monthly["delivery_weekdays"] == [0, 1, 2, 3, 4, 5]

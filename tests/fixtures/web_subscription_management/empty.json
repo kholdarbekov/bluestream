@@ -1,0 +1,25 @@
+{
+ "about": "No subscriptions.",
+ "case": "empty",
+ "language": "en",
+ "requests": {
+  "GET /api/v1/subscriptions/?per_page=50": {
+   "body": {
+    "data": {
+     "items": []
+    },
+    "meta": {
+     "has_next": false,
+     "has_prev": false,
+     "page": 1,
+     "pages": 0,
+     "per_page": 50,
+     "subscriptions_key": "items",
+     "total": 0
+    },
+    "success": true
+   },
+   "status": 200
+  }
+ }
+}

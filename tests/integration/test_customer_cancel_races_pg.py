@@ -31,7 +31,7 @@ import os
 import threading
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -44,16 +44,21 @@ from sqlalchemy.exc import OperationalError
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.order import Order
 from business_app.models.payment import Payment
+from business_app.models.subscription import Subscription, SubscriptionLog
 from business_app.models.user import User, UserAddress
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.order_service import OrderService
+from business_app.services.subscription_service import SubscriptionService
+from business_app.utils.local_windows import local_date
 from business_app.utils.password_security import hash_password
 from shared.enums import (
     DeliveryStatus,
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
+    SubscriptionFrequency,
+    SubscriptionStatus,
     UserRole,
     UserStatus,
     UserType,
@@ -65,6 +70,8 @@ ADMIN_DELIVERY_URL = "/api/v1/admin/deliveries/{delivery_id}"
 DRIVER_STATUS_URL = "/api/v1/staff/delivery/{delivery_id}/status"
 BULK_ACTIONS_URL = "/api/v1/admin/bulk-actions"
 CANCEL_URL = "/api/v1/orders/{order_id}/cancel"
+# What both clients send for a one-off order's Cancel (spec 2026-10-27 §5.2).
+CANCEL_BODY = {"expected_via": "cancel"}
 
 
 def _user(pg_db, phone, *, role, user_type):
@@ -235,7 +242,9 @@ def test_an_admin_move_arriving_while_the_customer_cancel_is_in_flight_is_refuse
     customer = _thread(
         "customer",
         pg_app,
-        lambda client: client.post(CANCEL_URL.format(order_id=world.order_id), headers=world.customer_headers),
+        lambda client: client.post(
+            CANCEL_URL.format(order_id=world.order_id), headers=world.customer_headers, json=CANCEL_BODY
+        ),
         answers,
         errors,
         finally_set=cancel_holds_its_locks,
@@ -324,7 +333,9 @@ def test_a_customer_cancel_arriving_while_a_pickup_holds_the_row_waits_and_is_re
     customer = _thread(
         "customer",
         pg_app,
-        lambda client: client.post(CANCEL_URL.format(order_id=world.order_id), headers=world.customer_headers),
+        lambda client: client.post(
+            CANCEL_URL.format(order_id=world.order_id), headers=world.customer_headers, json=CANCEL_BODY
+        ),
         answers,
         errors,
     )
@@ -355,6 +366,145 @@ def test_a_customer_cancel_arriving_while_a_pickup_holds_the_row_waits_and_is_re
     pg_db.session.expire_all()
     assert pg_db.session.get(Delivery, world.delivery_id).status is DeliveryStatus.PICKED_UP
     assert pg_db.session.get(Order, world.order_id).status is OrderStatus.OUT_FOR_DELIVERY
+
+
+def _subscription_world(pg_db):
+    """An ACTIVE weekly Click subscription with its unpaid order for tomorrow, no delivery yet: the customer's
+    Cancel of that order is "Skip this delivery" (spec 2026-10-27 §5.1)."""
+    customer = _user(pg_db, "+998901241011", role=UserRole.CUSTOMER, user_type=UserType.INDIVIDUAL)
+    address = UserAddress(
+        user_id=customer.id,
+        title="Home",
+        full_address="2 Race Street, Tashkent",
+        street_address="2 Race Street",
+        city="Tashkent",
+        latitude=41.3111,
+        longitude=69.2797,
+        is_default=True,
+    )
+    pg_db.session.add(address)
+    pg_db.session.flush()
+    tomorrow = local_date() + timedelta(days=1)
+    subscription = Subscription(
+        user_id=customer.id,
+        status=SubscriptionStatus.ACTIVE,
+        name="Home water",
+        frequency=SubscriptionFrequency.WEEKLY,
+        billing_amount=Decimal("15000.00"),
+        delivery_day_of_week=tomorrow.weekday(),
+        delivery_address_id=address.id,
+        next_delivery_date=tomorrow + timedelta(days=7),
+        start_date=datetime.now(UTC) - timedelta(days=28),
+        payment_method=PaymentMethod.CLICK,
+    )
+    pg_db.session.add(subscription)
+    pg_db.session.flush()
+    order = Order(
+        user_id=customer.id,
+        order_number=f"ORD-RACE-{uuid.uuid4().hex[:8].upper()}",
+        status=OrderStatus.PENDING,
+        payment_method=PaymentMethod.CLICK,
+        is_paid=False,
+        subtotal=Decimal("15000.00"),
+        total_amount=Decimal("15000.00"),
+        delivery_address_id=address.id,
+        delivery_date=tomorrow,
+        is_subscription_order=True,
+        subscription_id=subscription.id,
+    )
+    pg_db.session.add(order)
+    pg_db.session.flush()
+    pg_db.session.add(
+        Payment(
+            order_id=order.id,
+            user_id=customer.id,
+            payment_method=PaymentMethod.CLICK,
+            amount=Decimal("15000.00"),
+            amount_collected=Decimal("0.00"),
+            outstanding_amount=Decimal("15000.00"),
+            currency="UZS",
+            status=PaymentStatus.PENDING,
+            payment_id=f"PAY-RACE-{order.id}",
+        )
+    )
+    pg_db.session.commit()
+    return SimpleNamespace(
+        order_id=order.id,
+        subscription_id=subscription.id,
+        customer_headers={
+            "Authorization": f"Bearer {create_access_token(identity=str(customer.id))}",
+            "Content-Type": "application/json",
+        },
+    )
+
+
+def test_a_skip_arriving_while_a_pause_holds_the_subscription_row_waits_and_is_refused(pg_app, pg_db, monkeypatch):
+    """The order's Skip locks the subscription first, as the pause and its cascade do. A pause holding that row
+    makes the skip wait; once the pause has cancelled the order, the skip meets the order's own refusal and
+    records no skip."""
+    current_app.config["REDIS_URL"] = os.environ["REDIS_URL"]
+    world = _subscription_world(pg_db)
+    pause_holds_the_row = threading.Event()
+    release_the_pause = threading.Event()
+    settle_plan = SubscriptionService._settle_plan
+
+    # The pause asks this right after its locked read of the subscription and before it writes anything.
+    def held_after_the_locked_read(cls, subscription, *, orders=None):
+        if threading.current_thread().name == "pause" and not pause_holds_the_row.is_set():
+            pause_holds_the_row.set()
+            assert release_the_pause.wait(timeout=30), "the test never released the pause"
+        return settle_plan(subscription, orders=orders)
+
+    monkeypatch.setattr(SubscriptionService, "_settle_plan", classmethod(held_after_the_locked_read))
+    # The state the customer's pause confirm was drawn from (spec 2026-10-27 §16 M2).
+    shown = SubscriptionService.state_token(pg_db.session.get(Subscription, world.subscription_id))
+    answers, errors = {}, []
+    pause = _thread(
+        "pause",
+        pg_app,
+        lambda client: client.post(
+            f"/api/v1/subscriptions/{world.subscription_id}/pause",
+            headers=world.customer_headers,
+            json={"expected_state": shown},
+        ),
+        answers,
+        errors,
+        finally_set=pause_holds_the_row,
+    )
+    skip = _thread(
+        "skip",
+        pg_app,
+        lambda client: client.post(
+            CANCEL_URL.format(order_id=world.order_id), headers=world.customer_headers, json={"expected_via": "skip"}
+        ),
+        answers,
+        errors,
+    )
+
+    pause.start()
+    try:
+        assert pause_holds_the_row.wait(timeout=30), "the pause never reached its locked read"
+        assert errors == [], errors
+        skip.start()
+        assert _await_a_lock_waiter(pg_db), "the skip did not wait: nothing holds the subscription row"
+        assert skip.is_alive(), "the skip finished while the pause held the row"
+    finally:
+        release_the_pause.set()
+        _finish(pause, *([skip] if skip.ident else []))
+
+    assert errors == []
+    (pause_status, pause_body), (skip_status, skip_body) = answers["pause"], answers["skip"]
+    assert pause_status == 200, pause_body
+    assert skip_status == 400, skip_body
+    assert skip_body["data"] == {
+        "error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE",
+        "reason_code": "NOT_CANCELLABLE",
+        "can_customer_cancel": False,
+    }
+    pg_db.session.expire_all()
+    assert pg_db.session.get(Subscription, world.subscription_id).status is SubscriptionStatus.PAUSED
+    assert pg_db.session.get(Order, world.order_id).status is OrderStatus.CANCELLED
+    assert SubscriptionLog.query.filter_by(subscription_id=world.subscription_id, action="delivery_skipped").all() == []
 
 
 def _locked_by_someone_else(pg_db, order_id) -> bool:

@@ -3276,7 +3276,17 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # /api/v1/subscriptions/templates, POST /api/v1/subscriptions/<int:subscription_id>/retry-billing,
     # POST /api/v1/orders/subscription and POST /api/v1/payments/subscription. Unrelated to
     # place-merge; only the estate-wide count moved.
-    assert len(routes) == 655
+    # 655 -> 658: website subscription management (spec 2026-10-26, step 3) added GET
+    # /api/v1/subscriptions/<int:subscription_id>/history (subscriptions.get_subscription_history), PUT
+    # /api/v1/subscriptions/<int:subscription_id>/items (subscriptions.replace_subscription_items), POST
+    # /api/v1/subscriptions/<int:subscription_id>/preview (subscriptions.preview_subscription_change) and GET
+    # /api/v1/subscriptions/products (subscriptions.get_subscription_products, the product picker), and
+    # removed GET /api/v1/subscriptions/<int:subscription_id>/billing-history
+    # (subscriptions.get_billing_history). Unrelated to place-merge; only the estate-wide count moved.
+    # 658, unchanged: subscriptions.get_subscription_products became @jwt_required(optional=True) (re-review G6,
+    # the homepage builder lists products before sign-in). The snapshot records rule and methods only.
+    # 658 -> 657: payments.process_card_payment removed (step 4, §4.2).
+    assert len(routes) == 657
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

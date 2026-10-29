@@ -135,7 +135,9 @@ def test_a_cancel_refreshes_the_card_even_when_the_driver_has_no_route_row_today
     )
     assert RouteOptimizationService().current_route(delivery_driver.id) is None
 
-    response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+    response = client.post(
+        CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+    )
 
     assert response.status_code == 200, response.get_json()
     assert RouteOptimizationService().current_route(delivery_driver.id) is None
@@ -177,7 +179,9 @@ def test_a_cancel_that_rolls_back_after_queueing_the_refresh_publishes_nothing(
     monkeypatch.setattr(route_card_refresh_dispatch, "queue_route_card_refresh", queue_route_card_refresh)
     monkeypatch.setattr(AgentOrderApprovalService, "close_on_cancel", staticmethod(close_on_cancel))
 
-    response = client.post(CANCEL_URL.format(order_id=order_id), headers=_headers(app, sample_user))
+    response = client.post(
+        CANCEL_URL.format(order_id=order_id), headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+    )
 
     assert response.status_code == 500, response.get_json()
     assert queued == [(delivery_driver.id, delivery_id)], "the cascade ran, so the failure came after the queue"

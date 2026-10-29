@@ -13,6 +13,10 @@ when the customer has no Telegram).
                       detail (the refusal's own message, or None for a passed date)
     PAID_ORDER_KEPT   order_id, order_number, delivery_date, trigger ("skip" | "pause" | "cancel"),
                       next_delivery_date (None when no delivery follows: paused or cancelled)
+    SCHEDULE_CHANGED  subscription_id, subscription_name, changes (an ordered subset of SCHEDULE_CHANGES),
+                      old_window, new_window ("HH:MM–HH:MM" or None), old_weekday, new_weekday (0-6 or None),
+                      added_weekdays ([0-6], empty unless "days_added"), next_delivery_date (None unless ACTIVE),
+                      time_kind; a slot write changed the delivery time or day (spec 2026-10-27 §6.5)
 
 The customer's own skip also writes a `delivery_skipped` row (`skipped_by="customer"`). It owes no notice:
 the customer asked for it and the response tells them. So a notice is chosen by the action AND, for a skip,
@@ -27,6 +31,16 @@ logger = logging.getLogger(__name__)
 ORDER_CREATED = "order_created"
 DELIVERY_SKIPPED = "delivery_skipped"
 PAID_ORDER_KEPT = "paid_order_kept"
+SCHEDULE_CHANGED = "schedule_changed"
+
+# What a slot write changed in one subscription's schedule (spec 2026-10-27 §6.5), in the order the notice names
+# them. Each is also a bot line, `telegram.customer_notice.schedule_change.<code>`, and a paragraph of the email.
+TIME_CLEARED = "time_cleared"  # its slot was switched off or no longer covers it: Any time now
+TIME_CHANGED = "time_changed"  # its slot keeps it, at new times
+DAY_MOVED = "day_moved"  # its weekly or biweekly day stopped being a delivery day
+DATE_MOVED = "date_moved"  # its next delivery fell on a day that stopped being a delivery day
+DAYS_ADDED = "days_added"  # a daily subscription now delivers on more days
+SCHEDULE_CHANGES = (TIME_CLEARED, TIME_CHANGED, DAY_MOVED, DATE_MOVED, DAYS_ADDED)
 
 # Why the system could not create a scheduled order (§2.8). Each is also a seeded label,
 # `api.subscriptions.skip_reason.<code>`, which the notice quotes.
@@ -67,7 +81,7 @@ def refusal_reason(exc: Exception) -> Optional[str]:
 
 def owes_notice(log) -> bool:
     """Whether this committed row owes the customer a message (see the module docstring)."""
-    if log.action in (ORDER_CREATED, PAID_ORDER_KEPT):
+    if log.action in (ORDER_CREATED, PAID_ORDER_KEPT, SCHEDULE_CHANGED):
         return True
     return log.action == DELIVERY_SKIPPED and (log.extra_data or {}).get("skipped_by") == "system"
 
@@ -102,9 +116,13 @@ def send(log_id: int) -> str:
     notice_id = f"subscription-log:{log.id}"
     if log.action == DELIVERY_SKIPPED:
         return customer_notices.send_delivery_skipped(log.subscription, facts, notice_id=notice_id)
+    if log.action == SCHEDULE_CHANGED:
+        return customer_notices.send_schedule_changed(log.subscription, facts, notice_id=notice_id)
     order = db.session.get(Order, facts.get("order_id"))
     if order is None:
         return "skipped:order_missing"
     if log.action == ORDER_CREATED:
-        return customer_notices.send_order_created(order, notice_id=notice_id)
+        return customer_notices.send_order_created(
+            order, notice_id=notice_id, not_included_product_ids=facts.get("not_included_product_ids") or []
+        )
     return customer_notices.send_paid_order_kept(order, facts, notice_id=notice_id)

@@ -41,7 +41,9 @@ from business_app.services.order_service import OrderService
 from business_app.services.sales import notifications
 from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.utils.exceptions import ConflictError, ValidationError
+from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES
 from business_app.utils.timezone_utils import get_utc_now
+from business_app.utils.translations import get_translation
 from shared.enums import OrderStatus, PaymentMethod
 from shared.staff_constants import (
     SALES_AGENT_ORDER_STATES,
@@ -212,16 +214,20 @@ class AgentOrderConfirmationService:
         return and_(~customer_pending, ~AgentOrderApprovalService.awaiting_clause())
 
     @staticmethod
-    def respond(order_id: int, user_id: int, action: str, reason: Optional[str] = None) -> Dict[str, Any]:
-        """The store's own answer, from the customer bot.
+    def pending_request(order: Order) -> Optional[OrderConfirmationRequest]:
+        """The store's still open Confirm/Decline question on `order` (its latest pending row), or None.
 
-        `get_order(order_id, user_id)` is the ownership gate: another customer's
-        order is a 404, never a 403 that confirms the order exists.
-        """
-        order_service = OrderService()
-        order = order_service.get_order(order_id, user_id)
+        The ONE answer to "may the store still answer": `customer_order_actions.confirm_action` publishes it,
+        `OrderService.customer_cancel_via` turns the store's Cancel into Decline by it, and `respond` enforces it.
+        A question is open only while the order is: once staff cancel or deliver it, its row stays "pending" until
+        `expire_due`, but neither Confirm nor Decline is offered or accepted any more.
 
-        request_row = (
+        Only an order a staff member placed can carry one, so an order with no `created_by_staff_id`, like an order
+        no longer active, is answered None without a query: the customer order list asks this for every order it
+        publishes."""
+        if order.created_by_staff_id is None or order.status not in ACTIVE_ORDER_STATUSES:
+            return None
+        return (
             OrderConfirmationRequest.query.filter(
                 OrderConfirmationRequest.order_id == order.id,
                 OrderConfirmationRequest.status == "pending",
@@ -229,16 +235,50 @@ class AgentOrderConfirmationService:
             .order_by(OrderConfirmationRequest.id.desc())
             .first()
         )
+
+    @staticmethod
+    def respond(
+        order_id: int, user_id: int, action: str, reason: Optional[str] = None, *, channel: str = "telegram"
+    ) -> Dict[str, Any]:
+        """The store's own answer: the customer bot's Confirm/Decline, or the store's own Cancel of the order
+        (`OrderService.remove_order_as_customer`, `channel="customer_cancel"`). `channel` is recorded as the
+        request row's `response_channel`.
+
+        `get_order(order_id, user_id)` is the ownership gate: another customer's
+        order is a 404, never a 403 that confirms the order exists.
+
+        Decided on the Delivery and Order rows locked in that order (`lock_delivery_then_order`, the order the
+        customer's cancel and a driver's Picked up take them in). The question must still be open
+        (`pending_request`, else 409 SALES_CONFIRMATION_NOT_PENDING). A decline removes the order, so it is the
+        customer's Cancel rule's to allow: when `OrderService.customer_cancel_block_code` refuses (a paid order, one
+        the driver has, one awaiting a new date) the decline raises the cancel's own refusal
+        (`_refuse_customer_cancel`: ValidationError ORDER_NOT_CUSTOMER_CANCELLABLE with its `reason_code`, a 400)
+        and nothing is written. Both routes that decline (POST /orders/<id>/agent-confirmation, the bot's Decline,
+        and POST /orders/<id>/cancel) pass through here.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        order_service = OrderService()
+        order_service.get_order(order_id, user_id)
+        _delivery, order = OrderScheduleService.lock_delivery_then_order(order_id)
+
+        request_row = AgentOrderConfirmationService.pending_request(order)
         if request_row is None:
+            db.session.rollback()
             raise ConflictError(
-                "This order is not awaiting your confirmation",
+                get_translation("api.orders.agent_confirmation.not_pending"),
                 error_code="SALES_CONFIRMATION_NOT_PENDING",
             )
         if action not in ("confirm", "decline"):
+            db.session.rollback()
             raise ValidationError(
                 "action must be 'confirm' or 'decline'",
                 error_code="SALES_CONFIRMATION_ACTION_INVALID",
             )
+        if action == "decline":
+            block_code = OrderService.customer_cancel_block_code(order)
+            if block_code is not None:
+                order_service._refuse_customer_cancel(order, block_code)
 
         outlet = request_row.outlet
 
@@ -256,7 +296,7 @@ class AgentOrderConfirmationService:
                     order.id,
                     OrderStatus.CONFIRMED,
                     updated_by=user_id,
-                    notes="Confirmed by customer via Telegram",
+                    notes=f"Confirmed by customer via {'Telegram' if channel == 'telegram' else 'the website'}",
                 )
             answer, decline_reason = "confirmed", None
             event, event_reason = SALES_EVENT_AGENT_ORDER_CONFIRMED, None
@@ -273,7 +313,7 @@ class AgentOrderConfirmationService:
         request_row.status = answer
         request_row.decline_reason = decline_reason
         request_row.responded_at = get_utc_now()
-        request_row.response_channel = "telegram"
+        request_row.response_channel = channel
         db.session.commit()
         notifications.notify_agent_order_event(order, outlet, event, reason=event_reason)
         return {"order": serialize_order(order), "confirmation": {"status": request_row.status}}

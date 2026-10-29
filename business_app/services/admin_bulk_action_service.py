@@ -10,12 +10,11 @@ from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.models.product import Product
 from business_app.models.review import Review
-from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
 from business_app.services.session_revocation_service import SessionRevocationService
-from business_app.utils.exceptions import ValidationError
-from shared.enums import OrderStatus, SubscriptionStatus, UserRole, UserStatus
+from business_app.utils.exceptions import NotFoundError, ValidationError
+from shared.enums import OrderStatus, UserRole, UserStatus
 from shared.status_transitions import is_valid_order_transition
 
 
@@ -338,49 +337,32 @@ class AdminBulkActionService:
 
     @staticmethod
     def _bulk_action_subscriptions(action, subscription_ids, parameters, reason, admin_id):
+        """Pause, resume and cancel by the admin's own single-subscription actions (spec 2026-10-26 §12):
+        the same guard, the same order rule (an unpaid upcoming order is cancelled, a paid one stays) and the
+        same audit log. A refusal is reported in the guard's own translated words."""
+        from business_app.services.subscription_service import SubscriptionService
+        from business_app.utils.translations import get_translation
+
+        service = SubscriptionService()
+        actor_user_id = int(admin_id) if admin_id is not None else None
+        perform = {
+            "pause": lambda sid: service.admin_pause_subscription(sid, actor_user_id, reason),
+            "resume": lambda sid: service.admin_resume_subscription(sid, actor_user_id),
+            "cancel": lambda sid: service.admin_cancel_subscription(sid, actor_user_id, reason),
+        }[action]
+
         success_count = 0
         failed_count = 0
         errors = []
 
         for subscription_id in subscription_ids:
             try:
-                subscription = Subscription.query.get(subscription_id)
-                if not subscription:
-                    failed_count += 1
-                    errors.append({"subscription_id": subscription_id, "error": "Subscription not found"})
-                    continue
-
-                if action == "pause":
-                    if subscription.status == SubscriptionStatus.ACTIVE:
-                        subscription.status = SubscriptionStatus.PAUSED
-                        subscription.paused_at = datetime.now(UTC)
-                        subscription.pause_reason = reason
-                    else:
-                        failed_count += 1
-                        errors.append(
-                            {"subscription_id": subscription_id, "error": "Can only pause active subscriptions"}
-                        )
-                        continue
-
-                elif action == "resume":
-                    if subscription.status == SubscriptionStatus.PAUSED:
-                        subscription.status = SubscriptionStatus.ACTIVE
-                        subscription.paused_at = None
-                        subscription.pause_reason = None
-                    else:
-                        failed_count += 1
-                        errors.append(
-                            {"subscription_id": subscription_id, "error": "Can only resume paused subscriptions"}
-                        )
-                        continue
-
-                elif action == "cancel":
-                    subscription.status = SubscriptionStatus.CANCELLED
-                    subscription.end_date = datetime.now(UTC)
-
-                db.session.commit()
+                perform(subscription_id)
                 success_count += 1
-
+            except (NotFoundError, ValidationError) as e:
+                db.session.rollback()
+                failed_count += 1
+                errors.append({"subscription_id": subscription_id, "error": get_translation(e.message)})
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1

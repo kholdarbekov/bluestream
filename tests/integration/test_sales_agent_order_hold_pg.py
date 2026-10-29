@@ -203,7 +203,7 @@ def test_t_hold_14_an_approval_racing_the_stores_cancel_ends_consistent(pg_app, 
 
     _run_together(
         caller("approve", f"{APPROVALS}/{held_id}/approve", {}, manager_headers),
-        caller("cancel", f"/api/v1/orders/{held_id}/cancel", {"reason": "Ordered twice"}, store_headers),
+        caller("cancel", f"/api/v1/orders/{held_id}/cancel", {"expected_via": "cancel"}, store_headers),
     )
 
     assert set(answers) == {"approve", "cancel"}, answers  # both threads finished with an answer

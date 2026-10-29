@@ -51,6 +51,7 @@ class EmailTemplateService:
         "subscription_delivery_skipped": "subscription_delivery_skipped",
         "subscription_paid_order_kept": "subscription_paid_order_kept",
         "order_payment_expired": "order_payment_expired",
+        "subscription_schedule_changed": "subscription_schedule_changed",
     }
 
     # Email subjects by template and language
@@ -206,6 +207,12 @@ class EmailTemplateService:
             "uz": "#{order_number} buyurtmasi bekor qilindi: to'lanmagan - {company_name}",
             "en": "Order #{order_number} cancelled: not paid - {company_name}",
             "ru": "Заказ #{order_number} отменён: не оплачен - {company_name}",
+        },
+        # A slot write changed the delivery time or day (spec 2026-10-27 §6.5). uz/ru: NATIVE-READ.
+        "subscription_schedule_changed": {
+            "uz": "Yetkazib berish jadvalingiz o'zgardi - {company_name}",
+            "en": "Your delivery schedule changed - {company_name}",
+            "ru": "Расписание доставки изменилось - {company_name}",
         },
     }
 

@@ -1007,7 +1007,8 @@ class TestRevokedIdentities:
         """
         fresh = app.test_client()
         headers = {"Authorization": "Bearer not.a.jwt", "Content-Type": "application/json"}
-        expected = {"error": "Invalid Token", "message": "The token is invalid."}
+        # `reauth`: the JWT layer's "sign in again" mark, which the storefront's apiRequest reads (Task 9fix).
+        expected = {"error": "Invalid Token", "message": "The token is invalid.", "reauth": True}
 
         bottle = fresh.get(f"{API}/bottles/balances", headers=headers)
         assert bottle.status_code == 401, bottle.get_data(as_text=True)

@@ -55,7 +55,7 @@ pytestmark = pytest.mark.integration
 LOGIN = "/api/v1/auth/login"
 LOGOUT = "/api/v1/auth/logout"
 PROFILE = "/api/v1/auth/profile"
-REFRESH = "/api/v1/auth/refresh-token"  # the storefront's (base.js); the bot posts the same body to /auth/refresh
+REFRESH = "/api/v1/auth/refresh-token"  # the admin UI calls it; the bot posts the same body to /auth/refresh
 REFRESH_COOKIE = "/api/v1/auth/refresh-cookie"
 STAFF_LOGIN = "/api/v1/staff/auth/login"
 STAFF_REFRESH = "/api/v1/staff/auth/refresh"
@@ -94,8 +94,22 @@ def doors(app, tokens):
     return [door(app, tokens).status_code for door in (refresh, refresh_by_cookie, profile)]
 
 
+def staff_doors(app, tokens):
+    """What a STAFF login gets from the doors staff use: the admin UI's body-token refresh and the profile.
+    The storefront cookie door renews a customer's login only (TokenService.storefront_may_renew), so a
+    staff login is asked there separately: see `assert_staff_signed_in`."""
+    return [door(app, tokens).status_code for door in (refresh, profile)]
+
+
+def assert_staff_signed_in(app, tokens):
+    """A staff login is signed in on its own doors, and the storefront cookie door refuses it by design."""
+    assert staff_doors(app, tokens) == STAFF_SIGNED_IN
+    assert refresh_by_cookie(app, tokens).status_code == 401
+
+
 SIGNED_OUT = [401, 401, 401]
 SIGNED_IN = [200, 200, 200]
+STAFF_SIGNED_IN = [200, 200]
 
 
 def _revocations(events):

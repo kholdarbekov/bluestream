@@ -87,10 +87,19 @@ async def bot(monkeypatch):
                 }
             },
         )
+    harness.backend.route(
+        "GET",
+        "/api/v1/delivery/time-slots",
+        lambda _c: {
+            "delivery_weekdays": [0, 1, 2, 3, 4, 5, 6],
+            "time_slots": [{"id": 5, "name": "Morning", "time_range": "10:00-12:00"}],
+        },
+    )
+    for sub_id in (SUB_ID, OTHER_SUB_ID):
         harness.backend.route(
-            "GET",
-            f"/api/v1/subscriptions/{sub_id}/items",
-            lambda _c: {"data": {"items": []}},
+            "POST",
+            f"/api/v1/subscriptions/{sub_id}/preview",
+            lambda _c: {"data": {"preview": {"schedule_sentence": "Every day", "expected_state": "0123456789abcdef"}}},
         )
     harness.backend.route(
         "GET",
@@ -163,18 +172,15 @@ def collect_errors(bot):
 # ---------------------------------------------------------------------------
 
 
-async def test_the_billing_button_reaches_that_subscriptions_history(bot, user):
-    """`billing_history_12`.split('_') is ['billing','history','12'] — index 3
-    does not exist. Every tap raised IndexError and showed the error toast."""
-    errors = collect_errors(bot)
+async def test_the_billing_button_is_gone_with_its_always_empty_history(bot, user):
+    """The Billing screen read `/billing-history`, which was always empty: no subscription is ever "billed",
+    each delivery is an order. The route is retired (spec 2026-10-26 §5 B6), and so are its button and
+    callback; the subscription's orders are its `/history`."""
+    await bot.send(user.tap(f"subscription_{SUB_ID}"))
 
-    await bot.send(user.tap(f"billing_history_{SUB_ID}"))
-
-    assert not errors, f"the tap still raises: {errors}"
-    assert f"{SUBSCRIPTION}/billing-history" in endpoints(bot), (
-        f"billing history was never requested; the bot called {endpoints(bot)}"
-    )
-    assert "BILLING-HISTORY" in last_text(bot)
+    assert not [b for b in buttons(bot) if b and b.startswith("billing_history")], buttons(bot)
+    assert bot.handlers_matching(user.tap(f"billing_history_{SUB_ID}")) == []
+    assert f"{SUBSCRIPTION}/billing-history" not in endpoints(bot)
 
 
 async def test_the_change_payment_button_opens_the_picker(bot, user):
@@ -230,7 +236,9 @@ async def test_every_button_on_the_change_frequency_screen_is_claimed(bot, user)
         )
 
 
-async def test_choosing_a_new_frequency_updates_that_subscription(bot, user):
+async def test_choosing_a_new_frequency_asks_the_slot_and_writes_nothing_yet(bot, user):
+    """A frequency tap is a step, not a save: the slot is asked next (spec 2026-10-27 §6.2), and the change is
+    written only after the backend's preview has been shown and Saved."""
     await bot.send(user.tap(f"change_frequency_{SUB_ID}"))
     frequency_buttons = [b for b in buttons(bot) if b and b.startswith("subfreq_")]
     assert frequency_buttons, f"the screen offers no frequency buttons: {buttons(bot)}"
@@ -238,8 +246,10 @@ async def test_choosing_a_new_frequency_updates_that_subscription(bot, user):
 
     await bot.send(user.tap(f"subfreq_daily_{SUB_ID}"))
 
-    assert payload_for(bot, "PUT", SUBSCRIPTION) == {"frequency": "daily"}
-    assert last_text(bot) == "✅ FREQUENCY-UPDATED"
+    assert "PUT" not in [call.method for call in bot.backend.calls]
+    assert buttons(bot) == [
+        f"subsched_daily_x_5_{SUB_ID}", f"subsched_daily_x_any_{SUB_ID}", f"change_frequency_{SUB_ID}",
+    ]
 
 
 async def test_every_button_on_the_change_payment_screen_is_claimed(bot, user):
@@ -252,28 +262,56 @@ async def test_every_button_on_the_change_payment_screen_is_claimed(bot, user):
         )
 
 
-async def test_choosing_a_new_payment_method_updates_that_subscription(bot, user):
+STATE = "0123456789abcdef"  # the card's `allowed_actions.expected_state`: 16 hex characters
+
+
+def _editable_card(bot, note=None):
+    """The card the consequence screen re-reads: editable, with the state a save must carry."""
+    bot.backend.route(
+        "GET", SUBSCRIPTION,
+        lambda _c: {"data": {"subscription": {
+            "id": SUB_ID, "status": "active", "frequency": "weekly", "kept_order_note": note,
+            "allowed_actions": {"edit": {"allowed": True}, "expected_state": STATE},
+        }}},
+    )
+
+
+async def test_choosing_a_new_payment_method_shows_the_consequence_then_updates_that_subscription(bot, user):
+    _editable_card(bot, note="KEPT-NOTE")
     await bot.send(user.tap(f"change_payment_{SUB_ID}"))
     bot.telegram.reset()
 
     await bot.send(user.tap(f"subpay_cash_{SUB_ID}"))
 
+    assert "POST" not in [call.method for call in bot.backend.calls], "the choice wrote at once"
+    assert "KEPT-NOTE" in last_text(bot)
+    assert buttons(bot) == [f"subpayok_cash_{SUB_ID}_{STATE}", f"change_payment_{SUB_ID}"]
+    bot.telegram.reset()
+
+    await bot.send(user.tap(f"subpayok_cash_{SUB_ID}_{STATE}"))
+
     assert payload_for(bot, "POST", f"{SUBSCRIPTION}/change-payment-method") == {
-        "payment_method": "cash"
+        "payment_method": "cash", "expected_state": STATE,
     }
-    assert last_text(bot) == "✅ PAYMENT-UPDATED"
+    assert "PAYMENT-UPDATED" in [a.params.get("text") for a in bot.telegram.visible_answers]
+    assert "SUBSCRIPTION-DETAILS" in last_text(bot)  # the card as it stands now
 
 
 async def test_a_payment_method_whose_name_contains_an_underscore_survives(bot, user):
     """`business_account` is why the old parser used `split('_', 2)[2]`. The id
     now travels last, so the rail is everything between the prefix and the id."""
+    _editable_card(bot)
     await bot.send(user.tap(f"change_payment_{SUB_ID}"))
     bot.telegram.reset()
 
     await bot.send(user.tap(f"subpay_business_account_{SUB_ID}"))
+    assert buttons(bot)[0] == f"subpayok_business_account_{SUB_ID}_{STATE}"
+    bot.telegram.reset()
+
+    await bot.send(user.tap(f"subpayok_business_account_{SUB_ID}_{STATE}"))
 
     assert payload_for(bot, "POST", f"{SUBSCRIPTION}/change-payment-method") == {
-        "payment_method": "business_account"
+        "payment_method": "business_account", "expected_state": STATE,
     }
 
 
@@ -284,15 +322,17 @@ async def test_a_payment_method_whose_name_contains_an_underscore_survives(bot, 
 
 async def test_the_edit_screens_still_work_after_a_restart(bot, user):
     """A deploy empties `user_data` while the card stays tappable. The id must
-    come off the callback, or the update posts to `subscriptions/None`."""
+    come off the callback, or the preview posts to `subscriptions/None`."""
     await bot.send(user.tap(f"change_frequency_{SUB_ID}"))
     bot.application.user_data[DEFAULT_USER_ID].clear()  # the deploy
     bot.telegram.reset()
 
     await bot.send(user.tap(f"subfreq_daily_{SUB_ID}"))
+    await bot.send(user.tap(f"subsched_daily_x_any_{SUB_ID}"))
 
-    assert payload_for(bot, "PUT", SUBSCRIPTION) == {"frequency": "daily"}
+    assert payload_for(bot, "POST", f"{SUBSCRIPTION}/preview") == {"frequency": "daily", "delivery_time_slot_id": None}
     assert "/api/v1/subscriptions/None" not in endpoints(bot)
+    assert "/api/v1/subscriptions/None/preview" not in endpoints(bot)
 
 
 async def test_editing_one_subscription_never_touches_another(bot, user):
@@ -303,9 +343,10 @@ async def test_editing_one_subscription_never_touches_another(bot, user):
     bot.telegram.reset()
 
     await bot.send(user.tap(f"subfreq_daily_{SUB_ID}"))
+    await bot.send(user.tap(f"subsched_daily_x_any_{SUB_ID}"))
 
-    assert payload_for(bot, "PUT", SUBSCRIPTION) == {"frequency": "daily"}
-    assert f"/api/v1/subscriptions/{OTHER_SUB_ID}" not in endpoints(bot, "PUT"), (
+    assert payload_for(bot, "POST", f"{SUBSCRIPTION}/preview") == {"frequency": "daily", "delivery_time_slot_id": None}
+    assert f"/api/v1/subscriptions/{OTHER_SUB_ID}/preview" not in endpoints(bot, "POST"), (
         "the tap edited the other subscription's card"
     )
 
@@ -324,13 +365,26 @@ async def test_the_edit_screens_do_not_hijack_subscription_creation(bot, user):
 
 
 # ---------------------------------------------------------------------------
-# Pause must carry a JSON body: the endpoint is body-validated, so no body is a 400
+# Pause carries the state the card showed: the endpoint is body-validated, so no body is a 400
 # ---------------------------------------------------------------------------
 
 
-async def test_pausing_sends_an_empty_json_body_not_none(bot, user):
+async def test_pausing_sends_the_state_the_card_showed_not_an_empty_body(bot, user):
+    """A pause that cancels nothing (`needs_confirm` False) goes out at once, with the `expected_state` of the
+    card it just read: the backend answers 409 when that no longer holds."""
+    state = "0123456789abcdef"
+    bot.backend.route(
+        "GET", SUBSCRIPTION,
+        lambda _c: {"data": {"subscription": {
+            "id": SUB_ID, "status": "active", "frequency": "weekly",
+            "allowed_actions": {
+                "pause": {"allowed": True, "label": "Pause", "needs_confirm": False},
+                "expected_state": state,
+            },
+        }}},
+    )
     bot.backend.route("POST", f"{SUBSCRIPTION}/pause", lambda _c: {"success": True, "data": {}})
 
     await bot.send(user.tap(f"pause_sub_{SUB_ID}"))
 
-    assert payload_for(bot, "POST", f"{SUBSCRIPTION}/pause") == {}
+    assert payload_for(bot, "POST", f"{SUBSCRIPTION}/pause") == {"expected_state": state}

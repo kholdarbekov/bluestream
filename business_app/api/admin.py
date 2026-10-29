@@ -43,6 +43,7 @@ from business_app.models.translation import Translation
 # from business_app.services.admin_service import AdminService
 from business_app.utils.service_factory import get_notification_service, get_corporate_contract_service
 from business_app.services.order_address_change_service import ADDRESS_CHANGE_PERMISSIONS
+from business_app.services import subscription_schedule
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.payment_service import PaymentService
 from business_app.services.review_service import ReviewService
@@ -55,6 +56,7 @@ from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
 from business_app.services.customer_link_service import CustomerLinkService
+from business_app.services.delivery_time_slot_service import DeliveryTimeSlotService
 from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin,
@@ -130,10 +132,11 @@ from business_app.utils.api_responses import (
     conflict_response,
 )
 from business_app.utils.bot_webhook import trigger_translation_reload
-from business_app.utils.pydantic_helpers import validate_json_with_model
+from business_app.utils.pydantic_helpers import dump_changes, validate_json_with_model
 from business_app.utils.request_helpers import parse_bool_arg
 from business_app.utils.staff_order_info import build_staff_order_info as _build_staff_order_info
 from business_app.serializers.subscription_serializers import (
+    CLEARABLE_SUBSCRIPTION_FIELDS,
     AdminCreateSubscriptionRequest,
     AdminUpdateSubscriptionRequest,
     AdminAddSubscriptionItemRequest,
@@ -1234,18 +1237,29 @@ def get_user_cart(user_id):
 @jwt_required()
 @manager_or_higher_required
 def get_user_payment_methods_admin(user_id):
-    """Get debt-aware payment methods for admin-created orders."""
+    """Get a customer's debt-aware payment methods for admin-created orders, or (`?context=subscription`)
+    for the admin subscription form."""
     try:
+        from business_app.services.payment_service import PaymentContext
         from business_app.services.staff_service import StaffService
 
         # Same optional param as the operator route: with the destination
         # address the COD cap's PLACE arm is evaluated too, so this menu can
         # never offer cash that admin order creation would then refuse.
         delivery_address_id = request.args.get("delivery_address_id", type=int)
-        payload = StaffService.get_client_payment_methods(user_id, delivery_address_id=delivery_address_id)
+        try:
+            context = PaymentContext(request.args.get("context", PaymentContext.ORDER.value))
+        except ValueError:
+            return validation_error_response(get_translation("api.payments.error.invalid_context"))
+        if context == PaymentContext.SUBSCRIPTION:
+            # The customer's subscription menu, the list the subscription write guard checks (spec 2026-10-26
+            # §8.1, B8), so the form offers what an admin create or update accepts for this customer.
+            payload = SubscriptionService.admin_payment_menu(user_id, delivery_address_id)
+        else:
+            payload = StaffService.get_client_payment_methods(user_id, delivery_address_id=delivery_address_id)
         return success_response(data=payload)
-    except NotFoundError:
-        return not_found_response(resource_type="User")
+    except NotFoundError as e:
+        return not_found_response(e.message)  # "User not found", or the subscription menu's foreign address
     except ValidationError as e:
         return validation_error_response(e.message)
     except Exception as e:
@@ -4037,7 +4051,8 @@ def get_time_slot_admin(slot_id):
 @jwt_required()
 @validate_admin_action(["manage_delivery"])
 def create_time_slot():
-    """Create a new delivery time slot"""
+    """Create a new delivery time slot. Its days may add delivery days (spec 2026-10-27 §6.5): the slot service
+    tells the daily subscribers."""
     try:
         data = request.get_json()
 
@@ -4047,26 +4062,13 @@ def create_time_slot():
             if field not in data:
                 return validation_error_response(f"{field} is required")
 
-        # Create time slot
-        time_slot = DeliveryTimeSlot(
-            name=data["name"],
-            start_time=data["start_time"],
-            end_time=data["end_time"],
-            is_active=data.get("is_active", True),
-            max_orders=data["max_orders"],
-            delivery_fee=data["delivery_fee"],
-            is_premium=data.get("is_premium", False),
-            premium_fee=data.get("premium_fee", 0),
-            available_days=data.get("available_days", [0, 1, 2, 3, 4, 5, 6]),
-        )
-
-        db.session.add(time_slot)
-        db.session.commit()
-
+        time_slot = DeliveryTimeSlotService.create_slot(data, actor_id=g.current_user_id)
         current_app.logger.info(f"Time slot created: {time_slot.name} (ID: {time_slot.id})")
-
         return created_response(message="Time slot created successfully", data={"id": time_slot.id})
 
+    except ValidationError as e:
+        _rollback_db_session()
+        return error_response(get_translation(e.message))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create time slot error: {e}")
@@ -4077,41 +4079,19 @@ def create_time_slot():
 @jwt_required()
 @validate_admin_action(["manage_delivery"])
 def update_time_slot(slot_id):
-    """Update a delivery time slot"""
+    """Update a delivery time slot. The subscriptions it serves follow in the same transaction (spec 2026-10-27
+    §6.5): switched off or narrowed, they become Any time; new times, they keep it; each customer is told."""
     try:
-        slot = DeliveryTimeSlot.query.get(slot_id)
-
-        if not slot:
-            return not_found_response("Time slot not found")
-
-        data = request.get_json()
-
-        # Update fields
-        if "name" in data:
-            slot.name = data["name"]
-        if "start_time" in data:
-            slot.start_time = data["start_time"]
-        if "end_time" in data:
-            slot.end_time = data["end_time"]
-        if "is_active" in data:
-            slot.is_active = data["is_active"]
-        if "max_orders" in data:
-            slot.max_orders = data["max_orders"]
-        if "delivery_fee" in data:
-            slot.delivery_fee = data["delivery_fee"]
-        if "is_premium" in data:
-            slot.is_premium = data["is_premium"]
-        if "premium_fee" in data:
-            slot.premium_fee = data["premium_fee"]
-        if "available_days" in data:
-            slot.available_days = data["available_days"]
-
-        db.session.commit()
-
+        slot = DeliveryTimeSlotService.update_slot(slot_id, request.get_json(), actor_id=g.current_user_id)
         current_app.logger.info(f"Time slot updated: {slot.name} (ID: {slot_id})")
-
         return success_response(message=get_translation("api.admin.success.time_slot_updated"))
 
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        _rollback_db_session()
+        return error_response(get_translation(e.message))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update time slot error: {e}")
@@ -4122,21 +4102,19 @@ def update_time_slot(slot_id):
 @jwt_required()
 @validate_admin_action(["manage_delivery"])
 def delete_time_slot(slot_id):
-    """Delete a delivery time slot"""
+    """Delete a delivery time slot no live subscription uses; one still used is refused in words (spec 2026-10-27
+    §6.5): switch it off instead."""
     try:
-        slot = DeliveryTimeSlot.query.get(slot_id)
-
-        if not slot:
-            return not_found_response("Time slot not found")
-
-        slot_name = slot.name
-        db.session.delete(slot)
-        db.session.commit()
-
-        current_app.logger.info(f"Time slot deleted: {slot_name} (ID: {slot_id})")
-
+        DeliveryTimeSlotService.delete_slot(slot_id, actor_id=g.current_user_id)
+        current_app.logger.info(f"Time slot deleted: ID {slot_id}")
         return success_response(message=get_translation("api.admin.success.time_slot_deleted"))
 
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(get_translation(e.message))
+    except ConflictError as e:
+        _rollback_db_session()
+        return conflict_response(get_translation(e.message, count=e.details["count"]))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Delete time slot error: {e}")
@@ -4810,6 +4788,7 @@ def get_subscriptions():
 
         # Serialize subscriptions
         subscriptions_data = []
+        delivery_days = subscription_schedule.delivery_weekdays()  # read once for the page (spec 2026-10-27 §6.4)
         for sub in pagination.items:
             sub_dict = {
                 "id": sub.id,
@@ -4829,7 +4808,9 @@ def get_subscriptions():
                 "total_amount_billed": float(sub.total_amount_billed),
                 "items_count": len(sub.subscription_items),
                 "created_at": sub.created_at.isoformat() if sub.created_at else None,
-                **SubscriptionService.published_schedule(sub),
+                **SubscriptionService.published_schedule(sub, delivery_days=delivery_days),
+                # The admin's buttons (spec 2026-10-26 §12): the guard every admin write calls.
+                "allowed_actions": SubscriptionService.allowed_actions(sub, actor="admin"),
             }
             subscriptions_data.append(sub_dict)
 
@@ -4938,6 +4919,8 @@ def get_subscription(subscription_id):
             "created_at": subscription.created_at.isoformat() if subscription.created_at else None,
             "updated_at": subscription.updated_at.isoformat() if subscription.updated_at else None,
             **SubscriptionService.published_schedule(subscription),
+            # The admin's buttons (spec 2026-10-26 §12): the guard every admin write calls.
+            "allowed_actions": SubscriptionService.allowed_actions(subscription, actor="admin"),
         }
 
         return success_response(data={"subscription": subscription_data})
@@ -4968,7 +4951,7 @@ def create_subscription_admin():
         return conflict_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         _rollback_db_session()
         current_app.logger.error(f"Create subscription (admin) error: {e}")
@@ -4988,8 +4971,9 @@ def update_subscription_admin(subscription_id):
             "manual_billing_amount": validated.override_manual_billing_amount,
             "manual_billing_dates": validated.override_manual_billing_dates,
         }
-        update_data = validated.model_dump(
-            exclude_none=True,
+        update_data = dump_changes(
+            validated,
+            clearable=CLEARABLE_SUBSCRIPTION_FIELDS,
             exclude={
                 "override_edit_any_status",
                 "override_manual_billing_amount",
@@ -5022,7 +5006,7 @@ def update_subscription_admin(subscription_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         _rollback_db_session()
         current_app.logger.error(f"Update subscription (admin) error: {e}")
@@ -5067,7 +5051,7 @@ def add_subscription_item_admin(subscription_id):
         return conflict_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         _rollback_db_session()
         current_app.logger.error(f"Add subscription item (admin) error: {e}")
@@ -5109,7 +5093,7 @@ def update_subscription_item_admin(subscription_id, item_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         _rollback_db_session()
         current_app.logger.error(f"Update subscription item (admin) error: {e}")
@@ -5134,7 +5118,7 @@ def remove_subscription_item_admin(subscription_id, item_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         _rollback_db_session()
         current_app.logger.error(f"Remove subscription item (admin) error: {e}")
@@ -5175,7 +5159,7 @@ def pause_subscription_admin(subscription_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Pause subscription error: {e}")
         return internal_error_response(f"Failed to pause subscription: {str(e)}")
@@ -5210,7 +5194,7 @@ def resume_subscription_admin(subscription_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Resume subscription error: {e}")
         return internal_error_response(f"Failed to resume subscription: {str(e)}")
@@ -5252,7 +5236,7 @@ def cancel_subscription_admin(subscription_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Cancel subscription error: {e}")
         return internal_error_response(f"Failed to cancel subscription: {str(e)}")
@@ -5286,7 +5270,7 @@ def process_subscription_billing_admin(subscription_id):
         return not_found_response(getattr(e, "message", str(e)))
     except ValidationError as e:
         _rollback_db_session()
-        return validation_error_response(getattr(e, "message", str(e)))
+        return validation_error_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Process subscription billing error: {e}")
         return internal_error_response(f"Failed to process billing: {str(e)}")

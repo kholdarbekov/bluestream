@@ -227,7 +227,9 @@ class TestCancelPaidClickOrderSettlesAsPrepaidCredit:
         comes before any money moves: no credit, and the payment and reserved code are untouched."""
         order, payment, code = paid_click_order
 
-        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        response = client.post(
+            CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+        )
         body = response.get_json()
 
         assert response.status_code == 400, body
@@ -562,7 +564,9 @@ class TestNothingIsMintedOutOfMoneyWeNeverTook:
         order.paid_at = None
         db.session.commit()
 
-        response = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+        response = client.post(
+            CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+        )
         assert response.status_code == 200, response.get_json()
 
         db.session.expire_all()

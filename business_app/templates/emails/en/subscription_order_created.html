@@ -20,12 +20,18 @@
     </tr>
     <tr>
         <th>Delivery</th>
-        <td>{{ delivery_date }}, {% if window %}{{ window }}{% else %}time to be confirmed{% endif %}</td>
+        <td>{{ delivery_date }}, {{ time_label }}</td>
     </tr>
     {% for item in items %}
     <tr>
         <th>{{ item.name }}</th>
         <td>× {{ item.qty }}</td>
+    </tr>
+    {% endfor %}
+    {% for name in not_included or [] %}
+    <tr>
+        <th>Not included</th>
+        <td>{{ name }} (no longer available)</td>
     </tr>
     {% endfor %}
     <tr>

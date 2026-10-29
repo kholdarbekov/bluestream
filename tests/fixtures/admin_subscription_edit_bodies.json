@@ -1,0 +1,171 @@
+{
+  "_comment": "The admin Edit form (admin_ui Subscriptions.js): a published admin detail (`GET /api/v1/admin/subscriptions/<id>`, only the keys `mapDetailToForm` reads) goes through `mapDetailToForm`, the case's `edit`, then `buildSubscriptionPayload(values, {isEdit: true})`; the body the form submits must equal `body`. admin_ui/src/__tests__/utils/subscriptionPayload.test.js runs the shipped functions on each case and checks every key `mapDetailToForm` reads is here. tests/integration/test_subscription_action_guards.py checks each detail IS what the endpoint publishes for the subscription it builds, then PUTs the SAME body. Ids are placeholders the Python test swaps for real rows (11 = the subscription's address, 12 = the other address, 22 = the slot). `next_delivery_date` is a placeholder too: the form sends it only behind the override switch.",
+  "placeholders": {"address": 11, "other_address": 12, "slot": 22},
+  "details": {
+    "thursday_cash": {
+      "name": "Home water",
+      "description": "",
+      "frequency": "weekly",
+      "delivery_day_of_week": 3,
+      "delivery_day_of_month": null,
+      "delivery_time_slot_id": null,
+      "delivery_time_slot": null,
+      "delivery_address_id": 11,
+      "payment_method": "cash",
+      "auto_renew": true,
+      "discount_percentage": 0.0,
+      "loyalty_points_multiplier": 1.0,
+      "start_date": "2026-01-05T05:00:00+00:00",
+      "end_date": null,
+      "billing_amount": 30000.0,
+      "next_delivery_date": "2026-11-05"
+    },
+    "thursday_click": {
+      "name": "Home water",
+      "description": "",
+      "frequency": "weekly",
+      "delivery_day_of_week": 3,
+      "delivery_day_of_month": null,
+      "delivery_time_slot_id": null,
+      "delivery_time_slot": null,
+      "delivery_address_id": 11,
+      "payment_method": "click",
+      "auto_renew": true,
+      "discount_percentage": 0.0,
+      "loyalty_points_multiplier": 1.0,
+      "start_date": "2026-01-05T05:00:00+00:00",
+      "end_date": null,
+      "billing_amount": 30000.0,
+      "next_delivery_date": "2026-11-05"
+    },
+    "saturday_slot": {
+      "name": "Home water",
+      "description": "",
+      "frequency": "weekly",
+      "delivery_day_of_week": 5,
+      "delivery_day_of_month": null,
+      "delivery_time_slot_id": 22,
+      "delivery_address_id": 11,
+      "payment_method": "click",
+      "auto_renew": true,
+      "discount_percentage": 0.0,
+      "loyalty_points_multiplier": 1.0,
+      "start_date": "2026-01-05T05:00:00+00:00",
+      "end_date": null,
+      "billing_amount": 30000.0,
+      "next_delivery_date": "2026-11-07"
+    }
+  },
+  "cases": [
+    {
+      "name": "rename",
+      "detail": "thursday_cash",
+      "edit": {"name": "Renamed by admin"},
+      "body": {
+        "name": "Renamed by admin",
+        "description": "",
+        "frequency": "weekly",
+        "delivery_day_of_week": 3,
+        "delivery_day_of_month": null,
+        "delivery_time_slot_id": null,
+        "delivery_address_id": 11,
+        "payment_method": "cash",
+        "auto_renew": true,
+        "discount_percentage": 0,
+        "loyalty_points_multiplier": 1,
+        "start_date": "2026-01-05T05:00:00.000Z",
+        "override_edit_any_status": false,
+        "override_manual_billing_amount": false,
+        "override_manual_billing_dates": false
+      }
+    },
+    {
+      "name": "move to the other address",
+      "detail": "thursday_cash",
+      "edit": {"delivery_address_id": 12},
+      "body": {
+        "name": "Home water",
+        "description": "",
+        "frequency": "weekly",
+        "delivery_day_of_week": 3,
+        "delivery_day_of_month": null,
+        "delivery_time_slot_id": null,
+        "delivery_address_id": 12,
+        "payment_method": "cash",
+        "auto_renew": true,
+        "discount_percentage": 0,
+        "loyalty_points_multiplier": 1,
+        "start_date": "2026-01-05T05:00:00.000Z",
+        "override_edit_any_status": false,
+        "override_manual_billing_amount": false,
+        "override_manual_billing_dates": false
+      }
+    },
+    {
+      "name": "move a card subscription to the other address",
+      "detail": "thursday_click",
+      "edit": {"delivery_address_id": 12},
+      "body": {
+        "name": "Home water",
+        "description": "",
+        "frequency": "weekly",
+        "delivery_day_of_week": 3,
+        "delivery_day_of_month": null,
+        "delivery_time_slot_id": null,
+        "delivery_address_id": 12,
+        "payment_method": "click",
+        "auto_renew": true,
+        "discount_percentage": 0,
+        "loyalty_points_multiplier": 1,
+        "start_date": "2026-01-05T05:00:00.000Z",
+        "override_edit_any_status": false,
+        "override_manual_billing_amount": false,
+        "override_manual_billing_dates": false
+      }
+    },
+    {
+      "name": "rename a Saturday subscription that has a slot",
+      "detail": "saturday_slot",
+      "edit": {"name": "Renamed by admin"},
+      "body": {
+        "name": "Renamed by admin",
+        "description": "",
+        "frequency": "weekly",
+        "delivery_day_of_week": 5,
+        "delivery_day_of_month": null,
+        "delivery_time_slot_id": 22,
+        "delivery_address_id": 11,
+        "payment_method": "click",
+        "auto_renew": true,
+        "discount_percentage": 0,
+        "loyalty_points_multiplier": 1,
+        "start_date": "2026-01-05T05:00:00.000Z",
+        "override_edit_any_status": false,
+        "override_manual_billing_amount": false,
+        "override_manual_billing_dates": false
+      }
+    },
+    {
+      "name": "Saturday to Monday on Any time",
+      "detail": "saturday_slot",
+      "edit": {"delivery_day_of_week": 0, "delivery_time_slot_id": "any"},
+      "body": {
+        "name": "Home water",
+        "description": "",
+        "frequency": "weekly",
+        "delivery_day_of_week": 0,
+        "delivery_day_of_month": null,
+        "delivery_time_slot_id": null,
+        "delivery_address_id": 11,
+        "payment_method": "click",
+        "auto_renew": true,
+        "discount_percentage": 0,
+        "loyalty_points_multiplier": 1,
+        "start_date": "2026-01-05T05:00:00.000Z",
+        "override_edit_any_status": false,
+        "override_manual_billing_amount": false,
+        "override_manual_billing_dates": false
+      }
+    }
+  ]
+}

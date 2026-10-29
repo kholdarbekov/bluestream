@@ -50,7 +50,9 @@ CONTRACT_KEYS = {
         "delivery_date",
         "window_start",
         "window_end",
+        "time_kind",
         "items",
+        "not_included",
         "total",
         "payment",
         "amount_due",
@@ -61,6 +63,19 @@ CONTRACT_KEYS = {
     "subscription_paid_order_kept": ENVELOPE
     | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date"},
     "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline"},
+    "subscription_schedule_changed": ENVELOPE
+    | {
+        "subscription_id",
+        "subscription_name",
+        "changes",
+        "old_window",
+        "new_window",
+        "old_weekday",
+        "new_weekday",
+        "added_weekdays",
+        "next_delivery_date",
+        "time_kind",
+    },
 }
 
 # One real push per kind, as business_app/services/customer_notices.py builds it, plus the `timestamp`
@@ -75,7 +90,9 @@ ORDER_CREATED = {
     "delivery_date": "2027-01-07",
     "window_start": "10:00",
     "window_end": "12:00",
+    "time_kind": "window",
     "items": [{"name": "Pure Water 19L", "qty": 2}, {"name": "Cooler cups", "qty": 1}],
+    "not_included": [],
     "total": 30000.0,
     "payment": "cash",
     "amount_due": 30000.0,
@@ -116,13 +133,30 @@ PAYMENT_EXPIRED = {
     "deadline": "2027-01-07T12:00:00+05:00",
     "timestamp": "2027-01-07T07:15:00+00:00",
 }
-ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED]
+SCHEDULE_CHANGED = {
+    "notice_id": "subscription-log:44",
+    "kind": "subscription_schedule_changed",
+    "telegram_id": "810000001",
+    "language": "en",
+    "subscription_id": 77,
+    "subscription_name": "Office water",
+    "changes": ["time_cleared", "day_moved"],
+    "old_window": "10:00–12:00",
+    "new_window": None,
+    "old_weekday": 6,
+    "new_weekday": 0,
+    "added_weekdays": [],
+    "next_delivery_date": "2027-01-11",
+    "time_kind": "any_time",
+    "timestamp": "2027-01-06T04:00:00+00:00",
+}
+ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED, SCHEDULE_CHANGED]
 CLICK = dict(ORDER_CREATED, payment="online_unpaid", amount_due=None, deadline="2027-01-07T12:00:00+05:00")
 
 COPY_KEYS = sorted(k for k in BACKEND_TRANSLATIONS if k.startswith("telegram.customer_notice.")) + [
     "telegram.payment.pay_now",
     "telegram.payment.view_order",
-]
+] + [f"telegram.subscription.weekday_{day}" for day in range(7)]
 
 
 class FakeRedis:
@@ -249,6 +283,24 @@ async def test_a_cash_order_names_the_date_window_items_total_and_the_door_payme
 
 @pytest.mark.unit
 @pytest.mark.anyio
+async def test_a_left_out_product_is_named_after_the_item_lines(ws):
+    payload = dict(ORDER_CREATED, items=[{"name": "Pure Water 19L", "qty": 2}], not_included=["Cooler <cups>"])
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        "telegram.customer_notice.order_created|en|order_number=WB_000017_27"
+        "|delivery=telegram.customer_notice.delivery_window|en|date=07.01.2027|start=10:00|end=12:00"
+        "|items=telegram.customer_notice.item|en|name=Pure Water 19L|qty=2"
+        "\ntelegram.customer_notice.not_included|en|name=Cooler &lt;cups&gt;"
+        "|total=30,000"
+        "|payment=telegram.customer_notice.pay_cash|en|amount=30,000"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
 async def test_an_unpaid_click_order_quotes_its_deadline_and_carries_pay_now(ws):
     resp = await ws.customer_notice_handler(_make_request(CLICK))
 
@@ -263,11 +315,38 @@ async def test_an_unpaid_click_order_quotes_its_deadline_and_carries_pay_now(ws)
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_an_order_without_a_window_reads_time_to_be_confirmed(ws):
-    resp = await ws.customer_notice_handler(_make_request(dict(ORDER_CREATED, window_start=None, window_end=None)))
+async def test_an_order_without_a_slot_reads_any_time(ws):
+    payload = dict(ORDER_CREATED, window_start=None, window_end=None, time_kind="any_time")
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert "|delivery=telegram.customer_notice.delivery_any_time|en|date=07.01.2027|items=" in _sent(ws)["text"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_order_whose_slot_is_off_reads_time_to_be_confirmed(ws):
+    payload = dict(ORDER_CREATED, window_start=None, window_end=None, time_kind="to_be_confirmed")
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
 
     assert resp.status == 200
     assert "|delivery=telegram.customer_notice.delivery_tbc|en|date=07.01.2027|items=" in _sent(ws)["text"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_old_shape_payload_without_time_kind_still_renders(ws):
+    """A notice queued in Celery before the deploy has no `time_kind`: the old window rule decides."""
+    old = {key: value for key, value in ORDER_CREATED.items() if key != "time_kind"}
+
+    resp = await ws.customer_notice_handler(_make_request(dict(old, window_start=None, window_end=None)))
+
+    assert resp.status == 200
+    assert "|delivery=telegram.customer_notice.delivery_tbc|en|date=07.01.2027|items=" in _sent(ws)["text"]
+    resp = await ws.customer_notice_handler(_make_request(dict(old, notice_id="subscription-log:99")))
+    assert "|delivery=telegram.customer_notice.delivery_window|en|date=07.01.2027|start=10:00|end=12:00|" in _sent(ws)["text"]
 
 
 @pytest.mark.unit
@@ -367,6 +446,98 @@ async def test_backend_supplied_text_is_html_escaped(ws):
     assert "order_number=A&lt;b&gt;" in order_text and "name=19L &lt;XL&gt; &amp; co" in order_text
     assert "subscription_name=Home &lt;i&gt;" in skipped_text and "reason=stock &lt;none&gt;" in skipped_text
     assert "<b>" not in order_text and "<i>" not in skipped_text
+
+
+# --------------------------------------------------------------------------- the schedule changed (§6.5)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_schedule_change_names_each_change_and_the_next_delivery(ws):
+    payload = dict(
+        SCHEDULE_CHANGED,
+        subscription_name="Home <i>",
+        changes=["time_cleared", "time_changed", "day_moved", "date_moved", "days_added"],
+        old_window="10:00–12:00",
+        new_window="11:00–13:00",
+        added_weekdays=[5, 6],
+    )
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    kwargs = _sent(ws)
+    assert kwargs["parse_mode"] == "HTML"
+    assert kwargs["text"] == (
+        "telegram.customer_notice.schedule_changed|en|subscription_name=Home &lt;i&gt;"
+        "|lines=telegram.customer_notice.schedule_change.time_cleared|en|old_window=10:00–12:00"
+        "\n\ntelegram.customer_notice.schedule_change.time_changed|en|new_window=11:00–13:00|old_window=10:00–12:00"
+        "\n\ntelegram.customer_notice.schedule_change.day_moved|en"
+        "|old_day=telegram.subscription.weekday_6|en|new_day=telegram.subscription.weekday_0|en"
+        "\n\ntelegram.customer_notice.schedule_change.date_moved|en|old_day=telegram.subscription.weekday_6|en"
+        "\n\ntelegram.customer_notice.schedule_change.days_added|en"
+        "|days=telegram.subscription.weekday_5|en, telegram.subscription.weekday_6|en"
+        "\n\ntelegram.customer_notice.schedule_changed_next|en|date=11.01.2027"
+    )
+    assert _buttons(kwargs) == []  # no order: no buttons (Task 17a adds Open subscription)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_paused_subscription_change_has_no_next_delivery_line(ws):
+    payload = dict(SCHEDULE_CHANGED, changes=["time_cleared"], next_delivery_date=None)
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        "telegram.customer_notice.schedule_changed|en|subscription_name=Office water"
+        "|lines=telegram.customer_notice.schedule_change.time_cleared|en|old_window=10:00–12:00"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"changes": ["moved"]},
+        {"changes": []},
+        {"changes": "time_cleared"},
+        {"changes": None},
+        {"changes": [["time_cleared"]]},
+        {"added_weekdays": [7]},
+        {"added_weekdays": ["6"]},
+        {"added_weekdays": [True]},
+        {"added_weekdays": None},
+    ],
+    ids=["unknown-code", "no-change", "not-a-list", "missing", "nested", "day-7", "day-text", "day-bool", "no-days"],
+)
+async def test_an_unknown_change_code_is_refused_before_the_claim(ws, change):
+    resp = await ws.customer_notice_handler(_make_request(dict(SCHEDULE_CHANGED, **change)))
+
+    assert resp.status == 400
+    assert "Unknown kind" not in json.loads(resp.body)["message"]  # refused for its facts, not its kind
+    ws.bot_app.bot.send_message.assert_not_awaited()
+    assert _redis(ws).store == {}
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_english_schedule_notice_reads_as_written(ws, monkeypatch):
+    _use_real_i18n(monkeypatch)
+
+    resp = await ws.customer_notice_handler(_make_request(SCHEDULE_CHANGED))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        "🕒 <b>Office water</b>: your delivery schedule has changed.\n\n"
+        "The 10:00–12:00 delivery time is no longer offered, so your deliveries now come at any time of the day. "
+        "You can choose another time in your subscription.\n\n"
+        "We no longer deliver on this day of the week (Sunday). Your new delivery day: Monday. "
+        "You can change it in your subscription.\n\n"
+        "📅 Next delivery: 11.01.2027"
+    )
 
 
 # --------------------------------------------------------------------------- refusals, dedup, failures

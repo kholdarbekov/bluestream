@@ -13,11 +13,14 @@ order as it is NOW: an order created and cancelled before its notice went out is
 The bot payload is an envelope plus the kind's facts (tests pin both sides: tests/integration/
 customer_notice_builders.py::CONTRACT_KEYS and tests/telegram_bot/test_webhook_customer_notice.py):
     envelope                      notice_id, kind, telegram_id, language
-    subscription_order_created    order_id, order_number, delivery_date, window_start, window_end,
-                                  items [{name, qty}], total, payment, amount_due, prepaid_applied, deadline
+    subscription_order_created    order_id, order_number, delivery_date, window_start, window_end, time_kind,
+                                  items [{name, qty}], not_included [name], total, payment, amount_due,
+                                  prepaid_applied, deadline
     subscription_delivery_skipped subscription_name, skipped_dates, reason, next_delivery_date
     subscription_paid_order_kept  order_id, order_number, delivery_date, trigger, next_delivery_date
     order_payment_expired         order_id, order_number, deadline
+    subscription_schedule_changed subscription_id, subscription_name, changes, old_window, new_window, old_weekday,
+                                  new_weekday, added_weekdays, next_delivery_date, time_kind
 Dates are ISO, money a float, a deadline an ISO instant in local time: each channel formats them by its own
 rule (the bot's `utils.format_date`, the email's `helpers.format_datetime`). `payment` is the backend's one
 answer to "how is this order paid": cash, company_account, online_unpaid (Pay now, the deadline) or
@@ -28,16 +31,19 @@ message per id.
 
 import logging
 from datetime import date, datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from business_app import db
 from business_app.models.order import Order
+from business_app.models.product import Product
 from business_app.models.user import User
 from business_app.services.notification_service import NotificationService
+from business_app.services import subscription_display
 from business_app.services.order_service import OrderService
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.bot_webhook import trigger_bot_webhook
+from business_app.utils import display_labels
 from business_app.utils.constants import NotificationChannel, NotificationType
 from business_app.utils.helpers import format_datetime
 from business_app.utils.payment_projection import net_open_receivable_amount, paid_amount
@@ -57,6 +63,20 @@ SUBSCRIPTION_ORDER_CREATED = NotificationType.SUBSCRIPTION_ORDER_CREATED.value
 SUBSCRIPTION_DELIVERY_SKIPPED = NotificationType.SUBSCRIPTION_DELIVERY_SKIPPED.value
 SUBSCRIPTION_PAID_ORDER_KEPT = NotificationType.SUBSCRIPTION_PAID_ORDER_KEPT.value
 ORDER_PAYMENT_EXPIRED = NotificationType.ORDER_PAYMENT_EXPIRED.value
+SUBSCRIPTION_SCHEDULE_CHANGED = NotificationType.SUBSCRIPTION_SCHEDULE_CHANGED.value
+# The facts a schedule change carries, as `SubscriptionService.reconcile_with_slots` records them.
+_SCHEDULE_CHANGED_FACTS = (
+    "subscription_id",
+    "subscription_name",
+    "changes",
+    "old_window",
+    "new_window",
+    "old_weekday",
+    "new_weekday",
+    "added_weekdays",
+    "next_delivery_date",
+    "time_kind",
+)
 
 PAY_CASH = "cash"
 PAY_COMPANY_ACCOUNT = "company_account"
@@ -68,14 +88,21 @@ class RetryableNoticeError(Exception):
     """The bot was unreachable or failed: the task retries. The bot's dedup on `notice_id` keeps it one message."""
 
 
-# --------------------------------------------------------------------------- the four notices
+# --------------------------------------------------------------------------- the notices
 
 
-def send_order_created(order: Order, *, notice_id: str) -> str:
-    """A subscription order was created (§4.4)."""
+def send_order_created(order: Order, *, notice_id: str, not_included_product_ids: Sequence[int] = ()) -> str:
+    """A subscription order was created (§4.4). `not_included_product_ids` are the subscription's products that
+    were no longer available and so left out of the order (spec 2026-10-26 §8.5)."""
     if order.status == OrderStatus.CANCELLED:
         return "skipped:order_inactive"
-    return _send(order.user, SUBSCRIPTION_ORDER_CREATED, _order_created_facts(order), notice_id=notice_id, order=order)
+    return _send(
+        order.user,
+        SUBSCRIPTION_ORDER_CREATED,
+        _order_created_facts(order, not_included_product_ids),
+        notice_id=notice_id,
+        order=order,
+    )
 
 
 def send_delivery_skipped(subscription, facts: Dict[str, Any], *, notice_id: str) -> str:
@@ -107,6 +134,17 @@ def send_paid_order_kept(order: Order, facts: Dict[str, Any], *, notice_id: str)
             "trigger": facts.get("trigger"),
             "next_delivery_date": facts.get("next_delivery_date"),
         },
+        notice_id=notice_id,
+    )
+
+
+def send_schedule_changed(subscription, facts: Dict[str, Any], *, notice_id: str) -> str:
+    """A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5): the facts recorded with
+    the change, each a line of the message."""
+    return _send(
+        subscription.user,
+        SUBSCRIPTION_SCHEDULE_CHANGED,
+        {key: facts.get(key) for key in _SCHEDULE_CHANGED_FACTS},
         notice_id=notice_id,
     )
 
@@ -149,7 +187,7 @@ def payment_facts(order: Order) -> Dict[str, Any]:
     return {**facts, "payment": PAY_ONLINE_UNPAID, "deadline": _local_iso(OrderService.payment_deadline(order))}
 
 
-def _order_created_facts(order: Order) -> Dict[str, Any]:
+def _order_created_facts(order: Order, not_included_product_ids: Sequence[int] = ()) -> Dict[str, Any]:
     language = _language(order.user)
     has_window = order.delivery_window_start is not None and order.delivery_window_end is not None
     return {
@@ -158,16 +196,24 @@ def _order_created_facts(order: Order) -> Dict[str, Any]:
         "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
         "window_start": order.delivery_window_start.strftime("%H:%M") if has_window else None,
         "window_end": order.delivery_window_end.strftime("%H:%M") if has_window else None,
-        "items": [{"name": _product_name(item, language), "qty": item.quantity} for item in order.order_items],
+        # Which of the three delivery times this is (spec 2026-10-27 §6.3): the window, Any time, or to be confirmed.
+        "time_kind": subscription_display.time_kind(order),
+        "items": [
+            {"name": _product_name(item.product, item.product_id, language), "qty": item.quantity}
+            for item in order.order_items
+        ],
+        "not_included": [
+            _product_name(db.session.get(Product, product_id), product_id, language)
+            for product_id in not_included_product_ids
+        ],
         "total": float(order.total_amount or 0),
         **payment_facts(order),
     }
 
 
-def _product_name(item, language: str) -> str:
-    product = item.product
+def _product_name(product: Optional[Product], product_id: int, language: str) -> str:
     if product is None:
-        return f"#{item.product_id}"
+        return f"#{product_id}"
     return product.get_translated("name", language) or product.name
 
 
@@ -186,7 +232,8 @@ def email_template_data(
     kind: str, facts: Dict[str, Any], language: str, *, pay_url: Optional[str] = None
 ) -> Dict[str, Any]:
     """The facts as the email template prints them, in `language`: dates and the deadline by the email's own
-    date rule, money with thousands separators, the window as one span, and the Click link (`pay_url`).
+    date rule, money with thousands separators, the window as one span, weekdays by name, and the Click link
+    (`pay_url`).
     `order_id` stays in, so the email's `Notification` row is linked to its order."""
     data: Dict[str, Any] = dict(facts)
     for key in ("delivery_date", "next_delivery_date"):
@@ -197,15 +244,31 @@ def email_template_data(
         if facts.get("deadline")
         else None
     )
-    if facts.get("window_start") and facts.get("window_end"):
-        data["window"] = f"{facts['window_start']}–{facts['window_end']}"
-    else:
-        data["window"] = None
+    data["time_label"] = _email_time_label(facts, language)
+    for key in ("old_weekday", "new_weekday"):
+        data[f"{key}_label"] = _email_weekday(facts.get(key), language)
+    data["added_weekdays_label"] = ", ".join(_email_weekday(day, language) for day in facts.get("added_weekdays") or [])
     # Nothing due (a prepaid balance covers it) and no prepaid credit both print as absent.
     for key in ("total", "amount_due", "prepaid_applied"):
         data[key] = NotificationService._format_money(facts[key]) if facts.get(key) else None
     data["pay_url"] = pay_url
     return data
+
+
+def _email_time_label(facts: Dict[str, Any], language: str) -> str:
+    """The delivery time the email prints: the window's span, "any time" or "time to be confirmed" in `language`
+    (`subscription_display.time_words`). A payload queued before `time_kind` existed has none: the old rule decides,
+    a window or "to be confirmed"."""
+    has_span = facts.get("window_start") and facts.get("window_end")
+    span = f"{facts['window_start']}–{facts['window_end']}" if has_span else None
+    kind = facts.get("time_kind") or (subscription_display.TIME_WINDOW if span else subscription_display.TIME_TBC)
+    if kind == subscription_display.TIME_WINDOW and not span:
+        kind = subscription_display.TIME_TBC
+    return subscription_display.time_words(kind, span, language=language, inline=True)
+
+
+def _email_weekday(value: Optional[int], language: str) -> Optional[str]:
+    return display_labels.weekday_name(value, language) if value is not None else None
 
 
 def _email_date(value: Optional[str], language: str) -> Optional[str]:

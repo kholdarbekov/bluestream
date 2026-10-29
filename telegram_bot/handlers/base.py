@@ -262,6 +262,30 @@ class BaseHandler:
 
         return sent
 
+    async def _show(
+        self,
+        update: Any,
+        text: str,
+        *,
+        reply_markup: Any = None,
+        parse_mode: str | None = None,
+    ) -> Message | None:
+        """Draw a screen: on the tapped message, or as a new message when nothing was tapped.
+
+        A tap edits (or replaces) the message it came from, through
+        :meth:`_edit_or_replace_callback_message`. A `/start order_<id>` deep
+        link arrives as a message, with no bubble of ours to edit, so the screen
+        is sent as a reply, falling back to plain text if Telegram refuses the
+        markup. One door, so a screen opened both ways is drawn the same.
+        """
+        query = getattr(update, "callback_query", None)
+        if query is not None:
+            return await self._edit_or_replace_callback_message(
+                query, text, reply_markup=reply_markup, parse_mode=parse_mode,
+            )
+        message = getattr(update, "effective_message", None) or update.message
+        return await self._reply_markdown_or_plain(message, text, reply_markup, parse_mode=parse_mode)
+
     async def _ensure_loyalty_eligible(self, update, context, telegram_id, language) -> bool:
         """Block loyalty actions for ineligible users: the notice, sent with the bottom menu.
 
@@ -319,6 +343,19 @@ class BaseHandler:
         if not isinstance(body, dict):
             return None
         return body.get('error_code')
+
+    @staticmethod
+    def _response_reason_code(response) -> str | None:
+        """The `reason_code` a refused write carries, or None when it has none.
+
+        DEPTH MATTERS: the order routes answer through `error_response(..., data={...})`,
+        so the code sits at `data.reason_code` of the body, and `_make_request` hands
+        the whole error body back as `APIResponse.data`.
+        """
+        body = getattr(response, 'data', None)
+        detail = body.get('data') if isinstance(body, dict) else None
+        reason_code = detail.get('reason_code') if isinstance(detail, dict) else None
+        return reason_code if isinstance(reason_code, str) and reason_code else None
 
     async def _settle_callback_message(self, query, note: str) -> None:
         """Retire an answered message: drop its buttons, append the answer.

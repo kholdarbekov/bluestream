@@ -1,0 +1,46 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Your delivery schedule changed - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Your delivery schedule changed</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>The delivery schedule of your subscription <strong>{{ subscription_name }}</strong> has changed.</p>
+</div>
+
+{% for change in changes %}
+{% if change == "time_cleared" %}
+<p>The {{ old_window }} delivery time is no longer offered, so your deliveries now come at any time of the day.</p>
+{% elif change == "time_changed" %}
+<p>Your delivery time is now {{ new_window }} (it was {{ old_window }}).</p>
+{% elif change == "day_moved" %}
+<p>We no longer deliver on this day of the week ({{ old_weekday_label }}). Your new delivery day: {{ new_weekday_label }}.</p>
+{% elif change == "date_moved" %}
+<p>We no longer deliver on this day of the week ({{ old_weekday_label }}), so your next delivery moves to the next delivery day.</p>
+{% elif change == "days_added" %}
+<p>New delivery days: {{ added_weekdays_label }}. Your daily deliveries now come on these days too.</p>
+{% endif %}
+{% endfor %}
+
+{% if next_delivery_date %}
+<table class="details-table">
+    <tr>
+        <th>Next Delivery</th>
+        <td>{{ next_delivery_date }}</td>
+    </tr>
+</table>
+{% endif %}
+
+<p>You can change your delivery day and time in your subscription.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

@@ -22,13 +22,6 @@
         });
     });
 
-    function isValidRedirectUrl(url) {
-        if (!url || typeof url !== 'string') return false;
-        if (!url.startsWith('/') || url.startsWith('//')) return false;
-        if (url.includes('://')) return false;
-        return true;
-    }
-
     var form = document.getElementById('loginForm');
     if (!form) return;
 
@@ -86,14 +79,8 @@
 
                 showNotification(PAGE_DATA.i18n.login_success, 'success');
 
-                var urlParams = new URLSearchParams(window.location.search);
-                var nextUrl = urlParams.get('next');
-
-                if (nextUrl && isValidRedirectUrl(nextUrl)) {
-                    window.location.href = nextUrl;
-                } else {
-                    window.location.href = PAGE_DATA.my_account_url;
-                }
+                // The server checked `next` (shared/safe_paths.py safe_next_path) and published where to go.
+                window.location.href = PAGE_DATA.after_login_url;
             } else {
                 submitBtn.classList.remove('loading');
                 showNotification(result.message || PAGE_DATA.i18n.login_failed, 'error');

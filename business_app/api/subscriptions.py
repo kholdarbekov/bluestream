@@ -10,6 +10,7 @@ from business_app.utils.helpers import get_current_language
 from business_app.utils.local_windows import local_date
 from business_app.utils.translations import get_translation
 from business_app.serializers.subscription_serializers import (
+    CLEARABLE_SUBSCRIPTION_FIELDS,
     serialize_subscription,
     serialize_subscription_item,
     serialize_subscription_log,
@@ -23,10 +24,12 @@ from business_app.serializers.subscription_serializers import (
     SubscriptionPreviewResponse,
     ChangePaymentMethodRequest,
     SkipDeliveryRequest,
+    ReplaceSubscriptionItemsRequest,
+    SubscriptionChangePreviewRequest,
 )
 from business_app.utils.constants import NotificationType
-from business_app.utils.exceptions import NotFoundError, ValidationError, ConflictError
-from business_app.utils.pydantic_helpers import validate_json_with_model, serialize_response
+from business_app.utils.exceptions import NotFoundError, ValidationError, ConflictError, StateChangedError
+from business_app.utils.pydantic_helpers import dump_changes, validate_json_with_model, serialize_response
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -35,10 +38,39 @@ from business_app.utils.api_responses import (
     not_found_response,
     conflict_response,
     internal_error_response,
+    state_changed_response,
 )
 from business_app import db
 
 subscriptions_bp = Blueprint("subscriptions", __name__)
+
+# A refused request body answers with this, translated, as its `message` (spec 2026-10-26 §5 B12).
+_INVALID_BODY = "api.subscriptions.error.validation_failed"
+
+
+def _refused(exc):
+    """A refused request: nothing it changed stays, and it answers the translated reason (404 not found,
+    409 conflict, otherwise 400). A stale screen answers 409 STATE_CHANGED (spec 2026-10-27 §16 M2)."""
+    db.session.rollback()
+    if isinstance(exc, StateChangedError):
+        return state_changed_response()
+    if isinstance(exc, NotFoundError):
+        return not_found_response(get_translation(exc.message))
+    if isinstance(exc, ConflictError):
+        return conflict_response(get_translation(exc.message))
+    return error_response(get_translation(exc.message), status_code=400)
+
+
+def _page_args(default_per_page: int = 20, max_per_page: int = 50):
+    """`?page=` and `?per_page=` as positive whole numbers; anything else is the client's mistake (400)."""
+    try:
+        page = int(request.args.get("page", 1))
+        per_page = int(request.args.get("per_page", default_per_page))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("api.subscriptions.error.invalid_page") from exc
+    if page < 1 or per_page < 1:
+        raise ValidationError("api.subscriptions.error.invalid_page")
+    return page, min(per_page, max_per_page)
 
 
 @subscriptions_bp.route("/", methods=["GET"])
@@ -49,8 +81,7 @@ def get_subscriptions():
         current_user_id = get_jwt_identity()
 
         # Get query parameters
-        page = int(request.args.get("page", 1))
-        per_page = min(int(request.args.get("per_page", 20)), 50)
+        page, per_page = _page_args()
         status = request.args.get("status")
         frequency = request.args.get("frequency")
 
@@ -63,7 +94,8 @@ def get_subscriptions():
         )
 
         return paginated_response(
-            items=[serialize_subscription(sub) for sub in pagination.items],
+            # Each card carries its items, so the page never fetches a detail per card (spec 2026-10-26 B5).
+            items=[serialize_subscription(sub, include_items=True) for sub in pagination.items],
             page=page,
             per_page=per_page,
             total=pagination.total,
@@ -77,6 +109,21 @@ def get_subscriptions():
         return internal_error_response(get_translation("api.subscriptions.error.get_failed"))
 
 
+@subscriptions_bp.route("/products", methods=["GET"])
+@jwt_required(optional=True)
+def get_subscription_products():
+    """Every product a subscription can take, at its subscription price (spec 2026-10-26 B10): the
+    /my-subscriptions picker, the homepage builder and the customer bot's picker. Unpaged. A token is optional:
+    the builder lists products before sign-in, and `product_catalog()` takes no user (the price is the
+    product's own), so a visitor gets the signed-in customer's list. Like the public `/products` list, no
+    rate limit of its own."""
+    try:
+        return success_response(data={"items": get_subscription_service().product_catalog()})
+    except Exception as e:
+        current_app.logger.error(f"Get subscription products error: {e}")
+        return internal_error_response(get_translation("api.subscriptions.error.get_failed"))
+
+
 @subscriptions_bp.route("/<int:subscription_id>", methods=["GET"])
 @jwt_required()
 def get_subscription(subscription_id):
@@ -87,24 +134,11 @@ def get_subscription(subscription_id):
             subscription_id=subscription_id,
             user_id=current_user_id,
         )
-        subscription = details["subscription"]
-        recent_orders = details["recent_orders"]
-        billing_info = details["billing_info"]
-
+        # Its orders are `/history` (spec 2026-10-26 §12).
         return success_response(
             data={
-                "subscription": serialize_subscription(subscription, include_items=True),
-                "recent_orders": [
-                    {
-                        "id": order.id,
-                        "order_number": order.order_number,
-                        "status": order.status.value,
-                        "total_amount": order.total_amount,
-                        "created_at": order.created_at.isoformat() if order.created_at else None,
-                    }
-                    for order in recent_orders
-                ],
-                "billing_info": billing_info,
+                "subscription": serialize_subscription(details["subscription"], include_items=True),
+                "billing_info": details["billing_info"],
             }
         )
 
@@ -117,7 +151,7 @@ def get_subscription(subscription_id):
 
 @subscriptions_bp.route("/", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(CreateSubscriptionRequest)
+@validate_json_with_model(CreateSubscriptionRequest, message_key=_INVALID_BODY)
 def create_subscription():
     """Create a new subscription"""
     try:
@@ -167,29 +201,40 @@ def create_subscription():
 
 @subscriptions_bp.route("/<int:subscription_id>", methods=["PUT"])
 @jwt_required()
-@validate_json_with_model(UpdateSubscriptionRequest)
+@validate_json_with_model(UpdateSubscriptionRequest, message_key=_INVALID_BODY)
 def update_subscription(subscription_id):
-    """Update subscription details"""
+    """Update subscription details. An address change also answers the orders that moved with it and the ones that
+    still go to their old address, each with its reason (spec 2026-10-27 §7, §17 Q6)."""
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-        subscription = get_subscription_service().update_subscription_for_user(
+        result = get_subscription_service().update_subscription_for_user(
             subscription_id=subscription_id,
             user_id=current_user_id,
-            update_data=validated_data.model_dump(exclude_none=True),
+            update_data=dump_changes(
+                validated_data, clearable=CLEARABLE_SUBSCRIPTION_FIELDS, exclude={"expected_state"}
+            ),
+            expected_state=validated_data.expected_state,
         )
 
         return success_response(
-            data={"subscription": serialize_subscription(subscription)},
+            data={
+                "subscription": serialize_subscription(result["subscription"]),
+                "moved_orders": result["moved_orders"],
+                "orders_at_old_address": result["orders_at_old_address"],
+            },
             message=get_translation("api.subscriptions.updated"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
     except ValidationError as e:
+        # The refusal's code and details reach the client: SUBSCRIPTION_PAYMENT_METHOD_REQUIRED carries the new
+        # address's payment menu, from which the customer chooses before saving again (B8 re-pick).
         db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+        return error_response(
+            get_translation(e.message), status_code=400, data={"error_code": e.error_code, **(e.details or {})}
+        )
+    except (NotFoundError, StateChangedError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription error: {e}")
@@ -198,7 +243,7 @@ def update_subscription(subscription_id):
 
 @subscriptions_bp.route("/<int:subscription_id>/pause", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(PauseSubscriptionRequest)
+@validate_json_with_model(PauseSubscriptionRequest, message_key=_INVALID_BODY)
 def pause_subscription(subscription_id):
     """Pause a subscription"""
     try:
@@ -209,6 +254,7 @@ def pause_subscription(subscription_id):
             subscription_id=subscription_id,
             user_id=current_user_id,
             reason=reason,
+            expected_state=validated_data.expected_state,
         )
         subscription = outcome["subscription"]
 
@@ -233,12 +279,8 @@ def pause_subscription(subscription_id):
             message=get_translation("api.subscriptions.paused"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError, StateChangedError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Pause subscription error: {e}")
@@ -272,12 +314,8 @@ def resume_subscription(subscription_id):
             message=get_translation("api.subscriptions.resumed"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Resume subscription error: {e}")
@@ -286,7 +324,7 @@ def resume_subscription(subscription_id):
 
 @subscriptions_bp.route("/<int:subscription_id>/cancel", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(CancelSubscriptionRequest)
+@validate_json_with_model(CancelSubscriptionRequest, message_key=_INVALID_BODY)
 def cancel_subscription(subscription_id):
     """Cancel a subscription"""
     try:
@@ -299,6 +337,7 @@ def cancel_subscription(subscription_id):
             subscription_id=subscription_id,
             user_id=current_user_id,
             reason=reason,
+            expected_state=validated_data.expected_state,
         )
         subscription = outcome["subscription"]
 
@@ -322,12 +361,8 @@ def cancel_subscription(subscription_id):
             message=get_translation("api.subscriptions.cancelled"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError, StateChangedError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Cancel subscription error: {e}")
@@ -356,7 +391,7 @@ def get_subscription_items(subscription_id):
 
 @subscriptions_bp.route("/<int:subscription_id>/items", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(AddSubscriptionItemRequest)
+@validate_json_with_model(AddSubscriptionItemRequest, message_key=_INVALID_BODY)
 def add_subscription_item(subscription_id):
     """Add item to subscription"""
     try:
@@ -382,15 +417,8 @@ def add_subscription_item(subscription_id):
             message=get_translation("api.subscriptions.item_added"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
-    except ConflictError as e:
-        db.session.rollback()
-        return conflict_response(get_translation(e.message))
+    except (NotFoundError, ValidationError, ConflictError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Add subscription item error: {e}")
@@ -399,7 +427,7 @@ def add_subscription_item(subscription_id):
 
 @subscriptions_bp.route("/<int:subscription_id>/items/<int:item_id>", methods=["PUT"])
 @jwt_required()
-@validate_json_with_model(UpdateSubscriptionItemRequest)
+@validate_json_with_model(UpdateSubscriptionItemRequest, message_key=_INVALID_BODY)
 def update_subscription_item(subscription_id, item_id):
     """Update subscription item quantity"""
     try:
@@ -426,12 +454,8 @@ def update_subscription_item(subscription_id, item_id):
             message=get_translation("api.subscriptions.item_updated"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription item error: {e}")
@@ -451,40 +475,82 @@ def remove_subscription_item(subscription_id, item_id):
         )
 
         return success_response(
-            data={"new_billing_amount": subscription.billing_amount},
+            data={"new_billing_amount": float(subscription.billing_amount)},
             message=get_translation("api.subscriptions.item_removed"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Remove subscription item error: {e}")
         return internal_error_response(get_translation("api.subscriptions.error.remove_item_failed"))
 
 
-@subscriptions_bp.route("/<int:subscription_id>/billing-history", methods=["GET"])
+@subscriptions_bp.route("/<int:subscription_id>/items", methods=["PUT"])
 @jwt_required()
-def get_billing_history(subscription_id):
-    """Get subscription billing history"""
+@validate_json_with_model(ReplaceSubscriptionItemsRequest, message_key=_INVALID_BODY)
+def replace_subscription_items(subscription_id):
+    """Replace the whole item list in one transaction (spec 2026-10-26 §5 B7): the website's Items save."""
     try:
-        current_user_id = get_jwt_identity()
-        billing_data = get_subscription_service().get_subscription_billing_history_for_user(
+        subscription = get_subscription_service().replace_items_for_user(
             subscription_id=subscription_id,
-            user_id=current_user_id,
+            user_id=get_jwt_identity(),
+            items=request.validated_json.model_dump()["items"],
+            expected_state=request.validated_json.expected_state,
         )
+        return success_response(
+            data={"subscription": serialize_subscription(subscription, include_items=True)},
+            message=get_translation("api.subscriptions.updated"),
+        )
+    except (NotFoundError, ValidationError, StateChangedError) as e:
+        return _refused(e)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Replace subscription items error: {e}")
+        return internal_error_response(get_translation("api.subscriptions.error.update_failed"))
 
-        return success_response(data=billing_data)
 
+@subscriptions_bp.route("/<int:subscription_id>/preview", methods=["POST"])
+@jwt_required()
+@validate_json_with_model(SubscriptionChangePreviewRequest, message_key=_INVALID_BODY)
+def preview_subscription_change(subscription_id):
+    """What a schedule or items change would give, before Save (spec 2026-10-26 §5 B4). Writes nothing."""
+    try:
+        preview = get_subscription_service().preview_changes_for_user(
+            subscription_id=subscription_id,
+            user_id=get_jwt_identity(),
+            changes=dump_changes(request.validated_json, clearable=CLEARABLE_SUBSCRIPTION_FIELDS),
+        )
+        return success_response(data={"preview": preview})
+    except (NotFoundError, ValidationError) as e:
+        return _refused(e)
+    except Exception as e:
+        current_app.logger.error(f"Preview subscription change error: {e}")
+        return internal_error_response(get_translation("api.subscriptions.error.preview_failed"))
+
+
+@subscriptions_bp.route("/<int:subscription_id>/history", methods=["GET"])
+@jwt_required()
+def get_subscription_history(subscription_id):
+    """The Orders section: orders and skipped deliveries in one list, newest first (spec
+    2026-10-26 §5 B6, §12). `meta.total` counts every row."""
+    try:
+        page, per_page = _page_args(default_per_page=10)
+        rows, total = get_subscription_service().subscription_history_for_user(
+            subscription_id=subscription_id,
+            user_id=get_jwt_identity(),
+            page=page,
+            per_page=per_page,
+        )
+        return paginated_response(items=rows, page=page, per_page=per_page, total=total)
     except NotFoundError as e:
         return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
-        current_app.logger.error(f"Get billing history error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.get_billing_history_failed"))
+        current_app.logger.error(f"Get subscription history error: {e}")
+        return internal_error_response(get_translation("api.subscriptions.error.get_failed"))
 
 
 @subscriptions_bp.route("/<int:subscription_id>/logs", methods=["GET"])
@@ -493,8 +559,7 @@ def get_subscription_logs(subscription_id):
     """Get subscription activity logs"""
     try:
         current_user_id = get_jwt_identity()
-        page = int(request.args.get("page", 1))
-        per_page = min(int(request.args.get("per_page", 20)), 50)
+        page, per_page = _page_args()
 
         pagination = get_subscription_service().get_subscription_logs_paginated_for_user(
             subscription_id=subscription_id,
@@ -512,6 +577,8 @@ def get_subscription_logs(subscription_id):
 
     except NotFoundError as e:
         return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         current_app.logger.error(f"Get subscription logs error: {e}")
         return internal_error_response(get_translation("api.subscriptions.error.get_logs_failed"))
@@ -519,7 +586,7 @@ def get_subscription_logs(subscription_id):
 
 @subscriptions_bp.route("/preview", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(SubscriptionPreviewRequest)
+@validate_json_with_model(SubscriptionPreviewRequest, message_key=_INVALID_BODY)
 def preview_subscription():
     """Preview subscription cost and details before creation"""
     try:
@@ -531,6 +598,7 @@ def preview_subscription():
             user_id=current_user_id,
             frequency=validated_data.frequency,
             items=validated_data.items,
+            delivery_time_slot_id=validated_data.delivery_time_slot_id,
         )
 
         # Serialize the preview response using the response schema
@@ -573,34 +641,34 @@ def get_subscription_statistics():
 
 @subscriptions_bp.route("/<int:subscription_id>/skip-next-delivery", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(SkipDeliveryRequest)
+@validate_json_with_model(SkipDeliveryRequest, message_key=_INVALID_BODY)
 def skip_next_delivery(subscription_id):
     """Skip the next delivery for a subscription"""
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-        reason = validated_data.reason or get_translation("api.subscriptions.default_reason_customer_request")
+        # The date the customer's button named (spec 2026-10-26 §12): a skip that would now land elsewhere is
+        # a 409 and skips nothing.
         skip_result = get_subscription_service().skip_next_delivery_for_user(
             subscription_id=subscription_id,
             user_id=current_user_id,
-            reason=reason,
+            expected_date=validated_data.expected_date,
+            reason_code=validated_data.reason_code,
+            reason_text=validated_data.reason_text,
         )
         subscription = skip_result["subscription"]
+        reason = skip_result["reason"]
         current_next_delivery = skip_result["original_delivery_date"]
         new_next_delivery = skip_result["new_next_delivery_date"]
         new_next_iso = new_next_delivery.isoformat() if new_next_delivery else None
 
         # Send notification
-        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             "delivery_skipped",
-            template_data={
-                "subscription_name": subscription.get_translated("name", language),
-                "skipped_date": current_next_delivery.isoformat(),
-                "next_delivery_date": new_next_iso,
-                "reason": reason,
-            },
+            template_data=get_subscription_service().skip_notice_data(
+                subscription, skipped_date=current_next_delivery, next_date=new_next_delivery, reason=reason
+            ),
         )
 
         return success_response(
@@ -616,9 +684,15 @@ def skip_next_delivery(subscription_id):
     except NotFoundError as e:
         db.session.rollback()
         return not_found_response(get_translation(e.message))
-    except ValidationError as e:
+    except StateChangedError:
+        # The date the button named is stale (spec 2026-10-26 §12, 2026-10-27 §16 M2). Nothing written.
         db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+        return state_changed_response()
+    except (ValidationError, ConflictError) as e:
+        # A refusal (400), or another conflict (409). Nothing written.
+        db.session.rollback()
+        status_code = 409 if isinstance(e, ConflictError) else 400
+        return error_response(get_translation(e.message), status_code=status_code)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Skip next delivery error: {e}")
@@ -627,7 +701,7 @@ def skip_next_delivery(subscription_id):
 
 @subscriptions_bp.route("/<int:subscription_id>/change-payment-method", methods=["POST"])
 @jwt_required()
-@validate_json_with_model(ChangePaymentMethodRequest)
+@validate_json_with_model(ChangePaymentMethodRequest, message_key=_INVALID_BODY)
 def change_payment_method(subscription_id):
     """Change payment method for subscription"""
     try:
@@ -637,34 +711,17 @@ def change_payment_method(subscription_id):
             subscription_id=subscription_id,
             user_id=current_user_id,
             payment_method=validated_data.payment_method,
+            expected_state=validated_data.expected_state,
         )
         subscription = payment_change["subscription"]
-        old_payment_method = payment_change["old_payment_method"]
-        new_payment_method = payment_change["new_payment_method"]
-
-        # Send notification
-        language = get_current_language()
-        get_notification_service().send_notification(
-            current_user_id,
-            "payment_method_changed",
-            template_data={
-                "subscription_name": subscription.get_translated("name", language),
-                "old_method": old_payment_method.value,
-                "new_method": new_payment_method.value,
-            },
-        )
 
         return success_response(
             data={"subscription": serialize_subscription(subscription)},
             message=get_translation("api.subscriptions.payment_method_updated"),
         )
 
-    except NotFoundError as e:
-        db.session.rollback()
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        db.session.rollback()
-        return error_response(get_translation(e.message), status_code=400)
+    except (NotFoundError, ValidationError, StateChangedError) as e:
+        return _refused(e)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Change payment method error: {e}")

@@ -21,9 +21,9 @@ from tests.integration.test_admin_order_reschedule import audit_events  # noqa: 
 from tests.integration.test_customer_telegram_link_api import _DownRedis
 from tests.integration.test_session_revocation import (  # noqa: F401  (production_access_lifetime is a fixture)
     PROFILE,
-    SIGNED_IN,
     SIGNED_OUT,
     _revocations,
+    assert_staff_signed_in,
     doors,
     handed_back_login,
     production_access_lifetime,
@@ -102,7 +102,7 @@ def test_assigning_the_role_someone_already_has_signs_nobody_out(app, db, admin_
     )
 
     assert resp.get_json()["data"]["results"]["success_count"] == 1, resp.get_json()
-    assert doors(app, login) == SIGNED_IN
+    assert_staff_signed_in(app, login)
     assert ended_logins(audit_events) == []
 
 
@@ -157,17 +157,17 @@ def test_making_a_signed_in_customer_staff_signs_them_out_everywhere(
 
     assert resp.status_code in (200, 201), resp.get_json()
     assert doors(app, login) == SIGNED_OUT
-    assert doors(app, sign_in(app, sample_user.email, OLD_PASSWORD)) == SIGNED_IN
+    assert_staff_signed_in(app, sign_in(app, sample_user.email, OLD_PASSWORD))
     assert ended_logins(audit_events) == [(str(sample_user.id), ROLE_CHANGED)]
 
 
 @pytest.mark.parametrize(
-    "staff_roles, doors_after, reasons",
-    [(["operator", "delivery_driver"], SIGNED_OUT, ["role_changed"]), (["operator"], SIGNED_IN, [])],
+    "staff_roles, signed_out, reasons",
+    [(["operator", "delivery_driver"], True, ["role_changed"]), (["operator"], False, [])],
     ids=["adds_a_role", "keeps_the_roles"],
 )
 def test_editing_an_operator_signs_them_out_only_when_their_roles_change(
-    app, db, admin_user, operator_user, audit_events, staff_roles, doors_after, reasons
+    app, db, admin_user, operator_user, audit_events, staff_roles, signed_out, reasons
 ):
     """The Operators edit form always sends the roles box; a name fix leaves it as it was."""
     login = sign_in(app, operator_user.email, OPERATOR_PASSWORD)
@@ -184,7 +184,10 @@ def test_editing_an_operator_signs_them_out_only_when_their_roles_change(
     )
 
     assert resp.status_code == 200, resp.get_json()
-    assert doors(app, login) == doors_after
+    if signed_out:
+        assert doors(app, login) == SIGNED_OUT
+    else:
+        assert_staff_signed_in(app, login)
     assert [data["reason"] for _user, data in ended_logins(audit_events)] == reasons
 
 

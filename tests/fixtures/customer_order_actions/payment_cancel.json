@@ -1,0 +1,93 @@
+{
+ "case": "payment_cancel",
+ "exchanges": {
+  "pay_web": {
+   "body": {
+    "channel": "web",
+    "expected_amount": "30000.00"
+   },
+   "method": "POST",
+   "path": "/api/v1/orders/1/retry-payment",
+   "response": {
+    "data": {
+     "payment": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "amount_paid": 0.0,
+      "collection_events_count": 0,
+      "currency": "UZS",
+      "fiscalization": null,
+      "fiscalization_status": null,
+      "id": 1,
+      "is_payable": true,
+      "last_collected_at": null,
+      "net_outstanding_amount": 30000.0,
+      "outstanding_amount": 30000.0,
+      "paid_at": null,
+      "payable_payment_link": null,
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "payment_status": "pending",
+      "provider_transaction_id": null,
+      "transaction_id": null
+     },
+     "payment_link": {
+      "payment_url": "http://localhost/my-orders#click-checkout"
+     },
+     "payment_url": "http://localhost/my-orders#click-checkout"
+    },
+    "message": "Payment initiated",
+    "success": true
+   },
+   "status": 200
+  }
+ },
+ "language": "en",
+ "order_id": 1,
+ "page": {
+  "html": "<section class=\"payment-cancelled-section\">\n<div class=\"auto-container\">\n<div class=\"cancelled-content\">\n<div class=\"cancelled-icon\">\n<i class=\"far fa-times-circle\"></i>\n</div>\n<h2>Payment Cancelled</h2>\n<p>Your payment was cancelled and no charges were made.</p>\n<div class=\"order-info\">\n<div class=\"info-row\">\n<span class=\"info-label\">Order Number:</span>\n<span class=\"info-value\">TG_000001_26</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Total Amount:</span>\n<span class=\"info-value\">30,000 UZS</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Order Status:</span>\n<span class=\"info-value\">\n<span class=\"badge badge-warning\">Pending</span>\n</span>\n</div>\n</div>\n<div class=\"info-notice\">\n<i class=\"far fa-info-circle\"></i>\n                \n                \n                Your order is still pending. You can retry the payment or choose a different payment method.\n                \n            </div>\n<div class=\"order-actions mb-3\" data-order-id=\"1\" id=\"paymentActions\"></div>\n<div class=\"action-buttons\">\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n<a class=\"theme-btn btn-three\" href=\"/shop\">\n<i class=\"far fa-shopping-bag\"></i> landing.button.continue_shopping\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "island": {
+   "order": {
+    "customer_actions": {
+     "cancel": {
+      "allowed": true,
+      "confirm_text": "Cancel this order?",
+      "label": "Cancel order",
+      "reasons": [],
+      "refusal": null,
+      "subscription_id": null,
+      "via": "cancel"
+     },
+     "confirm": {
+      "allowed": false,
+      "label": null
+     },
+     "pay": {
+      "allowed": true,
+      "amount_label": "30 000 so'm",
+      "deadline_label": "Pay by 09:00 tomorrow.",
+      "expected_amount": "30000.00",
+      "label": "Pay 30 000 so'm",
+      "refusal": null
+     }
+    },
+    "display_status": "pending",
+    "id": 1,
+    "order_number": "TG_000001_26"
+   },
+   "order_actions": {
+    "confirmed": "Thanks! Your order is confirmed.",
+    "failed": "That didn't go through. Please try again.",
+    "keep": "Keep it",
+    "open_subscription": "Open the subscription",
+    "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
+    "reason_prompt": "Want to tell us why? (optional)",
+    "reason_text": "In a few words (optional)",
+    "switch_to_cash": "Pay with cash",
+    "try_again": "Try again",
+    "working": "One moment…"
+   }
+  }
+ }
+}

@@ -98,22 +98,25 @@ async def test_back_under_the_payment_link_opens_that_order_and_pay_now_comes_ba
     assert details.method == "editMessageText"
     assert details.params.get("parse_mode") == "MarkdownV2"
     assert f"BS\\-{order['id']}" in details.text
-    # OrderKeyboards.order_details (keyboards.py:876-885): Pay now is payment_retry_<id>.
+    # OrderKeyboards.order_details: Pay is the published one, `payment_retry_<id>_<amount>`.
+    pay_action = order["customer_actions"]["pay"]
     (pay,) = [d for d in details.callback_data() if d.startswith("payment_retry_")]
-    assert pay == f"payment_retry_{order['id']}"
+    assert pay == f"payment_retry_{order['id']}_{pay_action['expected_amount']}"
     assert f"cancel_order_{order['id']}" in details.callback_data()
     assert alerts(bot) == []
 
-    # Pay now, from the button the customer can see: retry_payment draws its link through
-    # the same send_payment_link (payments.py:392), so the new link's Back is the same.
+    # Pay, from the button the customer can see: retry_payment draws the link `retry-payment`
+    # answered through the same show_payment_link checkout uses, so the new link's Back is the same.
+    shop.retry_payment_route(order)
     bot.telegram.reset()
     await bot.send(user.tap(pay))
 
     relink = bot.telegram.last_shown()
     assert relink.text == f"Pay order BS-{order['id']}: 45,000 UZS"
     assert relink.callback_data() == [f"order_{order['id']}"]
-    creates = backend_calls(bot, "POST", "/api/v1/payments/create")
-    assert [(c.data["order_id"], c.data["payment_method"]) for c in creates[1:]] == [(order["id"], "click")]
+    (paid,) = backend_calls(bot, "POST", f"/api/v1/orders/{order['id']}/retry-payment")
+    assert paid.data == {"channel": "bot", "expected_amount": pay_action["expected_amount"]}
+    assert backend_calls(bot, "POST", "/api/v1/payments/create") == []
     assert shop.orders == [order]
     assert alerts(bot) == []
     assert_no_swallowed_crash(bot)

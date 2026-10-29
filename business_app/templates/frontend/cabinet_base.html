@@ -284,11 +284,5 @@
 {% endblock %}
 
 {% block extra_js %}
-{% from "frontend/macros/page_data.html" import render_page_data %}
-{{ render_page_data({
-    'refresh_url': url_for('auth.refresh_with_cookie'),
-    'login_url': url_for('frontend.login'),
-}, element_id='cabinet-base-data') }}
-<script src="{{ url_for('static', filename='js/pages/cabinet-base.js') }}"></script>
 {% block cabinet_extra_js %}{% endblock %}
 {% endblock %}

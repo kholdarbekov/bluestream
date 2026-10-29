@@ -7,7 +7,7 @@ Order 1277 (TG_000508_26) is why. Its Cancel button was drawn while the order wa
 pending. The customer tapped it after the delivery had failed, and it ended an order
 that was only waiting for a new date. Now:
 
-* the bot draws Cancel from the backend's published `can_customer_cancel` and holds no
+* the bot draws Cancel from the backend's published `customer_actions.cancel` and holds no
   copy of the rule, so a payload without the field offers no Cancel;
 * when the backend refuses a stale tap, the bot says why in the customer's language,
   picked by the refusal's `reason_code`, pointing to this chat and never to a phone;
@@ -90,6 +90,21 @@ TRANSLATIONS = {
 }
 
 _UNPUBLISHED = object()
+# `customer_actions.cancel` for a cancellable ordinary order, as `serialize_order` publishes it.
+CANCEL_ORDER = {
+    "allowed": True,
+    "refusal": None,
+    "via": "cancel",
+    "label": "Bekor qilish",
+    "confirm_text": "Buyurtmani bekor qilasizmi?",
+    "subscription_id": None,
+    "reasons": [],
+}
+# A cash order: Pay is published refused (spec 2026-10-27 §4.3, no cash → Click switch).
+PAY_NOT_ONLINE = {
+    "allowed": False, "refusal": "not_online", "label": None, "expected_amount": None,
+    "amount_label": None, "deadline_label": None,
+}
 
 
 def _copy(key: str, language: str) -> str:
@@ -97,7 +112,15 @@ def _copy(key: str, language: str) -> str:
     return BACKEND_TRANSLATIONS[key][language]
 
 
-def _order(*, status, can_customer_cancel=_UNPUBLISHED, display_status=None, payment_status="pending"):
+def _refused(reason_code: str) -> dict:
+    """`customer_actions.cancel` refused with the same code the cancel route refuses with."""
+    return {
+        "allowed": False, "refusal": reason_code, "via": None, "label": None, "confirm_text": None,
+        "subscription_id": None, "reasons": [],
+    }
+
+
+def _order(*, status, cancel=_UNPUBLISHED, display_status=None, payment_status="pending"):
     """What `GET /api/v1/orders/<id>` returns: the `serialize_order` fields the bot reads."""
     order = {
         "id": ORDER_ID,
@@ -110,14 +133,14 @@ def _order(*, status, can_customer_cancel=_UNPUBLISHED, display_status=None, pay
         "order_items": [],
         "payment_info": {"payment_method": "cash", "payment_status": payment_status, "is_payable": False},
     }
-    if can_customer_cancel is not _UNPUBLISHED:
-        order["can_customer_cancel"] = can_customer_cancel
+    if cancel is not _UNPUBLISHED:
+        order["customer_actions"] = {"pay": PAY_NOT_ONLINE, "cancel": cancel}
     return order
 
 
-PENDING = _order(status="pending", can_customer_cancel=True)
+PENDING = _order(status="pending", cancel=CANCEL_ORDER)
 AWAITING_NEW_DATE_ORDER = _order(
-    status="confirmed", display_status=ORDER_DISPLAY_AWAITING_NEW_DATE, can_customer_cancel=False
+    status="confirmed", display_status=ORDER_DISPLAY_AWAITING_NEW_DATE, cancel=_refused("AWAITING_NEW_DATE")
 )
 
 
@@ -213,26 +236,26 @@ def _expire_dedup() -> None:
 
 
 class TestCancelIsTheBackendsAnswer:
-    """`customer_may_cancel` reads `can_customer_cancel` and nothing else (F5)."""
+    """`published_cancel` reads `customer_actions.cancel` and nothing else (F5, spec 2026-10-27 §5.1)."""
 
     @pytest.mark.parametrize(
         "order, drawn",
         [
-            pytest.param(PENDING, True, id="pending-published-true"),
+            pytest.param(PENDING, True, id="pending-published-allowed"),
             # A completed payment whose `is_paid` flag has not caught up yet. The old
             # local rule read only `is_paid` and drew Cancel.
             pytest.param(
-                _order(status="pending", can_customer_cancel=False, payment_status="completed"),
+                _order(status="pending", cancel=_refused("PAID"), payment_status="completed"),
                 False,
-                id="pending-paid-published-false",
+                id="pending-paid-published-refused",
             ),
             # Confirmed and no driver has it: F5 allows it, and the old local rule hid it.
-            pytest.param(_order(status="confirmed", can_customer_cancel=True), True, id="confirmed-driverless"),
+            pytest.param(_order(status="confirmed", cancel=CANCEL_ORDER), True, id="confirmed-driverless"),
             pytest.param(AWAITING_NEW_DATE_ORDER, False, id="awaiting-new-date"),
             pytest.param(_order(status="pending"), False, id="field-missing-fails-closed"),
         ],
     )
-    async def test_the_detail_screen_draws_cancel_only_when_the_order_publishes_true(
+    async def test_the_detail_screen_draws_cancel_only_when_the_order_publishes_it(
         self, monkeypatch, order, drawn
     ):
         harness = await _harness(monkeypatch)
@@ -244,12 +267,13 @@ class TestCancelIsTheBackendsAnswer:
         assert (f"cancel_order_{ORDER_ID}" in buttons) is drawn, buttons
 
     def test_no_order_or_no_field_never_offers_cancel(self):
-        from keyboards import customer_may_cancel
+        from keyboards import published_cancel
 
-        assert customer_may_cancel(None) is False
-        assert customer_may_cancel({}) is False
-        # The fields the deleted local rule read decide nothing any more.
-        assert customer_may_cancel({"id": ORDER_ID, "status": "pending", "is_paid": False}) is False
+        assert published_cancel(None) is None
+        assert published_cancel({}) is None
+        # The fields the deleted local rules read decide nothing any more.
+        assert published_cancel({"id": ORDER_ID, "status": "pending", "is_paid": False}) is None
+        assert published_cancel({"id": ORDER_ID, "can_customer_cancel": True}) is None
 
 
 # What the refusal leaves on the card: back to the order, whose fresh read offers no Cancel, or to
@@ -265,7 +289,7 @@ class TestARefusedCancelIsExplainedInTheChat:
         harness = await _harness(monkeypatch, "uz")
         _refuse_cancel(harness, _refusal_body(reason_code, web_key))
 
-        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes"))
+        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes_cancel"))
 
         refusal = harness.telegram.last_shown()
         assert refusal.method == "editMessageText", "the stale card must be replaced, not left standing"
@@ -288,7 +312,7 @@ class TestARefusedCancelIsExplainedInTheChat:
         body = _refusal_body("SOME_NEWER_REASON", "api.orders.cancel_refused.awaiting_new_date")
         _refuse_cancel(harness, body)
 
-        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes"))
+        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes_cancel"))
 
         refusal = harness.telegram.last_shown()
         assert refusal.method == "editMessageText", "a toast cannot carry the backend's web wording"
@@ -305,7 +329,7 @@ class TestARefusedCancelIsExplainedInTheChat:
         harness = await _harness(monkeypatch, "uz")
         _refuse_cancel(harness, {"success": False, "message": "Buyurtma topilmadi"}, status_code=404)
 
-        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes"))
+        await harness.send(harness.updates().tap(f"cancel_order_{ORDER_ID}_confirm_yes_cancel"))
 
         (answer,) = harness.telegram.visible_answers
         assert answer.params.get("text") == "❌ Buyurtma topilmadi"
@@ -330,7 +354,7 @@ class TestTheStaleCancelOnAnOrderAwaitingANewDate:
         await harness.send(user.tap(f"order_{ORDER_ID}"))
         assert f"cancel_order_{ORDER_ID}" in harness.telegram.last_shown().callback_data()
         await harness.send(user.tap(f"cancel_order_{ORDER_ID}"))
-        yes = next(data for data in harness.telegram.last_shown().callback_data() if data.endswith("_yes"))
+        yes = next(data for data in harness.telegram.last_shown().callback_data() if "_confirm_yes_" in data)
 
         # The delivery failed before they answered the confirmation card.
         served["order"] = copy.deepcopy(AWAITING_NEW_DATE_ORDER)
@@ -364,8 +388,8 @@ class TestAStalePaymentCancelTapAsksTheOrder:
         await harness.send(harness.updates().tap(f"payment_cancel_{ORDER_ID}"))
 
         assert _order_calls(harness) == [("GET", ORDER_ENDPOINT)]
+        # A cash order publishes no Pay; its published Cancel is drawn.
         assert harness.telegram.last_shown().callback_data() == [
-            f"payment_retry_{ORDER_ID}",
             "menu_orders",
             f"cancel_order_{ORDER_ID}",
         ]
@@ -399,7 +423,7 @@ class TestTheAwaitingLabel:
 
     async def test_the_orders_list_marks_it(self, monkeypatch):
         harness = await _harness(monkeypatch)
-        other = {**_order(status="confirmed", can_customer_cancel=True), "id": 1278, "order_number": "TG_000509_26"}
+        other = {**_order(status="confirmed", cancel=CANCEL_ORDER), "id": 1278, "order_number": "TG_000509_26"}
         harness.backend.route(
             "GET",
             "/api/v1/orders/",

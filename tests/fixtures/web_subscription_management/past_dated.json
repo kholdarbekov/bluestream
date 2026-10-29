@@ -1,0 +1,351 @@
+{
+ "about": "The next delivery date has passed before the daily job ran.",
+ "case": "past_dated",
+ "language": "en",
+ "requests": {
+  "GET /api/v1/payments/methods?context=subscription&delivery_address_id=1": {
+   "body": {
+    "data": {
+     "available_methods": [
+      {
+       "description": "Pay with cash when order is delivered",
+       "display_name": "Cash on Delivery",
+       "icon_url": "/static/images/payment/cash.png",
+       "is_active": true,
+       "max_amount": 5000000,
+       "method": "cash",
+       "min_amount": 0,
+       "name": "cash",
+       "processing_fee": 0.0,
+       "supported_currencies": [
+        "UZS"
+       ],
+       "supports_recurring": false,
+       "supports_refunds": false
+      },
+      {
+       "description": "Pay with Click wallet or linked card",
+       "display_name": "Click",
+       "icon_url": "/static/images/payment/click.png",
+       "is_active": true,
+       "max_amount": 50000000,
+       "method": "click",
+       "min_amount": 1000,
+       "name": "click",
+       "processing_fee": 0.0,
+       "supported_currencies": [
+        "UZS"
+       ],
+       "supports_recurring": true,
+       "supports_refunds": false
+      }
+     ],
+     "payment_restrictions": {
+      "active_cod_debt_count": 0,
+      "available_prepayment_balance": 0.0,
+      "cluster_net_open_cod_debt_total": 0.0,
+      "cod_exempt": false,
+      "cod_restricted": false,
+      "cod_restriction_reason": null,
+      "is_grocery_store": false,
+      "place_active_cod_debt_count": null,
+      "restriction_scope": null
+     },
+     "saved_cards": []
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/1/history?page=1&per_page=5": {
+   "body": {
+    "data": {
+     "items": []
+    },
+    "meta": {
+     "has_next": false,
+     "has_prev": false,
+     "page": 1,
+     "pages": 0,
+     "per_page": 5,
+     "total": 0
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/?per_page=50": {
+   "body": {
+    "data": {
+     "items": [
+      {
+       "allowed_actions": {
+        "cancel": {
+         "allowed": true,
+         "block_reason": null,
+         "cancel_lines": [],
+         "coins_line": "Your AquaCoins stay with you.",
+         "confirm_label": "Cancel subscription",
+         "confirm_text": "We won't place any more automatic orders.",
+         "keep_label": "Keep subscription",
+         "kept_lines": [],
+         "kept_orders": [],
+         "label": "Cancel subscription",
+         "will_cancel_orders": []
+        },
+        "edit": {
+         "allowed": true,
+         "block_reason": null
+        },
+        "expected_state": "f1f2b6e89c417b5d",
+        "pause": {
+         "allowed": true,
+         "block_reason": null,
+         "cancel_lines": [],
+         "confirm_label": "Pause subscription",
+         "confirm_text": "Pause deliveries? We won't place new orders until you resume.",
+         "keep_label": "Keep delivering",
+         "kept_lines": [],
+         "kept_orders": [],
+         "label": "Pause",
+         "needs_confirm": false,
+         "will_cancel_orders": []
+        },
+        "pay": {
+         "allowed": false,
+         "block_reason": "There's nothing to pay right now.",
+         "label": null
+        },
+        "remove_item": {
+         "allowed": false,
+         "block_reason": "A subscription needs at least one product. Need a break instead? Pause."
+        },
+        "resume": {
+         "allowed": false,
+         "block_reason": "This subscription isn't paused, so there's nothing to resume.",
+         "label": null
+        },
+        "skip": {
+         "allowed": true,
+         "block_reason": null,
+         "confirm_label": "Skip 29 October",
+         "confirm_text": "Skip Thursday, 29 October? Your next delivery will be Thursday, 5 November.",
+         "date": "2026-10-29",
+         "date_label": "29 October",
+         "keep_label": "Keep this delivery",
+         "kept_orders": [],
+         "label": "Skip this delivery",
+         "label_long": "Thursday, 29 October",
+         "next_date_after": "2026-11-05",
+         "next_date_after_label": "Thursday, 5 November",
+         "reasons": [
+          {
+           "code": "still_have_water",
+           "label": "I still have water"
+          },
+          {
+           "code": "away",
+           "label": "I'll be away"
+          },
+          {
+           "code": "other",
+           "label": "Other"
+          }
+         ],
+         "will_cancel_orders": []
+        }
+       },
+       "auto_renew": true,
+       "billing_amount": 30000.0,
+       "cancelled_at_label": null,
+       "created_at": "<wall-clock>",
+       "deliveries_per_month": 4.333333333333333,
+       "delivery_address_id": 1,
+       "delivery_address_label": "1 Test St, Tashkent",
+       "delivery_day_of_month": null,
+       "delivery_day_of_week": 3,
+       "delivery_time_slot": {
+        "available_days": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6
+        ],
+        "delivery_fee": "0.00",
+        "end_time": "12:00",
+        "id": 1,
+        "is_active": true,
+        "is_premium": false,
+        "max_orders": 50,
+        "name": "Morning",
+        "premium_fee": "0.00",
+        "start_time": "10:00",
+        "time_range": "10:00-12:00"
+       },
+       "delivery_time_slot_id": 1,
+       "description": "",
+       "discount_percentage": 0.0,
+       "end_date": null,
+       "estimated_per_delivery": 30000.0,
+       "estimated_per_delivery_label": "30 000 so'm",
+       "estimated_per_month": 130000.0,
+       "estimated_per_month_label": "130 000 so'm",
+       "failed_billing_attempts": 0,
+       "frequency": "weekly",
+       "id": 1,
+       "items_availability": "all",
+       "kept_order_note": null,
+       "last_delivery_date": null,
+       "name": "Home water",
+       "next_delivery_date": "2026-10-29",
+       "pause_end_date": null,
+       "pause_start_date": null,
+       "paused_at": null,
+       "paused_at_label": null,
+       "payment_method": "click",
+       "payment_method_label": "Click",
+       "payment_method_warning": null,
+       "schedule_sentence": "Every Thursday, 10:00–12:00",
+       "start_date": "2026-10-26T05:00:00",
+       "status": "active",
+       "subscription_items": [
+        {
+         "available": true,
+         "id": 1,
+         "line_total_label": "30 000 so'm",
+         "min_order_quantity": 1,
+         "product": {
+          "barcode": null,
+          "base_price": 15000.0,
+          "category": {
+           "created_at": "<wall-clock>",
+           "description": "Water products",
+           "icon_url": null,
+           "id": 1,
+           "is_active": true,
+           "name": "Water",
+           "sort_order": 0,
+           "updated_at": "<wall-clock>"
+          },
+          "category_id": 1,
+          "created_at": "<wall-clock>",
+          "current_price": 15000.0,
+          "description": "Premium pure water in 19L bottle",
+          "discount_price": null,
+          "expire_days": 180,
+          "fiscal_profile": null,
+          "id": 1,
+          "images": [],
+          "in_sales_stock_check": false,
+          "ingredients": null,
+          "is_active": true,
+          "is_featured": false,
+          "is_returnable_bottle": false,
+          "is_tryout_eligible": true,
+          "max_stock_level": 500,
+          "meta_description": null,
+          "meta_title": null,
+          "min_order_quantity": 1,
+          "min_stock_level": 10,
+          "name": "Pure Water 19L",
+          "nutrition_facts": {},
+          "requires_prescription": false,
+          "returnable_bottles_per_unit": 0.0,
+          "short_description": null,
+          "size": "19L",
+          "sku": null,
+          "slug": null,
+          "stock_caps_purchase": true,
+          "stock_quantity": 100,
+          "track_inventory": true,
+          "tracks_returnable_bottles": false,
+          "updated_at": "<wall-clock>",
+          "volume": 19.0,
+          "volume_unit": "L",
+          "weight": null,
+          "weight_unit": "kg"
+         },
+         "product_id": 1,
+         "product_name": "Pure Water 19L",
+         "quantity": 2,
+         "subscription_id": 1,
+         "total_price": 30000.0,
+         "unit_price": 15000.0,
+         "unit_price_label": "15 000 so'm"
+        }
+       ],
+       "summary_sentence": "Every Thursday, 10:00–12:00. Since 26 October.",
+       "time_kind": "window",
+       "time_label": "10:00–12:00",
+       "total_amount_billed": 0.0,
+       "upcoming_dates": [
+        {
+         "date": "2026-10-29",
+         "label_long": "Thursday, 29 October",
+         "label_short": "Thu 29 Oct",
+         "state": "planned"
+        },
+        {
+         "date": "2026-11-05",
+         "label_long": "Thursday, 5 November",
+         "label_short": "Thu 5 Nov",
+         "state": "planned"
+        },
+        {
+         "date": "2026-11-12",
+         "label_long": "Thursday, 12 November",
+         "label_short": "Thu 12 Nov",
+         "state": "planned"
+        },
+        {
+         "date": "2026-11-19",
+         "label_long": "Thursday, 19 November",
+         "label_short": "Thu 19 Nov",
+         "state": "planned"
+        }
+       ],
+       "upcoming_delivery": {
+        "amount_label": null,
+        "can_pay": false,
+        "date": "2026-10-29",
+        "days_away_label": null,
+        "kept_line": null,
+        "label_long": "Thursday, 29 October",
+        "label_short": "Thu 29 Oct",
+        "order_id": null,
+        "order_number": null,
+        "pay_deadline_label": null,
+        "payment_method_label": "Click",
+        "payment_note": null,
+        "payment_status": null,
+        "state": "planned",
+        "time_kind": "window",
+        "time_label": "10:00–12:00",
+        "will_place_on_label": "Friday, 30 October",
+        "window_end": "12:00",
+        "window_label": "10:00–12:00",
+        "window_start": "10:00"
+       },
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ]
+    },
+    "meta": {
+     "has_next": false,
+     "has_prev": false,
+     "page": 1,
+     "pages": 1,
+     "per_page": 50,
+     "subscriptions_key": "items",
+     "total": 1
+    },
+    "success": true
+   },
+   "status": 200
+  }
+ }
+}

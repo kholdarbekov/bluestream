@@ -1,0 +1,29 @@
+{
+ "case": "payment_pending_neutral",
+ "language": "en",
+ "page": {
+  "html": "<section class=\"payment-pending-section\">\n<div class=\"auto-container\">\n<div class=\"pending-content\">\n<div class=\"pending-icon\">\n<i class=\"far fa-hourglass-half\"></i>\n</div>\n<h2>Payment Processing</h2>\n<p>Thank you! We're confirming your payment and will message you in the bot or by email once it's done.</p>\n<div class=\"action-buttons\">\n<a class=\"theme-btn btn-one\" href=\"https://t.me/aqua_element_bot\" rel=\"noopener noreferrer\" target=\"_blank\">\n<i class=\"fab fa-telegram-plane\"></i> Open the bot\n                </a>\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "island": {
+   "cancel_url": null,
+   "i18n": {
+    "failed": "Payment failed. Please try again.",
+    "timeout": "Payment verification is taking longer than expected. Please check your order status."
+   },
+   "order_actions": {
+    "confirmed": "Thanks! Your order is confirmed.",
+    "failed": "That didn't go through. Please try again.",
+    "keep": "Keep it",
+    "open_subscription": "Open the subscription",
+    "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
+    "reason_prompt": "Want to tell us why? (optional)",
+    "reason_text": "In a few words (optional)",
+    "switch_to_cash": "Pay with cash",
+    "try_again": "Try again",
+    "working": "One moment…"
+   },
+   "order_id": null,
+   "order_page_url": null,
+   "payment_id": null
+  }
+ }
+}

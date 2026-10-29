@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Optional
 from sqlalchemy import (
     Column,
     Integer,
@@ -15,8 +16,10 @@ from sqlalchemy import (
     JSON,
     Index,
     Numeric,
+    func,
     text,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from business_app import db
 from business_app.utils.constants import (
@@ -114,6 +117,11 @@ class Order(db.Model, TimestampMixin):
     )
     is_paid = Column(Boolean, default=False, index=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
+    # When the order became payable on Click (spec 2026-10-27 §4.4, §17 Q3): its payment deadline counts from here.
+    # Written only by `PaymentService.open_click_payment_window`; migration 3f8b2d6a9c41 stamped the deploy time on
+    # every live unpaid online order. NULL when no window was opened (a cash order, or one an old-code worker placed
+    # during the deploy), so it is read through `payment_window_start`, which falls back to `created_at`.
+    online_payable_since = Column(DateTime(timezone=True), nullable=True)
 
     # Special fields
     is_subscription_order = Column(Boolean, default=False)
@@ -131,6 +139,18 @@ class Order(db.Model, TimestampMixin):
     # Sales-agent visit that produced this order (phase 2a). Partial unique
     # uq_orders_visit_id in migration d4e7f9a2b6c1: at most one order per visit.
     visit_id = Column(Integer, ForeignKey("visits.id", name="fk_orders_visit_id"), nullable=True)
+
+    @hybrid_property
+    def payment_window_start(self) -> Optional[datetime]:
+        """When the order's payment window opened: `online_payable_since`, else `created_at` for an order nothing
+        stamped. `OrderService.payment_deadline` counts from this; in SQL it is the same COALESCE, so the sweep's
+        candidate query and the deadline agree."""
+        return self.online_payable_since or self.created_at
+
+    @payment_window_start.inplace.expression
+    @classmethod
+    def _payment_window_start_expression(cls):
+        return func.coalesce(cls.online_payable_since, cls.created_at)
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="orders")

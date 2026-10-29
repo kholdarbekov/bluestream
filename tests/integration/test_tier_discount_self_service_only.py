@@ -19,6 +19,7 @@ from flask_jwt_extended import create_access_token
 from business_app import db as _db
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order
+from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.order_service import OrderService
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
@@ -252,18 +253,16 @@ def test_the_subscription_preview_quotes_no_tier_for_a_user_who_would_get_one_on
 
 
 @pytest.mark.parametrize("source", ["admin", "phone", ORDER_SOURCE_SALES_AGENT])
-def test_a_staff_click_order_moved_onto_cash_by_the_customer_stays_without_the_tier(
-    app, db, customer, sample_product, user_address, source
+def test_a_staff_click_order_moved_onto_cash_at_the_door_stays_without_the_tier(
+    app, db, customer, driver, sample_product, user_address, source
 ):
     order = _staff_click_order(app, db, source, customer, user_address, sample_product)
 
-    resp = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": order.id, "payment_method": "cash"},
-        headers=customer_headers(app, customer),
+    CashCollectionService().convert_electronic_order_to_cash(
+        order, actor_user_id=driver.id, reason="paid in cash at the door"
     )
+    _db.session.commit()
 
-    assert resp.status_code in (200, 201), resp.get_data(as_text=True)
     order = _reload(order.id)
     assert order.payment_method == PaymentMethod.CASH
     assert D(order.tier_discount) == Decimal("0.00")
@@ -379,9 +378,11 @@ def test_a_billed_subscription_order_moved_onto_cash_by_an_admin_stays_without_t
     assert D(order_after.tier_discount) == Decimal("0.00")
 
 
-def test_a_web_click_order_moved_onto_cash_still_gains_the_tier(app, db, customer, sample_product, user_address):
+def test_a_web_click_order_moved_onto_cash_at_the_door_still_gains_the_tier(
+    app, db, customer, driver, sample_product, user_address
+):
     """Control for the staff Click orders above: the customer's own website order, moved onto cash by
-    the same `/payments/create` call, is re-priced onto the tier."""
+    the same door conversion, is re-priced onto the tier."""
     resp = post_order(
         app,
         customer_headers(app, customer),
@@ -394,13 +395,11 @@ def test_a_web_click_order_moved_onto_cash_still_gains_the_tier(app, db, custome
     order = _reload(resp.get_json()["data"]["order"]["id"])
     assert D(order.tier_discount) == Decimal("0.00")
 
-    moved = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": order.id, "payment_method": "cash"},
-        headers=customer_headers(app, customer),
+    CashCollectionService().convert_electronic_order_to_cash(
+        order, actor_user_id=driver.id, reason="paid in cash at the door"
     )
+    _db.session.commit()
 
-    assert moved.status_code in (200, 201), moved.get_data(as_text=True)
     order_after = _reload(order.id)
     assert order_after.payment_method == PaymentMethod.CASH
     assert D(order_after.tier_discount) > 0

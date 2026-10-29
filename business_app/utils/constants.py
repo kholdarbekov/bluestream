@@ -49,6 +49,9 @@ class NotificationType(Enum):
     SUBSCRIPTION_DELIVERY_SKIPPED = "subscription_delivery_skipped"
     SUBSCRIPTION_PAID_ORDER_KEPT = "subscription_paid_order_kept"
     ORDER_PAYMENT_EXPIRED = "order_payment_expired"
+    # A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5). A VARCHAR(50) column:
+    # no migration.
+    SUBSCRIPTION_SCHEDULE_CHANGED = "subscription_schedule_changed"
 
     # Promotional notification types
     PROMOTIONAL = "promotional"

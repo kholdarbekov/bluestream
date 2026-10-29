@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+{#- The same-site hop (business_app/utils/page_auth.py, spec 2026-10-27 §4.6). A browser that arrived from
+    another site sent none of our SameSite=Strict cookies; reloading the same URL from here is a same-site
+    navigation, so it sends them. Standalone on purpose: no analytics, no Referer, never indexed.
+    `target` has passed safe_next_path. It is written only into attributes (autoescaped), never into script:
+    same-site-hop.js reads it from `data-hop-target` and reloads it with the #fragment. A browser whose script
+    never runs (inline or all script blocked) continues through the plain meta refresh within a second, and one
+    with script turned off through the <noscript> refresh, placed first so it wins, or the Continue link. -#}
+<html lang="{{ current_language }}" data-hop-target="{{ target }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="referrer" content="no-referrer">
+    <title>{{ company_name }}</title>
+    <noscript><meta http-equiv="refresh" content="0; url={{ target }}"></noscript>
+    <meta http-equiv="refresh" content="1; url={{ target }}">
+    <script src="{{ url_for('static', filename='js/pages/same-site-hop.js') }}"></script>
+</head>
+<body>
+    <noscript><a href="{{ target }}">{{ 'web.page_auth.continue'|t }}</a></noscript>
+</body>
+</html>

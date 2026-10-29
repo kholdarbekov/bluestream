@@ -6,17 +6,27 @@ the customer's JWT, `{"action": ...}` as the body, nothing else.
 
 import inspect
 import logging
+from datetime import timedelta
 
 import pytest
 from flask_jwt_extended import create_access_token
 
+from business_app.models.order import Order
 from business_app.models.sales_visits import OrderConfirmationRequest
+from business_app.models.translation import Translation
 from business_app.models.user import UserAddress
+from business_app.services.notification_service import NotificationService
 from business_app.services.order_service import OrderService
+from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
 from business_app.services.sales.outlet_service import OutletService
 from business_app.tasks import sales_agent_tasks
+from business_app.tasks.payment_tasks import process_payment_confirmation
 from business_app.utils import error_handlers as error_handlers_module
-from shared.enums import EntitySubtype, OrderStatus
+from business_app.utils.timezone_utils import get_utc_now
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from shared.enums import EntitySubtype, OrderStatus, PaymentStatus
+from shared.staff_constants import SALES_EVENT_AGENT_ORDER_DECLINED
+from tests.integration.customer_action_matrix import ROW, seed
 from tests.integration.test_outlet_create import GROCERY
 from tests.unit.test_agent_order_confirmation import _place_order, _spy
 from tests.unit.test_outlet_dedupe import PIN, _customer
@@ -99,8 +109,158 @@ def test_store_declines_its_agent_order_and_the_reason_reaches_the_row(
     assert data["order"]["status"] == OrderStatus.CANCELLED.value
     row = OrderConfirmationRequest.query.filter_by(order_id=agent_order.id).one()
     assert (row.status, row.decline_reason) == ("declined", "Bugun pul yo'q")
+    assert row.response_channel == "telegram"
     db.session.refresh(agent_order)
     assert agent_order.status is OrderStatus.CANCELLED
+
+
+@pytest.fixture
+def order_words(db):
+    """The published order words and the refresh sentence, as the seeder ships them."""
+    for key, values in BACKEND_TRANSLATIONS.items():
+        if key.startswith(("api.orders.", "api.common.")):
+            for language, value in values.items():
+                db.session.add(Translation(key=key, language=language, value=value, category=_category_for(key)))
+    db.session.commit()
+
+
+def _published_actions(client, order_id, headers):
+    response = client.get(f"/api/v1/orders/{order_id}?lang=en", headers=headers)
+    assert response.status_code == 200, response.get_json()
+    return response.get_json()["data"]["order"]["customer_actions"]
+
+
+def test_a_store_cancel_of_an_awaiting_agent_order_is_a_decline_and_tells_the_agent(
+    client, app, db, linked_outlet, agent_order, order_words, monkeypatch
+):
+    """D13: the store's own Cancel of an order its agent placed, still awaiting its answer, is the bot's Decline:
+    one record, and the agent is told (spec 2026-10-27 §5.2)."""
+    pushes = _spy(monkeypatch, sales_agent_tasks.push_sales_event, "delay")
+    headers = _customer_headers(app, linked_outlet.user_id)
+
+    actions = _published_actions(client, agent_order.id, headers)
+    cancel, confirm = actions["cancel"], actions["confirm"]
+
+    assert cancel == {
+        "allowed": True,
+        "refusal": None,
+        "via": "decline",
+        "label": "Decline order",
+        "confirm_text": "Decline this order? We'll let your sales agent know.",
+        "subscription_id": None,
+        "reasons": [],
+    }
+    assert confirm == {"allowed": True, "label": "Confirm order"}
+    resp = client.post(
+        f"/api/v1/orders/{agent_order.id}/cancel?lang=en", headers=headers, json={"expected_via": "decline"}
+    )
+    assert (resp.status_code, resp.get_json()["message"]) == (200, "Declined. We've let your sales agent know.")
+    assert (resp.get_json()["data"]["via"], resp.get_json()["data"]["order"]["status"]) == ("decline", "cancelled")
+    row = OrderConfirmationRequest.query.filter_by(order_id=agent_order.id).one()
+    assert (row.status, row.response_channel) == ("declined", "customer_cancel")
+    assert [args[1] for args, _kwargs in pushes] == [SALES_EVENT_AGENT_ORDER_DECLINED]
+    db.session.refresh(agent_order)
+    assert agent_order.status is OrderStatus.CANCELLED
+
+
+def test_an_expired_question_turns_decline_back_into_cancel(
+    client, app, db, linked_outlet, agent_order, order_words
+):
+    """Once the question expires, the order is confirmed and is the store's to cancel like any other; a screen
+    still showing Decline is out of date."""
+    AgentOrderConfirmationService.expire_due(now=get_utc_now() + timedelta(days=30))
+    headers = _customer_headers(app, linked_outlet.user_id)
+
+    actions = _published_actions(client, agent_order.id, headers)
+
+    assert (actions["cancel"]["via"], actions["confirm"]) == ("cancel", {"allowed": False, "label": None})
+    stale = client.post(
+        f"/api/v1/orders/{agent_order.id}/cancel?lang=en", headers=headers, json={"expected_via": "decline"}
+    )
+    assert (stale.status_code, stale.get_json()["data"]) == (409, {"reason_code": "STATE_CHANGED"})
+    db.session.refresh(agent_order)
+    assert agent_order.status is OrderStatus.CONFIRMED
+
+
+def test_a_store_cannot_decline_through_the_proposal_an_agent_order_it_has_paid_for(
+    client, app, db, sample_user, order_words, monkeypatch
+):
+    """The proposal's Decline removes the order, so the one Cancel rule decides it (spec 2026-10-27 §5.1), on both
+    routes that decline. The store paid the Click link of its agent's order, and the payment confirmed the order
+    while the store's question was still pending (the matrix's `agent_pending_click`, an order an admin moved to
+    Click). The order's payload refuses its removal as PAID, and the Decline the proposal still carries answers that
+    same refusal and writes nothing: the paid order stays, the question stays open, and the agent hears nothing.
+    Confirm is still the store's to send."""
+    order = seed(db, sample_user, ROW["agent_pending_click"], now=get_utc_now())
+    payment = order.payment
+    # The gateway's word (external I/O): the store paid the link.
+    payment.status = PaymentStatus.COMPLETED
+    payment.paid_at = get_utc_now()
+    db.session.commit()
+    _spy(monkeypatch, NotificationService, "send_payment_notification")
+    assert process_payment_confirmation.run(payment.id) == {"success": True, "payment_id": payment.id}
+    db.session.refresh(order)
+    assert order.status is OrderStatus.CONFIRMED
+    pushes = _spy(monkeypatch, sales_agent_tasks.push_sales_event, "delay")
+    headers = _customer_headers(app, sample_user.id)
+
+    actions = _published_actions(client, order.id, headers)
+
+    cancel = actions["cancel"]
+    assert (cancel["allowed"], cancel["via"], cancel["refusal"]) == (False, None, "PAID")
+    assert actions["confirm"] == {"allowed": True, "label": "Confirm order"}
+    declined = client.post(
+        f"/api/v1/orders/{order.id}/agent-confirmation",
+        json={"action": "decline", "reason": "Bugun pul yo'q"},
+        headers=headers,
+    )
+    assert declined.status_code == 400, declined.get_data(as_text=True)
+    body = declined.get_json()
+    assert (body["error_code"], body["details"]["reason_code"]) == ("ORDER_NOT_CUSTOMER_CANCELLABLE", "PAID")
+    db.session.expire_all()
+    assert db.session.get(Order, order.id).status is OrderStatus.CONFIRMED
+    row = OrderConfirmationRequest.query.filter_by(order_id=order.id).one()
+    assert (row.status, row.responded_at, row.decline_reason) == ("pending", None, None)
+    assert pushes == []
+
+    confirmed = client.post(
+        f"/api/v1/orders/{order.id}/agent-confirmation", json={"action": "confirm"}, headers=headers
+    )
+    assert confirmed.status_code == 200, confirmed.get_data(as_text=True)
+    assert OrderConfirmationRequest.query.filter_by(order_id=order.id).one().status == "confirmed"
+
+
+def test_an_agent_order_staff_cancelled_asks_the_store_nothing_more(
+    client, app, db, linked_outlet, agent_order, order_words, admin_claim_headers, monkeypatch
+):
+    """Staff cancel an agent order while the store's question is still pending (its row stays "pending" until the
+    expiry sweep). The question closed with the order: the payload publishes no Confirm, and the proposal's
+    Confirm and Decline are both answered "not awaiting your confirmation", so a cancelled order is never stamped
+    confirmed and the agent is never told so."""
+    cancelled = client.put(
+        f"/api/v1/admin/orders/{agent_order.id}/status",
+        json={"status": "cancelled", "reason": "Store phoned to cancel"},
+        headers=admin_claim_headers,
+    )
+    assert cancelled.status_code == 200, cancelled.get_data(as_text=True)
+    pushes = _spy(monkeypatch, sales_agent_tasks.push_sales_event, "delay")
+    headers = _customer_headers(app, linked_outlet.user_id)
+
+    actions = _published_actions(client, agent_order.id, headers)
+
+    assert actions["confirm"] == {"allowed": False, "label": None}
+    assert (actions["cancel"]["allowed"], actions["cancel"]["refusal"]) == (False, "NOT_CANCELLABLE")
+    for action in ("confirm", "decline"):
+        answer = client.post(
+            f"/api/v1/orders/{agent_order.id}/agent-confirmation", json={"action": action}, headers=headers
+        )
+        assert answer.status_code == 409, answer.get_data(as_text=True)
+        assert answer.get_json()["error_code"] == "SALES_CONFIRMATION_NOT_PENDING"
+    row = OrderConfirmationRequest.query.filter_by(order_id=agent_order.id).one()
+    assert (row.status, row.responded_at) == ("pending", None)
+    db.session.refresh(agent_order)
+    assert agent_order.status is OrderStatus.CANCELLED
+    assert pushes == []
 
 
 def test_another_customer_cannot_answer_the_order(client, db, agent_order, auth_headers):
@@ -141,7 +301,7 @@ def test_answering_twice_is_a_409_with_its_code(client, app, db, linked_outlet, 
 
 
 def test_a_duplicate_answer_is_logged_as_a_warning_not_an_error(
-    client, app, db, linked_outlet, agent_order, caplog
+    client, app, db, linked_outlet, agent_order, caplog, order_words
 ):
     """A second Confirm tap is a thumb, not an incident.
 
@@ -180,7 +340,8 @@ def test_a_duplicate_answer_is_logged_as_a_warning_not_an_error(
     assert again.get_json()["error_code"] == "SALES_CONFIRMATION_NOT_PENDING"
     lines = [r for r in caplog.records if r.name == "business_app.utils.error_handlers"]
     assert [r.levelname for r in lines] == ["WARNING"], [(r.levelname, r.getMessage()) for r in lines]
-    assert "This order is not awaiting your confirmation" in lines[0].getMessage()
+    assert "This order is no longer waiting for your answer." in lines[0].getMessage()
+    assert again.get_json()["message"] == "This order is no longer waiting for your answer."
 
 
 def test_an_unknown_action_is_a_400_with_its_error_code(client, app, db, linked_outlet, agent_order):

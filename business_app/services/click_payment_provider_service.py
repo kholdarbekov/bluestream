@@ -14,6 +14,7 @@ from flask import current_app
 from business_app import db
 from business_app.models.order import Order
 from business_app.models.payment import CreditCard, Payment, PaymentTransaction
+from business_app.services.customer_links import pay_return_urls
 from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError
 from business_app.utils.http_client import RetryConfig, request_with_retry
@@ -36,7 +37,6 @@ class ClickPaymentProviderService:
         self.service_id = current_app.config.get("CLICK_SHOP_SERVICE_ID") or current_app.config.get("CLICK_SERVICE_ID")
         self.secret_key = current_app.config.get("CLICK_SHOP_SECRET_KEY") or current_app.config.get("CLICK_SECRET_KEY")
         self.checkout_url = current_app.config.get("CLICK_CHECKOUT_URL") or "https://my.click.uz/services/pay"
-        self.shop_callback_url = current_app.config.get("CLICK_SHOP_CALLBACK_URL")
         self.merchant_api_url = (
             current_app.config.get("CLICK_MERCHANT_API_URL")
             or current_app.config.get("CLICK_ENDPOINT_URL")
@@ -99,7 +99,10 @@ class ClickPaymentProviderService:
         log_fn = getattr(current_app.logger, level, current_app.logger.info)
         log_fn("Click payment flow step: %s", step, extra=payload)
 
-    def create_payment_link(self, payment: Payment) -> Dict[str, str]:
+    def create_payment_link(self, payment: Payment, *, channel: str) -> Dict[str, str]:
+        """The Click checkout link for `payment`. Click sends the customer back to where Pay was tapped
+        (`customer_links.pay_return_urls(order, channel)`), worked out again on every call: the URL an earlier link
+        recorded in `callback_url` is never read back, so it cannot carry over to another channel."""
         self._log_flow_step(
             "create_payment_link_started",
             payment=payment,
@@ -118,11 +121,7 @@ class ClickPaymentProviderService:
             raise PaymentError("Click payment service is not configured")
 
         now = datetime.now(timezone.utc)
-        base_url = current_app.config.get("COMPANY_WEBSITE", "http://localhost:5000").rstrip("/")
-        success_url = (
-            payment.callback_url or self.shop_callback_url or f"{base_url}/payment/success?order_id={payment.order_id}"
-        )
-        cancel_url = f"{base_url}/payment/cancel?order_id={payment.order_id}"
+        success_url, cancel_url = pay_return_urls(payment.order, channel)
         amount = self._normalize_amount(payment.amount)
 
         query_params = {

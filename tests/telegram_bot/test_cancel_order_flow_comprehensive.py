@@ -82,6 +82,18 @@ class FrozenCallbackQuery:
         raise AttributeError("Attribute `data` of class `CallbackQuery` can't be set!")
 
 
+# `customer_actions.cancel` for a cancellable ordinary order, as `serialize_order` publishes it.
+_PUBLISHED_CANCEL = {
+    "allowed": True,
+    "refusal": None,
+    "via": "cancel",
+    "label": "Cancel order",
+    "confirm_text": "Cancel this order?",
+    "subscription_id": None,
+    "reasons": [],
+}
+
+
 def _minimal_order(order_id: int):
     """A minimal but complete-enough order payload for order_details to render."""
     return {
@@ -91,6 +103,7 @@ def _minimal_order(order_id: int):
         "total_amount": 18000,
         "status": "confirmed",
         "order_items": [],
+        "customer_actions": {"pay": {"allowed": False}, "cancel": _PUBLISHED_CANCEL},
     }
 
 
@@ -423,13 +436,6 @@ class TestCancelOrderFullSequence:
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "order_details", lambda *_a, **_k: "details-kbd")
-        rendered = {}
-
-        def _yes_no(*_a, **kwargs):
-            rendered.update(kwargs)
-            return "yes-no-kbd"
-
-        monkeypatch.setattr(orders_module.MenuKeyboards, "yes_no_buttons", _yes_no)
         api = RecordingAPIContext()
         monkeypatch.setattr(orders_module, "api_client", api)
         context = make_context()
@@ -441,32 +447,31 @@ class TestCancelOrderFullSequence:
         assert api.requested_ids == [order_id]
         open_update.callback_query.edit_message_text.assert_awaited_once()
 
-        # 2) Tap "Cancel" -> confirmation prompt; cancelling id is stashed.
+        # 2) Tap "Cancel" -> the order is read again and its published removal confirmed.
         cancel_update = DummyUpdate()
         cancel_update.callback_query = DummyCallbackQuery(data=f"cancel_order_{order_id}")
         await handler.cancel_order(cancel_update, context)
+        assert api.requested_ids == [order_id, order_id]
+        drawn = cancel_update.callback_query.edit_message_text.await_args.kwargs
+        assert drawn["text"] == _PUBLISHED_CANCEL["confirm_text"]
+        card = [button.callback_data for row in drawn["reply_markup"].inline_keyboard for button in row]
         # The id travels on the buttons, so the card still works after a deploy.
-        assert rendered["no_callback"] == f"cancel_order_{order_id}_confirm_no"
+        assert card == [f"cancel_order_{order_id}_confirm_yes_cancel", f"cancel_order_{order_id}_confirm_no"]
         assert "cancelling_order_id" not in context.user_data
-        cancel_update.callback_query.edit_message_text.assert_awaited_once_with(
-            text="telegram.orders.cancel_confirm:en",
-            reply_markup="yes-no-kbd",
-        )
 
-        # 3) Tap "No" with a FROZEN callback query (the prod-crash shape) —
-        #    exactly the data the card just rendered.
+        # 3) Tap "Keep my order" with a FROZEN callback query (the prod-crash shape) —
+        #    exactly the data the card just rendered, through the handler bot.py routes it to.
         no_update = DummyUpdate()
-        no_update.callback_query = FrozenCallbackQuery(data=rendered["no_callback"])
-        await handler.cancel_order_confirm_no(no_update, context)
+        no_update.callback_query = FrozenCallbackQuery(data=card[1])
+        await handler.cancel_order(no_update, context)
 
         # Back on the detail view for the same order, with no AttributeError.
         handler._handle_error.assert_not_awaited()
         assert no_update.callback_query.data == f"cancel_order_{order_id}_confirm_no"
         no_update.callback_query.edit_message_text.assert_awaited_once()
         assert "cancelling_order_id" not in context.user_data
-        # The id flowed through unchanged from Cancel -> No -> details
-        # (opened once, then re-opened after "No").
-        assert api.requested_ids == [order_id, order_id]
+        # The id flowed through unchanged from Cancel -> Keep -> details.
+        assert api.requested_ids == [order_id, order_id, order_id]
 
 
 # ---------------------------------------------------------------------------
@@ -488,9 +493,9 @@ CANCELLABLE_ORDER = {
     "created_at": "2026-08-20T10:00:00",
     "total_amount": 42000,
     "status": "pending",
-    # `serialize_order`'s answer (F5). The bot draws Cancel from this field
-    # alone, so without it this order is not cancellable on screen.
-    "can_customer_cancel": True,
+    # `serialize_order`'s answer (F5, spec 2026-10-27 §5.1). The bot draws Cancel
+    # from this field alone, so without it this order is not cancellable on screen.
+    "customer_actions": {"pay": {"allowed": False}, "cancel": _PUBLISHED_CANCEL},
     "order_items": [],
 }
 
@@ -510,9 +515,12 @@ async def cancel_bot(monkeypatch):
         lambda _c: {"data": {"order": CANCELLABLE_ORDER, "delivery": None}},
     )
 
-    def _cancel(_call):
-        harness.cancelled.append(ORDER_ID)
-        return {"data": {"order": {**CANCELLABLE_ORDER, "status": "cancelled"}}}
+    def _cancel(call):
+        harness.cancelled.append((ORDER_ID, call.data))
+        return {
+            "data": {"order": {**CANCELLABLE_ORDER, "status": "cancelled"}, "via": "cancel"},
+            "message": "Order cancelled successfully",
+        }
 
     harness.backend.route("POST", f"/api/v1/orders/{ORDER_ID}/cancel", _cancel)
     return harness
@@ -537,7 +545,7 @@ class TestCancelConfirmationSurvivesARestart:
 
         await cancel_bot.send(user.tap(f"cancel_order_{ORDER_ID}"))
         card = cancel_bot.telegram.last_shown()
-        yes = next(data for data in card.callback_data() if data.endswith("_yes"))
+        yes = next(data for data in card.callback_data() if "_confirm_yes_" in data)
         assert str(ORDER_ID) in yes, (
             f"the id must ride on the callback, not in bot memory: {card.callback_data()}"
         )
@@ -552,8 +560,8 @@ class TestCancelConfirmationSurvivesARestart:
 
         await restarted.send(user.tap(yes))
 
-        assert restarted.cancelled == [ORDER_ID], (
-            "the tap did not reach the backend — the Yes button is dead again"
+        assert restarted.cancelled == [(ORDER_ID, {"expected_via": "cancel"})], (
+            "the tap did not reach the backend with the via the card showed — the Yes button is dead again"
         )
         assert restarted.telegram.shown, "the customer was left on the dead card"
 

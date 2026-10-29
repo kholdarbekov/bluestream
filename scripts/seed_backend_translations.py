@@ -827,11 +827,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Kartani tasdiqlab bo\'lmadi',
         'ru': 'Не удалось подтвердить карту'
     },
-    'api.payments.error.process_card_payment_failed': {
-        'en': 'Failed to process card payment',
-        'uz': 'Karta to\'lovini qayta ishlashda xatolik',
-        'ru': 'Не удалось обработать платеж картой'
-    },
 
     # ============================================================================
     # API - Addresses (api.addresses.*)
@@ -1542,9 +1537,9 @@ BACKEND_TRANSLATIONS = {
     # pays on delivery (cash or card transfer to the driver). Framed as our
     # thank-you, never as a rejection.
     'api.loyalty.tier_discount_condition': {
-        'en': 'Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery — in cash or by card transfer to the driver.',
-        'uz': "Telegram botimiz yoki saytimiz orqali buyurtma berganingiz uchun minnatdorchiligimiz: u yerda o'zingiz beradigan va yetkazib berishda — naqd yoki haydovchi kartasiga o'tkazma orqali — to'laydigan har bir buyurtmangizga daraja chegirmangiz avtomatik qo'llaniladi.",
-        'ru': 'Наша благодарность за заказы в Telegram-боте и на сайте: скидка вашего уровня автоматически применяется к каждому заказу, который вы оформляете там сами и оплачиваете при доставке — наличными или переводом на карту курьера.'
+        'en': 'Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery in cash.',
+        'uz': "Telegram botimiz yoki saytimiz orqali buyurtma berganingiz uchun minnatdorchiligimiz: u yerda o'zingiz beradigan va yetkazib berishda naqd to'laydigan har bir buyurtmangizga daraja chegirmangiz avtomatik qo'llaniladi.",
+        'ru': 'Наша благодарность за заказы в Telegram-боте и на сайте: скидка вашего уровня автоматически применяется к каждому заказу, который вы оформляете там сами и оплачиваете при доставке наличными.'
     },
     'api.loyalty.points_earned': {
         'en': 'AquaCoins earned',
@@ -5280,6 +5275,11 @@ BACKEND_TRANSLATIONS = {
     'landing.custom_subscription.select_day_of_month': {
         'en': 'Select a day of the month', 'uz': 'Oyning kunini tanlang', 'ru': 'Выберите день месяца'
     },
+    # The slot list's placeholder (index.html, and the builder's island when slots are offered: a slot is then
+    # required). It was a database-only row; seeded with the values it already had.
+    'landing.custom_subscription.select_time_slot': {
+        'en': 'Select a time slot', 'uz': "Vaqt oralig'ini tanlang", 'ru': 'Выберите временной интервал'
+    },
     # ─── Public delivery-coverage page (/coverage) ───────────────────────
     'landing.nav.coverage': {
         'en': 'Coverage', 'uz': 'Hududlar', 'ru': 'Зона доставки'
@@ -5850,9 +5850,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Выберите время доставки.'
     },
     'telegram.subscription.any_time': {
-        'en': 'Any time (we will confirm it)',
-        'uz': 'Istalgan vaqt (o\'zimiz aniqlaymiz)',
-        'ru': 'В любое время (уточним сами)'
+        'en': 'Any time',
+        'uz': 'Istalgan vaqtda',  # NATIVE-READ
+        'ru': 'В любое время'  # NATIVE-READ
     },
     'telegram.subscription.delivery_day': {
         'en': 'Delivery day',
@@ -6578,6 +6578,33 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Summa',
         'ru': 'Сумма'
     },
+    # The card's money line: the backend's estimate at the current customer price (spec 2026-10-26 §12, B10).
+    'telegram.subscription.per_delivery': {
+        'en': 'Per delivery',
+        'uz': 'Har bir yetkazishda',
+        'ru': 'За одну доставку'
+    },
+    # A subscription item the backend publishes as `available: False` (no longer sold, or deleted) is left out of
+    # every order (spec 2026-10-26 §8.5): its line says so instead of a price, and the card and the items screen
+    # add the note for `items_availability` 'some' or 'none'. The same words as the website's cabinet.subs.items.*.
+    'telegram.subscription.item_not_included': {
+        'en': 'Not included',
+        'uz': 'Kiritilmaydi',
+        'ru': 'Не входит'
+    },
+    'telegram.subscription.some_unavailable_note': {
+        'en': "Some products are no longer available. We'll deliver the rest of your order without them.",
+        'uz': "Ba'zi mahsulotlar endi mavjud emas. Buyurtmaning qolgan qismini ularsiz yetkazamiz.",
+        'ru': 'Некоторых товаров больше нет в продаже. Остальное привезём без них.'
+    },
+    'telegram.subscription.none_available_note': {
+        'en': "None of these products are available any more, so we can't place your next order. "
+              "Change your items to keep your deliveries coming.",
+        'uz': "Bu mahsulotlarning hech biri endi mavjud emas, shuning uchun keyingi buyurtmani bera olmaymiz. "
+              "Yetkazib berish davom etishi uchun mahsulotlarni o'zgartiring.",
+        'ru': 'Ни одного из этих товаров больше нет в продаже, поэтому мы не можем оформить следующий заказ. '
+              'Измените товары, чтобы доставки продолжились.'
+    },
     'telegram.subscription.average_order': {
         'en': 'Average order',
         'uz': 'O\'rtacha buyurtma',
@@ -6983,8 +7010,13 @@ BACKEND_TRANSLATIONS = {
     },
     'telegram.customer_notice.delivery_tbc': {
         'en': '{date}, time to be confirmed',
-        'uz': '{date}, vaqti keyinroq aniqlanadi',
-        'ru': '{date}, время уточним позже'
+        'uz': '{date}, vaqti tasdiqlanadi',  # NATIVE-READ
+        'ru': '{date}, время уточняется'  # NATIVE-READ
+    },
+    'telegram.customer_notice.delivery_any_time': {
+        'en': '{date}, any time',
+        'uz': '{date}, istalgan vaqtda',  # NATIVE-READ
+        'ru': '{date}, в любое время'  # NATIVE-READ
     },
     # A localized unit word, as telegram.agent_order.item: the Cyrillic guard catches a ru row
     # that is really the English string.
@@ -6992,6 +7024,13 @@ BACKEND_TRANSLATIONS = {
         'en': '• {name} × {qty}',
         'uz': '• {name} — {qty} dona',
         'ru': '• {name} — {qty} шт.'
+    },
+    # A product the subscription lists that is no longer available is left out of the order and named here
+    # (spec 2026-10-26 §8.5); one line per product, after the item lines.
+    'telegram.customer_notice.not_included': {
+        'en': '⚠️ Not included: {name} (no longer available)',
+        'uz': '⚠️ Kiritilmadi: {name} (endi mavjud emas)',
+        'ru': '⚠️ Не включено: {name} (больше недоступно)'
     },
     'telegram.customer_notice.pay_cash': {
         'en': '💵 Pay {amount} UZS to the driver at the door.',
@@ -8744,9 +8783,9 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         "Daraja chegirmasi qaysi buyurtmalarga qo'llaniladi?",
         'К каким заказам применяется скидка уровня?'),
     'loyalty_guide.faq.a10': _ui_tr(
-        "Every order you place yourself in our Telegram bot or on our website and pay on delivery — in cash or by card transfer to the driver. It's taken off automatically at checkout: our thank-you for ordering in the bot or on the website.",
-        "Telegram botimiz yoki saytimiz orqali o'zingiz beradigan va yetkazib berishda — naqd yoki haydovchi kartasiga o'tkazma orqali — to'laydigan har bir buyurtmangizga. Chegirma rasmiylashtirishda avtomatik qo'llaniladi — bu bot yoki sayt orqali buyurtma berganingiz uchun minnatdorchiligimiz.",
-        'К каждому заказу, который вы оформляете сами в нашем Telegram-боте или на сайте и оплачиваете при доставке — наличными или переводом на карту курьера. Скидка применяется автоматически при оформлении — это наша благодарность за заказ в боте или на сайте.'),
+        "Every order you place yourself in our Telegram bot or on our website and pay on delivery in cash. It's taken off automatically at checkout: our thank-you for ordering in the bot or on the website.",
+        "Telegram botimiz yoki saytimiz orqali o'zingiz beradigan va yetkazib berishda naqd to'laydigan har bir buyurtmangizga. Chegirma rasmiylashtirishda avtomatik qo'llaniladi — bu bot yoki sayt orqali buyurtma berganingiz uchun minnatdorchiligimiz.",
+        'К каждому заказу, который вы оформляете сами в нашем Telegram-боте или на сайте и оплачиваете при доставке наличными. Скидка применяется автоматически при оформлении — это наша благодарность за заказ в боте или на сайте.'),
     'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
     'loyalty_guide.earn.surprise_desc': _ui_tr(
         "Every now and then we surprise members who order with a little extra — a bonus of AquaCoins that lands in your balance when you least expect it. No schedule, no formula; that's what keeps it a surprise.",
@@ -8843,9 +8882,9 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     # literal percentage — the rate itself is always the {pct} parameter
     # elsewhere on the card.
     'loyalty_guide.tier.discount_footnote': _ui_tr(
-        "* Your tier discount is a perk of ordering in our Telegram bot or on our website: it's taken off automatically when you place the order yourself and pay on delivery — in cash or by card transfer to the driver. Subscription deliveries keep their own subscription price; your tier perk is there whenever you place an extra order in the bot or on the website.",
-        "* Daraja chegirmasi — Telegram botimiz yoki saytimiz orqali buyurtma berishning afzalligi: buyurtmani o'zingiz berib, yetkazib berishda naqd yoki haydovchi kartasiga o'tkazma orqali to'laganingizda u avtomatik qo'llaniladi. Obuna yetkazmalari o'z obuna narxida qoladi; bot yoki sayt orqali qo'shimcha buyurtma berganingizda daraja bonusingiz doim siz bilan.",
-        '* Скидка уровня — преимущество заказа в нашем Telegram-боте и на сайте: она применяется автоматически, когда вы оформляете заказ сами и оплачиваете при доставке — наличными или переводом на карту курьера. Доставки по подписке идут по своей цене подписки; бонус уровня всегда ждёт вас, когда вы оформляете дополнительный заказ в боте или на сайте.',
+        "* Your tier discount is a perk of ordering in our Telegram bot or on our website: it's taken off automatically when you place the order yourself and pay on delivery in cash. Subscription deliveries keep their own subscription price; your tier perk is there whenever you place an extra order in the bot or on the website.",
+        "* Daraja chegirmasi — Telegram botimiz yoki saytimiz orqali buyurtma berishning afzalligi: buyurtmani o'zingiz berib, yetkazib berishda naqd to'laganingizda u avtomatik qo'llaniladi. Obuna yetkazmalari o'z obuna narxida qoladi; bot yoki sayt orqali qo'shimcha buyurtma berganingizda daraja bonusingiz doim siz bilan.",
+        '* Скидка уровня — преимущество заказа в нашем Telegram-боте и на сайте: она применяется автоматически, когда вы оформляете заказ сами и оплачиваете при доставке наличными. Доставки по подписке идут по своей цене подписки; бонус уровня всегда ждёт вас, когда вы оформляете дополнительный заказ в боте или на сайте.',
     ),
 
     # Tagline + qualitative benefit bullets are keyed by tier display_order (0=lowest
@@ -9269,7 +9308,6 @@ SUBSCRIPTION_WEB_TRANSLATIONS = {
     'Please select a day of the month': _ui_tr(
         'Please select a day of the month', 'Iltimos, oyning kunini tanlang', 'Пожалуйста, выберите день месяца'
     ),
-    'Time to be confirmed': _ui_tr('Time to be confirmed', 'Vaqti tasdiqlanadi', 'Время уточняется'),
 }
 BACKEND_TRANSLATIONS.update(SUBSCRIPTION_WEB_TRANSLATIONS)
 
@@ -10039,6 +10077,1742 @@ TELEGRAM_LINK_WEB_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(TELEGRAM_LINK_WEB_TRANSLATIONS)
+
+
+# ============================================================================
+# Subscription action guards (docs/superpowers/specs/2026-10-26-web-subscription-management-design.md
+# §5 B1, B8, B9, §12). ONE guard per action in SubscriptionService publishes each refusal as
+# `allowed_actions.<action>.block_reason` AND answers the refused write with the same text, so the
+# website, the bot and admin show one sentence. Page-unique keys under api.subscriptions.action.* /
+# .schedule.* / .payment.*. The three skip_reason rows are the customer's own skip reasons (the chips),
+# beside the system reasons above. Positive tone; never "call us". uz/ru need a native read before prod.
+# ============================================================================
+SUBSCRIPTION_ACTION_GUARD_TRANSLATIONS = {
+    'api.subscriptions.action.pay.nothing_to_pay': {
+        'en': "There's nothing to pay right now.",
+        'uz': "Hozircha to'lanadigan narsa yo'q.",
+        'ru': 'Сейчас оплачивать нечего.',
+    },
+    'api.subscriptions.action.skip.not_active': {
+        'en': 'You can skip a delivery while the subscription is active.',
+        'uz': "Obuna faol bo'lganda yetkazib berishni o'tkazib yuborishingiz mumkin.",
+        'ru': 'Пропустить доставку можно, пока подписка активна.',
+    },
+    'api.subscriptions.action.skip.stale': {
+        'en': 'This changed. Refresh to see the latest.',
+        'uz': "Bu o'zgardi. Eng so'nggi holatni ko'rish uchun yangilang.",
+        'ru': 'Это изменилось. Обновите, чтобы увидеть актуальное.',
+    },
+    'api.subscriptions.action.pause.not_active': {
+        'en': "This subscription isn't running right now, so there's nothing to pause.",
+        'uz': "Bu obuna hozir ishlamayapti, shuning uchun to'xtatadigan narsa yo'q.",
+        'ru': 'Эта подписка сейчас не действует, поэтому приостанавливать нечего.',
+    },
+    'api.subscriptions.action.resume.not_paused': {
+        'en': "This subscription isn't paused, so there's nothing to resume.",
+        'uz': "Bu obuna to'xtatilmagan, shuning uchun davom ettiradigan narsa yo'q.",
+        'ru': 'Эта подписка не приостановлена, поэтому возобновлять нечего.',
+    },
+    'api.subscriptions.action.cancel.already_cancelled': {
+        'en': 'This subscription is already cancelled.',
+        'uz': 'Bu obuna allaqachon bekor qilingan.',
+        'ru': 'Эта подписка уже отменена.',
+    },
+    'api.subscriptions.action.edit.closed': {
+        'en': "This subscription has ended, so it can't be changed. You can set up a new one any time.",
+        'uz': "Bu obuna yakunlangan, shuning uchun uni o'zgartirib bo'lmaydi. Istalgan vaqtda yangisini yaratishingiz mumkin.",
+        'ru': 'Эта подписка завершена, поэтому изменить её нельзя. Вы можете оформить новую в любое время.',
+    },
+    'api.subscriptions.action.remove_item.last_item': {
+        'en': 'A subscription needs at least one product. Need a break instead? Pause.',
+        'uz': "Obunada kamida bitta mahsulot bo'lishi kerak. Tanaffus kerakmi? To'xtatib qo'ying.",
+        'ru': 'В подписке должен быть хотя бы один товар. Нужен перерыв? Приостановите её.',
+    },
+    'api.subscriptions.action.create_next_order.not_active': {
+        'en': 'Orders are created only while the subscription is active.',
+        'uz': "Buyurtmalar faqat obuna faol bo'lganda yaratiladi.",
+        'ru': 'Заказы создаются, только пока подписка активна.',
+    },
+    'api.subscriptions.schedule.day_of_week_required': {
+        'en': 'Choose the day of the week for your deliveries.',
+        'uz': 'Yetkazib berish uchun hafta kunini tanlang.',
+        'ru': 'Выберите день недели для доставки.',
+    },
+    'api.subscriptions.schedule.day_of_month_required': {
+        'en': 'Choose the day of the month for your deliveries.',
+        'uz': 'Yetkazib berish uchun oyning kunini tanlang.',
+        'ru': 'Выберите число месяца для доставки.',
+    },
+    'api.subscriptions.schedule.slot_not_offered_on_day': {
+        'en': "This delivery time isn't available on the day you chose. Pick another time, or Any time.",
+        'uz': "Bu yetkazib berish vaqti siz tanlagan kunda mavjud emas. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Это время доставки недоступно в выбранный день. Выберите другое время или «В любое время».',  # NATIVE-READ
+    },
+    # Reworded in step 4 (spec 2026-10-27 §6.4): a monthly slot must cover every DELIVERY day, not every weekday.
+    'api.subscriptions.schedule.slot_not_every_day': {
+        'en': "For a monthly delivery, pick a time that's available on every delivery day, or Any time.",
+        'uz': "Oylik yetkazib berish uchun har bir yetkazib berish kunida mavjud vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Для ежемесячной доставки выберите время, доступное в каждый день доставки, или «В любое время».',  # NATIVE-READ
+    },
+    'api.subscriptions.payment.method_not_offered': {
+        'en': "This payment method isn't available for this subscription right now. Pick another one.",
+        'uz': "Bu to'lov usuli hozircha ushbu obuna uchun mavjud emas. Boshqasini tanlang.",
+        'ru': 'Этот способ оплаты сейчас недоступен для этой подписки. Выберите другой.',
+    },
+    'api.subscriptions.skip_reason.still_have_water': {
+        'en': 'I still have water',
+        'uz': 'Suvim hali bor',
+        'ru': 'Вода ещё есть',
+    },
+    'api.subscriptions.skip_reason.away': {
+        'en': "I'll be away",
+        'uz': "Men bo'lmayman",
+        'ru': 'Меня не будет',
+    },
+    'api.subscriptions.skip_reason.other': {
+        'en': 'Other',
+        'uz': 'Boshqa',
+        'ru': 'Другое',
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_ACTION_GUARD_TRANSLATIONS)
+
+
+# ============================================================================
+# Website display labels (docs/superpowers/specs/2026-10-26-web-subscription-management-design.md §5 B11):
+# business_app/utils/display_labels.py words every date, delivery window, amount, "today"/"tomorrow"/
+# "in N days" and payment-method name the website shows, from these rows. Website-only (spec §12): the bot
+# and the emails keep their own formats. Every date label is in the nominative (ru/uz weekday names lower
+# case), so copy that embeds one places it after a colon or a dash. `in_days.*` are CLDR integer plural
+# forms picked by shared.i18n_rendering.plural_key (ru one/few/many, en and uz one/other); all four are
+# seeded in every language. Money keeps a no-break space before the unit. uz/ru need a native read.
+# ============================================================================
+_WEEKDAYS = (
+    ('Monday', 'dushanba', 'понедельник'),
+    ('Tuesday', 'seshanba', 'вторник'),
+    ('Wednesday', 'chorshanba', 'среда'),
+    ('Thursday', 'payshanba', 'четверг'),
+    ('Friday', 'juma', 'пятница'),
+    ('Saturday', 'shanba', 'суббота'),
+    ('Sunday', 'yakshanba', 'воскресенье'),
+)
+_WEEKDAYS_SHORT = (
+    ('Mon', 'Du', 'пн'), ('Tue', 'Se', 'вт'), ('Wed', 'Ch', 'ср'), ('Thu', 'Pa', 'чт'),
+    ('Fri', 'Ju', 'пт'), ('Sat', 'Sh', 'сб'), ('Sun', 'Ya', 'вс'),
+)
+# The month as it follows a day number ("30 October", "30-oktabr", "30 октября").
+_MONTHS = (
+    ('January', 'yanvar', 'января'), ('February', 'fevral', 'февраля'), ('March', 'mart', 'марта'),
+    ('April', 'aprel', 'апреля'), ('May', 'may', 'мая'), ('June', 'iyun', 'июня'),
+    ('July', 'iyul', 'июля'), ('August', 'avgust', 'августа'), ('September', 'sentabr', 'сентября'),
+    ('October', 'oktabr', 'октября'), ('November', 'noyabr', 'ноября'), ('December', 'dekabr', 'декабря'),
+)
+_MONTHS_SHORT = (
+    ('Jan', 'yan', 'янв.'), ('Feb', 'fev', 'февр.'), ('Mar', 'mar', 'мар.'), ('Apr', 'apr', 'апр.'),
+    ('May', 'may', 'мая'), ('Jun', 'iyn', 'июн.'), ('Jul', 'iyl', 'июл.'), ('Aug', 'avg', 'авг.'),
+    ('Sep', 'sen', 'сент.'), ('Oct', 'okt', 'окт.'), ('Nov', 'noy', 'нояб.'), ('Dec', 'dek', 'дек.'),
+)
+
+
+def _named(prefix, names, start):
+    return {
+        f'{prefix}.{index}': {'en': en, 'uz': uz, 'ru': ru}
+        for index, (en, uz, ru) in enumerate(names, start=start)
+    }
+
+
+WEB_DISPLAY_LABEL_TRANSLATIONS = {
+    **_named('web.display_labels.weekday', _WEEKDAYS, 0),
+    **_named('web.display_labels.weekday_short', _WEEKDAYS_SHORT, 0),
+    **_named('web.display_labels.month', _MONTHS, 1),
+    **_named('web.display_labels.month_short', _MONTHS_SHORT, 1),
+    'web.display_labels.date_long': {
+        'en': '{weekday}, {day} {month}', 'uz': '{day}-{month}, {weekday}', 'ru': '{weekday}, {day} {month}',
+    },
+    'web.display_labels.date_short': {
+        'en': '{weekday} {day} {month}', 'uz': '{day}-{month}, {weekday}', 'ru': '{weekday}, {day} {month}',
+    },
+    'web.display_labels.day_month': {'en': '{day} {month}', 'uz': '{day}-{month}', 'ru': '{day} {month}'},
+    'web.display_labels.money': {'en': "{amount}\u00a0so'm", 'uz': "{amount}\u00a0so'm", 'ru': '{amount}\u00a0сум'},
+    'web.display_labels.today': {'en': 'today', 'uz': 'bugun', 'ru': 'сегодня'},
+    'web.display_labels.tomorrow': {'en': 'tomorrow', 'uz': 'ertaga', 'ru': 'завтра'},
+    'web.display_labels.in_days.one': {'en': 'in {count} day', 'uz': '{count} kundan keyin', 'ru': 'через {count} день'},
+    'web.display_labels.in_days.few': {'en': 'in {count} days', 'uz': '{count} kundan keyin', 'ru': 'через {count} дня'},
+    'web.display_labels.in_days.many': {'en': 'in {count} days', 'uz': '{count} kundan keyin', 'ru': 'через {count} дней'},
+    'web.display_labels.in_days.other': {'en': 'in {count} days', 'uz': '{count} kundan keyin', 'ru': 'через {count} дня'},
+    'web.display_labels.deadline.today': {'en': '{time} today', 'uz': 'bugun, soat {time}', 'ru': 'сегодня, {time}'},
+    'web.display_labels.deadline.tomorrow': {
+        'en': '{time} tomorrow', 'uz': 'ertaga, soat {time}', 'ru': 'завтра, {time}',
+    },
+    'web.display_labels.deadline.weekday': {
+        'en': '{time} on {weekday}', 'uz': '{weekday}, soat {time}', 'ru': '{weekday}, {time}',
+    },
+    'web.display_labels.deadline.date': {'en': '{time} on {date}', 'uz': '{date}, soat {time}', 'ru': '{date}, {time}'},
+    'web.display_labels.payment_method.cash': {'en': 'Cash', 'uz': 'Naqd pul', 'ru': 'Наличные'},
+    'web.display_labels.payment_method.click': {'en': 'Click', 'uz': 'Click', 'ru': 'Click'},
+    'web.display_labels.payment_method.card': {'en': 'Card', 'uz': 'Karta', 'ru': 'Карта'},
+    'web.display_labels.payment_method.payme': {'en': 'Payme', 'uz': 'Payme', 'ru': 'Payme'},
+    'web.display_labels.payment_method.loyalty_points': {'en': 'AquaCoins', 'uz': 'AquaCoins', 'ru': 'AquaCoins'},
+    'web.display_labels.payment_method.business_account': {
+        'en': 'Bank transfer', 'uz': "Bank o'tkazmasi", 'ru': 'Банковский перевод',
+    },
+}
+BACKEND_TRANSLATIONS.update(WEB_DISPLAY_LABEL_TRANSLATIONS)
+
+
+# ============================================================================
+# The subscription page's published answers (spec 2026-10-26 §5 B2-B6, §12), worded by
+# business_app/services/subscription_display.py: the status chips (one palette, `{code, label, tone}`), the
+# line under the next delivery's order, the schedule and summary sentences, the kept-order note and the
+# preview's sentence. Page-unique keys under api.subscriptions.page.*. Positive tone; never "call us"; no
+# discount or savings language. `preview.per_month.*` are CLDR plural forms (see above). uz/ru need a
+# native read before prod.
+# ============================================================================
+SUBSCRIPTION_PAGE_DATA_TRANSLATIONS = {
+    'api.subscriptions.page.status.paid': {'en': 'Paid', 'uz': "To'langan", 'ru': 'Оплачено'},
+    'api.subscriptions.page.status.delivered': {'en': 'Delivered', 'uz': 'Yetkazildi', 'ru': 'Доставлено'},
+    'api.subscriptions.page.status.awaiting_payment': {
+        'en': 'Waiting for payment', 'uz': "To'lov kutilmoqda", 'ru': 'Ожидает оплаты',
+    },
+    'api.subscriptions.page.status.awaiting_new_date': {
+        'en': 'Awaiting new date', 'uz': 'Yangi sana kutilmoqda', 'ru': 'Ждёт новую дату',
+    },
+    'api.subscriptions.page.status.placed': {'en': 'Placed', 'uz': 'Rasmiylashtirildi', 'ru': 'Оформлен'},
+    'api.subscriptions.page.status.on_the_way': {'en': 'On the way', 'uz': "Yo'lda", 'ru': 'В пути'},
+    'api.subscriptions.page.status.pay_on_delivery': {
+        'en': 'Pay on delivery', 'uz': "Yetkazib berishda to'lov", 'ru': 'Оплата при получении',
+    },
+    'api.subscriptions.page.status.bank_transfer': {
+        'en': 'Bank transfer', 'uz': "Bank o'tkazmasi", 'ru': 'Банковский перевод',
+    },
+    'api.subscriptions.page.status.cancelled': {'en': 'Cancelled', 'uz': 'Bekor qilindi', 'ru': 'Отменён'},
+    'api.subscriptions.page.status.returned': {'en': 'Returned', 'uz': 'Qaytarildi', 'ru': 'Возвращён'},
+    'api.subscriptions.page.status.skipped': {'en': 'Skipped', 'uz': "O'tkazib yuborildi", 'ru': 'Пропущено'},
+    'api.subscriptions.page.status.payment_failed': {
+        'en': 'Payment failed', 'uz': "To'lov amalga oshmadi", 'ru': 'Оплата не прошла',
+    },
+    'api.subscriptions.page.payment_note.pay_by': {
+        'en': 'Pay by {deadline} so we can bring it.',
+        'uz': "Buyurtmani olib kelishimiz uchun to'lov muddati: {deadline}.",
+        'ru': 'Срок оплаты — {deadline}. Оплатите, чтобы мы привезли заказ.',
+    },
+    'api.subscriptions.page.payment_note.payment_failed': {
+        'en': "That payment didn't go through. Your order is still waiting, and you can try again until {deadline}.",
+        'uz': "To'lov amalga oshmadi. Buyurtmangiz hali kutmoqda, qayta urinib ko'rish muddati: {deadline}.",
+        'ru': 'Оплата не прошла. Заказ всё ещё ждёт, попробовать снова можно до срока — {deadline}.',
+    },
+    'api.subscriptions.page.payment_note.paid': {
+        'en': 'Paid. This delivery will arrive as planned.',
+        'uz': "To'langan. Bu yetkazib berish rejadagidek keladi.",
+        'ru': 'Оплачено. Доставка приедет по плану.',
+    },
+    'api.subscriptions.page.payment_note.pay_on_delivery': {
+        'en': 'Pay the driver at the door.',
+        'uz': "To'lovni eshik oldida haydovchiga qilasiz.",
+        'ru': 'Оплатите курьеру при получении.',
+    },
+    'api.subscriptions.page.payment_note.bank_transfer': {
+        'en': 'Your company pays by bank transfer under its contract.',
+        'uz': "Kompaniyangiz shartnoma bo'yicha bank o'tkazmasi orqali to'laydi.",
+        'ru': 'Ваша компания оплачивает банковским переводом по договору.',
+    },
+    'api.subscriptions.page.cadence.daily': {'en': 'Every day', 'uz': 'Har kuni', 'ru': 'Каждый день'},
+    'api.subscriptions.page.cadence.weekly': {
+        'en': 'Every {weekday}', 'uz': 'Har hafta: {weekday}', 'ru': 'Каждую неделю: {weekday}',
+    },
+    'api.subscriptions.page.cadence.biweekly': {
+        'en': 'Every other {weekday}', 'uz': 'Ikki haftada bir: {weekday}', 'ru': 'Раз в две недели: {weekday}',
+    },
+    'api.subscriptions.page.cadence.monthly': {
+        'en': 'Every month on day {day}', 'uz': 'Har oyning {day}-kuni', 'ru': 'Каждый месяц, {day}-го числа',
+    },
+    'api.subscriptions.page.cadence.weekly_no_day': {'en': 'Every week', 'uz': 'Har hafta', 'ru': 'Каждую неделю'},
+    'api.subscriptions.page.cadence.biweekly_no_day': {
+        'en': 'Every 2 weeks', 'uz': 'Ikki haftada bir', 'ru': 'Раз в две недели',
+    },
+    'api.subscriptions.page.cadence.monthly_no_day': {'en': 'Every month', 'uz': 'Har oy', 'ru': 'Каждый месяц'},
+    'api.subscriptions.page.schedule_with_window': {
+        'en': '{cadence}, {window}', 'uz': '{cadence}, {window}', 'ru': '{cadence}, {window}',
+    },
+    'api.subscriptions.page.since': {'en': 'Since {date}.', 'uz': '{date}dan beri.', 'ru': 'С {date}.'},
+    'api.subscriptions.page.summary': {
+        'en': '{schedule}. {since}', 'uz': '{schedule}. {since}', 'ru': '{schedule}. {since}',
+    },
+    'api.subscriptions.page.date_with_window': {
+        'en': '{date}, {window}', 'uz': '{date}, {window}', 'ru': '{date}, {window}',
+    },
+    'api.subscriptions.page.kept_order_note': {
+        'en': 'Your order for {date} stays as it is.',
+        'uz': "{date} uchun buyurtmangiz o'zgarishsiz qoladi.",
+        'ru': 'Заказ на {date} остаётся без изменений.',
+    },
+    'api.subscriptions.page.preview.first_delivery': {
+        'en': 'Your first delivery with these changes: {date}.',
+        'uz': "O'zgarishlardan keyingi birinchi yetkazib berish: {date}.",
+        'ru': 'Первая доставка с этими изменениями: {date}.',
+    },
+    'api.subscriptions.page.preview.first_delivery_paused': {
+        'en': 'If you resume today, your first delivery with these changes: {date}.',
+        'uz': "Bugun davom ettirsangiz, o'zgarishlardan keyingi birinchi yetkazib berish: {date}.",
+        'ru': 'Если возобновить сегодня, первая доставка с этими изменениями: {date}.',
+    },
+    'api.subscriptions.page.preview.per_month.one': {
+        'en': 'About {count} delivery a month, about {amount}.',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish, taxminan {amount}.',
+        'ru': 'Примерно {count} доставка в месяц, около {amount}.',
+    },
+    'api.subscriptions.page.preview.per_month.few': {
+        'en': 'About {count} deliveries a month, about {amount}.',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish, taxminan {amount}.',
+        'ru': 'Примерно {count} доставки в месяц, около {amount}.',
+    },
+    'api.subscriptions.page.preview.per_month.many': {
+        'en': 'About {count} deliveries a month, about {amount}.',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish, taxminan {amount}.',
+        'ru': 'Примерно {count} доставок в месяц, около {amount}.',
+    },
+    'api.subscriptions.page.preview.per_month.other': {
+        'en': 'About {count} deliveries a month, about {amount}.',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish, taxminan {amount}.',
+        'ru': 'Примерно {count} доставки в месяц, около {amount}.',
+    },
+    'api.subscriptions.error.invalid_page': {
+        'en': 'Page numbers must be whole numbers from 1.',
+        'uz': "Sahifa raqami 1 dan boshlanadigan butun son bo'lishi kerak.",
+        'ru': 'Номер страницы должен быть целым числом от 1.',
+    },
+    'api.subscriptions.error.too_many_items': {
+        'en': 'A subscription can hold up to {maximum} products.',
+        'uz': "Obunada ko'pi bilan {maximum} ta mahsulot bo'lishi mumkin.",
+        'ru': 'В подписке может быть не больше {maximum} товаров.',
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_PAGE_DATA_TRANSLATIONS)
+
+
+# ============================================================================
+# The customer bot's subscription screens, reading the backend's published answers (plan 2026-10-26 Task 5;
+# spec §6): Cancel asks first with its own label, a stale Skip says so, and the delivery time can be changed.
+# Positive tone; never "call us"; no discount language. uz/ru need a native read before prod.
+# ============================================================================
+SUBSCRIPTION_BOT_PUBLISHED_ANSWERS_TRANSLATIONS = {
+    'telegram.subscription.cancel_button': {
+        'en': '🛑 Cancel subscription',
+        'uz': "🛑 Obunani bekor qilish",
+        'ru': '🛑 Отменить подписку',
+    },
+    'telegram.subscription.cancel_confirm': {
+        'en': 'Cancel this subscription? You can set up a new one at any time.',
+        'uz': "Bu obunani bekor qilamizmi? Istalgan payt yangisini yaratishingiz mumkin.",
+        'ru': 'Отменить эту подписку? Новую можно оформить в любой момент.',
+    },
+    'telegram.subscription.cancel_confirm_yes': {
+        'en': '✅ Yes, cancel it',
+        'uz': "✅ Ha, bekor qilish",
+        'ru': '✅ Да, отменить',
+    },
+    'telegram.subscription.cancel_confirm_no': {
+        'en': '↩️ Keep my subscription',
+        'uz': "↩️ Obunani saqlab qolish",
+        'ru': '↩️ Оставить подписку',
+    },
+    'telegram.subscription.skip_stale': {
+        'en': 'This changed. Refresh to see the latest.',
+        'uz': "Ma'lumot o'zgargan. Yangilab, so'nggisini ko'ring.",
+        'ru': 'Данные изменились. Обновите, чтобы увидеть актуальные.',
+    },
+    'telegram.subscription.change_time_slot': {
+        'en': '🕘 Change Delivery Time',
+        'uz': "🕘 Yetkazish vaqtini o'zgartirish",
+        'ru': '🕘 Изменить время доставки',
+    },
+    'telegram.subscription.select_new_time_slot': {
+        'en': 'Choose the new delivery time:',
+        'uz': 'Yangi yetkazish vaqtini tanlang:',
+        'ru': 'Выберите новое время доставки:',
+    },
+    'telegram.subscription.time_slot_updated_successfully': {
+        'en': 'Delivery time updated.',
+        'uz': 'Yetkazish vaqti yangilandi.',
+        'ru': 'Время доставки обновлено.',
+    },
+    'telegram.subscription.no_time_slots': {
+        'en': 'No delivery times are available for this schedule right now.',
+        'uz': "Hozircha bu jadval uchun yetkazish vaqtlari mavjud emas.",
+        'ru': 'Для этого расписания сейчас нет доступного времени доставки.',
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_BOT_PUBLISHED_ANSWERS_TRANSLATIONS)
+
+
+# ============================================================================
+# /my-subscriptions, the page's own words (spec 2026-10-26 §4, §12; UX brief "copy_examples").
+# The template hands every `cabinet.subs.*` row below to static/js/pages/my-subscriptions.js through
+# its page-data island (island key = the key without the `cabinet.subs.` prefix); the JS renders
+# them around the backend's published labels and decides nothing. `{name}` placeholders are filled
+# by the JS with published labels only. `frequency.*` are the frequency names (my_account.html; the
+# schedule editor). Page-unique namespace (the step-2 seed-collision lesson). Positive tone; never
+# "call us"; no discount or savings language. uz/ru need a native read before prod.
+# ============================================================================
+MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
+    'cabinet.subs.title': {'en': 'My subscriptions', 'uz': 'Obunalarim', 'ru': 'Мои подписки'},
+    'cabinet.subs.loading': {
+        'en': 'Loading your subscriptions…', 'uz': 'Obunalaringiz yuklanmoqda…', 'ru': 'Загружаем ваши подписки…',
+    },
+    'cabinet.subs.load_failed': {
+        'en': "We couldn't load your subscriptions just now. Please try again.",
+        'uz': "Obunalaringizni hozir yuklab bo'lmadi. Qayta urinib ko'ring.",
+        'ru': 'Сейчас не удалось загрузить подписки. Попробуйте ещё раз.',
+    },
+    'cabinet.subs.retry': {'en': 'Try again', 'uz': 'Qayta urinish', 'ru': 'Попробовать снова'},
+    # The strip of subscription cards.
+    'cabinet.subs.strip.label': {'en': 'Your subscriptions', 'uz': 'Sizning obunalaringiz', 'ru': 'Ваши подписки'},
+    'cabinet.subs.strip.next': {'en': 'Next: {date}', 'uz': 'Keyingisi: {date}', 'ru': 'Следующая: {date}'},
+    'cabinet.subs.strip.cancelled_on': {
+        'en': 'Cancelled {date}', 'uz': 'Bekor qilingan: {date}', 'ru': 'Отменена {date}',
+    },
+    'cabinet.subs.strip.show_cancelled': {
+        'en': 'Show cancelled ({count})',
+        'uz': "Bekor qilinganlarni ko'rsatish ({count})",
+        'ru': 'Показать отменённые ({count})',
+    },
+    'cabinet.subs.strip.hide_cancelled': {
+        'en': 'Hide cancelled', 'uz': 'Bekor qilinganlarni yashirish', 'ru': 'Скрыть отменённые',
+    },
+    'cabinet.subs.strip.new': {'en': 'New subscription', 'uz': 'Yangi obuna', 'ru': 'Новая подписка'},
+    # A subscription's own state, beside its name (never "Active": the next date says it).
+    'cabinet.subs.chip.paused': {'en': 'Paused', 'uz': "To'xtatilgan", 'ru': 'Приостановлена'},
+    'cabinet.subs.chip.cancelled': {'en': 'Cancelled', 'uz': 'Bekor qilingan', 'ru': 'Отменена'},
+    'cabinet.subs.chip.on_the_way': {'en': 'On the way', 'uz': "Yo'lda", 'ru': 'В пути'},
+    # Phone-only jump links and the section headings.
+    'cabinet.subs.jump.label': {'en': 'On this page', 'uz': 'Ushbu sahifada', 'ru': 'На этой странице'},
+    'cabinet.subs.jump.orders': {'en': 'Orders', 'uz': 'Buyurtmalar', 'ru': 'Заказы'},
+    'cabinet.subs.section.items': {'en': 'Items', 'uz': 'Mahsulotlar', 'ru': 'Товары'},
+    'cabinet.subs.section.schedule': {'en': 'Schedule', 'uz': 'Jadval', 'ru': 'Расписание'},
+    'cabinet.subs.section.payment': {'en': 'Payment', 'uz': "To'lov", 'ru': 'Оплата'},
+    'cabinet.subs.section.orders': {
+        'en': 'Orders from this subscription', 'uz': 'Ushbu obuna buyurtmalari', 'ru': 'Заказы по этой подписке',
+    },
+    'cabinet.subs.change': {'en': 'Change', 'uz': "O'zgartirish", 'ru': 'Изменить'},
+    'cabinet.subs.change_label.items': {
+        'en': 'Change items', 'uz': "Mahsulotlarni o'zgartirish", 'ru': 'Изменить товары',
+    },
+    'cabinet.subs.change_label.schedule': {
+        'en': 'Change schedule', 'uz': "Jadvalni o'zgartirish", 'ru': 'Изменить расписание',
+    },
+    'cabinet.subs.change_label.payment': {
+        'en': 'Change payment method', 'uz': "To'lov usulini o'zgartirish", 'ru': 'Изменить способ оплаты',
+    },
+    # The next-delivery card.
+    'cabinet.subs.hero.label': {'en': 'Next delivery', 'uz': 'Keyingi yetkazib berish', 'ru': 'Следующая доставка'},
+    'cabinet.subs.hero.window_days': {'en': '{window}, {days}', 'uz': '{window}, {days}', 'ru': '{window}, {days}'},
+    'cabinet.subs.hero.order': {'en': 'Order {number}', 'uz': 'Buyurtma {number}', 'ru': 'Заказ {number}'},
+    'cabinet.subs.hero.will_place': {
+        'en': "We'll place this order on {date}.",
+        'uz': "Buyurtmani o'zimiz rasmiylashtiramiz: {date}.",
+        'ru': 'Заказ оформим сами: {date}.',
+    },
+    'cabinet.subs.hero.paused_since': {
+        'en': 'Paused since {date}', 'uz': "{date}dan beri to'xtatilgan", 'ru': 'Приостановлена с {date}',
+    },
+    'cabinet.subs.hero.paused': {'en': 'Paused', 'uz': "To'xtatilgan", 'ru': 'Приостановлена'},
+    'cabinet.subs.hero.paused_note': {
+        'en': 'No new orders until you resume. Your items and schedule are saved.',
+        'uz': "Davom ettirmaguningizcha yangi buyurtmalar berilmaydi. Mahsulotlaringiz va jadvalingiz saqlangan.",
+        'ru': 'Новых заказов не будет, пока вы не возобновите подписку. Товары и расписание сохранены.',
+    },
+    'cabinet.subs.hero.cancelled_on': {
+        'en': 'Cancelled on {date}', 'uz': '{date} kuni bekor qilingan', 'ru': 'Отменена {date}',
+    },
+    'cabinet.subs.hero.cancelled': {'en': 'Cancelled', 'uz': 'Bekor qilingan', 'ru': 'Отменена'},
+    'cabinet.subs.hero.cancelled_note': {
+        'en': 'Your past orders are below.', 'uz': "O'tgan buyurtmalaringiz quyida.", 'ru': 'Прошлые заказы — ниже.',
+    },
+    'cabinet.subs.hero.date_window': {'en': '{date}, {window}', 'uz': '{date}, {window}', 'ru': '{date}, {window}'},
+    'cabinet.subs.hero.on_the_way_note': {
+        'en': 'Your driver has this order and is on the way.',
+        'uz': "Haydovchi bu buyurtmani olgan va yo'lda.",
+        'ru': 'Курьер уже забрал этот заказ и везёт его.',
+    },
+    'cabinet.subs.hero.none_available': {
+        'en': "None of these products are available any more, so we can't place your next order. "
+              "Change your items to keep your deliveries coming.",
+        'uz': "Bu mahsulotlarning hech biri endi mavjud emas, shuning uchun keyingi buyurtmani bera olmaymiz. "
+              "Yetkazib berish davom etishi uchun mahsulotlarni o'zgartiring.",
+        'ru': 'Ни одного из этих товаров больше нет в продаже, поэтому мы не можем оформить следующий заказ. '
+              'Измените товары, чтобы доставки продолжились.',
+    },
+    'cabinet.subs.hero.not_included': {
+        'en': 'Not included: {products} (no longer available).',
+        'uz': 'Kiritilmaydi: {products} (endi mavjud emas).',
+        'ru': 'Не войдёт в заказ: {products} (больше нет в продаже).',
+    },
+    'cabinet.subs.hero.no_date': {
+        'en': "Your next delivery date will show here once it's set.",
+        'uz': "Keyingi yetkazib berish sanasi belgilangach, shu yerda ko'rinadi.",
+        'ru': 'Дата следующей доставки появится здесь, как только её назначат.',
+    },
+    # The waterline: the next deliveries as bottles on a line.
+    'cabinet.subs.wl.label': {'en': 'Next deliveries', 'uz': 'Keyingi yetkazishlar', 'ru': 'Ближайшие доставки'},
+    'cabinet.subs.wl.item': {'en': '{date}, {state}', 'uz': '{date}, {state}', 'ru': '{date}, {state}'},
+    'cabinet.subs.wl.state.placed': {'en': 'order placed', 'uz': 'buyurtma berilgan', 'ru': 'заказ оформлен'},
+    'cabinet.subs.wl.state.planned': {'en': 'planned', 'uz': 'rejalashtirilgan', 'ru': 'запланирована'},
+    'cabinet.subs.wl.state.skipped': {'en': 'skipped', 'uz': "o'tkazib yuborilgan", 'ru': 'пропущена'},
+    'cabinet.subs.wl.state.on_the_way': {'en': 'on the way', 'uz': "yo'lda", 'ru': 'в пути'},
+    'cabinet.subs.wl.legend.placed': {'en': 'Order placed', 'uz': 'Buyurtma berilgan', 'ru': 'Заказ оформлен'},
+    'cabinet.subs.wl.legend.planned': {'en': 'Planned', 'uz': 'Rejalashtirilgan', 'ru': 'Запланирована'},
+    'cabinet.subs.wl.legend.skipped': {'en': 'Skipped', 'uz': "O'tkazib yuborilgan", 'ru': 'Пропущена'},
+    'cabinet.subs.wl.legend.on_the_way': {'en': 'On the way', 'uz': "Yo'lda", 'ru': 'В пути'},
+    'cabinet.subs.wl.if_resume': {
+        'en': 'If you resume today: {date}', 'uz': 'Bugun davom ettirsangiz: {date}', 'ru': 'Если возобновить сегодня: {date}',
+    },
+    # Items.
+    'cabinet.subs.items.qty_price': {'en': '{quantity} × {price}', 'uz': '{quantity} × {price}', 'ru': '{quantity} × {price}'},
+    'cabinet.subs.items.per_delivery': {'en': 'Per delivery', 'uz': 'Har bir yetkazishda', 'ru': 'За одну доставку'},
+    'cabinet.subs.items.per_month': {'en': 'About a month', 'uz': 'Oyiga taxminan', 'ru': 'Примерно в месяц'},
+    'cabinet.subs.items.benefit': {
+        'en': "{free}, and every order earns AquaCoins at your tier's rate.",
+        'uz': "{free}, har bir buyurtma uchun esa darajangiz stavkasi bo'yicha AquaCoins olasiz.",
+        'ru': '{free}, а за каждый заказ начисляются AquaCoins по ставке вашего уровня.',
+    },
+    'cabinet.subs.items.benefit_free': {
+        'en': 'Delivery is always free', 'uz': 'Yetkazib berish doim bepul', 'ru': 'Доставка всегда бесплатная',
+    },
+    'cabinet.subs.items.unavailable': {
+        'en': "No longer available. We'll deliver the rest of your order without it.",
+        'uz': 'Endi mavjud emas. Buyurtmaning qolgan qismini usiz yetkazamiz.',
+        'ru': 'Больше нет в продаже. Остальное привезём без этого товара.',
+    },
+    'cabinet.subs.items.unavailable_none': {
+        'en': 'No longer available.', 'uz': 'Endi mavjud emas.', 'ru': 'Больше нет в продаже.',
+    },
+    'cabinet.subs.items.not_included': {'en': 'Not included', 'uz': 'Kiritilmaydi', 'ru': 'Не входит'},
+    'cabinet.subs.items.unknown_product': {
+        'en': 'A product we no longer sell', 'uz': 'Endi sotilmaydigan mahsulot', 'ru': 'Товар, который больше не продаётся',
+    },
+    # Payment: the one-line consequence of each method.
+    'cabinet.subs.payment.note.click': {
+        'en': "Pay online for each order. We'll remind you before the deadline.",
+        'uz': "Har bir buyurtmani onlayn to'laysiz. Muddatdan oldin eslatamiz.",
+        'ru': 'Каждый заказ оплачивается онлайн. Мы напомним до срока оплаты.',
+    },
+    'cabinet.subs.payment.note.cash': {
+        'en': 'Pay the driver at the door.',
+        'uz': "To'lovni eshik oldida haydovchiga qilasiz.",
+        'ru': 'Оплата курьеру при получении.',
+    },
+    'cabinet.subs.payment.note.business_account': {
+        'en': 'Your company pays by bank transfer under its contract.',
+        'uz': "Kompaniyangiz shartnoma bo'yicha bank o'tkazmasi orqali to'laydi.",
+        'ru': 'Ваша компания оплачивает банковским переводом по договору.',
+    },
+    # Orders from this subscription.
+    'cabinet.subs.orders.pay': {'en': 'Pay', 'uz': "To'lash", 'ru': 'Оплатить'},
+    'cabinet.subs.orders.pay_label': {
+        'en': 'Pay for order {number}', 'uz': "{number} buyurtmani to'lash", 'ru': 'Оплатить заказ {number}',
+    },
+    'cabinet.subs.orders.more': {
+        'en': 'Show more orders', 'uz': "Yana buyurtmalarni ko'rsatish", 'ru': 'Показать ещё заказы',
+    },
+    'cabinet.subs.orders.showing': {
+        'en': 'Showing {shown} of {total} orders',
+        'uz': "{total} ta buyurtmadan {shown} tasi ko'rsatilmoqda",
+        'ru': 'Показано {shown} из {total}',
+    },
+    'cabinet.subs.orders.empty_planned': {
+        'en': 'Your first order will show up here once we place it on {date}.',
+        'uz': "Birinchi buyurtmangiz biz uni rasmiylashtirganimizdan keyin shu yerda ko'rinadi: {date}.",
+        'ru': 'Первый заказ появится здесь, когда мы его оформим: {date}.',
+    },
+    'cabinet.subs.orders.empty': {
+        'en': 'Your orders will show up here.', 'uz': "Buyurtmalaringiz shu yerda ko'rinadi.", 'ru': 'Здесь появятся ваши заказы.',
+    },
+    'cabinet.subs.orders.load_failed': {
+        'en': "We couldn't load your orders just now.",
+        'uz': "Buyurtmalarni hozir yuklab bo'lmadi.",
+        'ru': 'Сейчас не удалось загрузить заказы.',
+    },
+    # The footer zone.
+    'cabinet.subs.footer.help': {'en': 'Questions? {link}.', 'uz': 'Savollar bormi? {link}.', 'ru': 'Есть вопросы? {link}.'},
+    'cabinet.subs.footer.help_link': {
+        'en': 'Message us in the Telegram bot', 'uz': 'Telegram botimizga yozing', 'ru': 'Напишите нам в Telegram-боте',
+    },
+    # No subscriptions yet.
+    'cabinet.subs.empty.title': {
+        'en': 'Water that arrives on its own', 'uz': "O'zi yetib keladigan suv", 'ru': 'Вода, которая приезжает сама',
+    },
+    'cabinet.subs.empty.body': {
+        'en': "Pick your bottles and a day, and we'll place the order for you every time, so you never forget "
+              "and never run out. Delivery is always free.",
+        'uz': "Butilkalar va kunni tanlang, har safar buyurtmani biz o'zimiz beramiz: unutmaysiz va suvsiz "
+              "qolmaysiz. Yetkazib berish doim bepul.",
+        'ru': 'Выберите бутыли и день, и мы будем каждый раз оформлять заказ за вас: вы не забудете и не '
+              'останетесь без воды. Доставка всегда бесплатная.',
+    },
+    'cabinet.subs.empty.cta': {'en': 'Set up a subscription', 'uz': 'Obuna rasmiylashtirish', 'ru': 'Оформить подписку'},
+    # The frequency names (my_account.html; the schedule editor).
+    'cabinet.subs.frequency.daily': {'en': 'Daily', 'uz': 'Har kuni', 'ru': 'Ежедневно'},
+    'cabinet.subs.frequency.weekly': {'en': 'Weekly', 'uz': 'Har hafta', 'ru': 'Еженедельно'},
+    'cabinet.subs.frequency.biweekly': {'en': 'Every 2 weeks', 'uz': 'Ikki haftada bir', 'ru': 'Раз в 2 недели'},
+    'cabinet.subs.frequency.monthly': {'en': 'Monthly', 'uz': 'Har oy', 'ru': 'Ежемесячно'},
+}
+BACKEND_TRANSLATIONS.update(MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS)
+
+
+# ============================================================================
+# /my-subscriptions, the write side (docs/superpowers/plans/2026-10-26-web-subscription-management.md Task 4b;
+# UX brief interaction rules and copy). Pay, the inline Skip and Pause confirms, Resume, the Cancel modal, the
+# read-then-edit sections (Items with the product picker, Schedule with its live preview, Payment), the save
+# bar and every status line. Page-unique `cabinet.subs.*` keys, handed to the script by the page-data island.
+# Dates in these templates are the backend's nominative labels, so ru/uz put them after a colon or a dash.
+# Positive tone; help is the Telegram bot; no savings wording. uz/ru need a native read before prod.
+# ============================================================================
+MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
+    # Buttons while their request is in flight.
+    'cabinet.subs.busy.paying': {'en': 'Opening payment…', 'uz': "To'lov ochilmoqda…", 'ru': 'Открываем оплату…'},
+    'cabinet.subs.busy.skipping': {'en': 'Skipping…', 'uz': "O'tkazib yuborilmoqda…", 'ru': 'Пропускаем…'},
+    'cabinet.subs.busy.pausing': {'en': 'Pausing…', 'uz': "To'xtatilmoqda…", 'ru': 'Приостанавливаем…'},
+    'cabinet.subs.busy.resuming': {'en': 'Resuming…', 'uz': 'Davom ettirilmoqda…', 'ru': 'Возобновляем…'},
+    'cabinet.subs.busy.cancelling': {'en': 'Cancelling…', 'uz': 'Bekor qilinmoqda…', 'ru': 'Отменяем…'},
+    'cabinet.subs.busy.saving': {'en': 'Saving…', 'uz': 'Saqlanmoqda…', 'ru': 'Сохраняем…'},
+    'cabinet.subs.busy.loading': {'en': 'Loading…', 'uz': 'Yuklanmoqda…', 'ru': 'Загружаем…'},
+    # Errors, next to the control that failed; they stay until the next try.
+    'cabinet.subs.error.action': {
+        'en': "We couldn't do that just now. Please try again.",
+        'uz': "Buni hozir bajarib bo'lmadi. Qayta urinib ko'ring.",
+        'ru': 'Сейчас не получилось. Попробуйте ещё раз.',
+    },
+    'cabinet.subs.error.pay': {
+        'en': "We couldn't open the payment just now. Please try again.",
+        'uz': "To'lovni hozir ochib bo'lmadi. Qayta urinib ko'ring.",
+        'ru': 'Сейчас не удалось открыть оплату. Попробуйте ещё раз.',
+    },
+    'cabinet.subs.error.save': {
+        'en': "We couldn't save just now. Your changes are still here, so try again.",
+        'uz': "Hozir saqlab bo'lmadi. O'zgarishlaringiz shu yerda, qayta urinib ko'ring.",
+        'ru': 'Сейчас не удалось сохранить. Ваши изменения на месте, попробуйте ещё раз.',
+    },
+    'cabinet.subs.error.preview': {
+        'en': "We couldn't check these changes just now. Please try again.",
+        'uz': "Bu o'zgarishlarni hozir tekshirib bo'lmadi. Qayta urinib ko'ring.",
+        'ru': 'Сейчас не удалось проверить изменения. Попробуйте ещё раз.',
+    },
+    # Skip: the inline two-step in the next-delivery card.
+    'cabinet.subs.skip.reasons': {
+        'en': 'Want to tell us why? (optional)',
+        'uz': 'Sababini aytasizmi? (ixtiyoriy)',
+        'ru': 'Расскажете почему? (необязательно)',
+    },
+    'cabinet.subs.skip.reason_text': {
+        'en': 'In a few words (optional)', 'uz': "Bir necha so'z bilan (ixtiyoriy)", 'ru': 'Пару слов (необязательно)',
+    },
+    'cabinet.subs.skip.done': {
+        'en': 'Skipped. Your next delivery is {date}.',
+        'uz': "O'tkazib yuborildi. Keyingi yetkazish: {date}.",
+        'ru': 'Пропущено. Следующая доставка: {date}.',
+    },
+    'cabinet.subs.skip.done_plain': {'en': 'Skipped.', 'uz': "O'tkazib yuborildi.", 'ru': 'Пропущено.'},
+    # Pause (inline two-step only when it cancels an order) and Resume (never asks).
+    'cabinet.subs.pause.done': {
+        'en': "Paused. Tap Resume whenever you're ready.",
+        'uz': "To'xtatildi. Tayyor bo'lganingizda davom ettiring.",
+        'ru': 'Приостановлено. Возобновите, когда будете готовы.',
+    },
+    'cabinet.subs.resume.done': {
+        'en': 'Welcome back. Your next delivery is {date}.',
+        'uz': 'Xush kelibsiz! Keyingi yetkazish: {date}.',
+        'ru': 'С возвращением! Следующая доставка: {date}.',
+    },
+    'cabinet.subs.resume.done_plain': {
+        'en': 'Welcome back. Your deliveries are on again.',
+        'uz': 'Xush kelibsiz! Yetkazish qayta yoqildi.',
+        'ru': 'С возвращением! Доставки снова включены.',
+    },
+    # The one Cancel modal: consequences, the two alternatives, an optional reason.
+    'cabinet.subs.cancel.title': {
+        'en': 'Cancel “{name}”?', 'uz': '«{name}» bekor qilinsinmi?', 'ru': 'Отменить подписку «{name}»?',
+    },
+    'cabinet.subs.cancel.alternatives': {
+        'en': 'Running low on space or still have water?',
+        'uz': 'Joy kammi yoki suv hali bormi?',
+        'ru': 'Мало места или вода ещё осталась?',
+    },
+    'cabinet.subs.cancel.pause_instead': {'en': 'Pause instead', 'uz': "To'xtatib turish", 'ru': 'Лучше приостановить'},
+    'cabinet.subs.cancel.less_often': {'en': 'Deliver less often', 'uz': 'Kamroq yetkazing', 'ru': 'Доставлять реже'},
+    'cabinet.subs.cancel.reason': {
+        'en': 'Anything we could do better? (optional)',
+        'uz': 'Nimani yaxshilashimiz mumkin? (ixtiyoriy)',
+        'ru': 'Что нам стоит улучшить? (необязательно)',
+    },
+    'cabinet.subs.cancel.close': {'en': 'Close', 'uz': 'Yopish', 'ru': 'Закрыть'},
+    'cabinet.subs.cancel.done': {'en': 'Subscription cancelled.', 'uz': 'Obuna bekor qilindi.', 'ru': 'Подписка отменена.'},
+    # The read-then-edit sections and their save bar.
+    'cabinet.subs.edit.unsaved': {'en': 'Unsaved changes', 'uz': "Saqlanmagan o'zgarishlar", 'ru': 'Несохранённые изменения'},
+    'cabinet.subs.edit.discard': {'en': 'Discard', 'uz': 'Qaytarish', 'ru': 'Отменить изменения'},
+    'cabinet.subs.edit.save': {'en': 'Save changes', 'uz': 'Saqlash', 'ru': 'Сохранить'},
+    'cabinet.subs.edit.checking': {
+        'en': 'Checking your changes…', 'uz': "O'zgarishlar tekshirilmoqda…", 'ru': 'Проверяем изменения…',
+    },
+    'cabinet.subs.edit.new_total': {
+        'en': 'New total {amount} per delivery',
+        'uz': 'Har bir yetkazish uchun yangi summa: {amount}',
+        'ru': 'Новая сумма за доставку: {amount}',
+    },
+    'cabinet.subs.edit.dirty_guard': {
+        'en': 'Save or discard these changes first.',
+        'uz': "Avval bu o'zgarishlarni saqlang yoki qaytaring.",
+        'ru': 'Сначала сохраните или отмените эти изменения.',
+    },
+    'cabinet.subs.edit.saved': {'en': 'Saved.', 'uz': 'Saqlandi.', 'ru': 'Сохранено.'},
+    'cabinet.subs.edit.saved_schedule': {
+        'en': 'Saved. Your next delivery is {date}.',
+        'uz': 'Saqlandi. Keyingi yetkazish: {date}.',
+        'ru': 'Сохранено. Следующая доставка: {date}.',
+    },
+    'cabinet.subs.edit.saved_items': {
+        'en': 'Saved. Each delivery is now {amount}.',
+        'uz': 'Saqlandi. Endi har bir yetkazish: {amount}.',
+        'ru': 'Сохранено. Теперь одна доставка: {amount}.',
+    },
+    'cabinet.subs.edit.saved_payment': {
+        'en': "Saved. You'll pay by {method}.",
+        'uz': "Saqlandi. To'lov usuli: {method}.",
+        'ru': 'Сохранено. Способ оплаты: {method}.',
+    },
+    # Items in edit mode and the product picker.
+    'cabinet.subs.items.edit_note': {
+        'en': 'Changes start with your next new order.',
+        'uz': "O'zgarishlar keyingi yangi buyurtmadan boshlanadi.",
+        'ru': 'Изменения начнут действовать со следующего нового заказа.',
+    },
+    'cabinet.subs.items.fewer': {'en': 'Fewer: {name}', 'uz': 'Kamaytirish: {name}', 'ru': 'Меньше: {name}'},
+    'cabinet.subs.items.more': {'en': 'More: {name}', 'uz': "Ko'paytirish: {name}", 'ru': 'Больше: {name}'},
+    'cabinet.subs.items.quantity': {'en': 'Quantity: {name}', 'uz': 'Miqdori: {name}', 'ru': 'Количество: {name}'},
+    'cabinet.subs.items.remove': {'en': 'Remove: {name}', 'uz': 'Olib tashlash: {name}', 'ru': 'Убрать: {name}'},
+    'cabinet.subs.items.last_item': {
+        'en': 'A subscription needs at least one product. Need a break instead? Pause.',
+        'uz': "Obunada kamida bitta mahsulot bo'lishi kerak. Tanaffus kerakmi? To'xtatib qo'ying.",
+        'ru': 'В подписке должен быть хотя бы один товар. Нужен перерыв? Приостановите её.',
+    },
+    'cabinet.subs.items.add': {'en': 'Add a product', 'uz': "Mahsulot qo'shish", 'ru': 'Добавить товар'},
+    'cabinet.subs.picker.title': {'en': 'Add to your subscription', 'uz': "Obunangizga qo'shish", 'ru': 'Добавить в подписку'},
+    'cabinet.subs.picker.add': {
+        'en': 'Add {quantity} × {name}', 'uz': "Qo'shish: {quantity} × {name}", 'ru': 'Добавить: {quantity} × {name}',
+    },
+    'cabinet.subs.picker.empty': {
+        'en': 'Every product is already in your subscription.',
+        'uz': 'Barcha mahsulotlar obunangizda bor.',
+        'ru': 'Все товары уже есть в подписке.',
+    },
+    'cabinet.subs.picker.failed': {
+        'en': "We couldn't load the products just now.",
+        'uz': "Mahsulotlarni hozir yuklab bo'lmadi.",
+        'ru': 'Сейчас не удалось загрузить товары.',
+    },
+    # Schedule in edit mode.
+    'cabinet.subs.schedule.how_often': {'en': 'How often', 'uz': 'Qanchalik tez-tez', 'ru': 'Как часто'},
+    'cabinet.subs.schedule.which_day': {'en': 'Which day', 'uz': 'Qaysi kuni', 'ru': 'В какой день'},
+    'cabinet.subs.schedule.day_of_month': {'en': 'Day of the month', 'uz': 'Oyning kuni', 'ru': 'День месяца'},
+    'cabinet.subs.schedule.choose_day': {'en': 'Choose a day', 'uz': 'Kunni tanlang', 'ru': 'Выберите день'},
+    'cabinet.subs.schedule.short_months': {
+        'en': "On the 29th to the 31st, in shorter months we'll deliver on the last day of the month.",
+        'uz': '29–31-kunlar: qisqa oylarda oyning oxirgi kunida yetkazamiz.',
+        'ru': '29–31 числа: в коротких месяцах доставим в последний день месяца.',
+    },
+    'cabinet.subs.schedule.time': {'en': 'Delivery time', 'uz': 'Yetkazish vaqti', 'ru': 'Время доставки'},
+    'cabinet.subs.schedule.hint.daily': {'en': 'about 30 a month', 'uz': 'oyiga 30 martacha', 'ru': 'около 30 в месяц'},
+    'cabinet.subs.schedule.hint.weekly': {'en': 'about 4 a month', 'uz': 'oyiga 4 martacha', 'ru': 'около 4 в месяц'},
+    'cabinet.subs.schedule.hint.biweekly': {'en': 'about 2 a month', 'uz': 'oyiga 2 martacha', 'ru': 'около 2 в месяц'},
+    'cabinet.subs.schedule.hint.monthly': {'en': 'once a month', 'uz': 'oyiga bir marta', 'ru': 'раз в месяц'},
+    'cabinet.subs.schedule.slot_missing': {
+        'en': "Your usual time isn't available on {day}. Choose another time or Any time.",
+        'uz': "Odatdagi vaqtingiz bu kunda yo'q: {day}. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Ваше обычное время недоступно в этот день: {day}. Выберите другое время или «В любое время».',  # NATIVE-READ
+    },
+    'cabinet.subs.schedule.slot_missing_plain': {
+        'en': "Your usual time isn't available on this schedule. Choose another time or Any time.",
+        'uz': "Odatdagi vaqtingiz bu jadvalda yo'q. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Ваше обычное время недоступно в этом расписании. Выберите другое время или «В любое время».',  # NATIVE-READ
+    },
+    'cabinet.subs.schedule.slots_failed': {
+        'en': "We couldn't load the delivery times just now.",
+        'uz': "Yetkazish vaqtlarini hozir yuklab bo'lmadi.",
+        'ru': 'Сейчас не удалось загрузить время доставки.',
+    },
+    'cabinet.subs.slot.window': {'en': '{start}–{end}', 'uz': '{start}–{end}', 'ru': '{start}–{end}'},
+    # Payment in edit mode.
+    'cabinet.subs.payment.legend': {'en': 'How you pay', 'uz': "To'lov usuli", 'ru': 'Способ оплаты'},
+    'cabinet.subs.payment.methods_failed': {
+        'en': "We couldn't load the payment methods just now.",
+        'uz': "To'lov usullarini hozir yuklab bo'lmadi.",
+        'ru': 'Сейчас не удалось загрузить способы оплаты.',
+    },
+}
+BACKEND_TRANSLATIONS.update(MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS)
+
+
+# ============================================================================
+# The one Pay rule's words (spec 2026-10-27 §4.2): `customer_actions.pay` on every customer order payload
+# (business_app/services/customer_order_actions.py), the sentence a refused Pay answers with, and the
+# subscription page's payment note when Pay has no deadline (the driver has the order). Backend-rendered
+# `api.*` keys. The uz/ru of `pay.label` are `cabinet.subs.hero.pay`'s; every other uz/ru needs a native read.
+# ============================================================================
+CUSTOMER_PAY_ACTION_TRANSLATIONS = {
+    'api.orders.actions.pay.label': {'en': 'Pay {amount}', 'uz': "{amount} to'lash", 'ru': 'Оплатить {amount}'},
+    'api.orders.actions.pay.deadline': {
+        'en': 'Pay by {deadline}.',
+        'uz': "To'lov muddati: {deadline}.",  # NATIVE-READ
+        'ru': 'Срок оплаты — {deadline}.',  # NATIVE-READ
+    },
+    'api.orders.actions.pay.refusal.not_online': {
+        'en': 'This order is paid at the door or by bank transfer, so there is nothing to pay online.',
+        'uz': "Bu buyurtma eshik oldida yoki bank o'tkazmasi orqali to'lanadi, onlayn to'lash shart emas.",  # NATIVE-READ
+        'ru': 'Этот заказ оплачивается при получении или банковским переводом, онлайн оплачивать ничего не нужно.',  # NATIVE-READ
+    },
+    'api.orders.actions.pay.refusal.partly_paid': {
+        'en': 'Part of this order is already paid. The driver will collect the rest at the door.',
+        'uz': "Bu buyurtmaning bir qismi allaqachon to'langan. Qolganini haydovchi eshik oldida oladi.",  # NATIVE-READ
+        'ru': 'Часть заказа уже оплачена. Остаток курьер примет при получении.',  # NATIVE-READ
+    },
+    'api.orders.actions.pay.refusal.deadline_passed': {
+        'en': 'The time to pay for this order online has ended.',
+        'uz': "Bu buyurtmani onlayn to'lash muddati tugadi.",  # NATIVE-READ
+        'ru': 'Срок онлайн-оплаты этого заказа истёк.',  # NATIVE-READ
+    },
+    'api.subscriptions.page.payment_note.pay_online': {
+        'en': "Pay online whenever you're ready.",
+        'uz': "Tayyor bo'lganingizda onlayn to'lang.",  # NATIVE-READ
+        'ru': 'Оплатите онлайн, когда будет удобно.',  # NATIVE-READ
+    },
+    'api.subscriptions.page.payment_note.payment_failed_retry': {
+        'en': "That payment didn't go through. You can try again.",
+        'uz': "To'lov amalga oshmadi. Qayta urinib ko'rishingiz mumkin.",  # NATIVE-READ
+        'ru': 'Оплата не прошла. Можно попробовать снова.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CUSTOMER_PAY_ACTION_TRANSLATIONS)
+
+
+# ============================================================================
+# The one answer to a stale customer write (spec 2026-10-27 §16 M2): the screen showed an amount, a date or a state
+# that has moved since (`StateChangedError`, `api_responses.state_changed_response`). Backend-rendered `api.*` key.
+# All three languages are `api.subscriptions.action.skip.stale`'s, already read.
+# ============================================================================
+STATE_CHANGED_TRANSLATIONS = {
+    'api.common.state_changed': {
+        'en': 'This changed. Refresh to see the latest.',
+        'uz': "Bu o'zgardi. Eng so'nggi holatni ko'rish uchun yangilang.",
+        'ru': 'Это изменилось. Обновите, чтобы увидеть актуальное.',
+    },
+}
+BACKEND_TRANSLATIONS.update(STATE_CHANGED_TRANSLATIONS)
+
+
+# ============================================================================
+# The rail rule's refusals (spec 2026-10-27 §4.3, D4, D5; `payment_service._refuse_customer_rail_move`).
+# Backend-rendered `api.*` keys.
+# - rail_move_not_allowed: a customer write asked for a rail move other than a legacy online order onto Click
+#   (RAIL_MOVE_NOT_ALLOWED).
+# - marking_codes_pool_short: a legacy Payme order paid through Click when the marking-code pool cannot cover
+#   it (MARKING_CODES_POOL_SHORT). It names no other way to pay: the customer cannot move the order to cash
+#   (D5), and it is usually delivered already. `api.payments.marking_codes_unavailable` ("pay with cash on
+#   delivery") stays for `POST /payments/create`'s own cash -> Click check until that route goes.
+#   OWNER-APPROVAL: draft wording (Task 2b fix round 1), awaiting the owner.
+# ============================================================================
+RAIL_MOVE_TRANSLATIONS = {
+    'api.payments.error.rail_move_not_allowed': {
+        'en': "The payment method of this order can't be changed.",
+        'uz': "Bu buyurtmaning to'lov usulini o'zgartirib bo'lmaydi.",  # NATIVE-READ
+        'ru': 'Способ оплаты этого заказа изменить нельзя.',  # NATIVE-READ
+    },
+    'api.payments.error.marking_codes_pool_short': {
+        'en': "Online payment for {product} isn't available just now. Please try again a little later.",
+        'uz': "{product} uchun onlayn to'lov hozircha mavjud emas. Birozdan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Онлайн-оплата для {product} сейчас недоступна. Пожалуйста, попробуйте чуть позже.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(RAIL_MOVE_TRANSLATIONS)
+
+
+# ============================================================================
+# The one Cancel rule's published words (spec 2026-10-27 §5.1-5.3; `customer_order_actions.cancel_action` /
+# `confirm_action`, `OrderService.remove_order_as_customer`). Backend-rendered `api.*` keys, the same on the bot and
+# the website. `{date}` / `{next}` are `display_labels.date_long`.
+# - <via>.label / .confirm_text: the button and its inline confirm for a skip, a cancel or a decline.
+# - skip.confirm_text_no_next: the skip's confirm when no next delivery is known.
+# - skip.done / .done_no_next / decline.done: the write's answer.
+# Copied rows (literal strings, never references; their sources are retired later): skip.label from
+# `cabinet.subs.hero.skip`, cancel.label from `web.order_modal.cancel_yes`, cancel.confirm_text from
+# `web.order_modal.cancel_question`, skip.done from `cabinet.subs.skip.done`, skip.done_no_next from
+# `cabinet.subs.skip.done_plain`.
+# ============================================================================
+CUSTOMER_ORDER_REMOVAL_TRANSLATIONS = {
+    'api.orders.actions.skip.label': {
+        'en': 'Skip this delivery', 'uz': "Bu yetkazishni o'tkazib yuborish", 'ru': 'Пропустить эту доставку',
+    },
+    'api.orders.actions.cancel.label': {'en': 'Cancel order', 'uz': 'Buyurtmani bekor qilish', 'ru': 'Отменить заказ'},
+    'api.orders.actions.decline.label': {
+        'en': 'Decline order',
+        'uz': 'Buyurtmani rad etish',  # NATIVE-READ
+        'ru': 'Отклонить заказ',  # NATIVE-READ
+    },
+    'api.orders.actions.confirm.label': {
+        'en': 'Confirm order',
+        'uz': 'Buyurtmani tasdiqlash',  # NATIVE-READ
+        'ru': 'Подтвердить заказ',  # NATIVE-READ
+    },
+    'api.orders.actions.skip.confirm_text': {
+        'en': 'Your {date} delivery will be skipped. Next delivery: {next}.',
+        'uz': "Bu yetkazish o'tkazib yuboriladi: {date}. Keyingi yetkazish: {next}.",  # NATIVE-READ
+        'ru': 'Эта доставка будет пропущена: {date}. Следующая доставка: {next}.',  # NATIVE-READ
+    },
+    'api.orders.actions.skip.confirm_text_no_next': {
+        'en': 'Your {date} delivery will be skipped.',
+        'uz': "Bu yetkazish o'tkazib yuboriladi: {date}.",  # NATIVE-READ
+        'ru': 'Эта доставка будет пропущена: {date}.',  # NATIVE-READ
+    },
+    'api.orders.actions.cancel.confirm_text': {
+        'en': 'Cancel this order?', 'uz': 'Bu buyurtma bekor qilinsinmi?', 'ru': 'Отменить этот заказ?',
+    },
+    'api.orders.actions.decline.confirm_text': {
+        'en': "Decline this order? We'll let your sales agent know.",
+        'uz': 'Buyurtma rad etilsinmi? Savdo agentingizga xabar beramiz.',  # NATIVE-READ
+        'ru': 'Отклонить этот заказ? Мы сообщим вашему торговому агенту.',  # NATIVE-READ
+    },
+    'api.orders.actions.skip.done': {
+        'en': 'Skipped. Your next delivery is {date}.',
+        'uz': "O'tkazib yuborildi. Keyingi yetkazish: {date}.",
+        'ru': 'Пропущено. Следующая доставка: {date}.',
+    },
+    'api.orders.actions.skip.done_no_next': {'en': 'Skipped.', 'uz': "O'tkazib yuborildi.", 'ru': 'Пропущено.'},
+    'api.orders.actions.decline.done': {
+        'en': "Declined. We've let your sales agent know.",
+        'uz': 'Rad etildi. Savdo agentingizga xabar berdik.',  # NATIVE-READ
+        'ru': 'Отклонено. Мы сообщили вашему торговому агенту.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CUSTOMER_ORDER_REMOVAL_TRANSLATIONS)
+
+
+# ============================================================================
+# The subscription page's finished sentences and button labels (spec 2026-10-27 §5.3, §8, §16 M3;
+# `SubscriptionService._consequences`, `subscription_display.action_label` / `kept_line` / `skip_confirm` /
+# `settle_lines` / `pay_note`). Backend-rendered `api.subscriptions.actions.*` keys: `allowed_actions.<action>` carries
+# these words, and the website and the bot render them as they are. "Copied" rows are the step-3 `cabinet.subs.*`
+# strings, repeated here as literals (their sources are retired later).
+# - <action>.label: the button. skip.do: the Skip confirm's button ({date} = day and month).
+# - skip.confirm_*: the Skip's confirm, by what the skip does (unpaid order cancelled, paid order kept, the driver's
+#   order kept, plain). pause.confirm / cancel.confirm: the first line of a pause's and a cancel's confirm.
+# - will_cancel / kept.*: the lines naming each order a pause or cancel cancels or keeps.
+# - pay.delivered_note: the line under Pay for an order already delivered and still unpaid.
+# ============================================================================
+SUBSCRIPTION_PUBLISHED_SENTENCES_TRANSLATIONS = {
+    'api.subscriptions.actions.skip.label': {
+        'en': 'Skip this delivery', 'uz': "Bu yetkazishni o'tkazib yuborish", 'ru': 'Пропустить эту доставку',
+    },
+    'api.subscriptions.actions.pause.label': {'en': 'Pause', 'uz': "To'xtatib turish", 'ru': 'Приостановить'},
+    'api.subscriptions.actions.resume.label': {
+        'en': 'Resume deliveries', 'uz': 'Yetkazishni davom ettirish', 'ru': 'Возобновить доставки',
+    },
+    'api.subscriptions.actions.cancel.label': {
+        'en': 'Cancel subscription', 'uz': 'Obunani bekor qilish', 'ru': 'Отменить подписку',
+    },
+    'api.subscriptions.actions.skip.confirm_unpaid': {
+        'en': "Skip {date}? We'll cancel that order. Your next delivery will be {next}.",
+        'uz': "Yetkazish o'tkazib yuborilsinmi: {date}? Bu buyurtmani bekor qilamiz. Keyingi yetkazish: {next}.",
+        'ru': 'Пропустить доставку: {date}? Мы отменим этот заказ. Следующая доставка: {next}.',
+    },
+    'api.subscriptions.actions.skip.confirm_paid': {
+        'en': "This order is paid, so it will still arrive on {kept}. We'll skip the one after it, on {date}.",
+        'uz': "Bu buyurtma to'langan, u baribir yetkaziladi: {kept}. Undan keyingisini o'tkazib yuboramiz: {date}.",
+        'ru': 'Этот заказ оплачен, он всё равно приедет: {kept}. Пропустим следующую доставку: {date}.',
+    },
+    'api.subscriptions.actions.skip.confirm_on_the_way': {
+        'en': "Your driver already has your order for {kept}, so it will still arrive. "
+              "We'll skip the one after it, on {date}.",
+        'uz': "Haydovchi buyurtmangizni olib ketgan, u baribir yetkaziladi: {kept}. "
+              "Undan keyingisini o'tkazib yuboramiz: {date}.",
+        'ru': 'Курьер уже везёт ваш заказ, он приедет: {kept}. Пропустим следующую доставку: {date}.',
+    },
+    'api.subscriptions.actions.skip.confirm_plain': {
+        'en': 'Skip {date}? Your next delivery will be {next}.',
+        'uz': "Yetkazish o'tkazib yuborilsinmi: {date}? Keyingi yetkazish: {next}.",
+        'ru': 'Пропустить доставку: {date}? Следующая доставка: {next}.',
+    },
+    'api.subscriptions.actions.skip.do': {
+        'en': 'Skip {date}', 'uz': "O'tkazib yuborish: {date}", 'ru': 'Пропустить: {date}',
+    },
+    'api.subscriptions.actions.skip.keep': {
+        'en': 'Keep this delivery', 'uz': 'Yetkazish qolsin', 'ru': 'Оставить доставку',
+    },
+    'api.subscriptions.actions.skip.keep_both': {
+        'en': 'Keep both', 'uz': 'Ikkalasi ham qolsin', 'ru': 'Оставить обе',
+    },
+    'api.subscriptions.actions.pause.confirm': {
+        'en': "Pause deliveries? We won't place new orders until you resume.",
+        'uz': "Yetkazish to'xtatilsinmi? Davom ettirmaguningizcha yangi buyurtma bermaymiz.",  # NATIVE-READ
+        'ru': 'Приостановить доставки? Новых заказов не будет, пока вы их не возобновите.',  # NATIVE-READ
+    },
+    'api.subscriptions.actions.pause.do': {
+        'en': 'Pause subscription', 'uz': "Obunani to'xtatish", 'ru': 'Приостановить подписку',
+    },
+    'api.subscriptions.actions.pause.keep': {
+        'en': 'Keep delivering', 'uz': 'Yetkazish davom etsin', 'ru': 'Продолжить доставки',
+    },
+    'api.subscriptions.actions.cancel.confirm': {
+        'en': "We won't place any more automatic orders.",
+        'uz': 'Boshqa avtomatik buyurtma bermaymiz.',
+        'ru': 'Мы больше не будем оформлять автоматические заказы.',
+    },
+    'api.subscriptions.actions.cancel.coins': {
+        'en': 'Your AquaCoins stay with you.',
+        'uz': "AquaCoins'laringiz o'zingizda qoladi.",
+        'ru': 'Ваши AquaCoins останутся с вами.',
+    },
+    'api.subscriptions.actions.cancel.keep': {
+        'en': 'Keep subscription', 'uz': 'Obuna qolsin', 'ru': 'Оставить подписку',
+    },
+    'api.subscriptions.actions.will_cancel': {
+        'en': "We'll cancel your order for {date}.",
+        'uz': 'Buyurtmangiz bekor qilinadi: {date}.',
+        'ru': 'Заказ будет отменён: {date}.',
+    },
+    'api.subscriptions.actions.kept.paid': {
+        'en': 'Your paid order for {date} will still be delivered.',
+        'uz': "To'langan buyurtmangiz baribir yetkaziladi: {date}.",
+        'ru': 'Оплаченный заказ всё равно будет доставлен: {date}.',
+    },
+    'api.subscriptions.actions.kept.with_driver': {
+        'en': 'Your order for {date} is on the way.',
+        'uz': "Buyurtmangiz yo'lda: {date}.",
+        'ru': 'Ваш заказ уже в пути: {date}.',
+    },
+    'api.subscriptions.actions.kept.awaiting_new_date': {
+        'en': "Your order {number} stays: we'll deliver it on its new date.",
+        'uz': "{number} buyurtmangiz saqlanadi: uni yangi sanada yetkazib beramiz.",
+        'ru': 'Заказ {number} остаётся в силе: мы доставим его в новую дату.',
+    },
+    'api.subscriptions.actions.kept.other': {
+        'en': 'Your order {number} stays as it is.',
+        'uz': "{number} buyurtmangiz o'zgarishsiz qoladi.",
+        'ru': 'Заказ {number} остаётся без изменений.',
+    },
+    'api.subscriptions.actions.pay.delivered_note': {
+        'en': 'For your order delivered on {date}.',
+        'uz': 'Yetkazilgan buyurtma uchun: {date}.',  # NATIVE-READ
+        'ru': 'За доставленный заказ: {date}.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_PUBLISHED_SENTENCES_TRANSLATIONS)
+
+
+# Step 4 Task 6a (spec 2026-10-27 §6.4, §17 Q7): a delivery day is a weekday an active slot is offered on. A weekly or
+# biweekly day that is not one is refused on create, the schedule save and the preview, in these words.
+SUBSCRIPTION_DELIVERY_DAY_TRANSLATIONS = {
+    'api.subscriptions.schedule.day_not_delivery_day': {
+        'en': "We don't deliver on that day of the week. Choose another day.",
+        'uz': 'Haftaning bu kunida yetkazib bermaymiz. Boshqa kunni tanlang.',  # NATIVE-READ
+        'ru': 'В этот день недели мы не доставляем. Выберите другой день.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_DELIVERY_DAY_TRANSLATIONS)
+
+
+# "Any time" and "Time to be confirmed": the ONE wording of a delivery's time on every surface (spec 2026-10-27
+# §6.3, D14), and the refusal that asks the customer to choose when the stored slot no longer covers the schedule
+# (§6.2). Step 4, Task 6b.
+SUBSCRIPTION_ANY_TIME_TRANSLATIONS = {
+    'api.subscriptions.time.any_time': {
+        'en': 'Any time',
+        'uz': 'Istalgan vaqtda',  # NATIVE-READ
+        'ru': 'В любое время',  # NATIVE-READ
+    },
+    'api.subscriptions.time.to_be_confirmed': {
+        'en': 'Time to be confirmed',
+        'uz': 'Vaqti tasdiqlanadi',  # NATIVE-READ
+        'ru': 'Время уточняется',  # NATIVE-READ
+    },
+    'api.subscriptions.time.any_time_inline': {
+        'en': 'any time',
+        'uz': 'istalgan vaqtda',  # NATIVE-READ
+        'ru': 'в любое время',  # NATIVE-READ
+    },
+    'api.subscriptions.time.to_be_confirmed_inline': {
+        'en': 'time to be confirmed',
+        'uz': 'vaqti tasdiqlanadi',  # NATIVE-READ
+        'ru': 'время уточняется',  # NATIVE-READ
+    },
+    'api.subscriptions.schedule.slot_choice_required': {
+        'en': "Your usual delivery time isn't available for this schedule. Choose a time, or Any time.",
+        'uz': "Odatiy yetkazib berish vaqtingiz bu jadvalda mavjud emas. Vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Ваше обычное время доставки недоступно для этого расписания. Выберите время или «В любое время».',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_ANY_TIME_TRANSLATIONS)
+
+
+# One slot writer (spec 2026-10-27 §6.5, §17 Q7; step 4 Task 7). A slot write that switches a slot off, narrows its
+# days, changes its times, or adds or removes a delivery day rewrites the schedules it touches and tells each customer
+# once: the bot's `schedule_changed` message holds one `schedule_change.<code>` line per change. The admin's slot
+# writes answer in these words.
+SUBSCRIPTION_SLOT_CHANGE_TRANSLATIONS = {
+    'telegram.customer_notice.schedule_changed': {
+        'en': '🕒 <b>{subscription_name}</b>: your delivery schedule has changed.\n\n{lines}',
+        'uz': "🕒 <b>{subscription_name}</b>: yetkazib berish jadvalingiz o'zgardi.\n\n{lines}",  # NATIVE-READ
+        'ru': '🕒 <b>{subscription_name}</b>: расписание доставки изменилось.\n\n{lines}',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_changed_next': {
+        'en': '📅 Next delivery: {date}',
+        'uz': '📅 Keyingi yetkazib berish: {date}',  # NATIVE-READ
+        'ru': '📅 Следующая доставка: {date}',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_change.time_cleared': {
+        'en': 'The {old_window} delivery time is no longer offered, so your deliveries now come at any time of the '
+              'day. You can choose another time in your subscription.',
+        'uz': "{old_window} yetkazib berish vaqti endi taklif qilinmaydi, shuning uchun buyurtmalaringiz kunning "
+              "istalgan vaqtida keltiriladi. Obunada boshqa vaqtni tanlashingiz mumkin.",  # NATIVE-READ
+        'ru': 'Время доставки {old_window} больше не предлагается, поэтому доставки теперь в любое время дня. '
+              'Другое время можно выбрать в подписке.',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_change.time_changed': {
+        'en': 'Your delivery time is now {new_window} (it was {old_window}).',
+        'uz': 'Yetkazib berish vaqtingiz endi {new_window} (avval {old_window} edi).',  # NATIVE-READ
+        'ru': 'Время доставки теперь {new_window} (было {old_window}).',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_change.day_moved': {
+        'en': 'We no longer deliver on this day of the week ({old_day}). Your new delivery day: {new_day}. '
+              'You can change it in your subscription.',
+        'uz': 'Haftaning bu kunida ({old_day}) endi yetkazib bermaymiz. Yangi yetkazib berish kuningiz: {new_day}. '
+              "Uni obunada o'zgartirishingiz mumkin.",  # NATIVE-READ
+        'ru': 'В этот день недели ({old_day}) мы больше не доставляем. Новый день доставки: {new_day}. '
+              'Его можно изменить в подписке.',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_change.days_added': {
+        'en': 'New delivery days: {days}. Your daily deliveries now come on these days too. You can pause or change '
+              'your subscription at any time.',
+        'uz': 'Yangi yetkazib berish kunlari: {days}. Kundalik yetkazib berishlaringiz endi shu kunlarda ham keladi. '
+              "Obunani istalgan vaqtda to'xtatib turish yoki o'zgartirish mumkin.",  # NATIVE-READ
+        'ru': 'Новые дни доставки: {days}. Ежедневные доставки теперь приходят и в эти дни. Подписку можно '
+              'приостановить или изменить в любое время.',  # NATIVE-READ
+    },
+    'telegram.customer_notice.schedule_change.date_moved': {
+        'en': 'We no longer deliver on this day of the week ({old_day}), so your next delivery moves to the next '
+              'delivery day.',
+        'uz': "Haftaning bu kunida ({old_day}) endi yetkazib bermaymiz, shuning uchun keyingi yetkazib berish "
+              "navbatdagi yetkazib berish kuniga o'tadi.",  # NATIVE-READ
+        'ru': 'В этот день недели ({old_day}) мы больше не доставляем, поэтому следующая доставка переносится на '
+              'ближайший день доставки.',  # NATIVE-READ
+    },
+    'api.subscriptions.log.schedule_changed': {
+        'en': 'The delivery schedule changed with our delivery times.',
+        'uz': 'Yetkazib berish jadvali yetkazib berish vaqtlarimiz bilan birga o\'zgardi.',  # NATIVE-READ
+        'ru': 'Расписание доставки изменилось вместе с нашим временем доставки.',  # NATIVE-READ
+    },
+    'api.admin.error.time_slot_in_use': {
+        'en': 'Subscriptions still use this time slot ({count}). Switch it off instead: they move to Any time and '
+              'each customer is told.',
+        'uz': "Bu vaqt oralig'idan hali obunalar foydalanmoqda ({count}). Uning o'rniga uni o'chiring: ular "
+              "«Istalgan vaqtda»ga o'tadi va har bir mijozga xabar beriladi.",  # NATIVE-READ
+        'ru': 'Этот интервал ещё используют подписки ({count}). Вместо удаления выключите его: подписки перейдут на '
+              '«В любое время», и каждый клиент получит уведомление.',  # NATIVE-READ
+    },
+    'api.admin.error.time_slot_days_invalid': {
+        'en': 'Choose at least one day of the week.',
+        'uz': 'Haftaning kamida bitta kunini tanlang.',  # NATIVE-READ
+        'ru': 'Выберите хотя бы один день недели.',  # NATIVE-READ
+    },
+    'api.admin.error.time_slot_times_invalid': {
+        'en': 'Enter the start and end times as HH:MM.',
+        'uz': "Boshlanish va tugash vaqtini SS:DD ko'rinishida kiriting.",  # NATIVE-READ
+        'ru': 'Укажите время начала и окончания в формате ЧЧ:ММ.',  # NATIVE-READ
+    },
+    'api.admin.error.time_slot_not_found': {
+        'en': 'Time slot not found.',
+        'uz': "Vaqt oralig'i topilmadi.",  # NATIVE-READ
+        'ru': 'Интервал не найден.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_SLOT_CHANGE_TRANSLATIONS)
+
+
+# A customer's subscription address change (spec 2026-10-27 §7, §17 Q6; step 4 Task 8). The preview's confirm names
+# where the deliveries go from now on and what happens to each order already placed; a method the new address does not
+# offer is asked for in the same flow. `order_stays` names the order's own address and never calls it "old": an order
+# the driver has may already sit at the new address (staff moved it there). `payment.not_offered` is the card's B8
+# warning, which the cabinet and the bot render: copied from `cabinet.subs.payment.not_offered` as literal strings.
+SUBSCRIPTION_ADDRESS_CHANGE_TRANSLATIONS = {
+    'api.subscriptions.actions.address.goes_to': {
+        'en': 'From now on, your deliveries go to {address}.',
+        'uz': 'Endi yetkazishlar shu manzilga boradi: {address}.',  # NATIVE-READ
+        'ru': 'Теперь доставки будут приезжать сюда: {address}.',  # NATIVE-READ
+    },
+    'api.subscriptions.actions.address.order_moves': {
+        'en': 'Your delivery on {date} moves there too.',
+        'uz': "Bu yetkazish ham shu manzilga o'tadi: {date}.",  # NATIVE-READ
+        'ru': 'Эта доставка тоже переедет туда: {date}.',  # NATIVE-READ
+    },
+    'api.subscriptions.actions.address.order_stays': {
+        'en': 'Your delivery on {date} still goes to {address}.',
+        'uz': 'Bu yetkazish baribir {address} manziliga boradi: {date}.',  # NATIVE-READ
+        'ru': 'Эта доставка всё равно приедет по адресу {address}: {date}.',  # NATIVE-READ
+    },
+    'api.subscriptions.actions.address.choose_method': {
+        'en': "{method} isn't offered at this address. Choose how you'd like to pay.",
+        'uz': "Bu manzilda «{method}» usuli yo'q. Qulay to'lov usulini tanlang.",  # NATIVE-READ
+        'ru': 'По этому адресу способ «{method}» недоступен. Выберите, как удобнее оплатить.',  # NATIVE-READ
+    },
+    'api.subscriptions.address.payment_method_required': {
+        'en': "Choose how you'd like to pay at the new address first.",
+        'uz': "Avval yangi manzil uchun to'lov usulini tanlang.",  # NATIVE-READ
+        'ru': 'Сначала выберите способ оплаты для нового адреса.',  # NATIVE-READ
+    },
+    'api.subscriptions.page.payment.not_offered': {
+        'en': 'Not available right now. Choose another method.',
+        'uz': 'Hozir mavjud emas. Boshqa usulni tanlang.',
+        'ru': 'Сейчас недоступно. Выберите другой способ.',
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_ADDRESS_CHANGE_TRANSLATIONS)
+
+
+# The same-site hop (spec 2026-10-27 §4.6, §17 Q4; step 4 Task 9; `business_app/utils/page_auth.py`). A customer page
+# reached from another site reloads itself once so the browser sends our SameSite=Strict cookies; a browser without
+# script gets this link to the same page instead. Website `web.*` key.
+PAGE_AUTH_TRANSLATIONS = {
+    'web.page_auth.continue': {
+        'en': 'Continue',
+        'uz': 'Davom etish',  # NATIVE-READ
+        'ru': 'Продолжить',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(PAGE_AUTH_TRANSLATIONS)
+
+
+# The order surfaces' shared script (spec 2026-10-27 §5.3, §8; step 4 Task 10a; `static/js/pages/order-actions.js`),
+# drawn on the My orders cards, the order modal and the tracking page. The buttons' labels and sentences are
+# published by the backend (`customer_actions`); these are the few words the script adds. Website `web.*` keys, plus
+# the sentence a second answer to an agent's order gets. uz/ru need a native read.
+WEB_ORDER_ACTIONS_TRANSLATIONS = {
+    'web.order_actions.keep': {
+        'en': 'Keep it',
+        'uz': 'Qolsin',  # NATIVE-READ
+        'ru': 'Оставить',  # NATIVE-READ
+    },
+    'web.order_actions.working': {
+        'en': 'One moment…',
+        'uz': 'Bir lahza…',  # NATIVE-READ
+        'ru': 'Секунду…',  # NATIVE-READ
+    },
+    'web.order_actions.failed': {
+        'en': "That didn't go through. Please try again.",
+        'uz': "Amalga oshmadi. Qaytadan urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не получилось. Попробуйте ещё раз.',  # NATIVE-READ
+    },
+    'web.order_actions.reason_prompt': {
+        'en': 'Want to tell us why? (optional)',
+        'uz': 'Sababini aytasizmi? (ixtiyoriy)',  # NATIVE-READ
+        'ru': 'Расскажете почему? (необязательно)',  # NATIVE-READ
+    },
+    'web.order_actions.reason_text': {
+        'en': 'In a few words (optional)',
+        'uz': "Bir necha so'z bilan (ixtiyoriy)",  # NATIVE-READ
+        'ru': 'Пару слов (необязательно)',  # NATIVE-READ
+    },
+    'web.order_actions.confirmed': {
+        'en': 'Thanks! Your order is confirmed.',
+        'uz': 'Rahmat! Buyurtmangiz tasdiqlandi.',  # NATIVE-READ
+        'ru': 'Спасибо! Заказ подтверждён.',  # NATIVE-READ
+    },
+    'web.order_actions.open_subscription': {
+        'en': 'Open the subscription',
+        'uz': 'Obunani ochish',  # NATIVE-READ
+        'ru': 'Открыть подписку',  # NATIVE-READ
+    },
+    'web.order_actions.preparing_payment': {
+        'en': "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
+        'uz': "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",  # NATIVE-READ
+        'ru': 'Готовим оплату. Регистрируем товары в налоговой системе («Asl belgisi»); Click откроется через мгновение.',  # NATIVE-READ
+    },
+    'web.order_actions.switch_to_cash': {
+        'en': 'Pay with cash',
+        'uz': "Naqd pul bilan to'lash",  # NATIVE-READ
+        'ru': 'Оплатить наличными',  # NATIVE-READ
+    },
+    'web.order_actions.try_again': {
+        'en': 'Try again',
+        'uz': 'Qayta urinish',  # NATIVE-READ
+        'ru': 'Попробовать снова',  # NATIVE-READ
+    },
+    'api.orders.agent_confirmation.not_pending': {
+        'en': 'This order is no longer waiting for your answer.',
+        'uz': 'Bu buyurtma endi javobingizni kutmayapti.',  # NATIVE-READ
+        'ru': 'Этот заказ больше не ждёт вашего ответа.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(WEB_ORDER_ACTIONS_TRANSLATIONS)
+
+
+# The payment return pages' neutral copy (spec 2026-10-27 §4.5; step 4 Task 10b): what /payment/success and
+# /payment/cancel say to a browser whose session cookie did not come along. It names no order and no amount.
+# Website `web.*` keys. uz/ru need a native read.
+PAYMENT_RETURN_TRANSLATIONS = {
+    'web.payment_return.neutral_success': {
+        'en': "Thank you! We're confirming your payment and will message you in the bot or by email once it's done.",
+        'uz': "Rahmat! To'lovingizni tasdiqlayapmiz va tayyor bo'lgach, botda yoki elektron pochta orqali xabar beramiz.",  # NATIVE-READ
+        'ru': 'Спасибо! Мы подтверждаем оплату и сообщим в боте или по почте, когда всё будет готово.',  # NATIVE-READ
+    },
+    'web.payment_return.neutral_cancel': {
+        'en': "The payment wasn't completed, and no money was taken.",
+        'uz': "To'lov yakunlanmadi, hech qanday pul yechilmadi.",  # NATIVE-READ
+        'ru': 'Оплата не завершена, деньги не списаны.',  # NATIVE-READ
+    },
+    # The tax-system outage sentence for a customer the cash-debt limit keeps off cash: the same outage, without
+    # the "choose cash payment" half, because the page and the bot offer them no cash button. One published answer
+    # (the 503 picks the sentence by `payment_restrictions.cod_restricted`); clients render it as it comes.
+    'api.orders.tax_committee_unavailable_retry_only': {
+        'en': 'Tax authority system (Asl belgisi) is temporarily unavailable. Please try again in a moment.',
+        'uz': "«Asl belgisi» tizimi hozirda mavjud emas. Iltimos, birozdan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Система «Asl belgisi» временно недоступна. Попробуйте снова чуть позже.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(PAYMENT_RETURN_TRANSLATIONS)
+
+
+# /my-subscriptions Orders rows (spec 2026-10-27 §5.3; step 4 Task 11a): a row's Skip or Cancel opens an inline
+# confirm in the order's own published words; this is the button that closes it and keeps the order. Website
+# `cabinet.*` key. uz/ru need a native read.
+CABINET_SUBS_ORDER_ROW_TRANSLATIONS = {
+    'cabinet.subs.orders.keep': {
+        'en': 'Keep it',
+        'uz': 'Qolsin',  # NATIVE-READ
+        'ru': 'Оставить',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CABINET_SUBS_ORDER_ROW_TRANSLATIONS)
+
+
+# /my-subscriptions Schedule "Any time" tile and the Delivery address section (spec 2026-10-27 §6.2, §7, D14, D20; step 4
+# Task 11b). Website `cabinet.*` keys. `slot.any` carries D14's exact words, as `api.subscriptions.time.any_time`
+# does for the card. uz/ru need a native read.
+CABINET_SUBS_ANY_TIME_ADDRESS_TRANSLATIONS = {
+    'cabinet.subs.slot.any': {
+        'en': 'Any time',
+        'uz': 'Istalgan vaqtda',  # NATIVE-READ
+        'ru': 'В любое время',  # NATIVE-READ
+    },
+    'cabinet.subs.section.address': {
+        'en': 'Delivery address',
+        'uz': 'Yetkazish manzili',  # NATIVE-READ
+        'ru': 'Адрес доставки',  # NATIVE-READ
+    },
+    'cabinet.subs.change_label.address': {
+        'en': 'Change the delivery address',
+        'uz': "Yetkazish manzilini o'zgartirish",  # NATIVE-READ
+        'ru': 'Изменить адрес доставки',  # NATIVE-READ
+    },
+    'cabinet.subs.address.legend': {
+        'en': 'Where we deliver',
+        'uz': 'Qayerga yetkazamiz',  # NATIVE-READ
+        'ru': 'Куда доставляем',  # NATIVE-READ
+    },
+    'cabinet.subs.address.add': {
+        'en': 'Add a new address',
+        'uz': "Yangi manzil qo'shish",  # NATIVE-READ
+        'ru': 'Добавить новый адрес',  # NATIVE-READ
+    },
+    'cabinet.subs.address.method_legend': {
+        'en': "Your usual way to pay isn't offered at this address. Choose how you'll pay there.",
+        'uz': "Odatdagi to'lov usulingiz bu manzilda yo'q. U yerda qanday to'lashingizni tanlang.",  # NATIVE-READ
+        'ru': 'Ваш обычный способ оплаты недоступен по этому адресу. Выберите, как будете платить там.',  # NATIVE-READ
+    },
+    'cabinet.subs.address.load_failed': {
+        'en': "We couldn't load your addresses. Please try again.",
+        'uz': "Manzillaringizni yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить ваши адреса. Попробуйте ещё раз.',  # NATIVE-READ
+    },
+    'cabinet.subs.edit.saved_address': {
+        'en': "Saved. We'll deliver to {address}.",
+        'uz': "Saqlandi. Endi bu manzilga yetkazamiz: {address}.",  # NATIVE-READ
+        'ru': 'Сохранено. Будем доставлять сюда: {address}.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CABINET_SUBS_ANY_TIME_ADDRESS_TRANSLATIONS)
+
+
+# The home-page subscription builder in the visitor's language (spec 2026-10-27 §6.2, §11; step 4 Task 12a):
+# "Any time" (D14's exact words), the builder's errors, address list, review card and name generator, and the four
+# frequency names (weekly, biweekly and monthly were database-only rows; daily is seeded above). index.html hands
+# them to subscription-constructor.js in one data island. uz/ru need a native read, except `any_time`.
+SUBSCRIPTION_BUILDER_TRANSLATIONS = {
+    'landing.custom_subscription.any_time': {
+        'en': 'Any time',
+        'uz': 'Istalgan vaqtda',
+        'ru': 'В любое время',
+    },
+    'landing.custom_subscription.created': {
+        'en': 'Your subscription is set up.',
+        'uz': "Obunangiz rasmiylashtirildi.",  # NATIVE-READ
+        'ru': 'Ваша подписка оформлена.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.products': {
+        'en': 'Choose at least one product.',
+        'uz': 'Kamida bitta mahsulotni tanlang.',  # NATIVE-READ
+        'ru': 'Выберите хотя бы один товар.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.frequency': {
+        'en': 'Choose how often we deliver.',
+        'uz': "Qanchalik tez-tez yetkazib berishimizni tanlang.",  # NATIVE-READ
+        'ru': 'Выберите, как часто доставлять.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.day': {
+        'en': 'Choose a delivery day.',
+        'uz': 'Yetkazib berish kunini tanlang.',  # NATIVE-READ
+        'ru': 'Выберите день доставки.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.time': {
+        'en': 'Choose a delivery time or Any time.',
+        'uz': "Yetkazib berish vaqtini yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'ru': 'Выберите время доставки или «В любое время».',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.address': {
+        'en': 'Choose a delivery address.',
+        'uz': 'Yetkazib berish manzilini tanlang.',  # NATIVE-READ
+        'ru': 'Выберите адрес доставки.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.payment': {
+        'en': "Choose how you'll pay.",
+        'uz': "Qanday to'lashingizni tanlang.",  # NATIVE-READ
+        'ru': 'Выберите, как будете платить.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.slots_failed': {
+        'en': "We couldn't load the delivery times. Please try again.",
+        'uz': "Yetkazib berish vaqtlarini yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить время доставки. Попробуйте ещё раз.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.methods_failed': {
+        'en': "We couldn't load the ways to pay. Please try again.",
+        'uz': "To'lov usullarini yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить способы оплаты. Попробуйте ещё раз.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.load_failed': {
+        'en': "We couldn't load the subscription builder. Please refresh the page.",
+        'uz': "Obuna konstruktorini yuklab bo'lmadi. Sahifani yangilang.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить конструктор подписки. Обновите страницу.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.sign_in': {
+        'en': 'Please sign in to continue.',
+        'uz': "Davom etish uchun tizimga kiring.",  # NATIVE-READ
+        'ru': 'Войдите в аккаунт, чтобы продолжить.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.error.create_failed': {
+        'en': "We couldn't set up your subscription. Please try again.",
+        'uz': "Obunangizni rasmiylashtirib bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось оформить подписку. Попробуйте ещё раз.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.address.none_title': {
+        'en': 'No addresses yet',
+        'uz': "Hozircha manzillar yo'q",  # NATIVE-READ
+        'ru': 'Адресов пока нет',  # NATIVE-READ
+    },
+    'landing.custom_subscription.address.none_body': {
+        'en': 'Add a delivery address to continue.',
+        'uz': "Davom etish uchun yetkazib berish manzilini qo'shing.",  # NATIVE-READ
+        'ru': 'Добавьте адрес доставки, чтобы продолжить.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.address.add': {
+        'en': 'Add new address',
+        'uz': "Yangi manzil qo'shish",  # NATIVE-READ
+        'ru': 'Добавить новый адрес',  # NATIVE-READ
+    },
+    'landing.custom_subscription.address.add_elsewhere': {
+        'en': 'Add a new address in My addresses, then come back here.',
+        'uz': "Yangi manzilni «Manzillarim» bo'limida qo'shing, so'ng shu yerga qayting.",  # NATIVE-READ
+        'ru': 'Добавьте новый адрес в разделе «Мои адреса», затем вернитесь сюда.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.address.apartment': {
+        'en': 'Apt. {number}',
+        'uz': '{number}-xonadon',  # NATIVE-READ
+        'ru': 'кв. {number}',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.name_title': {
+        'en': 'Subscription name',
+        'uz': 'Obuna nomi',  # NATIVE-READ
+        'ru': 'Название подписки',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.name_label': {
+        'en': "Give your subscription a name you'll recognise",
+        'uz': "Obunangizga tanish nom bering",  # NATIVE-READ
+        'ru': 'Назовите подписку так, чтобы её было легко узнать',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.name_placeholder': {
+        'en': 'For example: Water for home',
+        'uz': 'Masalan: Uy uchun suv',  # NATIVE-READ
+        'ru': 'Например: Вода для дома',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.name_hint': {
+        'en': 'We suggested a name from your choices. You can change it.',
+        'uz': "Tanlovlaringiz asosida nom taklif qildik. Uni o'zgartirishingiz mumkin.",  # NATIVE-READ
+        'ru': 'Мы предложили название на основе вашего выбора. Его можно изменить.',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.products_title': {
+        'en': 'Selected products',
+        'uz': 'Tanlangan mahsulotlar',  # NATIVE-READ
+        'ru': 'Выбранные товары',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.quantity': {
+        'en': 'Qty: {quantity}',
+        'uz': 'Soni: {quantity}',  # NATIVE-READ
+        'ru': 'Кол-во: {quantity}',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.schedule_title': {
+        'en': 'Delivery schedule',
+        'uz': 'Yetkazib berish jadvali',  # NATIVE-READ
+        'ru': 'График доставки',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.frequency': {
+        'en': 'How often',
+        'uz': 'Qanchalik tez-tez',  # NATIVE-READ
+        'ru': 'Как часто',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.day': {
+        'en': 'Delivery day',
+        'uz': 'Yetkazib berish kuni',  # NATIVE-READ
+        'ru': 'День доставки',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.time': {
+        'en': 'Delivery time',
+        'uz': 'Yetkazib berish vaqti',  # NATIVE-READ
+        'ru': 'Время доставки',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.address_title': {
+        'en': 'Delivery address',
+        'uz': 'Yetkazib berish manzili',  # NATIVE-READ
+        'ru': 'Адрес доставки',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.payment_title': {
+        'en': 'Payment method',
+        'uz': "To'lov usuli",  # NATIVE-READ
+        'ru': 'Способ оплаты',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.cost_title': {
+        'en': 'Cost summary',
+        'uz': 'Umumiy narx',  # NATIVE-READ
+        'ru': 'Итоговая стоимость',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_delivery': {
+        'en': 'Per delivery',
+        'uz': 'Har bir yetkazib berish uchun',  # NATIVE-READ
+        'ru': 'За одну доставку',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_delivery_hint': {
+        'en': 'One delivery',
+        'uz': 'Bitta yetkazib berish',  # NATIVE-READ
+        'ru': 'Одна доставка',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_month': {
+        'en': 'About a month',
+        'uz': 'Taxminan bir oy uchun',  # NATIVE-READ
+        'ru': 'Примерно за месяц',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_month_hint.one': {
+        'en': 'About {count} delivery a month',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish',  # NATIVE-READ
+        'ru': 'Примерно {count} доставка в месяц',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_month_hint.few': {
+        'en': 'About {count} deliveries a month',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish',  # NATIVE-READ
+        'ru': 'Примерно {count} доставки в месяц',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_month_hint.many': {
+        'en': 'About {count} deliveries a month',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish',  # NATIVE-READ
+        'ru': 'Примерно {count} доставок в месяц',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.per_month_hint.other': {
+        'en': 'About {count} deliveries a month',
+        'uz': 'Oyiga taxminan {count} ta yetkazib berish',  # NATIVE-READ
+        'ru': 'Примерно {count} доставки в месяц',  # NATIVE-READ
+    },
+    'landing.custom_subscription.review.note': {
+        'en': 'Your subscription starts once you confirm. You can change, pause or cancel it any time in My subscriptions.',
+        'uz': "Obunangiz tasdiqlaganingizdan so'ng boshlanadi. Uni istalgan vaqtda «Obunalarim» bo'limida o'zgartirishingiz, to'xtatib turishingiz yoki bekor qilishingiz mumkin.",  # NATIVE-READ
+        'ru': 'Подписка начнётся после вашего подтверждения. Изменить, приостановить или отменить её можно в любой момент в разделе «Мои подписки».',  # NATIVE-READ
+    },
+    'landing.custom_subscription.name.more': {
+        'en': '+{count} more',
+        'uz': 'va yana {count} ta',  # NATIVE-READ
+        'ru': 'и ещё {count}',  # NATIVE-READ
+    },
+    'landing.custom_subscription.name.to': {
+        'en': 'to {place}',
+        'uz': '{place} manziliga',  # NATIVE-READ
+        'ru': 'на адрес «{place}»',  # NATIVE-READ
+    },
+    'landing.custom_subscription.name.default': {
+        'en': 'My subscription',
+        'uz': 'Mening obunam',  # NATIVE-READ
+        'ru': 'Моя подписка',  # NATIVE-READ
+    },
+    'landing.custom_subscription.frequency.weekly': {
+        'en': 'Weekly',
+        'uz': 'Haftalik',  # NATIVE-READ
+        'ru': 'Еженедельно',  # NATIVE-READ
+    },
+    'landing.custom_subscription.frequency.biweekly': {
+        'en': 'Bi-Weekly',
+        'uz': 'Ikki haftada bir marta',  # NATIVE-READ
+        'ru': 'Раз в две недели',  # NATIVE-READ
+    },
+    'landing.custom_subscription.frequency.monthly': {
+        'en': 'Monthly',
+        'uz': 'Oylik',  # NATIVE-READ
+        'ru': 'Ежемесячно',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_BUILDER_TRANSLATIONS)
+
+
+# The bot's order screens (spec 2026-10-27 §5.3, §16 M5; step 4 Task 13). A subscription order's Skip asks its
+# reason with the backend's own chips (`customer_actions.cancel.reasons`), or none; a cancel or a decline is
+# confirmed with its published label. These are the buttons that skip without a reason and keep the order, and the
+# answer to a `/start order_<id>` / `sub_<id>` link this account does not own. Bot `telegram.*` keys. uz/ru need a
+# native read.
+BOT_ORDER_ACTIONS_TRANSLATIONS = {
+    'telegram.orders.skip_no_reason': {
+        'en': 'Skip without a reason',
+        'uz': "Sababsiz o'tkazib yuborish",  # NATIVE-READ
+        'ru': 'Пропустить без причины',  # NATIVE-READ
+    },
+    'telegram.orders.keep_delivery': {
+        'en': '↩️ Keep this delivery',
+        'uz': '↩️ Bu yetkazib berishni qoldirish',  # NATIVE-READ
+        'ru': '↩️ Оставить эту доставку',  # NATIVE-READ
+    },
+    'telegram.orders.keep_order': {
+        'en': '↩️ Keep my order',
+        'uz': '↩️ Buyurtmani qoldirish',  # NATIVE-READ
+        'ru': '↩️ Оставить заказ',  # NATIVE-READ
+    },
+    'telegram.deep_link.not_found': {
+        'en': "We couldn't find that. Here's the main menu.",
+        'uz': 'Buni topa olmadik. Mana asosiy menyu.',  # NATIVE-READ
+        'ru': 'Не удалось найти. Вот главное меню.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(BOT_ORDER_ACTIONS_TRANSLATIONS)
+
+
+# The bot's subscription card and order history (spec 2026-10-27 §5.3 D12, §7 D19, §16 M3; step 4 Task 14). The card
+# prints the backend's published sentences and labels; these are only the bot's own chrome around them (the dates line,
+# the per-month figure, the payment line, the Orders button and the history screen). Pause, Resume, Pay, Skip and
+# Cancel, and their confirm and keep buttons, are the backend's published labels, so no key here repeats them. Bot
+# `telegram.*` keys. uz/ru need a native read.
+BOT_SUBSCRIPTION_CARD_TRANSLATIONS = {
+    'telegram.subscription.next_dates': {
+        'en': 'Next deliveries',
+        'uz': 'Keyingi yetkazib berishlar',  # NATIVE-READ
+        'ru': 'Ближайшие доставки',  # NATIVE-READ
+    },
+    'telegram.subscription.if_resume': {
+        'en': 'If you resume today',
+        'uz': 'Bugun davom ettirsangiz',  # NATIVE-READ
+        'ru': 'Если возобновить сегодня',  # NATIVE-READ
+    },
+    'telegram.subscription.date_skipped': {
+        'en': 'skipped',
+        'uz': "o'tkazib yuborildi",  # NATIVE-READ
+        'ru': 'пропущена',  # NATIVE-READ
+    },
+    'telegram.subscription.per_month': {
+        'en': 'About a month',
+        'uz': 'Oyiga taxminan',  # NATIVE-READ
+        'ru': 'Примерно в месяц',  # NATIVE-READ
+    },
+    'telegram.subscription.payment': {
+        'en': 'Payment',
+        'uz': "To'lov",  # NATIVE-READ
+        'ru': 'Оплата',  # NATIVE-READ
+    },
+    'telegram.subscription.orders': {
+        'en': '📋 Orders',
+        'uz': '📋 Buyurtmalar',  # NATIVE-READ
+        'ru': '📋 Заказы',  # NATIVE-READ
+    },
+    'telegram.subscription.history_title': {
+        'en': '📋 Orders from this subscription',
+        'uz': '📋 Ushbu obunadagi buyurtmalar',  # NATIVE-READ
+        'ru': '📋 Заказы по этой подписке',  # NATIVE-READ
+    },
+    'telegram.subscription.history_empty': {
+        'en': 'No orders yet.',
+        'uz': "Hozircha buyurtmalar yo'q.",  # NATIVE-READ
+        'ru': 'Заказов пока нет.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(BOT_SUBSCRIPTION_CARD_TRANSLATIONS)
+
+
+# The bot's schedule and items edits: every change is previewed, then saved (spec 2026-10-27 §6.2, §7; step 4 Task 15a).
+# The preview's sentences and the item lines are the backend's own words, so these are only the chrome around them:
+# the title above the preview, the Save button and the two success toasts. Bot `telegram.*` keys. uz/ru need a native
+# read.
+BOT_SUBSCRIPTION_EDIT_PREVIEW_TRANSLATIONS = {
+    'telegram.subscription.preview_title': {
+        'en': 'Check the change before saving:',
+        'uz': "Saqlashdan oldin o'zgarishni tekshiring:",  # NATIVE-READ
+        'ru': 'Проверьте изменение перед сохранением:',  # NATIVE-READ
+    },
+    'telegram.subscription.save_change': {
+        'en': '✅ Save',
+        'uz': '✅ Saqlash',  # NATIVE-READ
+        'ru': '✅ Сохранить',  # NATIVE-READ
+    },
+    'telegram.subscription.schedule_updated_successfully': {
+        'en': 'Schedule updated.',
+        'uz': 'Jadval yangilandi.',  # NATIVE-READ
+        'ru': 'Расписание обновлено.',  # NATIVE-READ
+    },
+    'telegram.subscription.items_updated_successfully': {
+        'en': 'Products updated.',
+        'uz': 'Mahsulotlar yangilandi.',  # NATIVE-READ
+        'ru': 'Товары обновлены.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(BOT_SUBSCRIPTION_EDIT_PREVIEW_TRANSLATIONS)
+
+
+# The bot's payment-method and delivery-address changes (spec 2026-10-27 §7; step 4 Task 15b). The consequence and
+# preview sentences are the backend's own words; these are the chrome around them. Bot `telegram.*` keys. uz/ru need
+# a native read.
+BOT_SUBSCRIPTION_ADDRESS_PAYMENT_TRANSLATIONS = {
+    'telegram.subscription.change_address': {
+        'en': '📍 Change address',
+        'uz': "📍 Manzilni o'zgartirish",  # NATIVE-READ
+        'ru': '📍 Изменить адрес',  # NATIVE-READ
+    },
+    'telegram.subscription.select_new_address': {
+        'en': 'Choose the new delivery address:',
+        'uz': 'Yangi yetkazib berish manzilini tanlang:',  # NATIVE-READ
+        'ru': 'Выберите новый адрес доставки:',  # NATIVE-READ
+    },
+    'telegram.subscription.address_choose_method': {
+        'en': 'At this address you can pay with these methods. Choose one:',
+        'uz': "Bu manzilda quyidagi usullar bilan to'lash mumkin. Birini tanlang:",  # NATIVE-READ
+        'ru': 'По этому адресу доступны такие способы оплаты. Выберите один:',  # NATIVE-READ
+    },
+    'telegram.subscription.address_updated_successfully': {
+        'en': 'Delivery address updated.',
+        'uz': 'Yetkazib berish manzili yangilandi.',  # NATIVE-READ
+        'ru': 'Адрес доставки обновлён.',  # NATIVE-READ
+    },
+    'telegram.subscription.new_payment_method': {
+        'en': 'New payment method',
+        'uz': "Yangi to'lov usuli",  # NATIVE-READ
+        'ru': 'Новый способ оплаты',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(BOT_SUBSCRIPTION_ADDRESS_PAYMENT_TRANSLATIONS)
 
 
 def main():

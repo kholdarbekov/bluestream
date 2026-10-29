@@ -1,0 +1,137 @@
+{
+ "case": "rescue_ok",
+ "exchange": {
+  "body": {},
+  "method": "POST",
+  "path": "/api/v1/orders/1/retry-with-cash",
+  "response": {
+   "data": {
+    "order": {
+     "can_customer_cancel": true,
+     "confirmed_at": null,
+     "created_at": "<wall-clock>",
+     "customer_actions": {
+      "cancel": {
+       "allowed": true,
+       "confirm_text": "Cancel this order?",
+       "label": "Cancel order",
+       "reasons": [],
+       "refusal": null,
+       "subscription_id": null,
+       "via": "cancel"
+      },
+      "confirm": {
+       "allowed": false,
+       "label": null
+      },
+      "pay": {
+       "allowed": false,
+       "amount_label": null,
+       "deadline_label": null,
+       "expected_amount": null,
+       "label": null,
+       "refusal": "not_online"
+      }
+     },
+     "customer_cancel_via": "order",
+     "delivered_at": null,
+     "delivery_address": {
+      "apartment_number": null,
+      "city": "Tashkent",
+      "country": "Uzbekistan",
+      "delivery_instructions": null,
+      "district": null,
+      "floor_number": null,
+      "full_address": "1 Test St, Tashkent",
+      "id": 1,
+      "is_business": false,
+      "is_default": true,
+      "landmark": null,
+      "latitude": 41.3111,
+      "longitude": 69.2797,
+      "postal_code": null,
+      "street_address": "1 Test St",
+      "title": null
+     },
+     "delivery_date": "2026-10-26",
+     "delivery_fee": 0.0,
+     "delivery_notes": null,
+     "delivery_window": {
+      "end": null,
+      "kind": "anytime",
+      "label": "anytime",
+      "start": null
+     },
+     "discount_amount": 0.0,
+     "display_status": "pending",
+     "id": 2,
+     "is_paid": false,
+     "is_urgent": false,
+     "loyalty_discount": 0.0,
+     "loyalty_points_used": 0,
+     "order_items": [
+      {
+       "id": 2,
+       "is_reward": false,
+       "product_id": 1,
+       "product_name": "Pure Water 19L",
+       "product_sku": null,
+       "quantity": 2,
+       "total_price": 30000.0,
+       "unit_price": 15000.0
+      }
+     ],
+     "order_number": "TG_000002_26",
+     "order_source": "web",
+     "paid_at": null,
+     "payment_info": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "amount_paid": 0.0,
+      "collection_events_count": 0,
+      "currency": "UZS",
+      "fiscalization": null,
+      "fiscalization_status": null,
+      "id": 2,
+      "is_payable": false,
+      "last_collected_at": null,
+      "net_outstanding_amount": 30000.0,
+      "outstanding_amount": 30000.0,
+      "paid_at": null,
+      "payable_payment_link": null,
+      "payment_link": null,
+      "payment_method": "cash",
+      "payment_provider": "cash",
+      "payment_status": "pending",
+      "provider_transaction_id": null,
+      "transaction_id": null
+     },
+     "payment_method": "cash",
+     "promo_code_used": null,
+     "special_instructions": null,
+     "status": "pending",
+     "subscription_id": null,
+     "tax_amount": 0.0,
+     "tier_discount": 0.0,
+     "total_amount": 30000.0,
+     "updated_at": "<wall-clock>",
+     "user_id": 1
+    },
+    "payment_restrictions": {
+     "active_cod_debt_count": 0,
+     "available_prepayment_balance": 0.0,
+     "cluster_net_open_cod_debt_total": 0.0,
+     "cod_exempt": false,
+     "cod_restricted": false,
+     "cod_restriction_reason": null,
+     "is_grocery_store": false,
+     "place_active_cod_debt_count": null,
+     "restriction_scope": null
+    }
+   },
+   "message": "Order created successfully",
+   "success": true
+  },
+  "status": 201
+ }
+}

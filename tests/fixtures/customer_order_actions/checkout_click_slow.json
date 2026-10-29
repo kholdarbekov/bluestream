@@ -1,0 +1,147 @@
+{
+ "case": "checkout_click_slow",
+ "exchange": {
+  "body": {
+   "delivery_address_id": 1,
+   "delivery_date": "2026-10-26",
+   "delivery_notes": null,
+   "delivery_window_end": null,
+   "delivery_window_start": null,
+   "items": [
+    {
+     "product_id": 1,
+     "quantity": 2
+    }
+   ],
+   "payment_method": "click",
+   "source": "web"
+  },
+  "method": "POST",
+  "path": "/api/v1/orders/",
+  "response": {
+   "data": {
+    "order": {
+     "can_customer_cancel": true,
+     "confirmed_at": null,
+     "created_at": "<wall-clock>",
+     "customer_actions": {
+      "cancel": {
+       "allowed": true,
+       "confirm_text": "Cancel this order?",
+       "label": "Cancel order",
+       "reasons": [],
+       "refusal": null,
+       "subscription_id": null,
+       "via": "cancel"
+      },
+      "confirm": {
+       "allowed": false,
+       "label": null
+      },
+      "pay": {
+       "allowed": true,
+       "amount_label": "30 000 so'm",
+       "deadline_label": "Pay by <deadline>.",
+       "expected_amount": "30000.00",
+       "label": "Pay 30 000 so'm",
+       "refusal": null
+      }
+     },
+     "customer_cancel_via": "order",
+     "delivered_at": null,
+     "delivery_address": {
+      "apartment_number": null,
+      "city": "Tashkent",
+      "country": "Uzbekistan",
+      "delivery_instructions": null,
+      "district": null,
+      "floor_number": null,
+      "full_address": "1 Test St, Tashkent",
+      "id": 1,
+      "is_business": false,
+      "is_default": true,
+      "landmark": null,
+      "latitude": 41.3111,
+      "longitude": 69.2797,
+      "postal_code": null,
+      "street_address": "1 Test St",
+      "title": null
+     },
+     "delivery_date": "2026-10-26",
+     "delivery_fee": 0.0,
+     "delivery_notes": null,
+     "delivery_window": {
+      "end": null,
+      "kind": "anytime",
+      "label": "anytime",
+      "start": null
+     },
+     "discount_amount": 0.0,
+     "display_status": "pending",
+     "id": 1,
+     "is_paid": false,
+     "is_urgent": false,
+     "loyalty_discount": 0.0,
+     "loyalty_points_used": 0,
+     "order_items": [
+      {
+       "id": 1,
+       "is_reward": false,
+       "product_id": 1,
+       "product_name": "Pure Water 19L",
+       "product_sku": null,
+       "quantity": 2,
+       "total_price": 30000.0,
+       "unit_price": 15000.0
+      }
+     ],
+     "order_number": "TG_000001_26",
+     "order_source": "web",
+     "paid_at": null,
+     "payment_info": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "amount_paid": 0.0,
+      "collection_events_count": 0,
+      "currency": "UZS",
+      "fiscalization": null,
+      "fiscalization_status": null,
+      "id": 1,
+      "is_payable": true,
+      "last_collected_at": null,
+      "net_outstanding_amount": 30000.0,
+      "outstanding_amount": 30000.0,
+      "paid_at": null,
+      "payable_payment_link": null,
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "payment_status": "pending",
+      "provider_transaction_id": null,
+      "transaction_id": null
+     },
+     "payment_method": "click",
+     "promo_code_used": null,
+     "special_instructions": null,
+     "status": "pending",
+     "subscription_id": null,
+     "tax_amount": 0.0,
+     "tier_discount": 0.0,
+     "total_amount": 30000.0,
+     "updated_at": "<wall-clock>",
+     "user_id": 1
+    },
+    "payment_link": {
+     "payment_url": "http://localhost/my-orders#click-checkout"
+    },
+    "payment_ready_at": "<wall-clock>",
+    "payment_ready_in_seconds": 45,
+    "payment_url": "http://localhost/my-orders#click-checkout",
+    "pre_utilization_at": "<wall-clock>"
+   },
+   "message": "Order created successfully",
+   "success": true
+  },
+  "status": 201
+ }
+}

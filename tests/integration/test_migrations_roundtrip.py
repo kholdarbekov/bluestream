@@ -389,6 +389,18 @@ def _insert_user(db, **columns):
     return user_id
 
 
+def _insert_order(db, **columns):
+    """An `orders` row written with Core, and its id, for the same reason as `_insert_user`: fixtures
+    staged BEFORE 3f8b2d6a9c41, which predates `orders.online_payable_since`. Core skips the model's
+    order-number hook, so the caller names the number."""
+    from business_app.models.order import Order
+
+    values = {"subtotal": Decimal("15000.00"), "total_amount": Decimal("15000.00"), **columns}
+    order_id = db.session.execute(Order.__table__.insert().values(**values)).inserted_primary_key[0]
+    db.session.commit()
+    return order_id
+
+
 def _revision(engine):
     return _rows(engine, "SELECT version_num FROM alembic_version")[0][0]
 
@@ -448,9 +460,9 @@ def _v4_plan_world(db):
     from business_app.models.sales_pay import SalesAgentPayTerms, SalesPayPeriod, SalesPayPlan
     from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
     from tests.integration.sales_pay_builders import make_product
-    from tests.integration.test_sales_agent_pg_constraints import _order
 
-    # Users go in with Core: this schema predates users.telegram_blocked_at (see `_insert_user`).
+    # Users and the order go in with Core: this schema predates users.telegram_blocked_at and
+    # orders.online_payable_since (see `_insert_user`).
     agent_id = _insert_user(
         db, phone="+998900000501", password_hash="not-a-real-hash", first_name="Sardor", last_name="Agent"
     )
@@ -460,8 +472,11 @@ def _v4_plan_world(db):
     water = make_product(db, name="Water 19L", price="20000")
     plan = SalesPayPlan(name="Standard", created_by_user_id=agent_id)
     period = SalesPayPeriod(month_start=OCT, status="open", is_shadow=False, holidays=[])
-    order = _order(db, user_id=customer_id, order_source=ORDER_SOURCE_SALES_AGENT, created_by_staff_id=agent_id)
-    db.session.add_all([plan, period, order])
+    order_id = _insert_order(
+        db, order_number="SA_000001_26", user_id=customer_id, order_source=ORDER_SOURCE_SALES_AGENT,
+        created_by_staff_id=agent_id,
+    )
+    db.session.add_all([plan, period])
     db.session.commit()
     terms = SalesAgentPayTerms(
         agent_user_id=agent_id,
@@ -473,7 +488,7 @@ def _v4_plan_world(db):
     db.session.add(terms)
     db.session.commit()
     w = SimpleNamespace(
-        agent=agent_id, water=water.id, plan=plan.id, period=period.id, order=order.id, terms=terms.id
+        agent=agent_id, water=water.id, plan=plan.id, period=period.id, order=order_id, terms=terms.id
     )
     db.session.remove()
     versions = []
@@ -774,12 +789,11 @@ def _subscription_columns(conn):
 
 def _old_subscription_world(db):
     """Six rows at b4f1c7e9a2d3, one per case the backfill must get right. Subscriptions go in as SQL
-    (the model is already head-shaped); users with Core (`_insert_user`); the rest with the ORM, whose
-    tables are the same at both revisions. Tashkent is UTC+5, so a 19:00Z-or-later instant is the NEXT
-    local day: the cases put instants there to fail a UTC-date implementation."""
+    (the model is already head-shaped); users and orders with Core (`_insert_user`, `_insert_order`); the
+    rest with the ORM, whose tables are the same at both revisions. Tashkent is UTC+5, so a 19:00Z-or-later
+    instant is the NEXT local day: the cases put instants there to fail a UTC-date implementation."""
     from business_app.models.delivery import DeliveryTimeSlot
     from business_app.models.user import UserAddress
-    from tests.integration.test_sales_agent_pg_constraints import _order
 
     user_id = _insert_user(db, phone="+998900000601", password_hash="not-a-real-hash", first_name="Sub")
     address = UserAddress(
@@ -824,14 +838,13 @@ def _old_subscription_world(db):
     # weekly_thu: the NEWEST order (by created_at) has no delivery date, so its local creation day counts
     # (19:00Z on 19 October = 20 October in Tashkent), not the older order's 15 October.
     # biweekly_no_day: one order, delivered on its own delivery_date.
-    for subscription_id, delivery_date, created_at in (
+    for number, (subscription_id, delivery_date, created_at) in enumerate((
         (w.weekly_thu, date(2026, 10, 15), datetime(2026, 10, 14, 8, 0, tzinfo=UTC)),
         (w.weekly_thu, None, datetime(2026, 10, 19, 20, 0, tzinfo=UTC)),
         (w.biweekly_no_day, date(2026, 10, 14), datetime(2026, 10, 13, 5, 0, tzinfo=UTC)),
-    ):
-        db.session.add(_order(db, user_id=w.user, subscription_id=subscription_id, delivery_date=delivery_date,
-                              created_at=created_at))
-    db.session.commit()
+    ), 1):
+        _insert_order(db, order_number=f"WB_00000{number}_26", user_id=w.user, subscription_id=subscription_id,
+                      delivery_date=delivery_date, created_at=created_at)
     db.session.remove()
     return w
 
@@ -864,6 +877,7 @@ def test_subscription_frequency_backfill_and_round_trip(ephemeral_pg_database, c
     from alembic import command
 
     from business_app import db
+    from business_app.models.delivery import DeliveryTimeSlot
     from business_app.models.subscription import Subscription
     from business_app.services.subscription_schedule import first_delivery_on_or_after
     from business_app.utils.local_windows import local_date
@@ -886,7 +900,11 @@ def test_subscription_frequency_backfill_and_round_trip(ephemeral_pg_database, c
         assert columns["frequency"] == ("subscription_frequency", "NO")
         assert columns["next_delivery_date"] == ("date", "YES")
         assert columns["last_delivery_date"] == ("date", "YES")
-        # The migration's frozen anchor rule agrees with the live one, row by row.
+        # The migration's frozen anchor rule agrees with the live one, row by row. The frozen rule predates delivery
+        # days (spec 2026-10-27 §6.4), so they are compared where every day is one: an every-day slot is active.
+        db.session.add(DeliveryTimeSlot(name="Every day", start_time="08:00", end_time="20:00", is_active=True,
+                                        available_days=list(range(7))))
+        db.session.commit()
         billed = dict(_rows(db.engine, "SELECT id, next_billing_date FROM subscriptions"))
         for sub in Subscription.query.order_by(Subscription.id):
             assert first_delivery_on_or_after(sub, local_date(billed[sub.id])) == sub.next_delivery_date
@@ -1006,3 +1024,68 @@ def test_subscription_contract_drops_the_old_columns_and_the_downgrade_restores_
         command.upgrade(config, SUBSCRIPTION_CONTRACT_REVISION)
 
         assert _rows(db.engine, _NEW_SUBSCRIPTION_STATE) == before
+
+
+# ---- Orders: when an order became payable on Click (plan 2026-10-27 Task 3; spec 2026-10-27 §4.4, §17 Q3) ----
+
+ONLINE_PAYABLE_REVISION = "3f8b2d6a9c41"
+# Raw SQL, not the ORM: the model already carries `online_payable_since`, which the parent schema lacks.
+_ORDER_AT_PARENT = (
+    "INSERT INTO orders (order_number, user_id, status, subtotal, total_amount, payment_method, is_paid, "
+    "delivery_address_id, created_at, updated_at) VALUES (:number, :user_id, :status, 30000, 30000, :method, "
+    ":paid, :address, now() - interval '3 days', now()) RETURNING id"
+)
+
+
+@pytest.mark.integration
+def test_online_payable_since_backfills_live_unpaid_online_orders_and_rolls_back(ephemeral_pg_database):
+    """At deploy every order still unpaid on an online rail (click, card, payme) and not dead gets the deploy time
+    as the start of its payment window, so each has a full 24 hours and nobody is told "not paid by" a deadline
+    dated days ago. Cash, cancelled, returned and paid orders stay NULL. The downgrade drops the column; the
+    second upgrade lands again."""
+    from alembic import command
+
+    from business_app import db
+    from business_app.models.user import UserAddress
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, SUBSCRIPTION_CONTRACT_REVISION)
+        user_id = _insert_user(db, phone="+998900000701", password_hash="not-a-real-hash", first_name="Pay")
+        # The same table at both revisions, so the ORM is safe; an order past pending needs an address.
+        address = UserAddress(user_id=user_id, full_address="Amir Temur 1", city="Tashkent", latitude=41.31,
+                              longitude=69.27)
+        _add(db, address)
+        address_id = _rows(db.engine, "SELECT id FROM addresses")[0][0]
+
+        def order(number, status, method, paid=False):
+            params = {"number": f"OPS-{number}", "user_id": user_id, "status": status, "method": method,
+                      "paid": paid, "address": address_id}
+            with db.engine.begin() as conn:
+                return conn.execute(text(_ORDER_AT_PARENT), params).scalar_one()
+
+        stamped = [order(1, "pending", "click"), order(2, "confirmed", "card"), order(3, "delivered", "payme")]
+        unstamped = [
+            order(4, "pending", "cash"),
+            order(5, "cancelled", "click"),
+            order(6, "returned", "click"),
+            order(7, "pending", "click", paid=True),
+        ]
+        before = _rows(db.engine, "SELECT now()")[0][0]
+
+        command.upgrade(config, ONLINE_PAYABLE_REVISION)
+
+        starts = dict(_rows(db.engine, "SELECT id, online_payable_since FROM orders"))
+        [deploy] = {starts[order_id] for order_id in stamped}
+        assert deploy is not None and deploy >= before
+        assert [starts[order_id] for order_id in unstamped] == [None] * len(unstamped)
+
+        command.downgrade(config, SUBSCRIPTION_CONTRACT_REVISION)
+        with db.engine.connect() as conn:
+            assert "online_payable_since" not in _schema_columns(conn, "orders")
+        assert _revision(db.engine) == SUBSCRIPTION_CONTRACT_REVISION
+
+        command.upgrade(config, "head")
+        with db.engine.connect() as conn:
+            assert "online_payable_since" in _schema_columns(conn, "orders")

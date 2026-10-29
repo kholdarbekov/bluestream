@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from business_app import db
 from business_app.models.user import User
 from business_app.services.auth_service import mask_account_email, mask_person_name, may_sign_in
+from business_app.services.customer_links import bot_start_link
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.services.token_service import TokenService
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
@@ -74,7 +75,7 @@ class CustomerTelegramLinkService:
     @staticmethod
     def deep_link(token: str) -> str:
         """Our bot's `/start web_<token>` link, from the single bot-identity config (D2)."""
-        return f"{current_app.config['COMPANY_TELEGRAM_BOT_URL']}?start={WEB_LINK_START_PREFIX}{token}"
+        return bot_start_link(f"{WEB_LINK_START_PREFIX}{token}")
 
     @staticmethod
     def account_label(user: User) -> str:

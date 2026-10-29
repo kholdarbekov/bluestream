@@ -366,6 +366,12 @@ def setup_request_handlers(app):
             if "public" in response.headers.get("Cache-Control", ""):
                 return response
 
+            # Only an access token is extended. On a route that verified a refresh token (the refresh routes,
+            # Log out) the request's token is that refresh token, and re-minting it would hand out an access
+            # cookie the route itself refused or already set (a staff login on `/auth/refresh-cookie`).
+            if get_jwt().get("type") != "access":
+                return response
+
             exp_timestamp = get_jwt()["exp"]
             now = datetime.now(timezone.utc)
             target_timestamp = datetime.timestamp(now + timedelta(minutes=30))
@@ -417,7 +423,12 @@ def setup_request_handlers(app):
 
 
 def setup_jwt_handlers(app):
-    """Setup JWT-related handlers"""
+    """Setup JWT-related handlers.
+
+    The five 401 answers below (expired, invalid, missing, revoked, unknown user) say the login itself is not
+    usable, so each carries `reauth: true`: the storefront's `apiRequest` (static/js/pages/base.js) renews the
+    login and repeats the request on that answer only, and hands any other 401 (a wrong password) back to the
+    page that asked."""
 
     @jwt.user_identity_loader
     def user_identity_lookup(identity):
@@ -440,12 +451,12 @@ def setup_jwt_handlers(app):
     def expired_token_callback(jwt_header, jwt_payload):
         # Routine session expiry (validly-signed token past exp) — expected, not a warning.
         app.logger.info(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
-        return jsonify({"error": "Token Expired", "message": "The token has expired."}), 401
+        return jsonify({"error": "Token Expired", "message": "The token has expired.", "reauth": True}), 401
 
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
         app.logger.warning(f"JWT Invalid Token Error: {error} (type={type(error).__name__})")
-        return jsonify({"error": "Invalid Token", "message": "The token is invalid."}), 401
+        return jsonify({"error": "Invalid Token", "message": "The token is invalid.", "reauth": True}), 401
 
     @jwt.unauthorized_loader
     def missing_token_callback(error):
@@ -461,12 +472,21 @@ def setup_jwt_handlers(app):
             bool(request.headers.get("X-CSRF-TOKEN")),
             bool(request.cookies.get("csrf_access_token")),
         )
-        return jsonify({"error": "Authorization Required", "message": "Request does not contain an access token."}), 401
+        return (
+            jsonify(
+                {
+                    "error": "Authorization Required",
+                    "message": "Request does not contain an access token.",
+                    "reauth": True,
+                }
+            ),
+            401,
+        )
 
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_payload):
         app.logger.warning(f"JWT Revoked Token: jti={jwt_payload.get('jti')}, sub={jwt_payload.get('sub')}")
-        return jsonify({"error": "Token Revoked", "message": "The token has been revoked."}), 401
+        return jsonify({"error": "Token Revoked", "message": "The token has been revoked.", "reauth": True}), 401
 
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_payload):
@@ -489,7 +509,10 @@ def setup_jwt_handlers(app):
     @jwt.user_lookup_error_loader
     def user_lookup_error_callback(_jwt_header, jwt_payload):
         app.logger.warning(f"JWT identity does not resolve to a user: sub={jwt_payload.get('sub')}")
-        return jsonify({"error": "User Not Found", "message": "Token identity is no longer valid."}), 401
+        return (
+            jsonify({"error": "User Not Found", "message": "Token identity is no longer valid.", "reauth": True}),
+            401,
+        )
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):

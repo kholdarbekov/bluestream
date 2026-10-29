@@ -24,6 +24,7 @@ from business_app.models.subscription import Subscription
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import SubscriptionFrequency
 from tests.integration.sales_pay_builders import freeze_local_now
+from tests.integration.test_subscription_action_guards import _state
 
 TASHKENT = ZoneInfo(DISPLAY_TIMEZONE)
 BASE = "/api/v1/subscriptions"
@@ -222,7 +223,9 @@ class TestStatistics:
             .get_json()["data"]["subscription"]["id"]
             for freq in ("weekly", "monthly")
         ]
-        assert client.post(f"{BASE}/{ids[1]}/pause", headers=auth_headers, json={}).status_code == 200
+        token = _state(client, ids[1], auth_headers)
+        paused = client.post(f"{BASE}/{ids[1]}/pause", headers=auth_headers, json={"expected_state": token})
+        assert paused.status_code == 200
 
         resp = client.get(f"{BASE}/statistics", headers=auth_headers)
 
@@ -241,7 +244,10 @@ class TestAdminUpdate:
         )
         sub_id = _admin_created_id(created)
 
-        resp = client.put(f"{ADMIN_BASE}/{sub_id}", headers=admin_auth_headers, json={"frequency": "weekly"})
+        # The admin form sends the weekday with a weekly frequency: weekly without one is refused (B9).
+        resp = client.put(
+            f"{ADMIN_BASE}/{sub_id}", headers=admin_auth_headers, json={"frequency": "weekly", "delivery_day_of_week": 3}
+        )
 
         assert resp.status_code == 200, resp.get_json()
         _assert_one_frequency(_row(db, sub_id), SubscriptionFrequency.WEEKLY)
@@ -294,15 +300,32 @@ class TestTheOldColumnsAreGone:
         sub_id = created.get_json()["data"]["subscription"]["id"]
         _assert_no_old_keys(created.get_json())
 
-        for path in (f"{BASE}/", f"{BASE}/{sub_id}", f"{BASE}/{sub_id}/billing-history"):
+        for path in (f"{BASE}/", f"{BASE}/{sub_id}", f"{BASE}/{sub_id}/history"):
             resp = client.get(path, headers=auth_headers)
             assert resp.status_code == 200, (path, resp.get_json())
             _assert_no_old_keys(resp.get_json())
-        for action, body in (("skip-next-delivery", {}), ("pause", {}), ("resume", {})):
+        named = client.get(f"{BASE}/{sub_id}", headers=auth_headers).get_json()["data"]["subscription"][
+            "allowed_actions"
+        ]["skip"]["date"]
+        for action in ("skip-next-delivery", "pause", "resume"):
+            # Each body as its client sends it: the date the skip names, the state the pause's screen showed.
+            body = {
+                "skip-next-delivery": lambda: {"expected_date": named},
+                "pause": lambda: {"expected_state": _state(client, sub_id, auth_headers)},
+                "resume": dict,
+            }[action]()
             resp = client.post(f"{BASE}/{sub_id}/{action}", headers=auth_headers, json=body)
             assert resp.status_code == 200, (action, resp.get_json())
             _assert_no_old_keys(resp.get_json())
-        resp = client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={"frequency": "monthly"})
+        resp = client.put(
+            f"{BASE}/{sub_id}",
+            headers=auth_headers,
+            json={
+                "frequency": "monthly",
+                "delivery_day_of_month": 15,
+                "expected_state": _state(client, sub_id, auth_headers),
+            },
+        )
         assert resp.status_code == 200, resp.get_json()
         _assert_no_old_keys(resp.get_json())
 

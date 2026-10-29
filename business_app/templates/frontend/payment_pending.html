@@ -131,10 +131,10 @@
                 <i class="far fa-hourglass-half"></i>
             </div>
 
+            {% if order %}
             <h2>{{ 'Payment Processing'|t }}</h2>
             <p>{{ 'Your payment is being processed. This may take a few moments.'|t }}</p>
 
-            {% if order %}
             <div class="order-info">
                 <div class="info-row">
                     <span class="info-label">{{ 'Order Number'|t }}:</span>
@@ -147,17 +147,16 @@
                 <div class="info-row">
                     <span class="info-label">{{ 'Payment Method'|t }}:</span>
                     <span class="info-value">
-                        {% if order.payment_method == 'payme' %}
+                        {% if order.payment_method.value == 'payme' %}
                             Payme
-                        {% elif order.payment_method == 'click' %}
+                        {% elif order.payment_method.value == 'click' %}
                             Click
                         {% else %}
-                            {{ order.payment_method|title }}
+                            {{ order.payment_method.value|title }}
                         {% endif %}
                     </span>
                 </div>
             </div>
-            {% endif %}
 
             <div class="refresh-notice">
                 <i class="far fa-info-circle"></i>
@@ -172,6 +171,19 @@
                     <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>
             </div>
+            {% else %}
+            {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
+            <h2>{{ 'Payment Processing'|t }}</h2>
+            <p>{{ 'web.payment_return.neutral_success'|t }}</p>
+            <div class="action-buttons">
+                <a href="{{ company_telegram_bot_url }}" class="theme-btn btn-one" target="_blank" rel="noopener noreferrer">
+                    <i class="fab fa-telegram-plane"></i> {{ 'Open the bot'|t }}
+                </a>
+                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
+                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
+                </a>
+            </div>
+            {% endif %}
         </div>
     </div>
 </section>
@@ -180,12 +192,16 @@
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'payment_id': payment.id,
-    'order_id': order.id,
+    'payment_id': payment.id if (order and payment) else none,
+    'order_id': order.id if order else none,
+    'order_page_url': order_page_url if order else none,
+    'cancel_url': cancel_url if order else none,
+    'order_actions': order_actions_words(),
     'i18n': {
         'failed': 'Payment failed. Please try again.' | t,
         'timeout': 'Payment verification is taking longer than expected. Please check your order status.' | t,
     },
 }) }}
+<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pages/payment-pending.js') }}"></script>
 {% endblock %}

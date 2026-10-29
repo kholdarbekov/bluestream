@@ -1,35 +1,19 @@
+// The payment-cancelled page: the order's status, and Pay when the backend publishes it (spec 2026-10-27 §4.5).
+// `order-actions.js` draws the published `customer_actions.pay` and sends the Pay (channel web, the amount the screen
+// showed). This page shows the status and Pay only (never Cancel or Confirm), so it hands the renderer the Pay
+// answer alone. It decides nothing: a browser with no session, or not this customer's order, has no `order`.
 (function () {
     var PAGE_DATA = getPageData();
 
-    function retryPayment() {
-        if (!PAGE_DATA.order_id) {
-            window.location.href = PAGE_DATA.cart_url;
-            return;
-        }
-        showNotification(PAGE_DATA.i18n.preparing, 'info');
-        fetch('/api/v1/orders/' + PAGE_DATA.order_id + '/retry-payment', {
-            method: 'POST',
-            headers: {
-                'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
-                'Content-Type': 'application/json'
-            }
-        })
-        .then(function (response) { return response.json(); })
-        .then(function (data) {
-            if (data.success && data.data.payment_url) {
-                window.location.href = data.data.payment_url;
-            } else {
-                showNotification(PAGE_DATA.i18n.retry_failed, 'error');
-            }
-        })
-        .catch(function (err) {
-            console.error('Error retrying payment:', err);
-            showNotification(PAGE_DATA.i18n.error, 'error');
-        });
-    }
-
     document.addEventListener('DOMContentLoaded', function () {
-        var btn = document.querySelector('[data-action="retry-payment"]');
-        if (btn) btn.addEventListener('click', retryPayment);
+        var host = document.getElementById('paymentActions');
+        var order = PAGE_DATA.order;
+        if (!host || !order) return;
+        var published = order.customer_actions || {};
+        window.OrderActions.render(host, { id: order.id, customer_actions: { pay: published.pay } }, {
+            words: PAGE_DATA.order_actions,
+            // A refused or stale Pay (409): reload, so the page is drawn from the backend's new answer.
+            onChanged: function () { window.OrderActions.navigate(window.location.href); }
+        });
     });
 })();

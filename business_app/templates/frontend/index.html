@@ -665,7 +665,7 @@
 
                 <!-- View All Subscriptions Button -->
                 <div class="more-btn centred" style="margin-top: 50px;">
-                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'landing.custom_subscription.manage_subscriptions'|t }}</a>
+                    <a href="{{ url_for('frontend.my_subscriptions') }}" class="theme-btn btn-one">{{ 'landing.custom_subscription.manage_subscriptions'|t }}</a>
                 </div>
             </div>
         </section>
@@ -855,13 +855,68 @@
 
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
-{# The builder's own words, in the visitor's language. `{day}` is filled in by the script. #}
+{# The builder's own words, in the visitor's language: the whole page data of the script (`CONSTRUCTOR_PAGE`).
+   `{day}`, `{number}`, `{quantity}`, `{count}` and `{place}` are filled in by the script. #}
 {{ render_page_data({
     'i18n': {
         'day_of_month': 'Day {day} of the month' | t,
         'preview_after_sign_in': 'Shown once you are signed in' | t,
         'select_day_of_month': 'Please select a day of the month' | t,
-    }
+        'select_time_slot': 'landing.custom_subscription.select_time_slot' | t,
+        'any_time': 'landing.custom_subscription.any_time' | t,
+        'created': 'landing.custom_subscription.created' | t,
+        'error_products': 'landing.custom_subscription.error.products' | t,
+        'error_frequency': 'landing.custom_subscription.error.frequency' | t,
+        'error_day': 'landing.custom_subscription.error.day' | t,
+        'error_time': 'landing.custom_subscription.error.time' | t,
+        'error_address': 'landing.custom_subscription.error.address' | t,
+        'error_payment': 'landing.custom_subscription.error.payment' | t,
+        'error_slots_failed': 'landing.custom_subscription.error.slots_failed' | t,
+        'error_methods_failed': 'landing.custom_subscription.error.methods_failed' | t,
+        'error_load_failed': 'landing.custom_subscription.error.load_failed' | t,
+        'error_sign_in': 'landing.custom_subscription.error.sign_in' | t,
+        'error_create_failed': 'landing.custom_subscription.error.create_failed' | t,
+        'address_none_title': 'landing.custom_subscription.address.none_title' | t,
+        'address_none_body': 'landing.custom_subscription.address.none_body' | t,
+        'address_add': 'landing.custom_subscription.address.add' | t,
+        'address_add_elsewhere': 'landing.custom_subscription.address.add_elsewhere' | t,
+        'address_apartment': 'landing.custom_subscription.address.apartment' | t,
+        'review_name_title': 'landing.custom_subscription.review.name_title' | t,
+        'review_name_label': 'landing.custom_subscription.review.name_label' | t,
+        'review_name_placeholder': 'landing.custom_subscription.review.name_placeholder' | t,
+        'review_name_hint': 'landing.custom_subscription.review.name_hint' | t,
+        'review_products_title': 'landing.custom_subscription.review.products_title' | t,
+        'review_quantity': 'landing.custom_subscription.review.quantity' | t,
+        'review_schedule_title': 'landing.custom_subscription.review.schedule_title' | t,
+        'review_frequency': 'landing.custom_subscription.review.frequency' | t,
+        'review_day': 'landing.custom_subscription.review.day' | t,
+        'review_time': 'landing.custom_subscription.review.time' | t,
+        'review_address_title': 'landing.custom_subscription.review.address_title' | t,
+        'review_payment_title': 'landing.custom_subscription.review.payment_title' | t,
+        'review_cost_title': 'landing.custom_subscription.review.cost_title' | t,
+        'review_per_delivery': 'landing.custom_subscription.review.per_delivery' | t,
+        'review_per_delivery_hint': 'landing.custom_subscription.review.per_delivery_hint' | t,
+        'review_per_month': 'landing.custom_subscription.review.per_month' | t,
+        'review_note': 'landing.custom_subscription.review.note' | t,
+        'name_more': 'landing.custom_subscription.name.more' | t,
+        'name_to': 'landing.custom_subscription.name.to' | t,
+        'name_default': 'landing.custom_subscription.name.default' | t,
+    },
+    'frequency_names': {
+        'daily': 'landing.custom_subscription.frequency.daily' | t,
+        'weekly': 'landing.custom_subscription.frequency.weekly' | t,
+        'biweekly': 'landing.custom_subscription.frequency.biweekly' | t,
+        'monthly': 'landing.custom_subscription.frequency.monthly' | t,
+    },
+    'weekday_names': [
+        'web.display_labels.weekday.0' | t,
+        'web.display_labels.weekday.1' | t,
+        'web.display_labels.weekday.2' | t,
+        'web.display_labels.weekday.3' | t,
+        'web.display_labels.weekday.4' | t,
+        'web.display_labels.weekday.5' | t,
+        'web.display_labels.weekday.6' | t,
+    ],
 }, element_id='subscription-constructor-data') }}
 <script src="{{ url_for('static', filename='js/custom-index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/subscription-constructor.js') }}"></script>

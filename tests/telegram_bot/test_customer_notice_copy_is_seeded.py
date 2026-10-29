@@ -24,7 +24,9 @@ BOT_KEYS = {
     "telegram.customer_notice.order_created": {"order_number", "delivery", "items", "total", "payment"},
     "telegram.customer_notice.delivery_window": {"date", "start", "end"},
     "telegram.customer_notice.delivery_tbc": {"date"},
+    "telegram.customer_notice.delivery_any_time": {"date"},
     "telegram.customer_notice.item": {"name", "qty"},
+    "telegram.customer_notice.not_included": {"name"},
     "telegram.customer_notice.pay_cash": {"amount"},
     "telegram.customer_notice.pay_cash_prepaid": {"amount"},
     "telegram.customer_notice.pay_cash_covered": set(),
@@ -36,10 +38,19 @@ BOT_KEYS = {
     "telegram.customer_notice.paid_order_kept_pause": {"order_number", "date"},
     "telegram.customer_notice.paid_order_kept_cancel": {"order_number", "date"},
     "telegram.customer_notice.payment_expired": {"order_number", "deadline"},
+    # A slot write changed the schedule (spec 2026-10-27 §6.5): one line per change inside `schedule_changed`.
+    "telegram.customer_notice.schedule_changed": {"subscription_name", "lines"},
+    "telegram.customer_notice.schedule_changed_next": {"date"},
+    "telegram.customer_notice.schedule_change.time_cleared": {"old_window"},
+    "telegram.customer_notice.schedule_change.time_changed": {"new_window", "old_window"},
+    "telegram.customer_notice.schedule_change.day_moved": {"old_day", "new_day"},
+    "telegram.customer_notice.schedule_change.days_added": {"days"},
+    "telegram.customer_notice.schedule_change.date_moved": {"old_day"},
 }
 
 _RENDERING_MODULE = Path(__file__).resolve().parents[2] / "telegram_bot" / "webhook_server.py"
-_KEY_IN_SOURCE = re.compile(r"telegram\.customer_notice\.[a-z_]+")
+# Dotted to the end: `telegram.customer_notice.schedule_change.time_cleared` is one key, not its prefix.
+_KEY_IN_SOURCE = re.compile(r"telegram\.customer_notice\.[a-z_]+(?:\.[a-z_]+)*")
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 _PHONE_COPY = re.compile(r"call|позвон|qo'ng'iroq|qoʻngʻiroq|телефон|telefon", re.IGNORECASE)
 

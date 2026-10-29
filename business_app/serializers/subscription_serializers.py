@@ -4,14 +4,38 @@ This file contains Pydantic models for subscription-related data serialization
 """
 
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, FrozenSet, List, Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
+from pydantic_core import PydanticCustomError
 
 from business_app.models.subscription import SubscriptionItem
 from business_app.serializers.types import MoneyFloat
+from business_app.services.subscription_display import SKIP_REASON_CODES
 from shared.enums import SubscriptionFrequency
+
+
+# The fields an explicit `null` clears instead of being ignored (spec 2026-10-27 §6.1): the slot, where null is
+# "Any time". Read by `pydantic_helpers.dump_changes`.
+CLEARABLE_SUBSCRIPTION_FIELDS = frozenset({"delivery_time_slot_id"})
+
+
+class _NoExplicitNull(BaseModel):
+    """An update body that refuses an explicit `null` on the fields in `NEVER_NULL`: the service would otherwise get
+    the null (or drop it silently), so `{"name": null}` is a 400 here and never a 500 later. The error is a
+    `PydanticCustomError`, as `SkipDeliveryRequest`'s: its `ctx` stays JSON-serialisable."""
+
+    NEVER_NULL: ClassVar[FrozenSet[str]] = frozenset()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_explicit_null(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field in sorted(cls.NEVER_NULL):
+                if field in data and data[field] is None:
+                    raise PydanticCustomError("explicit_null", "{field} may not be null", {"field": field})
+        return data
 
 
 class _OneFrequency(BaseModel):
@@ -36,8 +60,13 @@ class CreateSubscriptionRequest(_OneFrequency):
     items: List[Dict[str, Any]] = Field(..., min_length=1)
 
 
-class UpdateSubscriptionRequest(BaseModel):
-    """Update subscription request schema"""
+class UpdateSubscriptionRequest(_NoExplicitNull):
+    """Update subscription request schema. An explicit `delivery_time_slot_id: null` is "Any time" (clears the slot);
+    a missing key keeps it (`CLEARABLE_SUBSCRIPTION_FIELDS`)."""
+
+    NEVER_NULL: ClassVar[FrozenSet[str]] = frozenset(
+        {"name", "frequency", "delivery_address_id", "auto_renew", "payment_method"}
+    )
 
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
@@ -47,8 +76,14 @@ class UpdateSubscriptionRequest(BaseModel):
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
     delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: Optional[int] = Field(None, gt=0)
+    # Only with `delivery_address_id`: the method chosen from the new address's menu when it does not offer the
+    # current one (spec 2026-10-27 §7, B8 re-pick). Alone it is refused; `/change-payment-method` is its writer.
     payment_method: Optional[str] = None
     auto_renew: Optional[bool] = None
+    # What the customer's screen showed (spec 2026-10-27 §16 M2): `allowed_actions.expected_state`, or the schedule
+    # or address preview's. Required only with a schedule field or `delivery_address_id`; a stale or missing one
+    # answers 409 STATE_CHANGED.
+    expected_state: Optional[str] = Field(None, max_length=64)
     # Unsupported fields must answer 400, not be dropped and reported as a saved success.
     model_config = ConfigDict(extra="forbid")
 
@@ -58,6 +93,9 @@ class PauseSubscriptionRequest(BaseModel):
     no client ever set an automatic resume date, so none is accepted (spec 2026-10-23 §4.7)."""
 
     reason: Optional[str] = Field(None, max_length=500)
+    # What the customer's screen showed (spec 2026-10-27 §16 M2): `allowed_actions.expected_state`. A
+    # stale or missing one answers 409 STATE_CHANGED.
+    expected_state: Optional[str] = Field(None, max_length=64)
 
 
 class CancelSubscriptionRequest(BaseModel):
@@ -65,6 +103,9 @@ class CancelSubscriptionRequest(BaseModel):
     `immediate` flag the bot still sends is ignored."""
 
     reason: Optional[str] = Field(None, max_length=500)
+    # What the customer's screen showed (spec 2026-10-27 §16 M2): `allowed_actions.expected_state`. A
+    # stale or missing one answers 409 STATE_CHANGED.
+    expected_state: Optional[str] = Field(None, max_length=64)
 
 
 class AddSubscriptionItemRequest(BaseModel):
@@ -83,9 +124,11 @@ class UpdateSubscriptionItemRequest(BaseModel):
 
 
 class SubscriptionPreviewRequest(_OneFrequency):
-    """Subscription preview request schema: one `frequency`."""
+    """Subscription preview request schema: one `frequency`, and the chosen slot, whose days a daily delivery is
+    counted on (spec 2026-10-27 §6.4)."""
 
     items: List[Dict[str, Any]] = Field(..., min_length=1)
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
 
 
 class SubscriptionPreviewResponse(BaseModel):
@@ -147,16 +190,70 @@ class SubscriptionLogSchema(BaseModel):
     extra_data: Optional[Dict[str, Any]] = None
 
 
+class SubscriptionItemLine(BaseModel):
+    """One item of a whole item list: what the website's Items save and its preview send."""
+
+    product_id: int = Field(..., gt=0)
+    quantity: int = Field(..., gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReplaceSubscriptionItemsRequest(BaseModel):
+    """`PUT /subscriptions/<id>/items`: the whole item list, replaced in one transaction (spec 2026-10-26
+    §5 B7). An empty list reaches the service, which refuses it with the "at least one product" rule."""
+
+    items: List[SubscriptionItemLine]
+    # What the customer's screen showed (spec 2026-10-27 §16 M2): the items preview's `expected_state`. A
+    # stale or missing one answers 409 STATE_CHANGED.
+    expected_state: Optional[str] = Field(None, max_length=64)
+    model_config = ConfigDict(extra="forbid")
+
+
+class SubscriptionChangePreviewRequest(BaseModel):
+    """`POST /subscriptions/<id>/preview`: the change the customer is drafting, before Save (spec 2026-10-26
+    §5 B4). The schedule and address fields are the PUT's; `items` is the replace-all save's list."""
+
+    frequency: Optional[SubscriptionFrequency] = None
+    delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
+    # The address change (spec 2026-10-27 §7, §17 Q6), and the method re-picked from the new address's menu.
+    delivery_address_id: Optional[int] = Field(None, gt=0)
+    payment_method: Optional[str] = None
+    items: Optional[List[SubscriptionItemLine]] = None
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChangePaymentMethodRequest(BaseModel):
     """Change payment method request schema"""
 
     payment_method: str
+    # What the customer's screen showed (spec 2026-10-27 §16 M2): `allowed_actions.expected_state`. A
+    # stale or missing one answers 409 STATE_CHANGED.
+    expected_state: Optional[str] = Field(None, max_length=64)
 
 
-class SkipDeliveryRequest(BaseModel):
-    """Skip delivery request schema"""
+class SkipReasonFields(BaseModel):
+    """Why a delivery is skipped: an optional chip (`subscription_display.SKIP_REASON_CODES`), with the customer's
+    own words only for "other". A stray key is a 400."""
 
-    reason: Optional[str] = Field(None, max_length=500)
+    reason_code: Optional[Literal[SKIP_REASON_CODES]] = None
+    reason_text: Optional[str] = Field(None, min_length=1, max_length=500)
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _text_only_for_other(self):
+        if self.reason_text is not None and self.reason_code != "other":
+            # A custom error carries no exception object, so the 400 body stays JSON.
+            raise PydanticCustomError("reason_text_needs_other", "reason_text goes with reason_code 'other'")
+        return self
+
+
+class SkipDeliveryRequest(SkipReasonFields):
+    """Skip the upcoming delivery (spec 2026-10-26 §12). `expected_date` is the date the customer's button
+    named; when a skip would now land elsewhere the backend answers 409 and skips nothing."""
+
+    expected_date: date
 
 
 # Export all schemas for easy importing
@@ -173,6 +270,9 @@ __all__ = [
     "SubscriptionLogSchema",
     "ChangePaymentMethodRequest",
     "SkipDeliveryRequest",
+    "SubscriptionItemLine",
+    "ReplaceSubscriptionItemsRequest",
+    "SubscriptionChangePreviewRequest",
 ]
 
 
@@ -213,9 +313,6 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             "auto_renew": getattr(subscription, "auto_renew", True),
             "total_amount_billed": float(getattr(subscription, "total_amount_billed", 0)),
             "failed_billing_attempts": getattr(subscription, "failed_billing_attempts", 0),
-            # frequency, next/last_delivery_date, deliveries_per_month and upcoming_delivery: the one
-            # answer every client shows (spec 2026-10-23 §9), never re-derived by a client.
-            **SubscriptionService.published_schedule(subscription),
             "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
             "end_date": subscription.end_date.isoformat() if getattr(subscription, "end_date", None) else None,
             "pause_start_date": (
@@ -224,8 +321,15 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             "pause_end_date": (
                 subscription.pause_end_date.isoformat() if getattr(subscription, "pause_end_date", None) else None
             ),
+            # When the subscription was paused (spec 2026-10-26 §12); None unless it is paused.
+            "paused_at": subscription.paused_at.isoformat() if getattr(subscription, "paused_at", None) else None,
             "created_at": subscription.created_at.isoformat(),
             "updated_at": subscription.updated_at.isoformat() if getattr(subscription, "updated_at", None) else None,
+            # The ONE answer every client shows, never re-derived by a client: frequency, next/last delivery,
+            # deliveries_per_month and upcoming_delivery (spec 2026-10-23 §9); what the customer may do now and
+            # why not, with each action's consequences, from the guard every write also calls (spec 2026-10-26
+            # §5 B1); and the page's waterline, estimate, sentences and labels (B2-B5).
+            **SubscriptionService.published_fields(subscription),
         }
 
         if include_items and hasattr(subscription, "subscription_items"):
@@ -252,26 +356,28 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
 
 
 def serialize_subscription_item(item: SubscriptionItem) -> Dict[str, Any]:
-    """Serialize subscription item object"""
+    """Serialize subscription item object. `available` (spec 2026-10-26 §8.5) and the two labels (the
+    current customer price, as the estimate counts it) are the page's; `unit_price` stays the stored one."""
+    from business_app.services.subscription_service import SubscriptionService
+
+    base = {
+        "id": item.id,
+        "subscription_id": item.subscription_id,
+        "product_id": item.product_id,
+        "quantity": item.quantity,
+        "unit_price": float(item.unit_price),
+        "total_price": float(item.total_price),
+    }
+    product = item.product
     try:
+        # A deleted product is never delivered again, and shown as such rather than dropped (spec §8.5).
         return {
-            "id": item.id,
-            "subscription_id": item.subscription_id,
-            "product_id": item.product_id,
-            "quantity": item.quantity,
-            "unit_price": float(item.unit_price),
-            "total_price": float(item.total_price),
-            "product": item.product.to_dict(),
+            **base,
+            "product": product.to_dict() if product is not None else None,
+            **SubscriptionService.line_labels(product, item.quantity),
         }
     except Exception:
-        return {
-            "id": item.id,
-            "subscription_id": item.subscription_id,
-            "product_id": item.product_id,
-            "quantity": item.quantity,
-            "unit_price": float(item.unit_price),
-            "total_price": float(item.total_price),
-        }
+        return base
 
 
 def serialize_subscription_address(address) -> Dict[str, Any]:
@@ -364,14 +470,21 @@ class AdminCreateSubscriptionRequest(_OneFrequency):
     items: List[Dict[str, Any]] = Field(..., min_length=1)
 
 
-class AdminUpdateSubscriptionRequest(_OneFrequency):
+class AdminUpdateSubscriptionRequest(_NoExplicitNull, _OneFrequency):
     """Admin: update subscription fields, with optional warned overrides.
 
     All content fields are optional. The ``override_*`` flags gate the
     dangerous fields: billing_amount / the next delivery date are only applied when
     their flag is set, and a cancelled/expired subscription can only be
     edited when ``override_edit_any_status`` is true (see the service).
+
+    An explicit ``delivery_time_slot_id: null`` is "Any time" (clears the slot). The form's nulls on the day fields,
+    ``loyalty_points_multiplier`` and ``description`` stay ignored.
     """
+
+    NEVER_NULL: ClassVar[FrozenSet[str]] = frozenset(
+        {"name", "frequency", "delivery_address_id", "payment_method", "auto_renew"}
+    )
 
     frequency: Optional[SubscriptionFrequency] = None
 

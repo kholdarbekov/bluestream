@@ -190,7 +190,7 @@ def test_the_template_data_is_the_seeded_copy(app, db, seeded_copy, email_custom
 
 def test_a_website_configured_with_a_trailing_slash_never_doubles_it(app, db, seeded_copy, email_customer,
                                                                      live_send, monkeypatch):
-    """Both links share ONE spelling of the website base (`tokens.site_url`)."""
+    """Both links share ONE spelling of the website base (`customer_links.website_url`)."""
     monkeypatch.setitem(app.config, "COMPANY_WEBSITE", "https://aqua-element.example/")
 
     assert _send(email_customer) == ChannelResult(ok=True)

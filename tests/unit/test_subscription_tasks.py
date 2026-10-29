@@ -77,7 +77,8 @@ class TestCreateSubscriptionDeliveryTask:
             assert result == {
                 "success": False,
                 "subscription_id": sample_subscription.id,
-                "error": "Cannot create an order for an inactive subscription",
+                # The `create_next_order` guard's key (spec 2026-10-26 B1): the same one admin is published.
+                "error": "api.subscriptions.action.create_next_order.not_active",
             }
             assert Order.query.filter_by(subscription_id=sample_subscription.id).count() == 0
 
@@ -182,7 +183,9 @@ class TestCancelTouchesOnlyItsOwnOrders:
             order_a = _make_order(db, sample_user, user_address, subscription_id=sub_a.id)
             order_b = _make_order(db, sample_user, user_address, subscription_id=sub_b.id)
 
-            outcome = SubscriptionService().cancel_subscription_for_user(sub_a.id, sample_user.id, "Moving")
+            outcome = SubscriptionService().cancel_subscription_for_user(
+                sub_a.id, sample_user.id, "Moving", expected_state=SubscriptionService.state_token(sub_a)
+            )
 
             assert Order.query.get(order_a.id).status is OrderStatus.CANCELLED
             assert Order.query.get(order_b.id).status is OrderStatus.PENDING, "sibling's order was collateral damage"
@@ -197,7 +200,9 @@ class TestCancelTouchesOnlyItsOwnOrders:
 
             order_b = _make_order(db, sample_user, user_address, subscription_id=sub_b.id)
 
-            outcome = SubscriptionService().cancel_subscription_for_user(sub_a.id, sample_user.id, "Moving")
+            outcome = SubscriptionService().cancel_subscription_for_user(
+                sub_a.id, sample_user.id, "Moving", expected_state=SubscriptionService.state_token(sub_a)
+            )
 
             assert Order.query.get(order_b.id).status is OrderStatus.PENDING
             assert outcome["cancelled_orders"] == []

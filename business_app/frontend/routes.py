@@ -6,7 +6,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from xml.sax.saxutils import escape
 
 from flask import render_template, request, session, current_app, redirect, url_for, flash, g, Response
-from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended import get_jwt_identity, unset_jwt_cookies, verify_jwt_in_request
 from sqlalchemy import desc, or_, func
 
 from . import frontend_bp
@@ -18,12 +18,12 @@ from business_app.models.loyalty import LoyaltyReward
 from business_app.models.blog import BlogPost, BlogStatus
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.loyalty_service import LoyaltyService
+from business_app.services.token_service import TokenService
 from business_app.services.reorder_reminders.tokens import (
     resubscribe_by_token,
     token_user_id,
     unsubscribe_by_token,
 )
-from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.agent_discovery import build_api_catalog_linkset, build_link_header
 from business_app.utils.markdown_negotiation import (
     MARKDOWN_MAX_HTML_BYTES,
@@ -33,10 +33,12 @@ from business_app.utils.markdown_negotiation import (
     wants_markdown,
 )
 from business_app.utils.csrf_protection import csrf_protection
+from business_app.utils.page_auth import customer_page_required, page_user_id
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from business_app import limiter
 from shared.constants import get_delivery_coverage, get_geoshape_polygon
+from shared.safe_paths import safe_next_path
 from datetime import datetime, UTC
 
 
@@ -548,18 +550,10 @@ def cart():
 
 
 @frontend_bp.route("/checkout")
+@customer_page_required
 def checkout():
     """Checkout page"""
-    # Check authentication
-    try:
-        verify_jwt_in_request(optional=True)
-        current_user_id = get_jwt_identity()
-        if not current_user_id:
-            return redirect(url_for("frontend.login", next=request.path))
-    except Exception:
-        return redirect(url_for("frontend.login", next=request.path))
-
-    user = User.query.get(current_user_id)
+    user = User.query.get(get_jwt_identity())
 
     # Get user addresses
     addresses = user.addresses if user else []
@@ -571,7 +565,7 @@ def checkout():
 
 
 @frontend_bp.route("/order-confirmation")
-@jwt_required()
+@customer_page_required
 def order_confirmation():
     """Order confirmation page"""
     from business_app.models.order import Order
@@ -606,81 +600,74 @@ def order_confirmation():
 
 
 @frontend_bp.route("/payment/success")
-@jwt_required()
+@customer_page_required(signed_out="render")
 def payment_success():
-    """Payment success callback page"""
-    from business_app.models.order import Order
+    """Where Click sends a payment back (links minted before the order page became the return URL).
+
+    A browser with no session, or an order that is not the signed-in customer's, gets the neutral page: it names
+    no order and no amount. Otherwise the order's latest payment decides: completed goes to the order's own page,
+    still in flight shows the waiting page, and anything else is the cancel page."""
     from business_app.models.payment import Payment
+    from business_app.services import customer_links
+    from shared.enums import PaymentStatus
 
-    current_user_id = get_jwt_identity()
+    order = _own_order(request.args.get("order_id", type=int))
+    if order is None:
+        return render_template("frontend/payment_pending.html", order=None)
 
-    # Get order reference from query params
-    order_id = request.args.get("order_id", type=int)
-
-    if order_id:
-        # Verify order belongs to user
-        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
-
-        if order:
-            # Check if there's a pending payment for this order
-            payment = Payment.query.filter_by(order_id=order.id).order_by(desc(Payment.created_at)).first()
-
-            # If payment is still pending, show a waiting page
-            # The webhook will update the payment status asynchronously
-            if payment and payment.status.value == "pending":
-                return render_template("frontend/payment_pending.html", order=order, payment=payment)
-
-            # If payment completed, redirect to order confirmation
-            if payment and payment.status.value == "completed":
-                flash("Payment successful! Your order has been confirmed.", "success")
-                return redirect(url_for("frontend.order_confirmation", order_id=order.id))
-
-    flash("Payment information not found. Please check your order status.", "warning")
-    return redirect(url_for("frontend.my_orders"))
+    payment = Payment.query.filter_by(order_id=order.id).order_by(desc(Payment.created_at), desc(Payment.id)).first()
+    if payment is not None and payment.status == PaymentStatus.COMPLETED:
+        return redirect(customer_links.order_page_path(order))
+    if payment is not None and payment.status in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+        return render_template(
+            "frontend/payment_pending.html",
+            order=order,
+            payment=payment,
+            order_page_url=customer_links.order_page_path(order),
+            cancel_url=url_for("frontend.payment_cancel", order_id=order.id),
+        )
+    return redirect(url_for("frontend.payment_cancel", order_id=order.id))
 
 
 @frontend_bp.route("/payment/cancel")
-@jwt_required()
+@customer_page_required(signed_out="render")
 def payment_cancel():
-    """Payment cancellation callback page"""
-    from business_app.models.order import Order
+    """Where Click sends a cancelled payment back (links minted before the order page became the return URL).
 
-    current_user_id = get_jwt_identity()
-    order_id = request.args.get("order_id", type=int)
+    The page names the order's status and publishes its `customer_actions`; `order-actions.js` draws the Pay
+    among them. A browser with no session, or an order that is not the signed-in customer's, gets the neutral
+    page."""
+    from business_app.services.customer_order_actions import customer_actions
+    from business_app.services.order_schedule_service import OrderScheduleService
 
-    if order_id:
-        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+    order = _own_order(request.args.get("order_id", type=int))
+    if order is None:
+        return render_template("frontend/payment_cancelled.html", order=None)
 
-        if order:
-            # Show payment cancelled message.
-            #
-            # `payable` is the PUBLISHED answer (`order_is_payable_online`, the
-            # single authority) and it gates the Retry button below. The button
-            # is not the guard — `POST /orders/<id>/retry-payment` refuses a
-            # resolved order on its own — but offering a customer a button that
-            # can only fail, on a page that also tells them the order is
-            # "Pending Payment", is how a cancelled order reads as a live one.
-            from business_app.utils.payment_projection import order_is_payable_online
+    return render_template(
+        "frontend/payment_cancelled.html",
+        order=order,
+        display_status=OrderScheduleService.customer_display_status(order),
+        customer_actions=customer_actions(order, language=get_current_language()),
+    )
 
-            flash("Payment was cancelled. You can try again or choose a different payment method.", "warning")
-            return render_template(
-                "frontend/payment_cancelled.html",
-                order=order,
-                payable=order_is_payable_online(order, getattr(order, "payment", None)),
-            )
 
-    flash("Order not found", "error")
-    return redirect(url_for("frontend.cart"))
+def _own_order(order_id):
+    """The signed-in customer's order `order_id`, or None: nobody signed in, no id, or someone else's order."""
+    user_id = page_user_id()
+    if user_id is None or not order_id:
+        return None
+    return Order.query.filter_by(id=order_id, user_id=user_id).first()
 
 
 @frontend_bp.route("/order-tracking")
-@jwt_required()
+@customer_page_required
 def order_tracking():
     """Order tracking page with real-time status"""
     from business_app.models.order import Order
     from business_app.models.delivery import Delivery
     from business_app.services.order_schedule_service import OrderScheduleService
-    from business_app.services.order_service import OrderService
+    from business_app.services.customer_order_actions import customer_actions
 
     current_user_id = get_jwt_identity()
     order_id = request.args.get("order_id", type=int)
@@ -709,10 +696,10 @@ def order_tracking():
         delivery=delivery,
         map_provider=map_provider,
         maps_api_key=maps_api_key,
-        # The backend's answers, published as the API publishes them (F15, F5). The page
-        # labels the one and draws Cancel from the other, and works out neither.
+        # The backend's answers, published as the API publishes them (F15, spec 2026-10-27 §5.3). The page
+        # labels the one and hands the other to order-actions.js through its island, and works out neither.
         display_status=OrderScheduleService.customer_display_status(order),
-        can_customer_cancel=OrderService.customer_cancel_block_code(order) is None,
+        customer_actions=customer_actions(order, language=get_current_language()),
     )
 
 
@@ -729,40 +716,16 @@ def subscriptions():
 
 
 @frontend_bp.route("/my-subscriptions")
-@jwt_required()
+@customer_page_required
 def my_subscriptions():
-    """User subscriptions management page"""
-    current_user_id = get_jwt_identity()
-    user = User.query.get(current_user_id)
-
-    # Get user's subscriptions
-    subscriptions = Subscription.query.filter_by(user_id=current_user_id).order_by(desc(Subscription.created_at)).all()
-
-    # Get active subscriptions count
-    active_subscriptions = [s for s in subscriptions if s.status == "active"]
-
-    # Get subscription overview data
-    subscription_service = SubscriptionService()
-    try:
-        overview_data = {
-            "active_count": len(active_subscriptions),
-            "deliveries_this_month": subscription_service.get_monthly_deliveries_count(current_user_id),
-        }
-    except Exception as e:
-        print(f"Error getting subscription overview: {e}")
-        overview_data = {"active_count": len(active_subscriptions), "deliveries_this_month": 0}
-
-    return render_template(
-        "frontend/my_subscriptions.html",
-        user=user,
-        subscriptions=subscriptions,
-        active_subscriptions=active_subscriptions,
-        overview_data=overview_data,
-    )
+    """The subscriptions page's shell. The page reads every subscription from the API (spec 2026-10-26 §12:
+    one JS renderer over the published fields), so the route queries nothing else."""
+    user = User.query.get(get_jwt_identity())
+    return render_template("frontend/my_subscriptions.html", user=user)
 
 
 @frontend_bp.route("/my-account")
-@jwt_required()
+@customer_page_required
 def my_account():
     """User account dashboard"""
     from business_app.services.customer_telegram_link_service import CustomerTelegramLinkService
@@ -809,7 +772,7 @@ def my_account():
 
 
 @frontend_bp.route("/my-loyalty")
-@jwt_required()
+@customer_page_required
 def my_loyalty():
     """User loyalty program page"""
     current_user_id = get_jwt_identity()
@@ -839,7 +802,7 @@ def my_loyalty():
 
 
 @frontend_bp.route("/my-orders")
-@jwt_required()
+@customer_page_required
 def my_orders():
     """User orders page"""
     from shared.enums import OrderStatus
@@ -863,7 +826,7 @@ def my_orders():
 
 
 @frontend_bp.route("/order/<int:order_id>")
-@jwt_required()
+@customer_page_required
 def order_detail(order_id):
     """Order detail page"""
     current_user_id = get_jwt_identity()
@@ -1197,34 +1160,41 @@ def water_delivery_faq():
 
 @frontend_bp.route("/login")
 def login():
-    """Login page"""
-    # If user is already logged in, redirect to next URL or account
+    """Login page. Where the customer lands after signing in is `next` when it is a safe path on this site
+    (the one rule, `safe_next_path`), else their account; login.js reads it from the page data."""
+    after_login_url = safe_next_path(request.args.get("next")) or url_for("frontend.my_account")
     try:
         verify_jwt_in_request(optional=True)
         if get_jwt_identity():
-            # Respect the next parameter if provided
-            next_url = request.args.get("next")
-            if next_url and next_url.startswith("/") and not next_url.startswith("//"):
-                return redirect(next_url)
-            return redirect(url_for("frontend.my_account"))
+            return redirect(after_login_url)
     except Exception:
         pass
 
-    return render_template("frontend/login.html")
+    return render_template("frontend/login.html", after_login_url=after_login_url)
+
+
+@frontend_bp.route("/logout")
+def logout():
+    """Where base.js sends the browser when its Log out call did not succeed (offline, a 5xx, a rate limit).
+
+    Script cannot remove the httpOnly login cookies; this answer always does, signed in or not, because
+    clearing a cookie needs no sign-in. Whatever login a cookie still proves is ended on the server first,
+    as `POST /api/v1/auth/logout` does (which also keeps the `after_request` re-mint from handing back a fresh
+    access cookie). Then the login page."""
+    TokenService().end_cookie_logins(request.cookies)
+    response = redirect(url_for("frontend.login"))
+    unset_jwt_cookies(response)  # the access and refresh cookies, and both readable CSRF cookies
+    return response
 
 
 @frontend_bp.route("/register")
 def register():
     """Registration page"""
-    # If user is already logged in, redirect to next URL or account
+    # A signed-in visitor goes to `next` when it is a safe path on this site, else to their account
     try:
         verify_jwt_in_request(optional=True)
         if get_jwt_identity():
-            # Respect the next parameter if provided
-            next_url = request.args.get("next")
-            if next_url and next_url.startswith("/") and not next_url.startswith("//"):
-                return redirect(next_url)
-            return redirect(url_for("frontend.my_account"))
+            return redirect(safe_next_path(request.args.get("next")) or url_for("frontend.my_account"))
     except Exception:
         pass
 
@@ -1320,7 +1290,7 @@ def _reminders_unsubscribe_page(state, *, token=None, undo_token=None):
 
 
 @frontend_bp.route("/profile-settings")
-@jwt_required()
+@customer_page_required
 def profile_settings():
     """Profile settings page"""
     user_id = get_jwt_identity()
@@ -1329,7 +1299,7 @@ def profile_settings():
 
 
 @frontend_bp.route("/account-security")
-@jwt_required()
+@customer_page_required
 def account_security():
     """Account security page"""
     user_id = get_jwt_identity()
@@ -1338,7 +1308,7 @@ def account_security():
 
 
 @frontend_bp.route("/addresses")
-@jwt_required()
+@customer_page_required
 def addresses():
     """User addresses management page"""
     user_id = get_jwt_identity()
@@ -1425,6 +1395,30 @@ def set_language_route(language):
                 pass
 
     return resp
+
+
+# The words order-actions.js adds to a page (static/js/pages/order-actions.js, the one renderer of an order's Pay,
+# Skip/Cancel/Decline and Confirm). Each is the row `web.order_actions.<word>`; the buttons' own labels and
+# sentences are published by the backend in `customer_actions`.
+ORDER_ACTIONS_WORDS = (
+    "keep",
+    "working",
+    "failed",
+    "reason_prompt",
+    "reason_text",
+    "confirmed",
+    "open_subscription",
+    "preparing_payment",
+    "switch_to_cash",
+    "try_again",
+)
+
+
+def order_actions_words():
+    """`{word: text}` for the page's island (`order_actions`), in the request's language."""
+    from business_app.utils.translations import get_translation
+
+    return {word: get_translation(f"web.order_actions.{word}") for word in ORDER_ACTIONS_WORDS}
 
 
 # Context processor for global template variables
@@ -1623,6 +1617,7 @@ def inject_global_vars():
         "seo": seo_context,
         "analytics": analytics_context,
         "moment": lambda: MomentJS(),
+        "order_actions_words": order_actions_words,
         "min": min,
         "max": max,
         # Cross-domain navigation

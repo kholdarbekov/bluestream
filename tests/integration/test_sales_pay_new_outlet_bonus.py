@@ -762,7 +762,7 @@ def test_an_approved_extra_order_the_store_then_cancels_earns_no_line_and_no_bon
         store_token = create_access_token(identity=str(customer.id))
     cancelled = client.post(
         f"/api/v1/orders/{held_id}/cancel",
-        json={"reason": "Ordered twice by mistake"},
+        json={"expected_via": "cancel"},
         headers={"Authorization": f"Bearer {store_token}", "Content-Type": "application/json"},
     )
     assert cancelled.status_code == 200, cancelled.get_data(as_text=True)

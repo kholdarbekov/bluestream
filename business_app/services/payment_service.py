@@ -14,7 +14,14 @@ from sqlalchemy.orm import joinedload
 
 from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
-from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError, NotFoundError
+from business_app.utils.exceptions import (
+    NotFoundError,
+    PaymentError,
+    PayRefusedError,
+    ProviderUnavailableError,
+    StateChangedError,
+    ValidationError,
+)
 from business_app.utils.constants import (
     PaymeErrors,
     PaymentMethodType,
@@ -32,28 +39,71 @@ from shared.payment_methods import (
     canonical_rail,
 )
 from business_app.utils.helpers import generate_random_string
-from business_app.utils.timezone_utils import ensure_utc
+from business_app.utils.timezone_utils import ensure_utc, get_utc_now
 from business_app.utils.payment_projection import (
     FISCALIZED_RAILS,
-    LIVE_ORDER_STATUSES,
     get_payment_projection,
+    is_online_rail,
     is_settled_prepayment,
+    order_is_dead,
     order_is_resolved,
+    pay_refusal,
 )
 from business_app.utils.translations import get_translation
 from business_app.utils.state_validators import assert_cash_payment_collector
 from business_app.services.card_token_service import CardTokenService
-from business_app.services.providers.payme_provider import PaymeProvider
+from business_app.services.customer_links import channel_for_order
+from business_app.services.customer_order_actions import money_value
+from business_app.services.product_fiscal_service import ProductFiscalService
+from business_app.services.providers.payme_provider import PaymeProvider, payme_checkout_in_progress
 from business_app.services.providers.webhook_signature import WebhookSignatureVerifier
 from business_app import db
 
 
-# Statuses past which a self-service rail switch has no settlement path left.
-# DERIVED, not hand-listed: this and LIVE_ORDER_STATUSES are the two halves of
-# one partition over OrderStatus, and two hand-maintained halves drift the
-# moment a status is added. Adding a status to the enum now forces a deliberate
-# choice in exactly one place.
-_RAIL_LOCKED_ORDER_STATUSES = frozenset(OrderStatus) - LIVE_ORDER_STATUSES
+def _refuse_customer_rail_move(order: Order, payment: Optional[Payment], requested_rail, current_rails) -> None:
+    """Raise `ValidationError` unless moving `order` onto `requested_rail` is the one rail move a customer write may
+    make: an online order (Click or legacy Payme on both columns) onto Click, with nothing collected, delivered or
+    not, but not dead (spec 2026-10-27 §4.3, D2, D4, D5). Every `create_payment` caller is a customer route or
+    Payme CreateTransaction; staff move rails with their own tools (`OrderPaymentMethodEditService`, and the
+    door's `CashCollectionService.convert_electronic_order_to_cash`). The first check that matches refuses:
+
+    1. any other move, cash -> Click and online -> cash among them: RAIL_MOVE_NOT_ALLOWED. The online rails are
+       `payment_projection.is_online_rail`'s, the same ones `pay_refusal` publishes Pay for;
+    2. money already collected on the row;
+    3. a dead order (cancelled, returned). `retry-payment` never gets here (`pay_refusal` refuses it first), but
+       `POST /payments/create` checks only `is_paid`, so this is that route's only lifecycle guard;
+    4. a marking-code pool too short for the order on Click: MARKING_CODES_POOL_SHORT. Payme draws no code,
+       so the move makes the order need them; refused here rather than at Click's PREPARE, which answers the
+       webhook's generic 503 and shows the customer nothing. Its sentence names no other way to pay: the
+       customer cannot move the order to cash (D5), and it is usually delivered already.
+
+    The move is not re-priced: Click is charged the online price the order was shown on its legacy rail."""
+    if requested_rail is not PaymentMethod.CLICK or not all(is_online_rail(rail) for rail in current_rails):
+        raise ValidationError(
+            get_translation("api.payments.error.rail_move_not_allowed"), error_code="RAIL_MOVE_NOT_ALLOWED"
+        )
+    if payment is not None and Decimal(str(payment.amount_collected or 0)) > Decimal("0.00"):
+        raise ValidationError("Payment method cannot be changed after cash has been collected")
+    if order_is_dead(order):
+        raise ValidationError("Payment method cannot be changed once the order has left delivery")
+    covered, short_product = ProductFiscalService().pool_covers_order(order, PaymentMethod.CLICK)
+    if not covered:
+        # get_translation applies **kwargs itself and swallows a bad placeholder.
+        raise ValidationError(
+            get_translation("api.payments.error.marking_codes_pool_short", product=short_product),
+            error_code="MARKING_CODES_POOL_SHORT",
+        )
+
+
+def _click_checkout_in_progress(payment: Optional[Payment]) -> bool:
+    """Has Click PREPARE passed for this payment, its COMPLETE still to come? PREPARE leaves the row PENDING and
+    records `provider_data.click.merchant_prepare_id` (`ClickPaymentProviderService.handle_prepare`); nothing
+    writes PROCESSING."""
+    if payment is None or payment.status != PaymentStatus.PENDING:
+        return False
+    if payment.payment_method not in {PaymentMethod.CLICK, PaymentMethod.CARD}:
+        return False
+    return bool(((payment.provider_data or {}).get("click") or {}).get("merchant_prepare_id"))
 
 
 class PaymentContext(str, Enum):
@@ -213,6 +263,16 @@ class PaymentService:
 
         return available
 
+    @staticmethod
+    def open_click_payment_window(order: Order, *, now: Optional[datetime] = None) -> None:
+        """The order became payable on Click at `now` (the wall clock when None): its payment deadline counts 24
+        hours from here (`OrderService.payment_deadline`, spec 2026-10-27 §4.4, §17 Q3). The caller commits.
+
+        The ONLY writer of `orders.online_payable_since`. Called when an order is placed on an online rail
+        (`initialize_order_payment`, once), when a customer's Pay moves it onto Click (`create_payment`) and when
+        staff move it there (`OrderPaymentMethodEditService._unwind_to_click`)."""
+        order.online_payable_since = now or get_utc_now()
+
     def create_payment(self, order_id: int, payment_method: PaymentMethod, amount: int = None, **kwargs) -> Payment:
         """
         Create or update the canonical payment record for an order.
@@ -286,57 +346,21 @@ class PaymentService:
         #     `payment.payment_method == CLICK` (the desync commit 6c2951d
         #     addressed) a requested CLICK read as "no move", the lock was
         #     skipped, and the `order.payment_method` write below then moved a
-        #     DELIVERED COD debt onto a gateway rail: exactly what this lock's
-        #     comment forbids.
+        #     DELIVERED COD debt onto a gateway rail, hiding it from the
+        #     receivable ledger: exactly what the lock forbids.
         #
         # Normalisation is `shared.payment_methods`' own, never re-spelled here.
         # A NULL `orders.payment_method` (legacy subscription rows) records no
-        # rail to move away from, so it does not vote.
+        # rail to move away from, so it does not vote; nor does a payment row
+        # that does not exist yet, so a row-less order's own rail still counts.
         requested_rail = canonical_rail(payment_method)
-        rail_moves = payment is not None and (
-            canonical_rail(payment.payment_method) != requested_rail
-            or (order.payment_method is not None and canonical_rail(order.payment_method) != requested_rail)
-        )
-        if rail_moves and Decimal(str(payment.amount_collected or 0)) > Decimal("0.00"):
-            raise ValidationError("Payment method cannot be changed after cash has been collected")
-        if rail_moves and order.status in _RAIL_LOCKED_ORDER_STATUSES:
-            # Past the door there is no settlement path left to re-route to, and
-            # moving a delivered COD debt onto a gateway rail hides it from the
-            # receivable ledger. Re-classifying those is an admin operation.
-            raise ValidationError("Payment method cannot be changed once the order has left delivery")
-
-        # THE PRICE FOLLOWS THE RAIL: a contract line's price (spec 2026-10-09 §5.2 #1) and the
-        # loyalty tier discount (see `LoyaltyService.quote_tier_discount`).
-        #
-        # It needs a COD rail (plus a customer-placed bot/web order) so it must never reach a Click fiscal receipt:
-        # build_click_fiscalization_payload asserts
-        # received_card == to_tiyin(order.total_amount) while filling per-item
-        # Discount from `loyalty_discount` ALONE, so a tier-discounted total on
-        # a fiscalized rail makes Sum(Price - Discount) != received_card — a
-        # tax-committee reconciliation failure, not a display bug.
-        #
-        # The two guards above have already confined this to a zero-collected,
-        # pre-delivery order: the only window in which re-pricing is safe.
-        if rail_moves:
-            from business_app.services.rail_pricing import reprice_order_for_rail
-
-            previous_total = Decimal(str(order.total_amount or 0))
-            quote = reprice_order_for_rail(order, payment_method, reason="customer changed the payment method")
-
-            if quote.total != previous_total:
-                # Every caller prices `amount` off the PRE-move total. Re-price
-                # it, and re-derive the idempotency key from the new amount —
-                # PAY-005: a stale key makes a later create_payment miss this
-                # row and mint a duplicate. A caller that asked for a partial
-                # amount keeps it.
-                if Decimal(str(amount)) == previous_total:
-                    amount = order.total_amount
-                    idempotency_key = Payment.compute_idempotency_key(
-                        order_id=order_id,
-                        user_id=order.user_id,
-                        amount=amount,
-                        payment_method=payment_method,
-                    )
+        current_rails = {
+            canonical_rail(method)
+            for method in (getattr(payment, "payment_method", None), order.payment_method)
+            if method is not None
+        }
+        if current_rails - {requested_rail}:
+            _refuse_customer_rail_move(order, payment, requested_rail, current_rails)
 
         if payment:
             payment.user_id = order.user_id
@@ -371,6 +395,8 @@ class PaymentService:
 
         if order.payment_method != payment_method and payment_method in ORDER_PAYMENT_METHODS:
             order.payment_method = payment_method
+            if payment_method == PaymentMethod.CLICK:
+                self.open_click_payment_window(order)
 
         if payment_method == PaymentMethod.CASH:
             from business_app.services.cash_collection_service import CashCollectionService
@@ -460,6 +486,8 @@ class PaymentService:
             payment.consume_marking_codes = True
 
         if payment_method in {PaymentMethod.PAYME, PaymentMethod.CLICK, PaymentMethod.CARD}:
+            if order.online_payable_since is None:
+                self.open_click_payment_window(order)
             # ARCH-008: respect outer-transaction commit ownership.
             if commit:
                 db.session.commit()
@@ -497,12 +525,15 @@ class PaymentService:
         db.session.commit()
         return payment
 
-    def create_payment_link(self, payment_id: int) -> Dict[str, str]:
+    def create_payment_link(self, payment_id: int, *, channel: Optional[str] = None) -> Dict[str, str]:
         """
         Create payment link for external payment gateways
 
         Args:
             payment_id: Payment ID
+            channel: where Pay was tapped (`customer_links.PAY_CHANNELS`); Click sends the customer back there. A
+                link opened without a tap (the checkout's first link, the admin resend, a notice) returns to the
+                channel the order came from (`customer_links.channel_for_order`).
 
         Returns:
             Dictionary with payment URL and other details
@@ -514,9 +545,62 @@ class PaymentService:
         if payment.payment_method == PaymentMethod.PAYME:
             return self._create_payme_link(payment)
         elif payment.payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD}:
-            return self._create_click_link(payment)
+            return self._create_click_link(payment, channel=channel or channel_for_order(payment.order))
         else:
             raise PaymentError(get_translation("error.payment.unsupported_method"))
+
+    def pay_order_as_customer(
+        self, order_id: int, user_id: int, *, channel: str, expected_amount: Decimal
+    ) -> Dict[str, Any]:
+        """The customer's Pay on one of their orders: a Click link for it (spec 2026-10-27 §4.2, §4.3, §4.5).
+
+        `POST /orders/<id>/retry-payment` is its only caller, so the bot and the website open a payment the same
+        way. Each step runs only if the one before it passed:
+
+        1. the order's payment row, then the order, both locked, in the order the Click and Payme webhooks lock them
+           (payment first), so a tap racing a webhook waits for it instead of deadlocking on PostgreSQL. Someone
+           else's order or a missing one is `NotFoundError`, and its payment row is never locked;
+        2. the one Pay rule (`pay_refusal`), the answer every order payload publishes: `PayRefusedError`;
+        3. the amount the screen showed (`expected_amount`) against the order total: `StateChangedError`;
+        4. a legacy Payme payment whose Payme checkout is still open (CreateTransaction passed, PerformTransaction
+           may still come: owner call 13) is not moved: `StateChangedError`. Moving it would let Payme capture a
+           second time;
+        5. the payment, on Click whatever rail the order is on (a legacy Payme or card order moves to Click). A
+           Click payment whose PREPARE has passed and whose COMPLETE has not arrived is left as it is: rebuilding
+           it would wipe what PREPARE recorded, and that COMPLETE must still settle the order (Review Focus 3);
+        6. its link, returning to `channel`. The link writes only `payment_link`, `payment_link_expires_at`,
+           `callback_url` and `provider_data.click.checkout_*`.
+
+        Returns `{"payment", "payment_link", "payment_url"}` and commits. Nothing is written when a check refuses.
+        """
+        payment = (
+            Payment.query.join(Order, Payment.order_id == Order.id)
+            .filter(Order.id == order_id, Order.user_id == user_id)
+            .with_for_update(of=Payment)
+            .populate_existing()
+            .first()
+        )
+        order = Order.query.filter_by(id=order_id, user_id=user_id).with_for_update().populate_existing().first()
+        if order is None:
+            raise NotFoundError(get_translation("api.orders.not_found"))
+        refusal = pay_refusal(order)
+        if refusal is not None:
+            raise PayRefusedError(refusal)
+        if money_value(expected_amount) != money_value(order.total_amount):
+            raise StateChangedError()
+        if payme_checkout_in_progress(payment):
+            raise StateChangedError()
+
+        if not _click_checkout_in_progress(payment):
+            payment = self.create_payment(
+                order.id,
+                PaymentMethod.CLICK,
+                amount=order.total_amount,
+                description=f"Payment for order #{order.order_number}",
+            )
+        payment_link = self.create_payment_link(payment.id, channel=channel)
+        db.session.commit()
+        return {"payment": payment, "payment_link": payment_link, "payment_url": payment_link.get("payment_url")}
 
     def process_cash_payment(self, payment_id: int, collected_by: int = None) -> Payment:
         """Process cash payment"""
@@ -613,14 +697,6 @@ class PaymentService:
         """Delegate to CardTokenService.verify_card."""
         return self.card_token_service.verify_card(token, code)
 
-    def create_payme_receipt(self, order: Order, description: str = None) -> Dict[str, Any]:
-        """Delegate to PaymeProvider.create_payme_receipt."""
-        return self.payme_provider.create_payme_receipt(order, description=description)
-
-    def pay_payme_receipt(self, receipt_id: str, token: str, payer: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Delegate to PaymeProvider.pay_payme_receipt."""
-        return self.payme_provider.pay_payme_receipt(receipt_id, token, payer=payer)
-
     def _detect_card_brand(self, masked_number: str) -> str:
         """Delegate to CardTokenService.detect_card_brand."""
         return self.card_token_service.detect_card_brand(masked_number)
@@ -628,18 +704,6 @@ class PaymentService:
     def _save_or_update_verified_card(self, user_id: int, token: str, card_metadata: Dict[str, Any]) -> CreditCard:
         """Delegate to CardTokenService.save_or_update_verified_card."""
         return self.card_token_service.save_or_update_verified_card(user_id, token, card_metadata)
-
-    def process_payme_payment_full(
-        self, order_id: int, card_token: str, user_id: int, save_card: bool = True, card_metadata: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
-        """Delegate to PaymeProvider.process_payme_payment_full."""
-        return self.payme_provider.process_payme_payment_full(
-            order_id,
-            card_token,
-            user_id,
-            save_card=save_card,
-            card_metadata=card_metadata,
-        )
 
     # ============================================================================
     # END OF PAYME SUBSCRIBE API METHODS
@@ -1167,9 +1231,9 @@ class PaymentService:
         return self.payme_provider.get_statement(params)
 
     # Private methods for Click integration
-    def _create_click_link(self, payment: Payment) -> Dict[str, str]:
+    def _create_click_link(self, payment: Payment, *, channel: str) -> Dict[str, str]:
         """Create Click payment link via dedicated provider service."""
-        return self._get_click_provider_service().create_payment_link(payment)
+        return self._get_click_provider_service().create_payment_link(payment, channel=channel)
 
     def _verify_click_signature(self, data: Dict[str, Any]) -> bool:
         """Verify Click webhook signature."""

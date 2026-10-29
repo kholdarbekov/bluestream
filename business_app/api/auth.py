@@ -5,6 +5,7 @@ This file should be placed in business_app/api/auth.py
 
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import (
     jwt_required,
@@ -13,7 +14,10 @@ from flask_jwt_extended import (
     set_access_cookies,
     set_refresh_cookies,
     unset_jwt_cookies,
+    verify_jwt_in_request,
 )
+from flask_jwt_extended.exceptions import JWTExtendedException
+from jwt.exceptions import PyJWTError
 from flasgger import swag_from
 
 from business_app.utils.service_factory import get_auth_service
@@ -765,14 +769,20 @@ def refresh():
 
 
 @auth_bp.route("/refresh-cookie", methods=["POST"])
-@jwt_required(refresh=True)  # This reads refresh token from cookie
+# The httpOnly refresh cookie only, with its CSRF value in X-CSRF-TOKEN: a refresh token in an Authorization
+# header would skip that CSRF check, so it never stands in for the cookie the handler renews.
+@jwt_required(refresh=True, locations=["cookies"])
 @handle_exceptions
 def refresh_with_cookie():
     """
     Refresh Access Token using HttpOnly Cookie
 
     This is the Flask-JWT-Extended recommended approach for cookie-based auth.
-    The refresh token is read from the httpOnly cookie automatically.
+    The refresh token is read from the httpOnly cookie, and the new access token goes through
+    the one refresh rule (`TokenService.refresh_access_token`: the session cut-off, an active
+    account, a live session, and the account's role claims) under its storefront rule, as customer
+    pages renew it: only base.js calls this route, so it renews a customer's login only. A staff login
+    (the admin UI signs in on the same cookie domain) gets the 401, and its cookies are left as they are.
     ---
     tags:
       - Authentication
@@ -782,29 +792,21 @@ def refresh_with_cookie():
       401:
         description: Invalid or expired refresh token
     """
-    from flask_jwt_extended import get_jwt_identity, create_access_token, set_access_cookies
+    from business_app.services.token_service import TokenService
 
-    # Get current user from refresh token
-    current_user_id = get_jwt_identity()
+    try:
+        tokens = TokenService().refresh_access_token(
+            request.cookies.get(current_app.config["JWT_REFRESH_COOKIE_NAME"]), storefront=True
+        )
+    except Exception:  # noqa: BLE001 - any refusal of the refresh rule (it logs why) is a 401
+        return unauthorized_response(message=get_translation("api.auth.token_invalid"))
 
-    # Create new access token
-    new_access_token = create_access_token(identity=current_user_id)
-
-    # Create response and set new access token cookie
-    response_data = success_response(
+    response_obj, status_code = success_response(
         data={"refreshed": True}, message=get_translation("api.auth.token_refreshed_successfully")
     )
+    set_access_cookies(response_obj, tokens["access_token"])
 
-    # Handle tuple response
-    if isinstance(response_data, tuple):
-        response_obj, status_code = response_data
-    else:
-        response_obj = response_data
-        status_code = 200
-
-    set_access_cookies(response_obj, new_access_token)
-
-    logger.info(f"Token refreshed via cookie for user {current_user_id}")
+    logger.info("Token refreshed via cookie for user %s", get_jwt_identity())
     return response_obj, status_code
 
 
@@ -2692,8 +2694,18 @@ def revoke_session(session_id):
         return internal_error_response(message=get_translation("error.server_error"))
 
 
+def _logout_claims(refresh: bool) -> Optional[dict]:
+    """The claims of the login this request proves, or None: an access token (the Authorization header, or the
+    access cookie with `csrf_access_token` in X-CSRF-TOKEN), or with `refresh` the refresh cookie with
+    `csrf_refresh_token` in X-CSRF-TOKEN. Expired, revoked, forged or CSRF-less tokens prove nothing."""
+    try:
+        verified = verify_jwt_in_request(refresh=refresh, locations=["cookies"] if refresh else None)
+    except (JWTExtendedException, PyJWTError):
+        return None
+    return verified[1] if verified else None
+
+
 @auth_bp.route("/logout", methods=["POST"])
-@jwt_required()
 @handle_exceptions
 def logout():
     """
@@ -2701,6 +2713,12 @@ def logout():
     ---
     tags:
       - Authentication
+    description: |
+      Ends the login the request proves: a valid access token (Bearer, or the access cookie with
+      csrf_access_token in X-CSRF-TOKEN), or the refresh cookie with csrf_refresh_token in X-CSRF-TOKEN, so a
+      browser whose 30-minute access cookie has expired still logs out. The token is blacklisted and its
+      session removed. Every answer, the 401 included, clears the JWT and CSRF cookies: clearing a cookie
+      needs no sign-in.
     security:
       - bearerAuth: []
     responses:
@@ -2716,90 +2734,25 @@ def logout():
               type: string
               example: Logout successful
       401:
-        description: Unauthorized
+        description: No valid access token or refresh cookie (the cookies are cleared all the same)
     """
-    user_id = get_jwt_identity()
-    claims = get_jwt()
-    jti = claims["jti"]
-    session_id = claims.get("session_id")
+    from business_app.services.token_service import TokenService
 
-    try:
-        from business_app.services.token_service import TokenService
+    proven = [claims for claims in (_logout_claims(refresh=False), _logout_claims(refresh=True)) if claims]
+    token_service = TokenService()
+    for claims in proven:
+        token_service.end_login(claims)
+        logger.info("User %s logged out (%s token)", claims["sub"], claims.get("type"))
 
-        token_service = TokenService()
-
-        # Blacklist the current token with proper expiry
-        # Get the actual token from Authorization header to extract proper expiry
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            current_token = auth_header[7:]  # Remove "Bearer " prefix
-            blacklisted = token_service.blacklist_token_by_string(current_token)
-            logger.info(f"Token blacklisted for user {user_id}: {blacklisted}")
-        else:
-            # Fallback to JTI with default expiry
-            access_expires = current_app.config.get("JWT_ACCESS_TOKEN_EXPIRES", timedelta(hours=1))
-            blacklisted = token_service.blacklist_token(jti, expires_delta=access_expires)
-            logger.info(f"Token JTI blacklisted for user {user_id}: {blacklisted}")
-
-        # Remove session info if session_id exists
-        if session_id:
-            session_removed = token_service._remove_session_info(user_id, session_id)
-            logger.info(f"Session removed for user {user_id}: {session_removed}")
-
-        # Create response and clear JWT cookies
-        # Handle both tuple and Response object returns from success_response
-        response_result = success_response(message=get_translation("api.auth.logout_successful"))
-
-        if isinstance(response_result, tuple):
-            response = response_result[0]  # Extract response object from tuple
-            status_code = response_result[1] if len(response_result) > 1 else 200
-        else:
-            response = response_result
-            status_code = 200
-
-        # Clear JWT cookies - this removes both access and refresh token cookies
-        logger.info(f"Clearing JWT cookies for user {user_id}")
-        unset_jwt_cookies(response)
-
-        # Also manually clear CSRF cookies (Flask-JWT-Extended only clears JWT cookies)
-        # Get cookie configuration from app config
-        cookie_domain = current_app.config.get("JWT_COOKIE_DOMAIN", None)
-        cookie_path = current_app.config.get("JWT_COOKIE_PATH", "/")
-        cookie_secure = current_app.config.get("JWT_COOKIE_SECURE", False)
-        cookie_samesite = current_app.config.get("JWT_COOKIE_SAMESITE", "Lax")
-
-        # Clear CSRF token cookies explicitly
-        response.set_cookie(
-            "csrf_access_token",
-            value="",
-            max_age=0,
-            expires=0,
-            path=cookie_path,
-            domain=cookie_domain,
-            secure=cookie_secure,
-            httponly=False,
-            samesite=cookie_samesite,
-        )
-        response.set_cookie(
-            "csrf_refresh_token",
-            value="",
-            max_age=0,
-            expires=0,
-            path=cookie_path,
-            domain=cookie_domain,
-            secure=cookie_secure,
-            httponly=False,
-            samesite=cookie_samesite,
-        )
-
-        logger.info(f"JWT cookies cleared, response Set-Cookie headers: {response.headers.getlist('Set-Cookie')}")
-
-        logger.info(f"User {user_id} logged out successfully")
-        return response, status_code
-
-    except Exception as e:
-        logger.error(f"Logout failed for user {user_id}: {e}", exc_info=True)
-        return internal_error_response(message=get_translation("error.server_error"))
+    if proven:
+        # base.js proves the login with the refresh cookie, so the browser's access cookie was not checked
+        # above: whatever this browser's cookies hold ends too.
+        token_service.end_cookie_logins(request.cookies)
+        response, status_code = success_response(message=get_translation("api.auth.logout_successful"))
+    else:
+        response, status_code = unauthorized_response(message=get_translation("api.auth.token_invalid"))
+    unset_jwt_cookies(response)  # the access and refresh cookies, and both readable CSRF cookies
+    return response, status_code
 
 
 @auth_bp.route("/platform-status", methods=["GET"])

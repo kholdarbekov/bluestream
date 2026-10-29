@@ -4,6 +4,10 @@
 `can_change_address` flag and the write guard all ask it, so the button an admin
 sees and the write it sends cannot disagree. `_disabled_reason` does the same for
 each address: the dropdown greys exactly what `change` refuses.
+
+A customer moves an order only with their subscription's address change (spec 2026-10-27
+§7, §17 Q6): `customer_move_refusal` is that move's one answer, which the subscription's
+preview publishes and `change(for_customer=True)` re-asks under its locks.
 """
 
 from dataclasses import dataclass
@@ -20,7 +24,7 @@ from business_app.services.sales import pay_rules
 from business_app.services.sales.outlet_service import OutletService
 from business_app.utils.address_helpers import door_fields, get_address_line
 from business_app.utils.decorators import has_admin_permission
-from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.exceptions import NotFoundError, ValidationError, WaterBusinessException
 from business_app.utils.staff_order_info import build_staff_order_info
 from business_app.utils.geo_validation import is_in_delivery_zone
 from business_app.utils.timezone_utils import get_utc_now
@@ -137,6 +141,27 @@ class OrderAddressChangeService:
             return "SALES_PAY_SELF_DECISION"
         return None
 
+    @classmethod
+    def customer_move_refusal(cls, order: Order, address: UserAddress, *, actor: User) -> Optional[str]:
+        """Why the customer's own subscription address change cannot take this order to `address`, or None when it
+        moves too (spec 2026-10-27 §17 Q6). The first match wins: WITH_DRIVER (the driver has picked it up,
+        `OrderService.order_is_with_driver`), then `block_code`, then `_disabled_reason` (CURRENT, NO_PIN,
+        OUTSIDE_ZONE, COD_PLACE_CAPPED, SALES_PAY_SELF_DECISION). A driver who has only accepted the stop does not
+        stop the move: they are told, as an admin's move tells them.
+
+        The subscription's preview and save publish this code per order, and `change(for_customer=True)` asks this
+        very function under its locks, so what the confirm said is what the write decides."""
+        from business_app.services.order_service import OrderService
+
+        if OrderService.order_is_with_driver(order):
+            return "WITH_DRIVER"
+        code = cls.block_code(order)
+        if code is not None:
+            return code
+        current = OutletService.outlets_for_delivery(order.user_id, order.delivery_address_id)
+        target = OutletService.outlets_for_delivery(order.user_id, address.id)
+        return cls._disabled_reason(order, address, actor=actor, current=current, target=target)
+
     @staticmethod
     def _branch_view(outlets: List[Outlet], address_id: Optional[int]) -> Optional[Dict[str, Any]]:
         """The outlet an order at `address_id` counts under, with the agent who owns it."""
@@ -213,7 +238,9 @@ class OrderAddressChangeService:
 
     # ------------------------------------------------------------------ the write
     @classmethod
-    def change(cls, order_id: int, *, address_id: int, note: Optional[str], actor: User) -> AddressChangeResult:
+    def change(
+        cls, order_id: int, *, address_id: int, note: Optional[str], actor: User, for_customer: bool = False
+    ) -> AddressChangeResult:
         """Move the order to another saved address of its own customer (the admin PATCH).
 
         One transaction. It locks the delivery, then the order, in the reschedule's order, and
@@ -223,10 +250,16 @@ class OrderAddressChangeService:
         the driver, the price and the commission subjects never move (R5, R9, R12), and nothing
         customer-visible is written (R4). After the commit, `_run_post_commit` runs.
 
+        `for_customer`: the customer's subscription address change moves the order (spec 2026-10-27 §17 Q6). Its
+        checks are `customer_move_refusal`'s, in that order, after the ownership check: an order the driver has
+        refuses with ORDER_WITH_DRIVER, any other reason with the admin write's own refusal for it, and each refusal
+        carries the function's code as `details["reason_code"]`.
+
         Raises NotFoundError (ORDER_NOT_FOUND), ConflictError (ORDER_AWAITING_STAFF_APPROVAL),
         ForbiddenError (SALES_PAY_SELF_DECISION), or ValidationError with ORDER_ADDRESS_LOCKED,
         DELIVERY_ADDRESS_LOCKED, INVALID_DELIVERY_ADDRESS, ADDRESS_CURRENT, ADDRESS_NO_PIN,
-        ADDRESS_OUTSIDE_ZONE or COD_DEBT_LIMIT_REACHED. Nothing is written when it raises.
+        ADDRESS_OUTSIDE_ZONE, COD_DEBT_LIMIT_REACHED or (the customer's) ORDER_WITH_DRIVER. Nothing is written when
+        it raises.
         """
         from business_app.services.delivery_service import DeliveryService
         from business_app.services.order_service import OrderService
@@ -235,13 +268,18 @@ class OrderAddressChangeService:
 
         with atomic_transaction():
             delivery, order = OrderScheduleService.lock_delivery_then_order(order_id)
-            cls.assert_open(order)
+            if not for_customer:
+                cls.assert_open(order)
             # A foreign address is refused here (INVALID_DELIVERY_ADDRESS); it is never an option.
             _, new = OrderService().get_user_and_address_for_order(order.user_id, address_id)
             old, old_id = order.delivery_address, order.delivery_address_id  # None on a legacy order (RF4)
             current = OutletService.outlets_for_delivery(order.user_id, old_id)
             target = OutletService.outlets_for_delivery(order.user_id, new.id)
-            cls._refuse_unpickable(cls._disabled_reason(order, new, actor=actor, current=current, target=target))
+            if for_customer:
+                reason = cls.customer_move_refusal(order, new, actor=actor)
+                cls._refuse_customer_move(order, reason, actor=actor, current=current, target=target)
+            else:
+                cls._refuse_unpickable(cls._disabled_reason(order, new, actor=actor, current=current, target=target))
             # R13: a non-admin pay subject is refused here (SALES_PAY_SELF_DECISION, the option's
             # reason); an admin one is recorded. A list, so every subject is checked.
             self_decided = any(
@@ -347,6 +385,35 @@ class OrderAddressChangeService:
             )
         if reason not in (None, "SALES_PAY_SELF_DECISION"):
             raise RuntimeError(f"unmapped address-change reason {reason}")
+
+    @classmethod
+    def _refuse_customer_move(
+        cls,
+        order: Order,
+        reason: Optional[str],
+        *,
+        actor: User,
+        current: Sequence[Outlet],
+        target: Sequence[Outlet],
+    ) -> None:
+        """The customer's refusal for `customer_move_refusal`'s `reason` (None: the move goes ahead): ORDER_WITH_DRIVER
+        for an order the driver has, otherwise the admin write's own refusal for that reason (`assert_open`,
+        `_refuse_unpickable`, the self-decision guard). The refusal carries `reason` as `details["reason_code"]`: the
+        code the subscription's address change reports for an order it could not move. A reason none of them refuses
+        fails closed."""
+        if reason is None:
+            return
+        try:
+            if reason == "WITH_DRIVER":
+                raise ValidationError("The driver already has this order", error_code="ORDER_WITH_DRIVER")
+            cls.assert_open(order)
+            cls._refuse_unpickable(reason)
+            for subject in sorted(cls.pay_subjects(current, target)):
+                pay_rules.check_self_decision(subject, actor)
+        except WaterBusinessException as refused:
+            refused.details = {**refused.details, "reason_code": reason}
+            raise
+        raise RuntimeError(f"unrefused customer address-change reason {reason}")
 
     @staticmethod
     def _snap(address: Optional[UserAddress]) -> Optional[Dict[str, Any]]:

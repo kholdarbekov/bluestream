@@ -841,6 +841,9 @@
                                 </div>
                             </div>
 
+                            {# The wait for Click, or the cash rescue: drawn by order-actions.js from the backend's answers. #}
+                            <div id="checkoutPaymentState" class="mb-3" role="status" aria-live="polite" hidden></div>
+
                             <div class="checkout-actions">
                                 <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-two">
                                     <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|t }}
@@ -1041,6 +1044,7 @@
     'default_image': url_for('static', filename='images/resource/shop/shop-1.jpg'),
     'current_language': current_language,
     'min_order_amount': config['MIN_ORDER_AMOUNT'],
+    'order_actions': order_actions_words(),
     'i18n': {
         'qty': 'Qty' | t,
         'select_address': 'Select address' | t,
@@ -1054,19 +1058,6 @@
         'min_qty_warning_short': 'Some items are below their minimum order quantity' | t,
         'calculating': 'Calculating...' | t,
         'address_coming_soon': 'Address management feature coming soon! For now, please add addresses through your account settings.' | t,
-        'code_expires_in': 'Code expires in' | t,
-        'code_expired': 'Code expired.' | t,
-        'request_new_code': 'Request new code' | t,
-        'sending': 'Sending...' | t,
-        'new_code_sent': 'New code sent' | t,
-        'resend_failed': 'Failed to resend code' | t,
-        'resend_code': 'Resend code' | t,
-        'enter_code': 'Please enter the verification code' | t,
-        'verifying': 'Verifying...' | t,
-        'verify': 'Verify' | t,
-        'too_many_attempts': 'Too many failed attempts. Please request a new code.' | t,
-        'invalid_code': 'Invalid verification code' | t,
-        'verify_failed': 'Verification failed. Please try again.' | t,
         'payment_failed': 'Payment failed. Please try again.' | t,
         'select_delivery_address': 'Please select a delivery address' | t,
         'select_delivery_date': 'Please select a delivery date' | t,
@@ -1082,5 +1073,6 @@
         'cod_savings': 'Pay cash on delivery and save {amount}' | t,
     },
 }) }}
+<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>
 {% endblock %}

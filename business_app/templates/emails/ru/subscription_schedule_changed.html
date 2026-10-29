@@ -1,0 +1,47 @@
+{% extends "emails/base.html" %}
+{# NATIVE-READ (plan 2026-10-27 Task 7): the title, every sentence and the row label below. #}
+
+{% block title %}Расписание доставки изменилось - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Расписание доставки изменилось</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Расписание доставки по вашей подписке <strong>{{ subscription_name }}</strong> изменилось.</p>
+</div>
+
+{% for change in changes %}
+{% if change == "time_cleared" %}
+<p>Время доставки {{ old_window }} больше не предлагается, поэтому доставки теперь в любое время дня.</p>
+{% elif change == "time_changed" %}
+<p>Время доставки теперь {{ new_window }} (было {{ old_window }}).</p>
+{% elif change == "day_moved" %}
+<p>В этот день недели ({{ old_weekday_label }}) мы больше не доставляем. Новый день доставки: {{ new_weekday_label }}.</p>
+{% elif change == "date_moved" %}
+<p>В этот день недели ({{ old_weekday_label }}) мы больше не доставляем, поэтому следующая доставка переносится на ближайший день доставки.</p>
+{% elif change == "days_added" %}
+<p>Новые дни доставки: {{ added_weekdays_label }}. Ежедневные доставки теперь приходят и в эти дни.</p>
+{% endif %}
+{% endfor %}
+
+{% if next_delivery_date %}
+<table class="details-table">
+    <tr>
+        <th>Следующая доставка</th>
+        <td>{{ next_delivery_date }}</td>
+    </tr>
+</table>
+{% endif %}
+
+<p>День и время доставки можно изменить в подписке.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

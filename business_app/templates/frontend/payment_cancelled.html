@@ -111,6 +111,7 @@
 </style>
 {% endblock %}
 
+{% from "frontend/macros/order_status.html" import order_status_label %}
 {% block content %}
 <section class="payment-cancelled-section">
     <div class="auto-container">
@@ -120,9 +121,9 @@
             </div>
 
             <h2>{{ 'Payment Cancelled'|t }}</h2>
-            <p>{{ 'Your payment was cancelled and no charges were made.'|t }}</p>
 
             {% if order %}
+            <p>{{ 'Your payment was cancelled and no charges were made.'|t }}</p>
             <div class="order-info">
                 <div class="info-row">
                     <span class="info-label">{{ 'Order Number'|t }}:</span>
@@ -135,40 +136,41 @@
                 <div class="info-row">
                     <span class="info-label">{{ 'Order Status'|t }}:</span>
                     <span class="info-value">
-                        <span class="badge badge-warning">{{ 'Pending Payment'|t }}</span>
+                        <span class="badge badge-warning">{{ order_status_label(display_status) }}</span>
                     </span>
                 </div>
             </div>
 
             <div class="info-notice">
                 <i class="far fa-info-circle"></i>
-                {% if payable %}
+                {# The backend's published Pay answer decides which sentence; the page works out nothing. #}
+                {% if customer_actions.pay.allowed %}
                 {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|t }}
                 {% else %}
                 {{ 'This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.'|t }}
                 {% endif %}
             </div>
 
+            {# Pay, drawn by order-actions.js from the published `customer_actions.pay`. #}
+            <div id="paymentActions" class="order-actions mb-3" data-order-id="{{ order.id }}"></div>
+
             <div class="action-buttons">
-                {% if payable %}
-                <button data-action="retry-payment" class="theme-btn btn-one">
-                    <i class="far fa-redo"></i> {{ 'Retry Payment'|t }}
-                </button>
-                {% endif %}
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
                     <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>
-                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three" style="grid-column: span 2;">
+                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
                     <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                 </a>
             </div>
             {% else %}
+            {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
+            <p>{{ 'web.payment_return.neutral_cancel'|t }}</p>
             <div class="action-buttons">
-                <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-one">
-                    <i class="far fa-shopping-cart"></i> {{ 'View Cart'|t }}
+                <a href="{{ company_telegram_bot_url }}" class="theme-btn btn-one" target="_blank" rel="noopener noreferrer">
+                    <i class="fab fa-telegram-plane"></i> {{ 'Open the bot'|t }}
                 </a>
-                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                    <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
+                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
+                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>
             </div>
             {% endif %}
@@ -180,13 +182,14 @@
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'order_id': order.id if (order is defined and order) else none,
-    'cart_url': url_for('frontend.cart'),
-    'i18n': {
-        'preparing': 'Preparing payment...' | t,
-        'retry_failed': 'Failed to retry payment. Please try again later.' | t,
-        'error': 'An error occurred. Please try again.' | t,
-    },
+    'order': {
+        'id': order.id,
+        'order_number': order.order_number,
+        'display_status': display_status,
+        'customer_actions': customer_actions,
+    } if order else none,
+    'order_actions': order_actions_words(),
 }) }}
+<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/pages/payment-cancelled.js') }}"></script>
 {% endblock %}

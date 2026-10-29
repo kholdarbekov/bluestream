@@ -1,0 +1,13 @@
+{
+ "case": "rescue_cod_limit",
+ "exchange": {
+  "body": {},
+  "method": "POST",
+  "path": "/api/v1/orders/1/retry-with-cash",
+  "response": {
+   "message": "Cash on delivery is unavailable: your outstanding balance is 30,000 UZS, over the 10,000 UZS limit. Please pay down your balance or choose a card payment method.",
+   "success": false
+  },
+  "status": 400
+ }
+}

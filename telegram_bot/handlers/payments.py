@@ -4,41 +4,26 @@ Telegram payment-link handler.
 Implements redirect-based external payment links for the configured PSP.
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from i18n import i18n
 from api_client import api_client
 from utils import get_auth_token, format_price
-from keyboards import PaymentKeyboards, customer_may_pay, customer_may_cancel
+from keyboards import PaymentKeyboards, parse_pay_callback, published_cancel, published_pay
 from handlers.base import BaseHandler
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger('handlers.payments')
 
-
-class PaymentLinkResult:
-    """Outcome of `send_payment_link`.
-
-    Bool-like on purpose: every existing call site (`orders.py`'s
-    `confirm_order`, this module's `retry_payment`) tests it with
-    `if not result:` and only cares that success is truthy. That keeps this a
-    drop-in replacement for the plain `bool` the method used to return, while
-    still letting a call site that DOES care -- `retry_payment`, which needs
-    to tell a pool-guard refusal apart from every other kind of failure --
-    read `.error_code` off the same object instead of a second return value.
-    """
-
-    __slots__ = ("success", "error_code")
-
-    def __init__(self, success: bool, error_code: Optional[str] = None):
-        self.success = success
-        self.error_code = error_code
-
-    def __bool__(self) -> bool:
-        return self.success
+# The `retry-payment` answers whose `message` the route translates (business_app/api/orders.py
+# `retry_order_payment`): 400 (the payment cannot be opened; the bot never sends the malformed body
+# the route's other 400 answers), 404 (not this customer's order) and 409 (the refusal, or "This
+# changed"). The bot shows only those sentences. Other 4xx messages come from layers that do not
+# translate them: a 401 from the JWT loaders, a 429 from the rate limiter.
+_RETRY_PAYMENT_SENTENCE_STATUSES = frozenset({400, 404, 409})
 
 
 class PaymentHandlers(BaseHandler):
@@ -52,192 +37,82 @@ class PaymentHandlers(BaseHandler):
     # CORE PAYMENT METHODS
     # =========================================================================
 
-    async def send_payment_link(
+    async def show_payment_link(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
-        order_data: Dict[str, Any],
-        payment_method: str = 'click',
+        *,
+        order_id: int,
+        order_number: str,
+        amount,
+        payment_url: str,
         send_as_new_message: bool = False,
-    ) -> "PaymentLinkResult":
-        """
-        Send external payment link to user via Redirect Method.
+    ) -> None:
+        """Show a Click link the backend already minted: checkout's `POST /orders`, or `retry-payment`.
 
-        Differs from native invoice: sends a message with an inline button
-        that redirects to the configured PSP checkout page.
+        Render-only. The bot mints no link of its own (spec 2026-10-27 §4.2): the caller passes the
+        backend's `payment_url` and the amount it charges, and this draws the message with its Pay
+        button and a Back to that order.
 
         When send_as_new_message=True, the payment link is sent as a brand new
         message (which triggers a Telegram notification) and the original
         callback-query message is edited to a brief "ready" status. Used after
         the Asl Belgisi wait so users get a notification the link arrived.
-
-        FAILURE IS SIGNALLED, NOT DRAWN. Every failure path below logs and
-        returns a falsy `PaymentLinkResult` WITHOUT touching the customer's
-        screen. This method cannot know what the failure means: by the time
-        `confirm_order` calls it the order already exists, so "payment
-        failed" would be a lie that makes the customer buy the same basket
-        twice. Only the caller knows, so the caller renders — via
-        `show_payment_link_failed` when the right screen is "the order
-        stands, here is Retry", or, when the backend's `error_code` says the
-        marking-code pool refused the rail move, a message that the order
-        stays on cash.
-
-        Drawing a screen here as well as at the call site is not merely
-        redundant: when Telegram refuses the first edit,
-        `_edit_or_replace_callback_message` DELETES the bubble and posts a
-        replacement, so the caller's edit then lands on a stale message and
-        posts a second one — two messages for one failure.
         """
-        try:
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+        language = await i18n.get_user_language(update.effective_user.id)
+        msg_text = i18n.get(
+            'telegram.payment.pay_message',
+            language,
+            order_number=order_number,
+            amount=format_price(amount),
+        )
+        keyboard = PaymentKeyboards.payment_link(payment_url, language, order_id)
 
-            # Extract order details
-            order_id = order_data.get('id')
-            order_number = order_data.get('order_number', str(order_id))
-            total_amount = order_data.get('total_amount', 0)
-
-            # 1. Authenticate with Backend
-            async with api_client as client:
-                token = await get_auth_token(update, context, client)
-                if not token:
-                    logger.error("Failed to get auth token for payment-link generation")
-                    return PaymentLinkResult(False)
-
-                # 2. Request Payment Link
-                # We use the generic 'POST /payments/create' endpoint via api_client
-                # Use dynamic bot username
-                bot = context.bot
-                bot_username = bot.username or (await bot.get_me()).username
-                return_url = f"https://t.me/{bot_username}"
-
-                result = await client.create_payment(token, {
-                    'order_id': order_id,
-                    'payment_method': payment_method,
-                    'return_url': return_url
-                })
-
-                if not result.success:
-                    logger.error(f"Failed to create {payment_method} link: {result.error}")
-                    # `_make_request` (api_client.py) surfaces the full error
-                    # body as `result.data` on failure, so a structured
-                    # `data.error_code` (e.g. the pool-guard refusal) survives
-                    # the trip even though this method only returns a bool-like
-                    # result, not the raw response.
-                    error_code = None
-                    if isinstance(result.data, dict):
-                        nested_data = result.data.get('data')
-                        if isinstance(nested_data, dict):
-                            error_code = nested_data.get('error_code')
-                    return PaymentLinkResult(False, error_code=error_code)
-
-                # Let's inspect result structure safely
-                response_body = result.data or {}
-                if 'data' in response_body:
-                    response_data = response_body['data']
-                else:
-                    response_data = response_body
-
-                payment_link_data = response_data.get('payment_link', {})
-                # It accepts dict (from payment_service) or string?
-                # payment_service returns dict.
-                if isinstance(payment_link_data, dict):
-                    payment_url = payment_link_data.get('payment_url')
-                else:
-                    payment_url = str(payment_link_data)
-
-                if not payment_url:
-                    logger.error(f"No payment_url in response: {result.data}")
-                    return PaymentLinkResult(False)
-
-                # Quote the money the link charges: the server's payment amount. The server re-prices
-                # the order when the rail moves (spec 2026-10-09 §5.2 #1), so the order figure fetched
-                # before this call is stale. No arithmetic here; the pre-move total is only a fallback
-                # for a response that carries no payment amount.
-                payment_amount = (response_data.get('payment') or {}).get('amount')
-                if payment_amount is not None:
-                    total_amount = payment_amount
-
-            # 3. Send Message with Button
-            msg_text = i18n.get(
-                'telegram.payment.pay_message',
+        query = update.callback_query
+        if send_as_new_message and query:
+            # New-message mode: deliver the payment link as a fresh message
+            # (so Telegram pushes a notification) and then update the old
+            # "preparing" message to a brief ready-status notice.
+            sent_message = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=msg_text,
+                reply_markup=keyboard,
+            )
+            ready_notice = i18n.get(
+                'telegram.orders.payment_link_ready_notice',
                 language,
                 order_number=order_number,
-                amount=format_price(total_amount)
             )
-
-            keyboard = PaymentKeyboards.payment_link(payment_url, language, order_id)
-
-            query = update.callback_query
-            message_id = None
-
-            if send_as_new_message and query:
-                # New-message mode: deliver the payment link as a fresh message
-                # (so Telegram pushes a notification) and then update the old
-                # "preparing" message to a brief ready-status notice.
-                chat_id = update.effective_chat.id
-                sent_message = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=msg_text,
-                    reply_markup=keyboard,
+            try:
+                await query.edit_message_text(text=ready_notice)
+            except Exception as edit_err:
+                logger.warning(
+                    f"Failed to update preparing message after sending new payment link: {edit_err}"
                 )
-                message_id = sent_message.message_id
+        else:
+            sent_message = await self._show(update, msg_text, reply_markup=keyboard)
 
-                ready_notice = i18n.get(
-                    'telegram.orders.payment_link_ready_notice',
-                    language,
-                    order_number=order_number,
-                )
-                try:
-                    await query.edit_message_text(text=ready_notice)
-                except Exception as edit_err:
-                    logger.warning(
-                        f"Failed to update preparing message after sending new payment link: {edit_err}"
-                    )
-            elif query:
-                # Edit the existing callback-query message in place
-                sent_message = await query.edit_message_text(
-                    text=msg_text,
-                    reply_markup=keyboard
-                )
-                if hasattr(sent_message, 'message_id'):
-                    message_id = sent_message.message_id
-                else:
-                    message_id = query.message.message_id
-            else:
-                sent_message = await update.effective_message.reply_text(
-                    text=msg_text,
-                    reply_markup=keyboard
-                )
-                if hasattr(sent_message, 'message_id'):
-                    message_id = sent_message.message_id
+        message_id = getattr(sent_message, 'message_id', None)
+        if message_id and order_id:
+            try:
+                # TokenManager lives on the running Application's bot_data
+                # (see bot.py:166). Earlier code did `from token_manager
+                # import token_manager` — but the module only exports the
+                # *class*, no module-level instance — so the import always
+                # failed and the message_id was never persisted, breaking
+                # the in-place edit on payment-success.
+                token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+                if token_manager and token_manager.redis:
+                    redis_key = RedisKeyspace.bot_payment_message(order_id)
+                    await token_manager.redis.setex(redis_key, 3600, str(message_id))
+            except Exception as redis_err:
+                logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
 
-            if message_id and order_id:
-                try:
-                    # TokenManager lives on the running Application's bot_data
-                    # (see bot.py:166). Earlier code did `from token_manager
-                    # import token_manager` — but the module only exports the
-                    # *class*, no module-level instance — so the import always
-                    # failed and the message_id was never persisted, breaking
-                    # the in-place edit on payment-success.
-                    token_manager = context.bot_data.get('token_manager') if context.bot_data else None
-                    if token_manager and token_manager.redis:
-                        redis_key = RedisKeyspace.bot_payment_message(order_id)
-                        await token_manager.redis.setex(redis_key, 3600, str(message_id))
-                except Exception as redis_err:
-                    logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
-
-            # Ack the tap: the dedup middleware no longer pre-answers, so the
-            # happy path must dismiss the spinner itself. Through `_ack`, so a
-            # refused answer can't trigger the error path after success.
-            await self._ack(update.callback_query)
-
-            logger.info(f"{payment_method} link sent for order {order_id}")
-            return PaymentLinkResult(True)
-
-        except Exception as e:
-            logger.error(f"Error sending payment link: {e}", exc_info=True)
-            return PaymentLinkResult(False)
+        # Ack the tap: the dedup middleware no longer pre-answers, so the
+        # happy path must dismiss the spinner itself. Through `_ack`, so a
+        # refused answer can't trigger the error path after success.
+        await self._ack(query)
+        logger.info(f"Payment link shown for order {order_id}")
 
     async def show_payment_link_failed(
         self,
@@ -248,17 +123,13 @@ class PaymentHandlers(BaseHandler):
     ) -> None:
         """The ONE screen for "the order exists, the payment link does not".
 
-        Both callers of `send_payment_link` need exactly this screen, so it is
-        written once here rather than copied into each of them: the copy in
-        `confirm_order` and the copy in `retry_payment` would be two places
-        deciding what a link failure looks like, which is how they drift.
-
         The copy leads with the order being PLACED and names it, because a
         screen that only says "payment failed" reads as "nothing happened" and
         the customer's next move is to order the same basket again. The
-        keyboard is the shared recovery one: its Retry button carries the order
-        id in its `callback_data`, so it re-pays THIS order (and survives a bot
-        restart, which `user_data` would not).
+        keyboard is the shared recovery one, drawn from the order's published
+        answers: its Pay carries the order id and the amount in its
+        `callback_data`, so it pays THIS order (and survives a bot restart,
+        which `user_data` would not).
 
         Draws only — the caller answers the callback query, because the caller
         owns when the interaction ends.
@@ -269,34 +140,9 @@ class PaymentHandlers(BaseHandler):
             order_number=order.get('order_number') or str(order_id),
         )
         keyboard = PaymentKeyboards.payment_failed(
-            order_id,
-            language,
-            may_pay=customer_may_pay(order),
-            may_cancel=customer_may_cancel(order),
+            order_id, language, pay=published_pay(order), cancel=published_cancel(order),
         )
-
-        query = update.callback_query
-        if query is not None:
-            await self._edit_or_replace_callback_message(
-                query, text, reply_markup=keyboard,
-            )
-        else:
-            await update.effective_message.reply_text(text, reply_markup=keyboard)
-
-    async def send_payme_invoice(
-        self,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        order_data: Dict[str, Any],
-        payment_method: str = 'click',
-    ) -> "PaymentLinkResult":
-        """Backward-compatible wrapper for old call sites."""
-        return await self.send_payment_link(
-            update,
-            context,
-            order_data,
-            payment_method=payment_method,
-        )
+        await self._show(update, text, reply_markup=keyboard)
 
     # =========================================================================
     # ERROR HANDLING & RECOVERY
@@ -307,116 +153,88 @@ class PaymentHandlers(BaseHandler):
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        """Pay an existing order (`payment_retry_<id>_<amount>`), through `retry-payment`.
+
+        The callback carries the amount the screen's published Pay showed, and the backend
+        decides: a link (shown), the refusal's sentence or "This changed" (an alert, then the
+        order as it stands now, whose buttons are fresh). The bot holds no copy of the Pay rule.
+
+        A button from before the amount rode the callback (`payment_retry_<id>`, and the
+        `payment_switch_<id>` that delegates here) has nothing to send, so it writes nothing and
+        opens the order, whose Pay carries the amount. Telegram messages are permanent: a notice
+        or a recovery screen drawn by an older release still carries one.
         """
-        Handle payment retry request.
-        Re-fetches order and sends new invoice.
-        """
+        from handlers.orders import order_handlers
+
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            # Extract order ID from callback data
-            order_id = int(query.data.split('_')[-1])
+            parsed = parse_pay_callback(query.data)
+            if parsed is None:
+                await self._ack(query, i18n.get('telegram.error.generic', language))
+                return
+            order_id, expected_amount = parsed
 
-            await self._ack(query)
+            if expected_amount is None:
+                await order_handlers.order_details(update, context, order_id=order_id)
+                return
 
-            # Fetch order details
+            # No ack before the write: its answer is the only ack, so an alert it raises is the
+            # first answer to this tap, and Telegram shows it.
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
-                    await query.edit_message_text(
-                        i18n.get('telegram.error.auth_failed', language)
-                    )
+                    await self._handle_auth_error(update, language)
                     return
 
-                response = await client.get_order(user_token, order_id)
-                if not response.success:
-                    await query.edit_message_text(
-                        i18n.get('telegram.payment.error_order_not_found', language)
-                    )
-                    return
-
-                order = response.data.get('data', {}).get('order', {})
-
-            # The id on the callback data is the one of record for this retry —
-            # it is what survives a restart. Keep it on the payload so a thin
-            # response body can still be rendered as a named order.
-            order.setdefault('id', order_id)
-
-            # Check if order can still be paid
-            if order.get('is_paid'):
-                await query.edit_message_text(
-                    i18n.get('telegram.payment.error_already_paid', language)
+                response = await client.retry_order_payment(
+                    user_token, order_id, expected_amount=expected_amount,
                 )
+                data = ((response.data or {}).get('data') or {}) if response.success else {}
+                payment_url = data.get('payment_url')
+                if payment_url:
+                    # The answer names the payment, not the order; one read names the order in
+                    # the message.
+                    order_response = await client.get_order(user_token, order_id)
+                    order = (
+                        ((order_response.data or {}).get('data') or {}).get('order') or {}
+                        if order_response.success else {}
+                    )
+
+            if payment_url:
+                # The amount the link charges, which the backend just checked against the screen's.
+                charged = (data.get('payment') or {}).get('amount')
+                await self.show_payment_link(
+                    update, context,
+                    order_id=order_id,
+                    order_number=order.get('order_number') or str(order_id),
+                    amount=charged if charged is not None else float(expected_amount),
+                    payment_url=payment_url,
+                )
+                logger.info(f"Payment retry initiated for order {order_id} by user {user_id}")
                 return
 
-            # THE payability gate. This handler had none: it re-fetched the
-            # order, tested `is_paid` alone and minted a link — so a stale Pay
-            # button on a CANCELLED or already-settled order produced a Click
-            # link that the PREPARE guard (`order_is_payable_online`, the same
-            # authority `customer_may_pay` reads through the published
-            # `is_payable`) then had to refuse with -9. The button is gone from
-            # the keyboard now, but the MESSAGE carrying it survives in the
-            # customer's chat forever, so the handler must refuse too.
-            if not customer_may_pay(order):
-                await query.edit_message_text(
-                    i18n.get('telegram.payment.error_not_payable', language)
-                )
+            if response.status_code in _RETRY_PAYMENT_SENTENCE_STATUSES:
+                # The backend's own sentence: the refusal, "This changed", or why the payment
+                # cannot be opened. Then the order as it stands, which offers no stale Pay.
+                await self._ack(query, response.error, show_alert=True)
+                await order_handlers.order_details(update, context, order_id=order_id)
                 logger.info(
-                    "Payment retry refused for order %s by user %s: backend says not payable",
-                    order_id, user_id,
+                    "Payment retry for order %s by user %s answered %s",
+                    order_id, user_id, response.status_code,
                 )
                 return
 
-            payment_info = order.get('payment_info') or {}
-            provider_method = payment_info.get('payment_provider') or order.get('payment_method') or 'click'
-            # Remember the rail this order was actually on BEFORE this retry
-            # rewrites `provider_method` to 'click' below -- the pool-short
-            # refusal only means "stays on cash" when the source really was
-            # cash. An order already on CLICK that gets refused (a genuinely
-            # exhausted pool, unrelated to this task's flip guard, which
-            # credits codes the order already holds) is not on cash and must
-            # not be told so.
-            was_cash = provider_method == 'cash'
-            if provider_method == 'card':
-                provider_method = 'click'
-            elif provider_method == 'cash':
-                # A cash order moves to an online rail only if the backend's
-                # marking-code pool can cover it. Ask, and keep the customer on
-                # cash with a real message when it cannot, instead of silently
-                # rewriting the rail into a payment link that never prepares.
-                provider_method = 'click'
-
-            # Send new payment link
-            link_sent = await self.send_payment_link(
-                update, context, order, payment_method=provider_method
-            )
-            if not link_sent:
-                if was_cash and getattr(link_sent, "error_code", None) == "MARKING_CODES_POOL_SHORT":
-                    # The backend refused the cash-to-click flip because the
-                    # marking-code pool is short; the order was left on cash.
-                    # Say so in the customer's language rather than showing
-                    # the generic "link failed, retry?" screen -- there is
-                    # nothing to retry, the order already stands as cash.
-                    await query.edit_message_text(
-                        i18n.get('telegram.payment.marking_codes_unavailable', language)
-                    )
-                    return
-                # `send_payment_link` signals, it does not render. This call
-                # site owns the screen: the order is still there and still
-                # unpaid, so the customer needs the same "it stands, here is
-                # Retry" screen rather than a silent no-op that reads as a tap
-                # that never registered.
-                await self.show_payment_link_failed(update, context, order, language)
-                logger.warning(
-                    "Payment retry for order %s by user %s produced no %s link; "
-                    "left the retry screen up",
-                    order_id, user_id, provider_method,
-                )
+            if response.status_code == 401:
+                # Still refused after the API client signed the customer in again (a deactivated
+                # account, say). The JWT loaders' `message` is English, so the customer reads the
+                # seeded sign-in sentence in their own language instead.
+                await self._handle_auth_error(update, language)
                 return
 
-            logger.info(f"Payment retry initiated for order {order_id} by user {user_id}")
+            await self._ack_failed_call(query, response, language, operation="retry_payment")
 
         except Exception as e:
             await self._handle_error(update, context, exc=e, operation="retry_payment")
@@ -431,8 +249,7 @@ class PaymentHandlers(BaseHandler):
         The button is no longer drawn anywhere (`PaymentKeyboards.payment_failed`
         records why), but Telegram messages are PERMANENT: every recovery screen
         already sitting in a customer's chat still carries it. Removing the
-        renderer does nothing for those, so the HANDLER has to answer — the same
-        reasoning `retry_payment` carries for its own stale button.
+        renderer does nothing for those, so the HANDLER has to answer.
 
         What it used to do was the defect. It parsed the order id, LOGGED it, and
         then rendered `OrderKeyboards.payment_methods`, whose callbacks
@@ -447,14 +264,10 @@ class PaymentHandlers(BaseHandler):
         spinner running with nothing able to stop it, so a removed pattern is a
         worse screen than a redirected one.
 
-        Delegating to `retry_payment` rather than drawing a dead end is the
-        honest answer, because Retry IS the rail move a customer has:
-        `POST /api/v1/payments/create` normalizes card->click and flips a pending
-        cash order onto Click behind the marking-code pool guard. It also
-        inherits the payability gate wholesale — a stale tap on a dead order is
-        refused there rather than needing a second copy of the rule here.
-        `retry_payment` reads the id as `query.data.split('_')[-1]`, which reads
-        `payment_switch_{id}` exactly as it reads `payment_retry_{id}`.
+        `retry_payment` reads `payment_switch_{id}` as it reads the amount-less
+        `payment_retry_{id}`: it writes nothing and opens that order, whose
+        published Pay is the way to pay it. No customer moves a rail from here: a
+        cash order is no longer flipped onto Click (spec 2026-10-27 §4.3, D4).
         """
         logger.info(
             "Stale payment_switch tap for %s from user %s; delegating to retry_payment",
@@ -470,7 +283,7 @@ class PaymentHandlers(BaseHandler):
     ) -> None:
         """
         Handle payment cancellation.
-        Shows options to retry, switch method, or cancel order.
+        Shows the order's published Pay and Cancel, with My Orders.
         """
         try:
             query = update.callback_query
@@ -484,10 +297,10 @@ class PaymentHandlers(BaseHandler):
 
             # Only stale `payment_cancel_<id>` buttons reach this handler: nothing
             # has drawn one since 553472c, but the messages stay in the chat. The
-            # order may have moved on since, so Retry and Cancel come from THIS
-            # order's published answers, fetched the way `retry_payment` fetches
-            # it. A failed fetch leaves `order` None, and both helpers fail
-            # closed on it: neither button, with My Orders still one tap away.
+            # order may have moved on since, so Pay and Cancel come from THIS
+            # order's published answers. A failed fetch leaves `order` None, and
+            # both readers fail closed on it: neither button, with My Orders still
+            # one tap away.
             order = None
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -500,10 +313,7 @@ class PaymentHandlers(BaseHandler):
             cancelled_text = i18n.get('telegram.payment.cancelled_message', language)
 
             keyboard = PaymentKeyboards.payment_failed(
-                order_id,
-                language,
-                may_pay=customer_may_pay(order),
-                may_cancel=customer_may_cancel(order),
+                order_id, language, pay=published_pay(order), cancel=published_cancel(order),
             )
 
             await query.edit_message_text(
@@ -515,8 +325,6 @@ class PaymentHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_error(update, context, exc=e, operation="cancel_payment")
-
-
 
 
 # Global handler instance

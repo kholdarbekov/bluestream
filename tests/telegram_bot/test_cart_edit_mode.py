@@ -575,7 +575,7 @@ class TestCartEditReturnFlagClearing:
             data={
                 "data": {
                     "order": {"id": 42, "order_number": "ORD-042", "total_amount": 36000, "order_items": []},
-                    "payment_ready_at": None,
+                    "payment_url": "https://click.test/pay/42",
                 }
             },
         )
@@ -596,7 +596,7 @@ class TestCartEditReturnFlagClearing:
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="tok"))
         monkeypatch.setattr(orders_module, "api_client", fake)
 
-        # Stub out payment_handlers.send_payment_link to avoid import side-effects.
+        # Stub out payment_handlers.show_payment_link to avoid import side-effects.
         #
         # ONE patch, via monkeypatch. This used to `patch(...)` the attribute AND
         # then monkeypatch the SAME attribute inside the with-block, which
@@ -615,9 +615,11 @@ class TestCartEditReturnFlagClearing:
         import handlers.payments as payments_module
 
         fake_payment_handlers = MagicMock()
-        fake_payment_handlers.send_payment_link = AsyncMock(return_value=True)
+        fake_payment_handlers.show_payment_link = AsyncMock(return_value=None)
         monkeypatch.setattr(payments_module, "payment_handlers", fake_payment_handlers)
 
         await handler.confirm_order(update, context)
 
         assert context.user_data.get("cart_edit_return") is None
+        # The link shown is the one POST /orders minted.
+        assert fake_payment_handlers.show_payment_link.await_args.kwargs["payment_url"] == "https://click.test/pay/42"

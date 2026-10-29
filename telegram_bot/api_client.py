@@ -747,10 +747,31 @@ class BusinessAPIClient:
         return await self._make_request('GET', f'/api/v1/orders/{order_id}',
                                        user_token=user_token)
 
-    async def cancel_order(self, user_token: str, order_id: int) -> APIResponse:
-        """Cancel order"""
+    async def cancel_order(self, user_token: str, order_id: int, *, expected_via: str,
+                           reason_code: Optional[str] = None) -> APIResponse:
+        """The customer's removal of an order: skip, cancel or decline (spec 2026-10-27 §5.2).
+
+        `expected_via` is the removal the screen showed; the backend answers 409 STATE_CHANGED when
+        it no longer matches. `reason_code` (a skip's reason) is sent only when there is one, so a
+        skip without a reason posts exactly `{"expected_via": "skip"}`. The bot never sends
+        `reason_text`.
+        """
+        data = {'expected_via': expected_via}
+        if reason_code:
+            data['reason_code'] = reason_code
         return await self._make_request('POST', f'/api/v1/orders/{order_id}/cancel',
-                                       user_token=user_token)
+                                       user_token=user_token, data=data)
+
+    async def retry_order_payment(self, user_token: str, order_id: int, *, expected_amount: str) -> APIResponse:
+        """Pay an existing order: the one route that opens a Click payment on it (spec 2026-10-27 §4.2).
+
+        `expected_amount` is the amount the screen's published Pay carried; the backend answers 409
+        STATE_CHANGED when it moved, and 409 PAY_REFUSED with the refusal's sentence when the order
+        may not be paid. `channel` makes Click return to this chat.
+        """
+        return await self._make_request('POST', f'/api/v1/orders/{order_id}/retry-payment',
+                                       user_token=user_token,
+                                       data={'channel': 'bot', 'expected_amount': expected_amount})
 
     async def respond_agent_order(self, user_token: str, order_id: int,
                                   action: str, reason: str = None) -> APIResponse:
@@ -812,8 +833,8 @@ class BusinessAPIClient:
     async def retry_order_with_cash(self, user_token: str, order_id: int) -> APIResponse:
         """Switch a tax-committee-cancelled order to cash payment.
 
-        Used by the Asl belgisi rescue flow. Bypasses the COD active-debt
-        cap server-side; see business_app/services/order_service.py
+        Used by the Asl belgisi rescue flow. The backend applies the cash-debt
+        limit here as at checkout; see business_app/services/order_service.py
         retry_cancelled_order_with_cash for the security boundary.
         """
         return await self._make_request(
@@ -854,11 +875,6 @@ class BusinessAPIClient:
         """
         return await self._make_request('POST', '/api/v1/orders/cart/estimate',
                                         user_token=user_token, data=estimate_data)
-
-    async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
-        """Create payment for order"""
-        return await self._make_request('POST', '/api/v1/payments/create',
-                                       user_token=user_token, data=payment_data)
 
     async def get_payment_status(self, user_token: str, payment_id: str) -> APIResponse:
         """Get payment status"""
@@ -1000,9 +1016,9 @@ class BusinessAPIClient:
 
     # Subscription methods
     async def get_user_subscriptions(self, user_token: str) -> APIResponse:
-        """Get user subscriptions"""
+        """The customer's subscriptions, 50 to a page: the same question the website asks (spec 2026-10-27 §16)."""
         return await self._make_request('GET', '/api/v1/subscriptions',
-                                       user_token=user_token)
+                                       user_token=user_token, params={"per_page": 50})
 
     async def create_subscription(self, user_token: str, subscription_data: Dict) -> APIResponse:
         """Create new subscription"""
@@ -1010,15 +1026,20 @@ class BusinessAPIClient:
                                        user_token=user_token, data=subscription_data)
 
     async def update_subscription(self, user_token: str, subscription_id: int,
-                                update_data: Dict) -> APIResponse:
-        """Update subscription"""
+                                update_data: Dict, *, expected_state: Optional[str] = None) -> APIResponse:
+        """Update subscription. A schedule save sends the `expected_state` its preview carried: the backend answers
+        409 STATE_CHANGED when what the screen showed no longer holds."""
+        data = dict(update_data)
+        if expected_state is not None:
+            data['expected_state'] = expected_state
         return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}',
-                                       user_token=user_token, data=update_data)
+                                       user_token=user_token, data=data)
 
-    async def pause_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
-        """Pause subscription"""
+    async def pause_subscription(self, user_token: str, subscription_id: int, *, expected_state: str) -> APIResponse:
+        """Pause a subscription. `expected_state` is the card's `allowed_actions.expected_state`; the backend
+        answers 409 STATE_CHANGED when what the screen showed no longer holds."""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/pause',
-                                       user_token=user_token, data={})
+                                       user_token=user_token, data={'expected_state': expected_state})
 
     async def resume_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Resume subscription"""
@@ -1030,72 +1051,72 @@ class BusinessAPIClient:
         return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}',
                                        user_token=user_token)
 
-    async def cancel_subscription(self, user_token: str, subscription_id: int,
-                                 cancel_data: Dict = None) -> APIResponse:
-        """Cancel subscription"""
+    async def cancel_subscription(self, user_token: str, subscription_id: int, *, expected_state: str) -> APIResponse:
+        """Cancel a subscription. `expected_state` is the card's `allowed_actions.expected_state`; the backend
+        answers 409 STATE_CHANGED when what the screen showed no longer holds."""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/cancel',
-                                       user_token=user_token, data=cancel_data or {})
+                                       user_token=user_token, data={'expected_state': expected_state})
 
-    async def get_subscription_items(self, user_token: str, subscription_id: int) -> APIResponse:
-        """Get subscription items"""
-        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/items',
-                                       user_token=user_token)
+    async def preview_subscription_change(self, user_token: str, subscription_id: int, changes: Dict) -> APIResponse:
+        """What a change to THIS subscription would do (`POST /subscriptions/<id>/preview`): the schedule, or the
+        whole item list. Nothing is saved; the answer carries the `expected_state` the save must send."""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/preview',
+                                       user_token=user_token, data=changes)
 
-    async def add_subscription_item(self, user_token: str, subscription_id: int,
-                                   item_data: Dict) -> APIResponse:
-        """Add item to subscription"""
-        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/items',
-                                       user_token=user_token, data=item_data)
+    async def replace_subscription_items(self, user_token: str, subscription_id: int, items: List[Dict], *,
+                                         expected_state: str) -> APIResponse:
+        """Save the whole item list at once (`PUT /subscriptions/<id>/items`), with the `expected_state` of the
+        preview the customer confirmed."""
+        return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}/items',
+                                       user_token=user_token,
+                                       data={'items': items, 'expected_state': expected_state})
 
-    async def update_subscription_item(self, user_token: str, subscription_id: int,
-                                      item_id: int, item_data: Dict) -> APIResponse:
-        """Update subscription item"""
-        return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}/items/{item_id}',
-                                       user_token=user_token, data=item_data)
+    async def get_subscription_history(self, user_token: str, subscription_id: int, page: int = 1) -> APIResponse:
+        """One page (5 rows) of the orders a subscription placed, its skipped dates among them: the website's
+        own history, with each order's published `customer_actions`."""
+        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/history',
+                                       user_token=user_token, params={"page": page, "per_page": 5})
 
-    async def remove_subscription_item(self, user_token: str, subscription_id: int,
-                                      item_id: int) -> APIResponse:
-        """Remove item from subscription"""
-        return await self._make_request('DELETE', f'/api/v1/subscriptions/{subscription_id}/items/{item_id}',
-                                       user_token=user_token)
+    async def get_subscription_products(self, user_token: str, language: Optional[str] = None) -> APIResponse:
+        """Every product a subscription can take, each with its subscription price label (spec 2026-10-26 B10):
+        the backend's one catalog for every subscription product picker. Unpaged."""
+        return await self._make_request('GET', '/api/v1/subscriptions/products',
+                                       user_token=user_token, language=language)
 
-    async def get_billing_history(self, user_token: str, subscription_id: int) -> APIResponse:
-        """Get subscription billing history"""
-        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/billing-history',
-                                       user_token=user_token)
-
-    async def get_subscription_logs(self, user_token: str, subscription_id: int) -> APIResponse:
-        """Get subscription activity logs"""
-        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/logs',
-                                       user_token=user_token)
-
-    async def get_subscription_time_slots(self, user_token: str, weekday) -> APIResponse:
-        """The active delivery slots a recurring delivery can pick: those offered on `weekday`
-        (0 = Monday), or every active slot for `'any'` (monthly and daily have no weekday to ask)."""
+    async def get_subscription_time_slots(self, user_token: str, weekday, frequency: Optional[str] = None) -> APIResponse:
+        """The delivery slots a recurring delivery can pick: those offered on `weekday` (0 = Monday), or every
+        active slot for `'any'` (monthly and daily have no weekday to ask). With `frequency` the backend applies
+        the subscription schedule's own slot rule, the one its save guard checks (monthly: every day of the week)."""
+        params = {'weekday': weekday}
+        if frequency:
+            params['frequency'] = frequency
         return await self._make_request('GET', '/api/v1/delivery/time-slots',
-                                       user_token=user_token, params={'weekday': weekday})
+                                       user_token=user_token, params=params)
 
-    async def preview_subscription(self, user_token: str, preview_data: Dict) -> APIResponse:
-        """Preview subscription cost before creating"""
+    async def preview_subscription(self, user_token: str, preview_data: Dict,
+                                   language: Optional[str] = None) -> APIResponse:
+        """The create preview (the quote), in `language`: each line's translated name and labels, and the
+        per-delivery label, at the subscription's one price rule (spec 2026-10-26 B10)."""
         return await self._make_request('POST', '/api/v1/subscriptions/preview',
-                                       user_token=user_token, data=preview_data)
+                                       user_token=user_token, data=preview_data, language=language)
 
-    async def get_subscription_statistics(self, user_token: str) -> APIResponse:
-        """Get user subscription statistics"""
-        return await self._make_request('GET', '/api/v1/subscriptions/statistics',
-                                       user_token=user_token)
-
-    async def skip_next_delivery(self, user_token: str, subscription_id: int,
-                                skip_data: Dict = None) -> APIResponse:
-        """Skip next delivery for subscription"""
+    async def skip_next_delivery(self, user_token: str, subscription_id: int, expected_date: str, *,
+                                 reason_code: Optional[str] = None) -> APIResponse:
+        """Skip the next delivery. `expected_date` is the date the customer's button named; the backend answers
+        409 when the delivery it would skip is no longer that one. `reason_code` is one of the reasons the
+        backend published, sent only when the customer picked one."""
+        data = {'expected_date': expected_date}
+        if reason_code:
+            data['reason_code'] = reason_code
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/skip-next-delivery',
-                                       user_token=user_token, data=skip_data or {})
+                                       user_token=user_token, data=data)
 
     async def change_payment_method(self, user_token: str, subscription_id: int,
-                                   payment_data: Dict) -> APIResponse:
-        """Change subscription payment method"""
+                                   payment_data: Dict, *, expected_state: str) -> APIResponse:
+        """Change subscription payment method. `expected_state` is the card's `allowed_actions.expected_state` the
+        consequence screen was built from: the backend answers 409 STATE_CHANGED when it no longer holds."""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/change-payment-method',
-                                       user_token=user_token, data=payment_data)
+                                       user_token=user_token, data={**payment_data, 'expected_state': expected_state})
 
     # Loyalty methods
     async def get_loyalty_points(self, user_token: str) -> APIResponse:

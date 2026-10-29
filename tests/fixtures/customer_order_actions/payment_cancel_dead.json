@@ -1,0 +1,51 @@
+{
+ "case": "payment_cancel_dead",
+ "exchanges": {},
+ "language": "en",
+ "order_id": 1,
+ "page": {
+  "html": "<section class=\"payment-cancelled-section\">\n<div class=\"auto-container\">\n<div class=\"cancelled-content\">\n<div class=\"cancelled-icon\">\n<i class=\"far fa-times-circle\"></i>\n</div>\n<h2>Payment Cancelled</h2>\n<p>Your payment was cancelled and no charges were made.</p>\n<div class=\"order-info\">\n<div class=\"info-row\">\n<span class=\"info-label\">Order Number:</span>\n<span class=\"info-value\">TG_000001_26</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Total Amount:</span>\n<span class=\"info-value\">30,000 UZS</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Order Status:</span>\n<span class=\"info-value\">\n<span class=\"badge badge-warning\">Cancelled</span>\n</span>\n</div>\n</div>\n<div class=\"info-notice\">\n<i class=\"far fa-info-circle\"></i>\n                \n                \n                This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.\n                \n            </div>\n<div class=\"order-actions mb-3\" data-order-id=\"1\" id=\"paymentActions\"></div>\n<div class=\"action-buttons\">\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n<a class=\"theme-btn btn-three\" href=\"/shop\">\n<i class=\"far fa-shopping-bag\"></i> landing.button.continue_shopping\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "island": {
+   "order": {
+    "customer_actions": {
+     "cancel": {
+      "allowed": false,
+      "confirm_text": null,
+      "label": null,
+      "reasons": [],
+      "refusal": "NOT_CANCELLABLE",
+      "subscription_id": null,
+      "via": null
+     },
+     "confirm": {
+      "allowed": false,
+      "label": null
+     },
+     "pay": {
+      "allowed": false,
+      "amount_label": null,
+      "deadline_label": null,
+      "expected_amount": null,
+      "label": null,
+      "refusal": "order_closed"
+     }
+    },
+    "display_status": "cancelled",
+    "id": 1,
+    "order_number": "TG_000001_26"
+   },
+   "order_actions": {
+    "confirmed": "Thanks! Your order is confirmed.",
+    "failed": "That didn't go through. Please try again.",
+    "keep": "Keep it",
+    "open_subscription": "Open the subscription",
+    "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
+    "reason_prompt": "Want to tell us why? (optional)",
+    "reason_text": "In a few words (optional)",
+    "switch_to_cash": "Pay with cash",
+    "try_again": "Try again",
+    "working": "One moment…"
+   }
+  }
+ }
+}

@@ -48,6 +48,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 
 PRODUCTS = "/api/v1/products"
+CATALOG = "/api/v1/subscriptions/products"
 ADDRESSES = "/api/v1/auth/addresses"
 PAYMENT_METHODS = "/api/v1/payments/methods"
 SLOTS = "/api/v1/delivery/time-slots"
@@ -103,6 +104,15 @@ TRANSLATIONS = {
     "telegram.cancel": "Cancel",
     "telegram.continue": "Continue",
     "telegram.main_menu": "MAIN-MENU",
+    "telegram.subscription.confirm_title": "CONFIRM-TITLE",
+    "telegram.subscription.items": "ITEMS-LABEL",
+    "telegram.subscription.frequency": "FREQUENCY-LABEL",
+    "telegram.subscription.frequency_weekly": "WEEKLY",
+    "telegram.subscription.delivery_day": "DAY-LABEL",
+    "telegram.subscription.weekday_3": "THURSDAY",
+    "telegram.subscription.delivery_time": "TIME-LABEL",
+    "telegram.subscription.total": "TOTAL-LABEL",
+    "telegram.currency.uzs": "UZS-WORD",
 }
 
 
@@ -110,14 +120,15 @@ TRANSLATIONS = {
 async def bot(monkeypatch):
     harness = await build_bot_harness(monkeypatch, translations=TRANSLATIONS)
 
+    # The picker reads the subscription catalog (`GET /subscriptions/products`, re-review G6).
     harness.backend.route(
         "GET",
-        PRODUCTS,
+        CATALOG,
         lambda _c: {
             "data": {
                 "items": [
-                    {"id": PRODUCT_ID, "name": "Aqua Element 19L", "base_price": 25000},
-                    {"id": 8, "name": "Aqua Element 10L", "base_price": 16000},
+                    {"id": PRODUCT_ID, "product_name": "Aqua Element 19L", "unit_price_label": "25 000 so'm"},
+                    {"id": 8, "product_name": "Aqua Element 10L", "unit_price_label": "16 000 so'm"},
                 ]
             }
         },
@@ -128,21 +139,27 @@ async def bot(monkeypatch):
             f"{PRODUCTS}/{product_id}",
             lambda _c, product_id=product_id, minimum=minimum: product_detail(product_id, minimum),
         )
+    # The items ride the card (`subscription_items`): the bot reads no second `GET .../items`.
     harness.backend.route(
         "GET",
-        f"/api/v1/subscriptions/{SUB_ID}/items",
+        f"/api/v1/subscriptions/{SUB_ID}",
         lambda _c: {
             "data": {
-                "items": [
-                    {
-                        "id": ITEM_ID,
-                        "subscription_id": SUB_ID,
-                        "product_id": 8,
-                        "quantity": 4,
-                        "unit_price": 16000.0,
-                        "total_price": 64000.0,
-                    }
-                ]
+                "subscription": {
+                    "id": SUB_ID,
+                    "status": "active",
+                    "frequency": "weekly",
+                    "subscription_items": [
+                        {
+                            "id": ITEM_ID,
+                            "subscription_id": SUB_ID,
+                            "product_id": 8,
+                            "quantity": 4,
+                            "unit_price": 16000.0,
+                            "total_price": 64000.0,
+                        }
+                    ],
+                }
             }
         },
     )
@@ -567,3 +584,40 @@ async def test_the_bot_sends_no_discount_in_the_preview_or_create_bodies(bot, us
     assert {"/api/v1/subscriptions/preview", "/api/v1/subscriptions"} <= endpoints, endpoints
     for call in sent:
         assert "discount_percentage" not in (call.data or {}), call
+
+
+# ---------------------------------------------------------------------------
+# The confirm screen prints the quote's published names and money (re-review admin-bot-backend-4)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_confirm_screen_prints_the_quotes_published_names_and_money(bot, user):
+    """Two taps after the picker (which shows the catalog's translated name and price label), the confirm screen
+    prints what the create preview publishes, asked in the customer's language: each line's translated name and
+    label, and the per-delivery label. Never the raw float with a currency word ("50000.0 UZS")."""
+    bot.backend.route(
+        "POST",
+        "/api/v1/subscriptions/preview",
+        lambda _c: {"data": {"preview": {
+            "frequency": "weekly", "total_amount": 50000.0, "total_amount_label": "50 000 so'm",
+            "items": [{
+                "product_id": PRODUCT_ID, "product_name": "Aqua Element 19L", "quantity": 2, "unit_price": 25000.0,
+                "item_total": 50000.0, "unit_price_label": "25 000 so'm", "line_total_label": "50 000 so'm",
+            }],
+        }}},
+    )
+    await reach_payment_screen(bot, user)
+
+    await bot.send(user.tap("sub_payment_cash"))
+
+    (asked,) = [c for c in bot.backend.calls if c.endpoint == "/api/v1/subscriptions/preview"]
+    assert asked.language == "uz"  # the harness customer's language
+    assert last_text(bot) == (
+        "CONFIRM-TITLE\n\n"
+        "📦 ITEMS-LABEL:\n"
+        "  • Aqua Element 19L x2 - 50 000 so'm\n"
+        "\n📅 FREQUENCY-LABEL: WEEKLY\n"
+        "🗓 DAY-LABEL: THURSDAY\n"
+        "🕘 TIME-LABEL: 10:00-12:00\n"
+        "💰 TOTAL-LABEL: 50 000 so'm\n"
+    )

@@ -3,9 +3,10 @@ User profile and registration handlers
 """
 import html
 import logging
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
@@ -19,6 +20,8 @@ from shared.constants import (
     get_district_center,
     get_all_districts,
     is_within_tashkent,
+    ORDER_START_PREFIX,
+    SUBSCRIPTION_START_PREFIX,
     WEB_LINK_START_PREFIX,
 )
 from shared.business_config import PHONE_OTP_EXPIRY
@@ -1093,6 +1096,14 @@ class ProfileHandlers(BaseHandler):
             existing_user = await user_repo.get_user_by_telegram_id(user_id)
             logger.info(f"existing_user {existing_user} for user_id {user_id}")
 
+            # `/start order_<id>` / `/start sub_<id>` (Click's return to this chat, spec 2026-10-27
+            # §4.5, §16 M5): a signed-up customer lands on that screen. Without an account, or still
+            # without a phone, the link is a plain /start.
+            target = self._deep_link_target(context)
+            if target is not None and existing_user and is_menu_customer(existing_user):
+                await self._open_deep_link_target(update, context, *target)
+                return ConversationHandler.END
+
             if not existing_user:
                 welcome_text_en = i18n.get('telegram.registration_welcome', "en")
                 welcome_text_uz = i18n.get('telegram.registration_welcome', "uz")
@@ -1113,6 +1124,40 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
+
+    _DEEP_LINK_TARGET = re.compile(
+        rf"^({re.escape(ORDER_START_PREFIX)}|{re.escape(SUBSCRIPTION_START_PREFIX)})(\d+)$"
+    )
+
+    @classmethod
+    def _deep_link_target(cls, context: ContextTypes.DEFAULT_TYPE) -> Optional[Tuple[str, int]]:
+        """`(prefix, id)` of a `/start order_<id>` or `/start sub_<id>` link, or None for any other /start.
+
+        Built from the prefixes the backend builds the links with (shared/constants.py). Anything
+        else, a malformed id included, is a plain /start.
+        """
+        args = getattr(context, "args", None) or []
+        if not args:
+            return None
+        match = cls._DEEP_LINK_TARGET.match(str(args[0]))
+        if not match:
+            return None
+        return match.group(1), int(match.group(2))
+
+    async def _open_deep_link_target(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, prefix: str, target_id: int,
+    ) -> None:
+        """Open the screen a deep link names, as a new message. Someone else's id is "not found" + the menu."""
+        if prefix == ORDER_START_PREFIX:
+            from handlers.orders import order_handlers
+
+            await order_handlers.order_details(update, context, order_id=target_id, deep_link=True)
+        else:
+            from handlers.subscriptions import subscription_handlers
+
+            await subscription_handlers.subscription_details(
+                update, context, subscription_id=target_id, deep_link=True,
+            )
 
     async def _resume_existing_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                        existing_user: dict) -> int:

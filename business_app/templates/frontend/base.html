@@ -631,6 +631,7 @@
         'current_user': current_user,
         'is_authenticated': true if current_user else false,
         'login_url': url_for('frontend.login'),
+        'logout_url': url_for('frontend.logout'),
         'i18n': {
             'success': 'Success' | t,
             'error': 'Error' | t,

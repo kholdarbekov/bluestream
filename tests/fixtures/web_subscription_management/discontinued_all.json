@@ -1,0 +1,368 @@
+{
+ "about": "The only product discontinued (RF2).",
+ "case": "discontinued_all",
+ "language": "en",
+ "requests": {
+  "GET /api/v1/payments/methods?context=subscription&delivery_address_id=1": {
+   "body": {
+    "data": {
+     "available_methods": [
+      {
+       "description": "Pay with cash when order is delivered",
+       "display_name": "Cash on Delivery",
+       "icon_url": "/static/images/payment/cash.png",
+       "is_active": true,
+       "max_amount": 5000000,
+       "method": "cash",
+       "min_amount": 0,
+       "name": "cash",
+       "processing_fee": 0.0,
+       "supported_currencies": [
+        "UZS"
+       ],
+       "supports_recurring": false,
+       "supports_refunds": false
+      },
+      {
+       "description": "Pay with Click wallet or linked card",
+       "display_name": "Click",
+       "icon_url": "/static/images/payment/click.png",
+       "is_active": true,
+       "max_amount": 50000000,
+       "method": "click",
+       "min_amount": 1000,
+       "name": "click",
+       "processing_fee": 0.0,
+       "supported_currencies": [
+        "UZS"
+       ],
+       "supports_recurring": true,
+       "supports_refunds": false
+      }
+     ],
+     "payment_restrictions": {
+      "active_cod_debt_count": 0,
+      "available_prepayment_balance": 0.0,
+      "cluster_net_open_cod_debt_total": 0.0,
+      "cod_exempt": false,
+      "cod_restricted": false,
+      "cod_restriction_reason": null,
+      "is_grocery_store": false,
+      "place_active_cod_debt_count": null,
+      "restriction_scope": null
+     },
+     "saved_cards": []
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/1/history?page=1&per_page=5": {
+   "body": {
+    "data": {
+     "items": [
+      {
+       "amount_label": null,
+       "can_pay": false,
+       "customer_actions": null,
+       "date": "2026-10-29",
+       "date_label": "Thu 29 Oct",
+       "kind": "skipped",
+       "order_id": null,
+       "order_number": null,
+       "reason_label": "a product was out of stock",
+       "status": {
+        "code": "skipped",
+        "label": "Skipped",
+        "tone": "neutral"
+       }
+      }
+     ]
+    },
+    "meta": {
+     "has_next": false,
+     "has_prev": false,
+     "page": 1,
+     "pages": 1,
+     "per_page": 5,
+     "total": 1
+    },
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/subscriptions/?per_page=50": {
+   "body": {
+    "data": {
+     "items": [
+      {
+       "allowed_actions": {
+        "cancel": {
+         "allowed": true,
+         "block_reason": null,
+         "cancel_lines": [],
+         "coins_line": "Your AquaCoins stay with you.",
+         "confirm_label": "Cancel subscription",
+         "confirm_text": "We won't place any more automatic orders.",
+         "keep_label": "Keep subscription",
+         "kept_lines": [],
+         "kept_orders": [],
+         "label": "Cancel subscription",
+         "will_cancel_orders": []
+        },
+        "edit": {
+         "allowed": true,
+         "block_reason": null
+        },
+        "expected_state": "562473df5f236688",
+        "pause": {
+         "allowed": true,
+         "block_reason": null,
+         "cancel_lines": [],
+         "confirm_label": "Pause subscription",
+         "confirm_text": "Pause deliveries? We won't place new orders until you resume.",
+         "keep_label": "Keep delivering",
+         "kept_lines": [],
+         "kept_orders": [],
+         "label": "Pause",
+         "needs_confirm": false,
+         "will_cancel_orders": []
+        },
+        "pay": {
+         "allowed": false,
+         "block_reason": "There's nothing to pay right now.",
+         "label": null
+        },
+        "remove_item": {
+         "allowed": false,
+         "block_reason": "A subscription needs at least one product. Need a break instead? Pause."
+        },
+        "resume": {
+         "allowed": false,
+         "block_reason": "This subscription isn't paused, so there's nothing to resume.",
+         "label": null
+        },
+        "skip": {
+         "allowed": true,
+         "block_reason": null,
+         "confirm_label": "Skip 5 November",
+         "confirm_text": "Skip Thursday, 5 November? Your next delivery will be Thursday, 12 November.",
+         "date": "2026-11-05",
+         "date_label": "5 November",
+         "keep_label": "Keep this delivery",
+         "kept_orders": [],
+         "label": "Skip this delivery",
+         "label_long": "Thursday, 5 November",
+         "next_date_after": "2026-11-12",
+         "next_date_after_label": "Thursday, 12 November",
+         "reasons": [
+          {
+           "code": "still_have_water",
+           "label": "I still have water"
+          },
+          {
+           "code": "away",
+           "label": "I'll be away"
+          },
+          {
+           "code": "other",
+           "label": "Other"
+          }
+         ],
+         "will_cancel_orders": []
+        }
+       },
+       "auto_renew": true,
+       "billing_amount": 15000.0,
+       "cancelled_at_label": null,
+       "created_at": "<wall-clock>",
+       "deliveries_per_month": 4.333333333333333,
+       "delivery_address_id": 1,
+       "delivery_address_label": "1 Test St, Tashkent",
+       "delivery_day_of_month": null,
+       "delivery_day_of_week": 3,
+       "delivery_time_slot": {
+        "available_days": [
+         0,
+         1,
+         2,
+         3,
+         4,
+         5,
+         6
+        ],
+        "delivery_fee": "0.00",
+        "end_time": "12:00",
+        "id": 1,
+        "is_active": true,
+        "is_premium": false,
+        "max_orders": 50,
+        "name": "Morning",
+        "premium_fee": "0.00",
+        "start_time": "10:00",
+        "time_range": "10:00-12:00"
+       },
+       "delivery_time_slot_id": 1,
+       "description": "",
+       "discount_percentage": 0.0,
+       "end_date": null,
+       "estimated_per_delivery": 0.0,
+       "estimated_per_delivery_label": "0 so'm",
+       "estimated_per_month": 0.0,
+       "estimated_per_month_label": "0 so'm",
+       "failed_billing_attempts": 0,
+       "frequency": "weekly",
+       "id": 1,
+       "items_availability": "none",
+       "kept_order_note": null,
+       "last_delivery_date": null,
+       "name": "Spring water",
+       "next_delivery_date": "2026-11-05",
+       "pause_end_date": null,
+       "pause_start_date": null,
+       "paused_at": null,
+       "paused_at_label": null,
+       "payment_method": "click",
+       "payment_method_label": "Click",
+       "payment_method_warning": null,
+       "schedule_sentence": "Every Thursday, 10:00–12:00",
+       "start_date": "2026-10-26T05:00:00",
+       "status": "active",
+       "subscription_items": [
+        {
+         "available": false,
+         "id": 1,
+         "line_total_label": "15 000 so'm",
+         "min_order_quantity": 1,
+         "product": {
+          "barcode": null,
+          "base_price": 5000.0,
+          "category": {
+           "created_at": "<wall-clock>",
+           "description": "Water products",
+           "icon_url": null,
+           "id": 1,
+           "is_active": true,
+           "name": "Water",
+           "sort_order": 0,
+           "updated_at": "<wall-clock>"
+          },
+          "category_id": 1,
+          "created_at": "<wall-clock>",
+          "current_price": 5000.0,
+          "description": "Five litres",
+          "discount_price": null,
+          "expire_days": 180,
+          "fiscal_profile": null,
+          "id": 2,
+          "images": [],
+          "in_sales_stock_check": false,
+          "ingredients": null,
+          "is_active": false,
+          "is_featured": false,
+          "is_returnable_bottle": false,
+          "is_tryout_eligible": true,
+          "max_stock_level": 500,
+          "meta_description": null,
+          "meta_title": null,
+          "min_order_quantity": 1,
+          "min_stock_level": 1,
+          "name": "Spring water 5L",
+          "nutrition_facts": {},
+          "requires_prescription": false,
+          "returnable_bottles_per_unit": 0.0,
+          "short_description": null,
+          "size": "5L",
+          "sku": null,
+          "slug": null,
+          "stock_caps_purchase": true,
+          "stock_quantity": 100,
+          "track_inventory": true,
+          "tracks_returnable_bottles": false,
+          "updated_at": "<wall-clock>",
+          "volume": 5.0,
+          "volume_unit": "L",
+          "weight": null,
+          "weight_unit": "kg"
+         },
+         "product_id": 2,
+         "product_name": "Spring water 5L",
+         "quantity": 3,
+         "subscription_id": 1,
+         "total_price": 15000.0,
+         "unit_price": 5000.0,
+         "unit_price_label": "5 000 so'm"
+        }
+       ],
+       "summary_sentence": "Every Thursday, 10:00–12:00. Since 26 October.",
+       "time_kind": "window",
+       "time_label": "10:00–12:00",
+       "total_amount_billed": 0.0,
+       "upcoming_dates": [
+        {
+         "date": "2026-10-29",
+         "label_long": "Thursday, 29 October",
+         "label_short": "Thu 29 Oct",
+         "state": "skipped"
+        },
+        {
+         "date": "2026-11-05",
+         "label_long": "Thursday, 5 November",
+         "label_short": "Thu 5 Nov",
+         "state": "planned"
+        },
+        {
+         "date": "2026-11-12",
+         "label_long": "Thursday, 12 November",
+         "label_short": "Thu 12 Nov",
+         "state": "planned"
+        },
+        {
+         "date": "2026-11-19",
+         "label_long": "Thursday, 19 November",
+         "label_short": "Thu 19 Nov",
+         "state": "planned"
+        }
+       ],
+       "upcoming_delivery": {
+        "amount_label": null,
+        "can_pay": false,
+        "date": "2026-11-05",
+        "days_away_label": "in 8 days",
+        "kept_line": null,
+        "label_long": "Thursday, 5 November",
+        "label_short": "Thu 5 Nov",
+        "order_id": null,
+        "order_number": null,
+        "pay_deadline_label": null,
+        "payment_method_label": "Click",
+        "payment_note": null,
+        "payment_status": null,
+        "state": "planned",
+        "time_kind": "window",
+        "time_label": "10:00–12:00",
+        "will_place_on_label": "Wednesday, 4 November",
+        "window_end": "12:00",
+        "window_label": "10:00–12:00",
+        "window_start": "10:00"
+       },
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ]
+    },
+    "meta": {
+     "has_next": false,
+     "has_prev": false,
+     "page": 1,
+     "pages": 1,
+     "per_page": 50,
+     "subscriptions_key": "items",
+     "total": 1
+    },
+    "success": true
+   },
+   "status": 200
+  }
+ }
+}

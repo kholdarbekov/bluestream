@@ -282,8 +282,10 @@ def make_celery(app=None):
             "schedule": _reorder_reminder_crontab(app.config),
             "options": {"time_limit": 1800},
         },
-        # Cancel orders left PENDING and unpaid for 24h. Hourly, offset from
-        # the :00 tasks. See the design spec §5.2 — this task had never run.
+        # Cancel unpaid online orders past their payment deadline: 24h from when they became
+        # payable on Click, while pending, confirmed or preparing (spec 2026-10-27 §4.4); never
+        # a cash order, one holding money or one the driver has. Hourly, offset from the :00
+        # tasks. See the design spec §5.2 — this task had never run.
         "cancel-abandoned-orders": {
             "task": "business_app.tasks.order_tasks.cancel_abandoned_orders",
             "schedule": crontab(minute=15),
@@ -315,11 +317,6 @@ def make_celery(app=None):
         "optimize-delivery-routes": {
             "task": "business_app.tasks.delivery_tasks.optimize_daily_delivery_routes",
             "schedule": crontab(hour=7, minute=0),  # Daily at 7 AM
-        },
-        # Process failed payments retry
-        "retry-failed-payments": {
-            "task": "business_app.tasks.payment_tasks.retry_failed_payments",
-            "schedule": crontab(hour=12, minute=0),  # Daily at noon
         },
         # Delete PaymentTransaction rows older than 1 year (growth-prevention).
         # Weekly is enough since these are pure audit-trail rows, not live state.
@@ -583,7 +580,6 @@ celery.conf.task_annotations = {
     "business_app.tasks.notification_tasks.send_payment_confirmation_task": {"rate_limit": "60/m"},
     # Payment processing
     "business_app.tasks.payment_tasks.process_payment_webhook": {"rate_limit": "60/m"},
-    "business_app.tasks.payment_tasks.retry_failed_payments": {"rate_limit": "10/m"},
     # Reorder reminders: about ten sends a second per worker, well under Telegram's ~30 msg/s.
     "reminders.send_reminder": {"rate_limit": "10/s"},
 }

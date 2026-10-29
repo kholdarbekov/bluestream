@@ -5,7 +5,6 @@ import asyncio
 import html
 import logging
 import re
-from datetime import datetime, timezone
 from functools import partial
 from typing import Dict, Any, List
 from telegram import Update, constants
@@ -15,8 +14,8 @@ from telegram.helpers import escape_markdown
 from address_text import address_block_markdown_v2, address_lines
 from i18n import i18n
 from keyboards import (
-    OrderKeyboards, MenuKeyboards, ProfileKeyboards, ORDERS_PAGE_PATTERN,
-    customer_may_pay, customer_may_cancel,
+    OrderKeyboards, ProfileKeyboards, ORDERS_PAGE_PATTERN,
+    parse_order_remove_callback, published_cancel, published_pay,
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
@@ -77,7 +76,8 @@ _PAYABLE_ICONS = {
     'payme': '💳',
 }
 
-# The customer's own cancel is refused with a `reason_code` (F5). The backend's
+# The customer's own cancel is refused with a `reason_code` (F5), and the order
+# publishes the same code as `customer_actions.cancel.refusal`. The backend's
 # `message` is the WEB wording, which sends the customer to the bot link. Inside
 # the bot, each code gets its own chat copy instead, pointing to this chat and
 # never to a phone. A code missing here (a newer backend) falls back to `message`.
@@ -89,43 +89,13 @@ _CANCEL_REFUSED_KEYS = {
 }
 
 
-def _cancel_refusal_code(response) -> str | None:
-    """The `reason_code` a refused customer cancel carries, or None when it has none.
-
-    DEPTH MATTERS: the route answers through `error_response(..., data={...})`,
-    so the code sits at `data.reason_code` of the body, and `_make_request` hands
-    the whole error body back as `APIResponse.data`.
-    """
-    body = getattr(response, 'data', None)
-    detail = body.get('data') if isinstance(body, dict) else None
-    reason_code = detail.get('reason_code') if isinstance(detail, dict) else None
-    return reason_code if isinstance(reason_code, str) and reason_code else None
-
-
-def _cancel_confirmation_callback(order_id: int, decision: str) -> str:
-    """Callback data for one button of the cancel-confirmation card.
-
-    The order id rides on the CALLBACK, not in ``context.user_data``: the
-    Application is built with no ``persistence``, so bot memory is empty after
-    every deploy. A Yes/No card that outlived a restart used to become a dead
-    button — the confirm handler found no id, answered the tap with nothing at
-    all, and left a live-looking card on screen that behaved identically
-    forever.
-
-    ``^cancel_order_\\d+`` (telegram_bot/bot.py) claims this data before the
-    older ``^cancel_order_confirm_(yes|no)$`` handlers can see it, which is why
-    :meth:`OrderHandlers.cancel_order` dispatches the decision itself.
-    """
-    return f"cancel_order_{order_id}_confirm_{decision}"
-
-
 def _cancelling_order_id(query_data) -> int | None:
     """The order id carried by a cancel/confirm callback; ``None`` when absent.
 
-    Absent means a card rendered by a release older than this one (bare
-    ``cancel_order_confirm_yes``). Tapping one of those must TELL the customer,
-    never fall through in silence. ``0`` is treated as absent — it is not a
-    real order id.
+    Absent means a card rendered by a release older than the one that put the
+    id on the callback (bare ``cancel_order_confirm_yes``). Tapping one of
+    those must TELL the customer, never fall through in silence. ``0`` is
+    treated as absent — it is not a real order id.
     """
     for part in str(query_data or '').split('_'):
         if part.isdigit() and int(part):
@@ -586,12 +556,19 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="orders_menu")
 
-    async def order_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: int | None = None):
+    async def order_details(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: int | None = None,
+        *, deep_link: bool = False,
+    ):
         """Show order details.
 
         ``order_id`` may be passed explicitly (e.g. when re-dispatched from
         another handler); otherwise it is parsed from the callback data. This
         avoids mutating the immutable ``CallbackQuery.data`` to re-route.
+
+        ``deep_link`` is a `/start order_<id>` link (spec 2026-10-27 §16 M5): the
+        screen goes out as a new message, and an order this account does not own
+        (404) is answered "not found" with the main menu.
         """
         try:
             query = update.callback_query
@@ -612,6 +589,12 @@ class OrderHandlers(BaseHandler):
 
                 response = await client.get_order(user_token, order_id)
                 if not response.success:
+                    if deep_link and response.status_code == 404:
+                        await send_menu_keyboard(
+                            context.bot, update.effective_chat.id, user_id,
+                            i18n.get('telegram.deep_link.not_found', language), language,
+                        )
+                        return
                     await self._handle_api_error(update, response.error, language)
                     return
 
@@ -652,6 +635,13 @@ class OrderHandlers(BaseHandler):
                     name = next((i.get('product_name', unknown_text) for i in items if i.get('product_id') == pid), unknown_text)
                     details_text += f"• 🎁 {name} x{qty} — {free_suffix}\n"
 
+            # Pay and the removal are the backend's published answers; the bot checks no status itself.
+            pay = published_pay(order)
+            cancel = published_cancel(order)
+            if pay and pay.get('deadline_label'):
+                # The backend's finished sentence ("Pay by 09:00 tomorrow."); the bot adds no words.
+                details_text += f"\n⏳ {pay['deadline_label']}"
+
             details_text = escape_markdown(details_text, version=2)
 
             # Add delivery info if available
@@ -663,19 +653,13 @@ class OrderHandlers(BaseHandler):
                     f"{address_block_markdown_v2(delivery_address.get('title') or unknown_text, delivery_address.get('full_address'))}"
                 )
 
-            # Payability is the BACKEND's answer (`payment_info.is_payable`),
-            # not a second reading of the status string — see `customer_may_pay`.
             keyboard = OrderKeyboards.order_details(
-                order_id,
-                order.get('status', ''),
-                language,
-                may_pay=customer_may_pay(order),
-                may_cancel=customer_may_cancel(order),
+                order_id, order.get('status', ''), language, pay=pay, cancel=cancel,
             )
 
             logger.info(f"order_details handler: details_text after escaping: {details_text}")
-            await self._edit_or_replace_callback_message(
-                query,
+            await self._show(
+                update,
                 details_text,
                 reply_markup=keyboard,
                 parse_mode=constants.ParseMode.MARKDOWN_V2,
@@ -688,21 +672,28 @@ class OrderHandlers(BaseHandler):
             await self._handle_error(update, exc=e, operation="order_details")
 
     async def cancel_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Ask the customer to confirm cancelling an order — and route the answer.
+        """An order's removal: draw its confirmation, or route the answer (spec 2026-10-27 §5.3).
 
-        Both buttons on the card this renders carry the order id
-        (``cancel_order_{id}_confirm_{yes|no}``, see
-        :func:`_cancel_confirmation_callback`), which the registered
-        ``^cancel_order_\\d+`` pattern claims before the
-        ``^cancel_order_confirm_(yes|no)$`` handlers ever see it. So the
-        decision is dispatched here rather than by the wiring.
+        Every button the flow draws carries the order id (it has to survive a
+        redeploy), and ``^cancel_order_\\d+`` (telegram_bot/bot.py) claims them
+        all, so the decision is dispatched here rather than by the wiring:
+
+        * a write (``…_confirm_yes_<via>``, ``…_skip_<reason|none>``) goes to
+          :meth:`remove_order`;
+        * ``…_confirm_no`` keeps the order and goes back to it;
+        * the bare ``cancel_order_<id>``, and a legacy ``…_confirm_yes`` that
+          named no ``via``, re-read the order and draw its confirmation from the
+          published removal. Nothing is written without the ``via`` the screen
+          showed.
         """
         try:
             query = update.callback_query
             data = query.data or ''
 
-            if 'confirm_yes' in data:
-                await self.cancel_order_confirm_yes(update, context)
+            removal = parse_order_remove_callback(data)
+            if removal is not None:
+                order_id, via, reason_code = removal
+                await self.remove_order(update, context, order_id, via, reason_code)
                 return
             if 'confirm_no' in data:
                 await self.cancel_order_confirm_no(update, context)
@@ -710,60 +701,7 @@ class OrderHandlers(BaseHandler):
 
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-
-            # Extract order ID from callback data (format: cancel_order_123)
-            order_id = int(data.split('_')[2])
-
-            confirm_keyboard = MenuKeyboards.yes_no_buttons(
-                language,
-                yes_callback=_cancel_confirmation_callback(order_id, 'yes'),
-                no_callback=_cancel_confirmation_callback(order_id, 'no'),
-            )
-
-            await self._edit_or_replace_callback_message(
-                query,
-                i18n.get('telegram.orders.cancel_confirm', language),
-                reply_markup=confirm_keyboard,
-            )
-            await self._ack(query)
-
-        except Exception as e:
-            await self._handle_error(update, exc=e, operation="cancel_order")
-
-    async def _cancel_confirmation_expired(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str
-    ) -> None:
-        """A Yes/No tap whose callback carries no order id: say so, then move on.
-
-        Only a card rendered by a release older than
-        :func:`_cancel_confirmation_callback` can reach this. The old code
-        answered such a tap with an empty ``query.answer()`` and returned, so
-        the card stayed on screen looking live and every later tap did exactly
-        as little — the customer had no way to tell it was broken. Re-rendering
-        their orders replaces the dead card with a screen whose buttons work.
-        """
-        await self._ack(update.callback_query, i18n.get('telegram.error.generic', language))
-        logger.info(
-            "Cancel confirmation carried no order id (card predates this release) "
-            "for user %s; returning them to the orders list",
-            getattr(update.effective_user, 'id', None),
-        )
-        await self.orders_menu(update, context)
-
-    async def cancel_order_confirm_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Process confirmed cancellation.
-
-        The order id comes off the callback data — the only place that survives
-        a redeploy. ``context.user_data`` deliberately holds nothing here: bot
-        memory is wiped by every restart, and a second copy of the id would just
-        be a second answer to the same question.
-        """
-        try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            order_id = _cancelling_order_id(query.data)
+            order_id = _cancelling_order_id(data)
             if not order_id:
                 await self._cancel_confirmation_expired(update, context, language)
                 return
@@ -774,41 +712,143 @@ class OrderHandlers(BaseHandler):
                     await self._handle_auth_error(update, language)
                     return
 
-                response = await client.cancel_order(user_token, order_id)
-
-                if response.success:
-                    await self._ack(query, i18n.get('telegram.orders.cancel_success', language))
-                    # Redirect to orders list
-                    await self.orders_menu(update, context)
-                    return
-
-                reason_code = _cancel_refusal_code(response)
-                if reason_code is None:
+                response = await client.get_order(user_token, order_id)
+                if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-                # The backend refused the customer's own cancel (F5). A card drawn
-                # while the order was still theirs to cancel lands here once it has
-                # moved on: order 1277's was tapped after its delivery failed. The
-                # refusal replaces the stale Yes/No, so it stays readable and
-                # leaves nothing stale to tap again, only the Track screen's way
-                # back: to the order, whose fresh read offers no Cancel, or to the
-                # list. A code with no chat copy here (a newer backend) shows the
-                # backend's `message` the same way, never as a toast: Telegram
-                # refuses a callback answer over 200 characters, and the web
-                # wording with the bot link runs past it.
-                refused_key = _CANCEL_REFUSED_KEYS.get(reason_code)
-                text = i18n.get(refused_key, language) if refused_key else response.error
+                order = (response.data.get('data') or {}).get('order') or {}
+
+            cancel = published_cancel(order)
+            if cancel is None:
+                # The order moved on since its Cancel was drawn: say why, in this chat's words.
+                refusal = ((order.get('customer_actions') or {}).get('cancel') or {}).get('refusal')
+                refused_key = _CANCEL_REFUSED_KEYS.get(refusal, _CANCEL_REFUSED_KEYS['NOT_CANCELLABLE'])
                 await self._edit_or_replace_callback_message(
-                    query, text, reply_markup=OrderKeyboards.order_tracking(order_id, language),
+                    query, i18n.get(refused_key, language),
+                    reply_markup=OrderKeyboards.order_tracking(order_id, language),
                 )
                 await self._ack(query)
+                return
 
+            await self._edit_or_replace_callback_message(
+                query,
+                cancel.get('confirm_text') or i18n.get('telegram.orders.cancel_confirm', language),
+                reply_markup=OrderKeyboards.remove_confirmation(order_id, cancel, language),
+            )
+            await self._ack(query)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="cancel_order")
+
+    async def remove_order(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: int, via: str,
+        reason_code: str | None,
+    ) -> None:
+        """Write the removal the confirmation showed: `POST /orders/<id>/cancel` with its `via`.
+
+        200: the backend's sentence ("Skipped. Your next delivery is …"), then the
+        subscription the order belongs to, or the orders list. 409 (the screen went
+        stale): the backend's "This changed", then the order as it stands now. A
+        coded refusal replaces the confirmation with this chat's copy for it, so
+        nothing stale is left to tap.
+        """
+        try:
+            query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.cancel_order(
+                    user_token, order_id, expected_via=via, reason_code=reason_code,
+                )
+
+            if response.success:
+                body = response.data or {}
+                await self._ack(query, body.get('message'))
+                subscription_id = ((body.get('data') or {}).get('order') or {}).get('subscription_id')
+                if subscription_id:
+                    from handlers.subscriptions import subscription_handlers
+
+                    await subscription_handlers.subscription_details(
+                        update, context, subscription_id=subscription_id,
+                    )
+                else:
+                    await self.orders_menu(update, context)
+                return
+
+            if response.status_code == 409:
+                await self._ack(query, response.error, show_alert=True)
+                await self.order_details(update, context, order_id=order_id)
+                return
+
+            reason = self._response_reason_code(response)
+            if reason is None:
+                await self._handle_api_error(update, response.error, language)
+                return
+
+            # The backend refused the customer's own cancel (F5). A card drawn
+            # while the order was still theirs to cancel lands here once it has
+            # moved on: order 1277's was tapped after its delivery failed. The
+            # refusal replaces the stale confirmation, so it stays readable and
+            # leaves nothing stale to tap again, only the Track screen's way
+            # back: to the order, whose fresh read offers no Cancel, or to the
+            # list. A code with no chat copy here (a newer backend) shows the
+            # backend's `message` the same way, never as a toast: Telegram
+            # refuses a callback answer over 200 characters, and the web
+            # wording with the bot link runs past it.
+            refused_key = _CANCEL_REFUSED_KEYS.get(reason)
+            text = i18n.get(refused_key, language) if refused_key else response.error
+            await self._edit_or_replace_callback_message(
+                query, text, reply_markup=OrderKeyboards.order_tracking(order_id, language),
+            )
+            await self._ack(query)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="remove_order")
+
+    async def _cancel_confirmation_expired(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str
+    ) -> None:
+        """A Yes/No tap whose callback carries no order id: say so, then move on.
+
+        Only a card rendered by a release older than the one that put the id on
+        the callback can reach this. The old code answered such a tap with an
+        empty ``query.answer()`` and returned, so the card stayed on screen
+        looking live and every later tap did exactly as little — the customer had
+        no way to tell it was broken. Re-rendering their orders replaces the dead
+        card with a screen whose buttons work.
+        """
+        await self._ack(update.callback_query, i18n.get('telegram.error.generic', language))
+        logger.info(
+            "Cancel confirmation carried no order id (card predates this release) "
+            "for user %s; returning them to the orders list",
+            getattr(update.effective_user, 'id', None),
+        )
+        await self.orders_menu(update, context)
+
+    async def cancel_order_confirm_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """A Yes on a card from before the order id rode the callback (bare ``cancel_order_confirm_yes``).
+
+        It names no order and no ``via``, so it writes nothing: the customer is
+        told, and taken to their orders, whose Cancel draws a fresh confirmation.
+        """
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            await self._cancel_confirmation_expired(update, context, language)
         except Exception as e:
             await self._handle_error(update, exc=e, operation="cancel_order_confirm_yes")
 
     async def cancel_order_confirm_no(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Process cancelled cancellation (User clicked No)"""
+        """Keep the order (``cancel_order_<id>_confirm_no``): back to its details.
+
+        The id comes off the callback data; a card that carries none predates
+        it and is answered as expired.
+        """
         try:
             query = update.callback_query
             user_id = update.effective_user.id
@@ -1417,14 +1457,21 @@ class OrderHandlers(BaseHandler):
                         # Stash the cancelled order_id so the cash-rescue button
                         # can revive THIS order rather than rebuilding from cart.
                         # Backend returns it under data.cancelled_order_id.
-                        try:
-                            cancelled_order_id = (response.data or {}).get('data', {}).get('cancelled_order_id')
-                        except AttributeError:
-                            cancelled_order_id = None
+                        outage = (response.data or {}).get('data')
+                        outage = outage if isinstance(outage, dict) else {}
+                        cancelled_order_id = outage.get('cancelled_order_id')
                         if cancelled_order_id:
                             context.user_data['psp_failed_order_id'] = int(cancelled_order_id)
-                        error_text = i18n.get('telegram.orders.asl_belgisi_error_message', language)
-                        keyboard = OrderKeyboards.asl_belgisi_error(language)
+                        # One published answer (spec 2026-10-27 D8): the backend chose the sentence,
+                        # and a customer the cash-debt limit keeps off cash is offered no cash rescue.
+                        error_text = (
+                            (response.data or {}).get('message')
+                            or i18n.get('telegram.orders.asl_belgisi_error_message', language)
+                        )
+                        keyboard = OrderKeyboards.asl_belgisi_error(
+                            language,
+                            cod_restricted=bool((outage.get('payment_restrictions') or {}).get('cod_restricted')),
+                        )
                         await self._edit_or_replace_callback_message(
                             query, error_text, reply_markup=keyboard,
                         )
@@ -1453,135 +1500,71 @@ class OrderHandlers(BaseHandler):
             # generic error with Confirm still live, and paid for two orders.
             context.user_data.clear()
 
-            # For card/click: show "preparing" message and wait until payment_ready_at
-            # so the Tax Committee utilisation is at least PRE_PAYMENT_UTILISATION_WAIT_SECONDS
-            # before the user sees the payment link.
+            # For card/click: show "preparing" message and wait the seconds the backend
+            # counts (`payment_ready_in_seconds`) so the Tax Committee utilisation is at
+            # least PRE_PAYMENT_UTILISATION_WAIT_SECONDS old before the user sees the
+            # payment link. The bot never works the wait out from an instant or its own
+            # clock.
             #
             # When the proactive marking-code pool covers the order the backend
-            # returns payment_ready_at == now → remaining ≤ 0 → no preparing
-            # message is shown and the link is delivered immediately via the
-            # original edit-in-place path (no need for the notification UX
-            # because there was nothing to wait for).
+            # answers 0 → no preparing message is shown and the link is delivered
+            # immediately via the original edit-in-place path (no need for the
+            # notification UX because there was nothing to wait for).
             needed_wait = False
             if payment_method in ['card', 'click']:
-                payment_ready_at_str = response_payload.get('payment_ready_at')
-                if payment_ready_at_str:
-                    payment_ready_at = datetime.fromisoformat(payment_ready_at_str.replace('Z', '+00:00'))
-                    remaining = (payment_ready_at - datetime.now(timezone.utc)).total_seconds()
-                    order_number = order.get('order_number')
-
-                    # Three distinct cases — log each at the right level so the
-                    # ops dashboard isn't drowned in INFO noise from the fast
-                    # path and so a real clock-skew incident actually surfaces:
-                    #
-                    #   1. remaining > 0          — slow path, we'll actually wait
-                    #   2. -CLOCK_SKEW_WARN_THRESHOLD_SECONDS <= remaining <= 0
-                    #                              — fast path (proactive pool
-                    #                                covered it), normal jitter
-                    #   3. remaining < -threshold — clock skew between backend
-                    #                                and bot worth investigating
-                    CLOCK_SKEW_WARN_THRESHOLD_SECONDS = 5.0
-
-                    if remaining > 0:
-                        needed_wait = True
-                        logger.info(
-                            "Payment for order %s ready at %s, waiting %.2fs before showing link to user %s",
-                            order_number, payment_ready_at_str, remaining, user_id,
-                        )
-                        # Values go INTO i18n.get: it renders the template and
-                        # never hands one back to format later (see
-                        # shared/i18n_rendering.py).
-                        preparing_text = i18n.get(
-                            'telegram.orders.preparing_payment_message', language,
-                            order_number=order.get('order_number', str(order['id'])),
-                        )
-                        await self._edit_or_replace_callback_message(query, preparing_text)
-                        await asyncio.sleep(remaining)
-                    elif remaining < -CLOCK_SKEW_WARN_THRESHOLD_SECONDS:
-                        # Negative wait of more than a few seconds isn't normal
-                        # PSP-coverage timing — it points to backend/bot clock
-                        # drift (NTP failure, container time skew, etc). Fire a
-                        # WARN so it's visible without blocking the order flow.
-                        logger.warning(
-                            "Clock skew suspected: payment_ready_at=%s is %.2fs in the past "
-                            "for order %s (user %s). Check NTP on backend and bot containers.",
-                            payment_ready_at_str, -remaining, order_number, user_id,
-                        )
-                    else:
-                        # Fast path: proactive marking-code pool covered the
-                        # order, payment_ready_at ≈ now, no wait needed. DEBUG
-                        # so it doesn't drown the log under normal traffic.
-                        logger.debug(
-                            "Payment for order %s ready immediately (proactive pool path, remaining=%.2fs) for user %s",
-                            order_number, remaining, user_id,
-                        )
+                wait_seconds = response_payload.get('payment_ready_in_seconds') or 0
+                needed_wait = wait_seconds > 0
+                if needed_wait:
+                    logger.info(
+                        "Payment for order %s ready in %ss, waiting before showing link to user %s",
+                        order.get('order_number'), wait_seconds, user_id,
+                    )
+                    # Values go INTO i18n.get: it renders the template and
+                    # never hands one back to format later (see
+                    # shared/i18n_rendering.py).
+                    preparing_text = i18n.get(
+                        'telegram.orders.preparing_payment_message', language,
+                        order_number=order.get('order_number', str(order['id'])),
+                    )
+                    await self._edit_or_replace_callback_message(query, preparing_text)
+                    await asyncio.sleep(wait_seconds)
 
             # Handle different payment methods
             if payment_method in ['payme', 'card', 'click']:
-                provider_method = 'payme' if payment_method == 'payme' else 'click'
                 # Redirect payment flow
                 # Don't clear cart yet - wait for successful payment
                 from handlers.payments import payment_handlers
 
-                # Build order data with items for invoice
-                order_for_payment = {
-                    'id': order['id'],
-                    'order_number': order.get('order_number', str(order['id'])),
-                    'total_amount': order['total_amount'],
-                    'order_items': order.get('order_items', []),
-                    # The link-failure screen this payload also feeds
-                    # (`show_payment_link_failed`) decides whether to offer
-                    # Retry / Switch method from `customer_may_pay`, which reads
-                    # the order's payability. Dropping these three here left
-                    # that screen with nothing to read and silently withheld
-                    # both recovery buttons on the one screen whose job is
-                    # recovery.
-                    'status': order.get('status'),
-                    'is_paid': order.get('is_paid', False),
-                    'payment_info': order.get('payment_info'),
-                    # And Cancel from `customer_may_cancel`, which reads only the
-                    # backend's `can_customer_cancel` off the POST /orders
-                    # response. Without it Cancel vanishes here: a missing field
-                    # fails closed.
-                    'can_customer_cancel': order.get('can_customer_cancel'),
-                }
-
-                # Send external payment link.
-                # Only use the "new message + notification" UX when we actually
-                # made the user wait — i.e. the slow path. When the proactive
-                # pool covered the order, fall back to edit-in-place because
-                # there's no preparing message to replace.
-                invoice_sent = await payment_handlers.send_payment_link(
-                    update,
-                    context,
-                    order_for_payment,
-                    payment_method=provider_method,
-                    send_as_new_message=(needed_wait and provider_method == 'click'),
-                )
-
-                if not invoice_sent:
-                    # The order EXISTS and only the link is missing, so the
-                    # screen has to say exactly that and NAME the order — a
-                    # generic "payment failed" reads as "nothing happened" and
-                    # the customer's next move is to order again.
-                    #
-                    # `send_payment_link` deliberately renders NOTHING on
-                    # failure (see its docstring): it only knows the PSP said
-                    # no, this call site knows the order stands. The screen
-                    # itself lives in `show_payment_link_failed` so the retry
-                    # call site draws the identical one.
-                    await payment_handlers.show_payment_link_failed(
-                        update, context, order_for_payment, language,
+                # The link `POST /orders` minted (spec 2026-10-27 §4.2): the bot mints no second one.
+                payment_url = response_payload.get('payment_url')
+                if payment_url:
+                    # Only use the "new message + notification" UX when we actually
+                    # made the user wait. When the proactive pool covered the order,
+                    # edit in place because there's no preparing message to replace.
+                    await payment_handlers.show_payment_link(
+                        update,
+                        context,
+                        order_id=order['id'],
+                        order_number=order.get('order_number') or str(order['id']),
+                        amount=order.get('total_amount', 0),
+                        payment_url=payment_url,
+                        send_as_new_message=needed_wait,
                     )
-                    await self._ack(query)
-                    logger.warning(
-                        "Order %s placed for user %s but no %s payment link could be created; "
-                        "offered retry on the same order",
-                        order.get('order_number', order['id']), user_id, provider_method,
-                    )
+                    logger.info(f"Payment link sent for order {order['id']} to user {user_id}")
                     return
 
-                logger.info(f"{provider_method} payment link sent for order {order['id']} to user {user_id}")
+                # The order EXISTS and only the link is missing, so the screen
+                # has to say exactly that and NAME the order — a generic "payment
+                # failed" reads as "nothing happened" and the customer's next move
+                # is to order again. Its Pay and Cancel are the created order's
+                # published answers.
+                await payment_handlers.show_payment_link_failed(update, context, order, language)
+                await self._ack(query)
+                logger.warning(
+                    "Order %s placed for user %s but POST /orders returned no payment link; "
+                    "offered its published Pay",
+                    order.get('order_number', order['id']), user_id,
+                )
                 return
 
             # Cash or other payment methods - process immediately. Confirm was
@@ -1640,8 +1623,10 @@ class OrderHandlers(BaseHandler):
         Triggered when the user taps "Pay with cash" on the Asl belgisi error
         screen. The bot stashed the cancelled order_id on the 503 response;
         here we call the dedicated rescue endpoint which creates a new cash
-        order from the cancelled order's items, bypassing the COD active-
-        debt cap.
+        order from the cancelled order's items. The backend applies the COD
+        active-debt cap there as at checkout, and the 503's
+        `payment_restrictions.cod_restricted` keeps the button off the screen
+        of a customer it would refuse.
 
         If the stash is missing (e.g. the user re-entered from a stale
         screen) we fall back to recreating from cart via confirm_order. That

@@ -11,8 +11,8 @@ credit, and the order was delivered unpaid and un-fiscalized.
 
 import pytest
 
-from business_app.services.payment_service import _RAIL_LOCKED_ORDER_STATUSES
 from business_app.utils.payment_projection import (
+    DEAD_ORDER_STATUSES,
     LIVE_ORDER_STATUSES,
     order_is_live,
     order_is_live_and_unpaid,
@@ -53,11 +53,10 @@ def test_raw_string_status_is_tolerated():
     assert order_is_live_and_unpaid(_Order("delivered")) is False
 
 
-def test_live_and_rail_locked_are_one_partition_not_two_lists():
-    """The complement must be DERIVED. Two hand-maintained halves drift the
-    moment a status is added to the enum."""
-    assert LIVE_ORDER_STATUSES.isdisjoint(_RAIL_LOCKED_ORDER_STATUSES)
-    assert LIVE_ORDER_STATUSES | _RAIL_LOCKED_ORDER_STATUSES == set(OrderStatus)
+def test_a_dead_order_has_left_the_live_statuses():
+    """Every dead status lies past the door, and the door is not all of it: DELIVERED is neither live nor dead
+    (policy case B), so the two sets must never be read as one partition."""
+    assert DEAD_ORDER_STATUSES < frozenset(OrderStatus) - LIVE_ORDER_STATUSES
 
 
 def test_pending_is_not_the_only_live_status():

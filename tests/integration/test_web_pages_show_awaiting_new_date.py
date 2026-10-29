@@ -170,8 +170,14 @@ def _stepper(soup):
     return steps
 
 
+def _island(soup):
+    return json.loads(soup.select_one("script#page-data").string)
+
+
 def _cancel_drawn(soup):
-    return bool(soup.select('[data-action="cancel-order"]'))
+    """The tracking page draws Cancel with order-actions.js, from the `order.customer_actions.cancel` its island
+    carries (spec 2026-10-27 §5.3): the same answer GET /orders/<id> publishes. Drawn means published allowed."""
+    return _island(soup)["order"]["customer_actions"]["cancel"]["allowed"]
 
 
 @pytest.mark.parametrize(
@@ -268,10 +274,15 @@ def test_the_tracking_page_draws_cancel_only_when_the_backend_allows_it(
         is_paid=case.is_paid,
     )
 
-    published = _published(client, auth_headers, order.id)["can_customer_cancel"]
-    drawn = _cancel_drawn(_page(client, TRACKING_URL.format(order_id=order.id), auth_headers))
+    published = _published(client, auth_headers, order.id)
+    soup = _page(client, TRACKING_URL.format(order_id=order.id), auth_headers)
+    drawn = _cancel_drawn(soup)
 
-    assert (drawn, published) == (case.customer_may_cancel, case.customer_may_cancel)
+    assert (drawn, published["can_customer_cancel"]) == (case.customer_may_cancel, case.customer_may_cancel)
+    # The page's island is the API's answer, not a second one. A one-off order is cancelled on its own
+    # (via "cancel"); a subscription's order is covered in tests/integration/test_order_skip_cancel_decline.py.
+    assert _island(soup)["order"] == {"id": order.id, "customer_actions": published["customer_actions"]}
+    assert published["customer_actions"]["cancel"]["via"] == ("cancel" if case.customer_may_cancel else None)
 
 
 class WebCancel(NamedTuple):
@@ -280,13 +291,10 @@ class WebCancel(NamedTuple):
     history_note: Optional[str]  # what the cancel's history row keeps
 
 
-# What the storefront's Cancel buttons send once Step 9 is in. All three pages go through
-# base.js `apiRequest`.
+# What the storefront's Cancel buttons send for a one-off order (spec 2026-10-27 §5.2): the `expected_via` the
+# page showed, and no free-text reason. All three pages go through base.js `apiRequest`.
 WEB_CANCELS = [
-    # order-tracking.js sends the reason the customer typed into its prompt.
-    WebCancel("tracking-page", {"reason": "Ordered twice by mistake"}, "Ordered twice by mistake"),
-    # orders.js and order-detail-modal.js send no body.
-    WebCancel("orders-page-and-modal", None, None),
+    WebCancel("every-page", {"expected_via": "cancel"}, None),
 ]
 
 
@@ -310,8 +318,8 @@ def _cancel_from_the_web(client, token, order_id, body):
 def test_a_web_cancel_reaches_the_backend_and_ends_the_order(
     client, db, auth_token, sample_user, user_address, delivery_driver, web
 ):
-    """The request Step 9 gives the tracking page, and the one the order list and the modal
-    already send, authenticate by cookie and carry what the customer typed."""
+    """The request the tracking page, the order list and the modal send authenticates by cookie and
+    carries the `expected_via` the page showed."""
     order = _seed_order(db, sample_user, user_address, delivery_driver, f"web-cancel-{web.name}", OS.PENDING, None)
 
     response = _cancel_from_the_web(client, auth_token, order.id, web.body)

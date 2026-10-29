@@ -3,13 +3,18 @@ Order Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for order-related data serialization
 """
 
+import copy
 from datetime import datetime, date
-from typing import Dict, Any, Optional, List
+from decimal import Decimal
+from typing import Dict, Any, Literal, Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from pydantic.alias_generators import to_camel
+from pydantic_core import PydanticCustomError
 
+from business_app.services.customer_links import PAY_CHANNELS
 from business_app.utils.delivery_window import format_delivery_window
+from business_app.utils.helpers import get_current_language
 from business_app.utils.payment_projection import (
     get_payment_projection,
     net_open_receivable_amount,
@@ -18,6 +23,7 @@ from business_app.utils.payment_projection import (
 )
 from business_app.models.order import Order, OrderItem, is_free_reward_item
 from business_app.utils.constants import SELF_SERVICE_ORDER_SOURCES
+from business_app.serializers.subscription_serializers import SkipReasonFields
 from business_app.serializers.types import MoneyFloat
 
 
@@ -188,6 +194,32 @@ class UpdateOrderRequest(BaseModel):
     delivery_window_end: Optional[str] = None
 
 
+class RetryPaymentRequest(BaseModel):
+    """`POST /orders/<id>/retry-payment`: where Pay was tapped, and the amount that screen showed (the order's
+    published `customer_actions.pay.expected_amount`, spec 2026-10-27 §4.2). A stray key is a 400, and so is an
+    amount no order total can hold (`orders.total_amount` is NUMERIC(10, 2))."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: Literal[PAY_CHANNELS]
+    expected_amount: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+
+
+class CustomerCancelOrderRequest(SkipReasonFields):
+    """`POST /orders/<id>/cancel`: the removal the screen showed (`customer_actions.cancel.via`, spec 2026-10-27
+    §5.2), and for a skip only, its optional reason. A missing `expected_via` is accepted here and answered 409 by
+    the write, like a stale one. A stray key (a free-text `reason` included) is a 400."""
+
+    expected_via: Optional[Literal["skip", "cancel", "decline"]] = None
+
+    @model_validator(mode="after")
+    def _reasons_only_for_a_skip(self):
+        if self.expected_via != "skip" and (self.reason_code is not None or self.reason_text is not None):
+            # A custom error carries no exception object, so the 400 body stays JSON.
+            raise PydanticCustomError("reason_needs_skip", "a reason goes with expected_via 'skip' only")
+        return self
+
+
 class OrderFeedbackRequest(BaseModel):
     """Order feedback request schema"""
 
@@ -316,6 +348,8 @@ __all__ = [
     "OrderPaymentSchema",
     "CreateOrderRequest",
     "UpdateOrderRequest",
+    "RetryPaymentRequest",
+    "CustomerCancelOrderRequest",
     "OrderFeedbackRequest",
     "OrderStatisticsSchema",
     "CartEstimateRequest",
@@ -342,10 +376,12 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
     """
     # Lazy, like the service imports in admin_serializers: keeps this module
     # importable before the service layer is wired up.
+    from business_app.services.customer_order_actions import CLOSED_CUSTOMER_ACTIONS, customer_actions
     from business_app.services.order_schedule_service import OrderScheduleService
-    from business_app.services.order_service import OrderService
+    from business_app.services.order_service import LEGACY_CUSTOMER_CANCEL_VIA, OrderService
 
     try:
+        cancel_via = OrderService.customer_cancel_via(order)
         order_data = {
             "id": order.id,
             "order_number": order.order_number,
@@ -375,9 +411,17 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "updated_at": order.updated_at.isoformat() if order.updated_at else None,
             "confirmed_at": order.confirmed_at.isoformat() if getattr(order, "confirmed_at", None) else None,
             "delivered_at": order.delivered_at.isoformat() if getattr(order, "delivered_at", None) else None,
-            # F5: the one answer to "may the customer cancel this themselves". The bot
-            # and the web draw Cancel from it and keep no copy of the rule.
-            "can_customer_cancel": OrderService.customer_cancel_block_code(order) is None,
+            # F5: the one answer to "may the customer cancel this themselves", which
+            # POST /orders/<id>/cancel enforces.
+            "can_customer_cancel": cancel_via is not None,
+            # Retired by `customer_actions.cancel` (spec 2026-10-27 §5.1), kept in its old values until the
+            # clients stop reading it: "subscription" for a skip, "order" for a cancel or a decline, or None.
+            "customer_cancel_via": LEGACY_CUSTOMER_CANCEL_VIA.get(cancel_via),
+            # What the customer may do with the order, by its one rule, with the finished words (spec
+            # 2026-10-27 §4.2, §5.1): `pay`, which POST /orders/<id>/retry-payment enforces, and `cancel`
+            # and `confirm`, which POST /orders/<id>/cancel and /agent-confirmation enforce. Clients render it.
+            "customer_actions": customer_actions(order, language=get_current_language()),
+            "subscription_id": getattr(order, "subscription_id", None),
         }
 
         if include_items and hasattr(order, "order_items"):
@@ -411,6 +455,8 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             # Fail closed. Never re-run the predicate here: it reads relationships, and a
             # second raise would turn this degraded answer into a 500.
             "can_customer_cancel": False,
+            "customer_cancel_via": None,
+            "customer_actions": copy.deepcopy(CLOSED_CUSTOMER_ACTIONS),
             "error": f"Partial serialization due to: {str(e)}",
         }
 

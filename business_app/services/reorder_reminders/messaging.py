@@ -41,13 +41,14 @@ from business_app import db, redis_client
 from business_app.models.order import OrderItem
 from business_app.models.reorder_reminder import ReorderReminderEpisode, ReorderReminderEvent
 from business_app.models.user import User
+from business_app.services.customer_links import website_url
 from business_app.services.notification_service import NotificationService
 from business_app.services.reorder_reminders.config import MODE_ON, ReminderConfig, current_config, in_send_window
 from business_app.services.reorder_reminders.eligibility import PATH_CUSTOMER, Evaluation, days_since, evaluate
 from business_app.services.reorder_reminders.engine import close_decision
 from business_app.services.reorder_reminders.events import record_event_at
 from business_app.services.reorder_reminders.facts import ReminderCustomer, load_customer_for_user
-from business_app.services.reorder_reminders.tokens import site_url, unsubscribe_headers, unsubscribe_url
+from business_app.services.reorder_reminders.tokens import unsubscribe_headers, unsubscribe_url
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.bot_webhook import trigger_bot_webhook
 from business_app.utils.constants import NotificationChannel, NotificationType
@@ -413,7 +414,7 @@ def email_template_data(
     "days since" is `eligibility.days_since`, the one rule the bot payload and the worklist use too
     (amendment 8). The order lines are `_recipient_order_lines`, the ones the bot payload carries.
     `customer` and `cfg` are part of the contract signature but unused, as in `telegram_payload`.
-    Both links are built on `tokens.site_url`, so they share one spelling of the website base.
+    Both links are built on `customer_links.website_url`, so they share one spelling of the website base.
     """
     recipient = evaluation.recipient
     today = today or local_date()
@@ -432,7 +433,7 @@ def email_template_data(
     )
     return {
         **parts,
-        "shop_url": site_url(_SHOP_PATH),
+        "shop_url": website_url(_SHOP_PATH),
         "unsubscribe_url": unsubscribe_url(recipient.user_id, language),
     }
 

@@ -158,12 +158,6 @@ TRANSLATIONS = {
     # act on.
     "telegram.orders.payment_link_failed_message":
         "Order {order_number} is placed. We could not create the payment link.",
-    # N-2: the retry path's OTHER screen -- rendered instead of the generic
-    # payment_link_failed_message above when the backend refuses a cash-order
-    # rail flip for a short marking-code pool. Distinguishable text on
-    # purpose, so a test can prove WHICH of the two screens rendered.
-    "telegram.payment.marking_codes_unavailable":
-        "Your order stays on Cash on Delivery.",
     "telegram.order.number": "Order {0}",
     "telegram.order.total": "Total {0} UZS",
     # Seeded on purpose while `telegram.orders.cod_restricted_place` is left
@@ -232,10 +226,14 @@ class Shop:
         ]
         self.payment_restrictions: dict = {}
         self.order_response = None  # None -> succeed
-        # What `serialize_order` publishes as `can_customer_cancel` on the created
-        # order (F5). True is the backend's answer for a fresh unpaid pending
-        # order. A test flips it to prove the failure screen reads the field.
-        self.order_can_customer_cancel = True
+        # Whether `serialize_order` publishes the created order's removal as allowed
+        # (`customer_actions.cancel`, F5). True is the backend's answer for a fresh
+        # unpaid pending order. A test flips it to prove the failure screen reads it.
+        self.order_cancel_allowed = True
+        # Whether `POST /orders` answers an online order with the Click link it
+        # minted (`payment_url`). A test turns it off for the "order stands, no
+        # link" screen.
+        self.order_payment_url = True
 
         # (METHOD, endpoint) -> a whole APIResponse, returned untouched.
         # `FakeBackend.route` can only express success-with-body or
@@ -279,7 +277,6 @@ class Shop:
         route("GET", "/api/v1/payments/methods", self._payment_methods)
         route("POST", "/api/v1/orders", self._create_order)
         route("POST", "/api/v1/orders/cart/estimate", self._estimate)
-        route("POST", "/api/v1/payments/create", self._create_payment)
 
         for category in self.categories:
             route("GET", f"/api/v1/products/categories/{category['id']}",
@@ -410,15 +407,35 @@ class Shop:
         }
 
     def _create_order(self, call):
+        """`POST /api/v1/orders`'s answer: `serialize_order` with its published
+        `customer_actions`, plus the Click link it minted for an online order."""
         if self.order_response is not None:
             return self.order_response
         self.next_order_id += 1
+        total = float(self.cart_envelope()["data"]["cart"]["subtotal"])
+        online = (call.data or {}).get("payment_method") in {"card", "click", "payme"}
         order = {
             "id": self.next_order_id,
             "order_number": f"BS-{self.next_order_id}",
-            "total_amount": float(self.cart_envelope()["data"]["cart"]["subtotal"]),
+            "total_amount": total,
             "status": "pending",
-            "can_customer_cancel": self.order_can_customer_cancel,
+            "customer_actions": {
+                "pay": {
+                    "allowed": online,
+                    "refusal": None if online else "not_online",
+                    "label": f"Pay {total:,.0f} UZS" if online else None,
+                    "expected_amount": f"{total:.2f}" if online else None,
+                    "deadline_label": None,
+                },
+                "cancel": {
+                    "allowed": self.order_cancel_allowed,
+                    "refusal": None if self.order_cancel_allowed else "NOT_CANCELLABLE",
+                    "via": "cancel" if self.order_cancel_allowed else None,
+                    "label": "Cancel order" if self.order_cancel_allowed else None,
+                    "confirm_text": "Cancel this order?" if self.order_cancel_allowed else None,
+                    "reasons": [],
+                },
+            },
             "created_at": "2026-08-21T09:15:00+00:00",
             "order_items": [
                 {"product_id": item["product_id"], "quantity": item["quantity"]}
@@ -426,15 +443,28 @@ class Shop:
             ],
         }
         self.orders.append(order)
-        return {"data": {"order": order}}
+        data = {"order": order}
+        if online and self.order_payment_url:
+            data["payment_url"] = self.payment_url(order["id"])
+        return {"data": data}
 
-    def _create_payment(self, call):
-        order_id = (call.data or {}).get("order_id")
-        return {
-            "data": {
-                "payment_link": {"payment_url": f"https://click.test/pay/{order_id}"}
-            }
-        }
+    @staticmethod
+    def payment_url(order_id) -> str:
+        return f"https://click.test/pay/{order_id}"
+
+    def retry_payment_route(self, order, *, payment_url=None):
+        """Answer `POST /orders/<id>/retry-payment` for `order` the way the route answers a link."""
+        self.backend.route(
+            "POST", f"/api/v1/orders/{order['id']}/retry-payment",
+            lambda call: {
+                "data": {
+                    "payment": {"amount": order["total_amount"], "payment_method": "click"},
+                    "payment_link": {"payment_url": payment_url or self.payment_url(order["id"])},
+                    "payment_url": payment_url or self.payment_url(order["id"]),
+                },
+                "message": "Payment initiated",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1188,13 +1218,12 @@ async def test_a_cash_order_clears_the_cart_and_shows_the_order_number(bot, shop
     assert_no_swallowed_crash(bot)
 
 
-async def test_a_card_order_shows_a_payment_link_and_keeps_the_cart_until_it_is_paid(
-    bot, shop, user
-):
-    """Clearing the cart before the PSP confirms would leave a customer who
-    abandons the payment page with neither an order nor a cart. The link itself
-    must name the order and the amount, because that is all the customer sees
-    before handing over card details."""
+async def test_checkout_uses_the_link_post_orders_returned(bot, shop, user):
+    """The link is the one `POST /orders` minted (spec 2026-10-27 §4.2): the bot
+    mints no second one. Clearing the cart before the PSP confirms would leave a
+    customer who abandons the payment page with neither an order nor a cart. The
+    link itself must name the order and the amount, because that is all the
+    customer sees before handing over card details."""
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
@@ -1202,12 +1231,8 @@ async def test_a_card_order_shows_a_payment_link_and_keeps_the_cart_until_it_is_
     await bot.send(user.tap("confirm_order"))
 
     order_id = shop.orders[-1]["id"]
-    (payment_request,) = backend_calls(bot, "POST", "/api/v1/payments/create")
-    assert payment_request.data["order_id"] == order_id
-    assert payment_request.data["payment_method"] == "click", (
-        "customers see 'Card'; the provider is Click — the rail must not be "
-        "renamed on the way to the backend"
-    )
+    assert backend_calls(bot, "POST", "/api/v1/payments/create") == [], "the bot must not mint a second link"
+    assert not [c for c in bot.backend.calls if c.endpoint.endswith("/retry-payment")]
 
     link_screen = bot.telegram.last_shown()
     assert link_screen.text == f"Pay order BS-{order_id}: 45,000 UZS"
@@ -1217,7 +1242,7 @@ async def test_a_card_order_shows_a_payment_link_and_keeps_the_cart_until_it_is_
         for button in row
         if "url" in button
     ]
-    assert urls == [f"https://click.test/pay/{order_id}"]
+    assert urls == [shop.payment_url(order_id)], "the url button is the POST's own payment_url"
 
     assert backend_calls(bot, "POST", "/api/v1/cart/clear") == [], (
         "an unpaid card order must not empty the cart"
@@ -1267,15 +1292,19 @@ async def test_a_tax_committee_outage_offers_a_cash_rescue_that_revives_the_same
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
 
-    # The real 503 shape: an error AND a body carrying the cancelled order id.
+    # The real 503 shape: an error AND a body carrying the cancelled order id,
+    # the backend's chosen sentence and whether the cash rescue is open.
     shop.raw_responses[("POST", "/api/v1/orders")] = api_failure_with_body(
         "Asl belgisi unavailable", 503,
-        {"data": {"cancelled_order_id": 7101}},
+        {
+            "message": "Asl belgisi unavailable",
+            "data": {"cancelled_order_id": 7101, "payment_restrictions": {"cod_restricted": False}},
+        },
     )
     await bot.send(user.tap("confirm_order"))
 
     outage = bot.telegram.last_shown()
-    assert outage.text == "Asl belgisi error message"
+    assert outage.text == "Asl belgisi unavailable", "the 503 shows the sentence the backend chose"
     assert outage.callback_data() == ["select_payment_cash", "confirm_order"]
     assert user_data(bot)["psp_failed_order_id"] == 7101, (
         "the cancelled order id must be read off the 503 body; without it the "
@@ -1303,44 +1332,35 @@ async def test_a_tax_committee_outage_offers_a_cash_rescue_that_revives_the_same
     assert rescued.callback_data() == []
 
 
-async def test_a_failed_payment_link_leaves_one_order_and_a_retry_that_reuses_it(
+async def test_checkout_without_a_link_shows_the_order_stands_screen_with_published_pay(
     bot, shop, user
 ):
-    """A PSP that cannot mint a link must not cost the customer a second order.
+    """An order answered without a link must not cost the customer a second order.
 
-    By the time `send_payment_link` runs, `POST /api/v1/orders` has already
-    returned 2xx — the order EXISTS. The card rail nonetheless left
-    `selected_address_id` and `selected_payment_method` sitting in `user_data`
-    while it went to the PSP, and on failure showed the generic
-    `telegram.payment.failed_message`: an error message with the Confirm button
-    still armed. The customer's only reasonable reading of that is "it did not
-    go through", and their next tap bought the same basket a SECOND time. This
-    is the wave-1 cash-rail defect on the rail that takes card money.
+    By the time the link is shown, `POST /api/v1/orders` has already returned
+    2xx — the order EXISTS. The card rail once left `selected_address_id` and
+    `selected_payment_method` sitting in `user_data` and showed a generic
+    failure with the Confirm button still armed. The customer's only reasonable
+    reading of that is "it did not go through", and their next tap bought the
+    same basket a SECOND time.
 
     Four things have to hold, and none of them is visible to a handler-level
     test: exactly one order exists, the screen SAYS the order was placed and
-    NAMES it, Confirm is disarmed, and the retry pays THAT order. The retry
-    carries the id in its `callback_data` (`payment_retry_<id>`) rather than
-    leaning on `user_data`, which is not persisted — the same reason the
-    cancel-order confirmation was rewired in wave 2.
+    NAMES it, Confirm is disarmed, and the screen's Pay pays THAT order. Pay is
+    the created order's published one and carries the id and the amount in its
+    `callback_data` rather than leaning on `user_data`, which is not persisted —
+    the same reason the cancel-order confirmation was rewired in wave 2.
     """
+    shop.order_payment_url = False
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
-
-    # The PSP is down. Keep the working responder so the retry below can find a
-    # recovered gateway — a retry proven only against a still-broken PSP proves
-    # nothing about which order it would have paid.
-    psp = bot.backend.routes[("POST", "/api/v1/payments/create")]
-    bot.backend.route(
-        "POST", "/api/v1/payments/create",
-        lambda call: backend_failure("Click gateway timeout", 502),
-    )
 
     await bot.send(user.tap("confirm_order"))
 
     (order,) = shop.orders
     order_id = order["id"]
+    pay = order["customer_actions"]["pay"]
 
     failure = bot.telegram.last_shown()
     assert failure.text == (
@@ -1349,24 +1369,17 @@ async def test_a_failed_payment_link_leaves_one_order_and_a_retry_that_reuses_it
         "the customer must be told the order stands, and be given its number — "
         "an unnamed order is one they cannot look up or talk to support about"
     )
-    assert "Failed message" not in failure.text, (
-        "the generic payment-failure copy says nothing about the order having "
-        "been placed, which is the fact that stops a second order"
-    )
 
-    # Retry pays this order; My Orders lets them go look at it.
-    #
-    # Switch method is deliberately GONE (B3 fix round 1): its callbacks carried
-    # no order id and routed to the CART confirmation screen, so — with the cart
-    # still holding this basket — it led to a SECOND order for the same items,
-    # the exact outcome the copy above exists to prevent. Retry is the rail move
-    # a customer actually has (POST /payments/create normalizes card->click and
-    # flips a pending cash order behind the pool guard).
+    # Pay pays this order; My Orders lets them go look at it. Switch method is
+    # deliberately GONE (B3 fix round 1): its callbacks carried no order id and
+    # routed to the CART confirmation screen.
     assert failure.callback_data() == [
-        f"payment_retry_{order_id}",
+        f"payment_retry_{order_id}_{pay['expected_amount']}",
         "menu_orders",
         f"cancel_order_{order_id}",
     ]
+    # Named as the screen's copy names it («Retry Payment»); it pays with the published Pay's amount.
+    assert failure.button_labels()[0] == "Retry"
 
     # The confirmation screen is still scrollable-to and its Confirm button
     # still looks live. This is the tap that used to place order number two.
@@ -1375,52 +1388,41 @@ async def test_a_failed_payment_link_leaves_one_order_and_a_retry_that_reuses_it
     assert len(order_payloads(bot)) == 1
     assert shop.cart == {BOTTLE_19L: 3}, "an unpaid card order must keep the cart"
 
-    # Gateway recovers; the customer taps Retry payment.
+    # The customer taps Pay: the one Pay route, with the amount the screen showed.
     bot.backend.route(
-        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": order}}
+        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": order, "delivery": None}}
     )
-    bot.backend.route("POST", "/api/v1/payments/create", psp)
+    shop.retry_payment_route(order)
 
-    await bot.send(user.tap(f"payment_retry_{order_id}"))
+    await bot.send(user.tap(failure.callback_data()[0]))
 
-    assert shop.orders == [order], "Retry must pay the existing order, not create one"
+    assert shop.orders == [order], "Pay must pay the existing order, not create one"
     assert len(order_payloads(bot)) == 1
-    assert backend_calls(bot, "POST", "/api/v1/payments/create")[-1].data["order_id"] == order_id
+    (paid,) = backend_calls(bot, "POST", f"/api/v1/orders/{order_id}/retry-payment")
+    assert paid.data == {"channel": "bot", "expected_amount": pay["expected_amount"]}
+    assert backend_calls(bot, "POST", "/api/v1/payments/create") == []
     link = bot.telegram.last_shown()
     assert link.text == f"Pay order BS-{order_id}: 45,000 UZS"
     assert_no_swallowed_crash(bot)
 
-async def test_a_refused_edit_on_a_failed_payment_link_still_leaves_one_screen(
+
+async def test_a_refused_edit_on_an_order_without_a_link_still_leaves_one_screen(
     bot, shop, user
 ):
     """One failure must produce ONE screen, and it must be the reassuring one.
 
-    `send_payment_link` used to draw its own generic failure screen (an
-    `_send_error_message` "could not create the payment link") immediately
-    before returning False, and `confirm_order` then drew the dedicated "order
-    placed, link failed" screen over the top. While Telegram accepts the first
-    edit the second one overwrites it and the duplication is invisible.
-
-    It is not invisible when Telegram REFUSES the edit — a bubble the customer
-    deleted, or one too old to edit, both of which are in this project's
-    production logs. `_edit_or_replace_callback_message` then DELETES the
-    bubble and posts a replacement, so the second edit targets a message that
-    no longer exists and posts a replacement of its own: two messages for one
-    failure, and the first of them says the payment failed without ever saying
-    the order stands. That is the exact reading that makes a customer order the
-    same basket again.
-
-    So the rule "what does a link failure look like" belongs in ONE place — the
-    caller that knows the order exists.
+    Telegram REFUSES edits routinely — a bubble the customer deleted, or one too
+    old to edit, both of which are in this project's production logs.
+    `_edit_or_replace_callback_message` then DELETES the bubble and posts a
+    replacement, so a second renderer would post a replacement of its own: two
+    messages for one failure. So the rule "what does a link failure look like"
+    belongs in ONE place — the caller that knows the order exists.
     """
+    shop.order_payment_url = False
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
 
-    bot.backend.route(
-        "POST", "/api/v1/payments/create",
-        lambda call: backend_failure("Click gateway timeout", 502),
-    )
     # Telegram refuses every edit from here on: the confirmation bubble is
     # gone. Every render after this point goes through the delete+replace
     # fallback, which is what makes a second renderer visible.
@@ -1436,39 +1438,32 @@ async def test_a_refused_edit_on_a_failed_payment_link_still_leaves_one_screen(
     assert [call.text for call in delivered] == [
         f"Order BS-{order['id']} is placed. We could not create the payment link."
     ], (
-        "one failed payment link must leave the customer exactly one message, "
+        "one missing payment link must leave the customer exactly one message, "
         "and it must be the one saying the order was placed"
     )
     assert delivered[0].callback_data() == [
-        f"payment_retry_{order['id']}",
+        f"payment_retry_{order['id']}_{order['customer_actions']['pay']['expected_amount']}",
         "menu_orders",
         f"cancel_order_{order['id']}",
     ], "the surviving screen must still carry the recovery keyboard"
     assert_no_swallowed_crash(bot)
 
 
-async def test_a_failed_payment_link_offers_cancel_only_when_the_order_says_so(
+async def test_an_order_without_a_link_offers_cancel_only_when_the_order_says_so(
     bot, shop, user
 ):
     """The link-failure screen draws Cancel from the created order's own answer.
 
     `POST /api/v1/orders` answers with `serialize_order`, which publishes
-    `can_customer_cancel` (F5). `confirm_order` hands the failure screen a
-    hand-built copy of that order, so the field has to ride along, or Cancel
-    vanishes from the one screen whose job is recovery (the two tests above).
-    And when the backend says no, the screen must not overrule it from the
-    status: this order is pending and unpaid, which the bot's old local rule
-    offered Cancel for.
+    `customer_actions.cancel` (F5). And when the backend says no, the screen must
+    not overrule it from the status: this order is pending and unpaid, which the
+    bot's old local rule offered Cancel for.
     """
-    shop.order_can_customer_cancel = False
+    shop.order_cancel_allowed = False
+    shop.order_payment_url = False
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
-
-    bot.backend.route(
-        "POST", "/api/v1/payments/create",
-        lambda call: backend_failure("Click gateway timeout", 502),
-    )
 
     await bot.send(user.tap("confirm_order"))
 
@@ -1477,131 +1472,51 @@ async def test_a_failed_payment_link_offers_cancel_only_when_the_order_says_so(
     assert failure.text == (
         f"Order BS-{order['id']} is placed. We could not create the payment link."
     )
-    assert failure.callback_data() == [f"payment_retry_{order['id']}", "menu_orders"]
+    assert failure.callback_data() == [
+        f"payment_retry_{order['id']}_{order['customer_actions']['pay']['expected_amount']}",
+        "menu_orders",
+    ]
     assert_no_swallowed_crash(bot)
 
 
-async def test_a_retry_that_the_psp_refuses_again_keeps_the_retry_loop_on_screen(
+async def test_a_pay_the_backend_refuses_says_why_and_shows_the_order_as_it_stands(
     bot, shop, user
 ):
-    """The retry path is the OTHER caller of `send_payment_link`.
-
-    Moving the failure screen out of `send_payment_link` must not leave this
-    call site mute — a retry that silently changes nothing on screen is
-    indistinguishable from a tap that never registered. The screen it draws is
-    the same "the order stands, here is Retry" one `confirm_order` draws,
-    because it is the same fact, and it must keep the retry button so the loop
-    can be run again when the gateway comes back.
-    """
+    """`retry-payment` answers a 4xx with its own sentence (a refusal, "This
+    changed", or a payment that cannot be opened). The customer sees it, and the
+    order as it stands now, whose buttons are fresh, rather than a tap that never
+    registered. No second order, no link."""
+    shop.order_payment_url = False
     add_address(bot, 900, "Uy", "Chilonzor 15")
     await fill_cart(bot, user, BOTTLE_19L, quantity=3)
     await reach_confirmation(bot, user, 900, payment="card")
-
-    bot.backend.route(
-        "POST", "/api/v1/payments/create",
-        lambda call: backend_failure("Click gateway timeout", 502),
-    )
     await bot.send(user.tap("confirm_order"))
 
     (order,) = shop.orders
     order_id = order["id"]
     bot.backend.route(
-        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": order}}
+        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": order, "delivery": None}}
     )
-
-    await bot.send(user.tap(f"payment_retry_{order_id}"))
-
-    still_failing = bot.telegram.last_shown()
-    assert still_failing.text == (
-        f"Order BS-{order_id} is placed. We could not create the payment link."
-    ), "a refused retry must say what happened, not leave the old screen standing"
-    assert f"payment_retry_{order_id}" in still_failing.callback_data(), (
-        "a retry that cannot be retried again is a dead end"
-    )
-    assert shop.orders == [order], "a retry must never create a second order"
-    assert_no_swallowed_crash(bot)
-
-
-async def test_a_retry_on_a_cash_order_refused_for_a_short_marking_code_pool_shows_the_cash_stays_message(
-    bot, shop, user
-):
-    """N-2(a): the backend's MARKING_CODES_POOL_SHORT refusal must reach the
-    customer as words, and ONLY as the cash-stays copy when the order's rail
-    really is cash -- `retry_payment`'s `was_cash` gate (I-1), pinned end to
-    end through the real dispatcher with the exact wire literal both
-    processes (this backend-shaped body, and the bot's error_code check) have
-    to agree on. Nothing under tests/ pinned that literal before this test;
-    a one-sided rename of it would previously degrade to the generic screen
-    with no test going red.
-    """
-    add_address(bot, 900, "Uy", "Chilonzor 15")
-    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
-    await reach_confirmation(bot, user, 900, payment="card")
-
-    shop.raw_responses[("POST", "/api/v1/payments/create")] = api_failure_with_body(
-        "Marking codes unavailable", 400,
-        {"data": {"error_code": "MARKING_CODES_POOL_SHORT"}},
-    )
-    await bot.send(user.tap("confirm_order"))
-
-    (order,) = shop.orders
-    order_id = order["id"]
-    # By retry time the order's rail reads CASH -- e.g. an earlier attempt
-    # already refused the flip and left it there.
-    cash_order = {**order, "payment_method": "cash"}
+    refusal = {"success": False, "message": "This changed. Refresh to see the latest.",
+               "data": {"reason_code": "STATE_CHANGED"}}
     bot.backend.route(
-        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": cash_order}}
+        "POST", f"/api/v1/orders/{order_id}/retry-payment",
+        lambda call: backend_failure(refusal["message"], 409, refusal),
     )
 
-    await bot.send(user.tap(f"payment_retry_{order_id}"))
+    await bot.send(user.tap(bot.telegram.last_shown().callback_data()[0]))
 
-    shown = bot.telegram.last_shown()
-    assert shown.text == "Your order stays on Cash on Delivery.", (
-        "a cash order refused for a short pool must show the cash-stays "
-        "copy, not the generic link-failed screen"
-    )
-    assert shop.orders == [order], "a refused retry must never create a second order"
+    alerts = [
+        c.params.get("text") for c in bot.telegram.visible_answers if c.params.get("show_alert")
+    ]
+    assert alerts == [refusal["message"]]
+    details = bot.telegram.last_shown()
+    assert f"BS\\-{order_id}" in details.text, "the order as it stands is shown"
+    assert not [
+        button for row in details.reply_markup.get("inline_keyboard") or [] for button in row if "url" in button
+    ]
+    assert shop.orders == [order], "a refused Pay must never create a second order"
     assert_no_swallowed_crash(bot)
-
-
-async def test_a_retry_on_a_click_order_refused_for_a_short_marking_code_pool_falls_through_to_the_generic_screen(
-    bot, shop, user
-):
-    """N-2(b): the I-1 regression pin. The SAME refusal body on an order that
-    is NOT on cash must not claim it is -- a money-facing false statement
-    that sets a COD expectation the driver's rail will not match. It falls
-    through to the ordinary "order stands, here is Retry" screen instead,
-    same as any other payment-link failure.
-    """
-    add_address(bot, 900, "Uy", "Chilonzor 15")
-    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
-    await reach_confirmation(bot, user, 900, payment="card")
-
-    shop.raw_responses[("POST", "/api/v1/payments/create")] = api_failure_with_body(
-        "Marking codes unavailable", 400,
-        {"data": {"error_code": "MARKING_CODES_POOL_SHORT"}},
-    )
-    await bot.send(user.tap("confirm_order"))
-
-    (order,) = shop.orders
-    order_id = order["id"]
-    click_order = {**order, "payment_method": "click"}
-    bot.backend.route(
-        "GET", f"/api/v1/orders/{order_id}", lambda call: {"data": {"order": click_order}}
-    )
-
-    await bot.send(user.tap(f"payment_retry_{order_id}"))
-
-    shown = bot.telegram.last_shown()
-    assert shown.text == (
-        f"Order BS-{order_id} is placed. We could not create the payment link."
-    ), "an order not on cash must fall through to the generic retry screen"
-    assert "Cash on Delivery" not in shown.text, (
-        "must never tell the customer they are on cash when they are not"
-    )
-    assert shop.orders == [order]
-    assert_no_swallowed_crash(bot)
-
 
 
 async def test_an_empty_cart_at_the_confirm_tap_never_reaches_order_creation(

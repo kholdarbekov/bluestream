@@ -599,7 +599,10 @@ class TestSubscriptionPaymentMethodValidation:
         with app.app_context():
             with pytest.raises(ValidationError):
                 SubscriptionService().change_payment_method_for_user(
-                    sample_subscription.id, sample_user.id, "payme"
+                    sample_subscription.id,
+                    sample_user.id,
+                    "payme",
+                    expected_state=SubscriptionService.state_token(sample_subscription),
                 )
 
 

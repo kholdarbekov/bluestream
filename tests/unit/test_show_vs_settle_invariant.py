@@ -66,7 +66,7 @@ import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 
 import pytest
 
@@ -187,16 +187,8 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
         "No cart exists yet, so there is no server total to read; the figure is "
         "a per-product quote and nothing is posted from it."
     ),
-    (
-        "telegram_bot/handlers/subscriptions.py",
-        "SubscriptionHandlers.manage_subscription_items",
-        "price * quantity",
-    ): (
-        "ONE-DECISION (read-only line). `unit_price` is the SERVER's stored "
-        "subscription-item price. The confirm screen that actually prices a "
-        "subscription reads `preview['total_amount']` from "
-        "`POST /subscriptions/preview` (sweep #32) -- this screen posts nothing."
-    ),
+    # The subscription items screen's `price * quantity` is GONE (final fix wave F4, spec 2026-10-26 B10):
+    # each line reads the backend's `line_total_label`, the one price rule the website and the estimate use.
     # -- staff_bot ----------------------------------------------------------
     (
         "staff_bot/handlers/delivery/cash_collection.py",
@@ -521,7 +513,9 @@ def test_no_client_side_money_arithmetic_in_the_admin_ui():
 
 # service-method -> the expression its WRITE half must go through.
 # `None` means "declared read-only: no write half may exist".
-_PREVIEW_SURFACES: Dict[Tuple[str, str], Tuple[str, str]] = {
+# Each value is ONE (write method, call it must make) pair, or a tuple of them when one preview has several
+# write halves.
+_PREVIEW_SURFACES: Dict[Tuple[str, str], Union[Tuple[str, str], Tuple[Tuple[str, str], ...]]] = {
     ("business_app.services.order_cash_edit_service", "OrderCashEditService.preview"): (
         "apply_edit",
         "self.preview(",
@@ -546,6 +540,23 @@ _PREVIEW_SURFACES: Dict[Tuple[str, str], Tuple[str, str]] = {
         "create_phone_order",
         "StaffService.price_phone_order(",
     ),
+    # Spec 2026-10-26 §5 B4: the /my-subscriptions schedule and items previews. ONE-DECISION (shared
+    # expression), with two write halves. The preview runs `_apply_schedule` on a detached `_ScheduleDraft`
+    # (so it writes nothing) and the schedule PUT runs the same `_apply_schedule` on the locked row. The
+    # preview's drafted lines come from `_item_lines`, and the replace-all items save validates through that
+    # same `_item_lines`, which only validates and returns (product, quantity): it prices nothing. The money
+    # SHOWN is the same expression before and after the save: the preview's line labels (`line_labels`) and its
+    # estimate (`_estimate_fields` -> `_estimate`) price every available line at `customer_unit_price`, and so
+    # does the estimate the page publishes once the items are saved. The stored `unit_price` (a kept row keeps
+    # its own, a new row gets `customer_unit_price`) and `billing_amount` are never shown (spec §12), and every
+    # order is priced when it is created. The address change (spec 2026-10-27 §7, §17 Q6) is a third half: the
+    # preview's `address_change` (which orders move, which stay, whether the method is offered there) and the PUT's
+    # moves come from the one `_address_change_plan`.
+    ("business_app.services.subscription_service", "SubscriptionService.preview_changes_for_user"): (
+        ("update_subscription_for_user", "self._apply_schedule("),
+        ("replace_items_for_user", "self._item_lines("),
+        ("update_subscription_for_user", "self._address_change_plan("),
+    ),
 }
 
 
@@ -561,16 +572,17 @@ def test_every_two_step_money_edit_replays_its_own_preview():
     """
     import importlib
 
-    for (module_name, qualname), (write_method, required_call) in _PREVIEW_SURFACES.items():
+    for (module_name, qualname), halves in _PREVIEW_SURFACES.items():
         module = importlib.import_module(module_name)
         cls_name, _ = qualname.split(".")
         cls = getattr(module, cls_name)
-        src = inspect.getsource(getattr(cls, write_method))
-        assert required_call in src, (
-            f"{cls_name}.{write_method} no longer goes through `{required_call}`. "
-            "The figure the admin confirmed and the change actually written are "
-            "now two expressions -- the defect this whole file exists for."
-        )
+        for write_method, required_call in halves if isinstance(halves[0], tuple) else (halves,):
+            src = inspect.getsource(getattr(cls, write_method))
+            assert required_call in src, (
+                f"{cls_name}.{write_method} no longer goes through `{required_call}`. "
+                "The figure the admin confirmed and the change actually written are "
+                "now two expressions -- the defect this whole file exists for."
+            )
 
 
 @pytest.mark.unit

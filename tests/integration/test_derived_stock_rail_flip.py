@@ -1,16 +1,18 @@
-"""A cash order may move to an online rail only if the code pool can cover it.
+"""A legacy Payme order may move to Click only if the code pool can cover it.
 
 Tasks 2-7 let a customer place and pay for a CASH order on a marking-code
-product even when the pool is empty -- cash draws no code. This closes the
-resulting hole at the one place the order's rail actually moves:
-`payment_service.create_payment` flips `order.payment_method` to CLICK the
-moment a payment link is created, long before Click's PREPARE would notice
-the pool is short. The requirement is that the order stays on cash when the
-pool cannot cover it.
+product even when the pool is empty -- cash draws no code. A customer no longer
+moves a cash order onto Click at all (spec 2026-10-27 §4.3, D4). The one rail
+move left is a legacy Payme order paid through Click (D2), and Payme draws no
+code either, so the move makes the order need one. `payment_service.
+create_payment` refuses it with MARKING_CODES_POOL_SHORT when the pool cannot
+cover the order, long before Click's PREPARE would notice, and the order stays
+on Payme. Driven through `POST /orders/<id>/retry-payment`, the one customer
+Pay route, with the body the clients send.
 
 NOTE: `sample_order` (tests/conftest.py) creates the order with ZERO
 OrderItem rows, so it never actually draws a marking code regardless of pool
-size. Both tests below attach an explicit OrderItem for `sample_product` so
+size. Every test below attaches an explicit OrderItem for `sample_product` so
 `pool_covers_order` has a code-consuming line to evaluate.
 """
 
@@ -18,10 +20,14 @@ from decimal import Decimal
 
 from business_app import db
 from business_app.models.order import Order, OrderItem
+from business_app.models.payment import Payment
 from business_app.models.product import Product, ProductFiscalProfile, ProductMarkingCode
-from shared.enums import MarkingCodeStatus, PaymentMethod
+from business_app.models.translation import Translation
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from shared.enums import MarkingCodeStatus, PaymentMethod, PaymentStatus
 
 ORDER_ITEM_QUANTITY = 2
+POOL_SHORT = "api.payments.error.marking_codes_pool_short"
 
 
 def make_derived(app, product_id, available_codes=0):
@@ -87,50 +93,89 @@ def add_order_item(app, order_id, product_id, quantity=ORDER_ITEM_QUANTITY):
         db.session.commit()
 
 
-def test_flip_to_click_is_refused_when_the_pool_is_short(
-    app, db, sample_user, sample_product, sample_order, auth_headers
-):
-    add_order_item(app, sample_order.id, sample_product.id)
-    make_derived(app, sample_product.id, available_codes=0)
+def put_on_payme(app, order_id):
+    """The legacy Payme order: its rail and its payment row, nothing collected."""
     with app.app_context():
-        order = Order.query.get(sample_order.id)
-        order.payment_method = PaymentMethod.CASH
+        order = Order.query.get(order_id)
+        order.payment_method = PaymentMethod.PAYME
+        db.session.add(
+            Payment(
+                order_id=order.id,
+                user_id=order.user_id,
+                payment_method=PaymentMethod.PAYME,
+                amount=order.total_amount,
+                currency="UZS",
+                status=PaymentStatus.PENDING,
+                payment_id=f"payme-{order.id}",
+            )
+        )
         db.session.commit()
 
-    resp = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": sample_order.id, "payment_method": "click"},
-        headers=auth_headers,
+
+def retry_payment(app, order_id, headers):
+    """The customer's Pay, with the body the bot and the website send, in English."""
+    with app.app_context():
+        shown = str(Order.query.get(order_id).total_amount)
+    return app.test_client().post(
+        f"/api/v1/orders/{order_id}/retry-payment?lang=en",
+        json={"channel": "web", "expected_amount": shown},
+        headers=headers,
     )
 
-    assert resp.status_code == 400, resp.get_json()
+
+def seed_sentence(app, key):
+    """`key` in every language, as the seeder ships it."""
     with app.app_context():
-        assert Order.query.get(sample_order.id).payment_method == PaymentMethod.CASH
+        for language, value in BACKEND_TRANSLATIONS[key].items():
+            db.session.add(Translation(key=key, language=language, value=value, category=_category_for(key)))
+        db.session.commit()
 
 
-def test_flip_to_click_is_allowed_when_the_pool_covers_the_order(
-    app, db, sample_user, sample_product, sample_order, auth_headers
+def rails(app, order_id):
+    with app.app_context():
+        order = Order.query.get(order_id)
+        return order.payment_method, order.payment.payment_method
+
+
+def test_payme_to_click_is_refused_when_the_pool_is_short(
+    matrix_app, db, sample_user, sample_product, sample_order, auth_headers
 ):
+    app = matrix_app
+    add_order_item(app, sample_order.id, sample_product.id)
+    make_derived(app, sample_product.id, available_codes=0)
+    put_on_payme(app, sample_order.id)
+    seed_sentence(app, POOL_SHORT)
+    with app.app_context():
+        product_name = Product.query.get(sample_product.id).name
+
+    resp = retry_payment(app, sample_order.id, auth_headers)
+
+    assert resp.status_code == 400, resp.get_json()
+    assert resp.get_json()["data"]["error_code"] == "MARKING_CODES_POOL_SHORT"
+    # The words, in `message`, which the bot and the website both show; never "Validation failed", and never
+    # advice to pay in cash, which the customer cannot choose (D5).
+    assert resp.get_json()["message"] == BACKEND_TRANSLATIONS[POOL_SHORT]["en"].format(product=product_name)
+    assert rails(app, sample_order.id) == (PaymentMethod.PAYME, PaymentMethod.PAYME)
+
+
+def test_payme_to_click_is_allowed_when_the_pool_covers_the_order(
+    matrix_app, db, sample_user, sample_product, sample_order, auth_headers
+):
+    app = matrix_app
     add_order_item(app, sample_order.id, sample_product.id)
     with app.app_context():
         ordered = sum(item.quantity for item in Order.query.get(sample_order.id).order_items)
     make_derived(app, sample_product.id, available_codes=ordered)
-    with app.app_context():
-        order = Order.query.get(sample_order.id)
-        order.payment_method = PaymentMethod.CASH
-        db.session.commit()
+    put_on_payme(app, sample_order.id)
 
-    resp = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": sample_order.id, "payment_method": "click"},
-        headers=auth_headers,
-    )
+    resp = retry_payment(app, sample_order.id, auth_headers)
 
-    assert resp.status_code in (200, 201), resp.get_json()
+    assert resp.status_code == 200, resp.get_json()
+    assert rails(app, sample_order.id) == (PaymentMethod.CLICK, PaymentMethod.CLICK)
 
 
 def test_retry_on_an_order_already_on_click_with_reserved_codes_still_succeeds(
-    app, db, sample_user, sample_product, sample_order, auth_headers
+    matrix_app, db, sample_user, sample_product, sample_order, auth_headers
 ):
     """C-1: the guard is a FLIP guard, and must credit codes this order
     already holds.
@@ -143,6 +188,7 @@ def test_retry_on_an_order_already_on_click_with_reserved_codes_still_succeeds(
     (PaymentFiscalizationService._codes_currently_held); the guard must not
     be stricter than PREPARE.
     """
+    app = matrix_app
     add_order_item(app, sample_order.id, sample_product.id)
     with app.app_context():
         order = Order.query.get(sample_order.id)
@@ -152,13 +198,9 @@ def test_retry_on_an_order_already_on_click_with_reserved_codes_still_succeeds(
         app, sample_product.id, sample_order.id, reserved_codes=ORDER_ITEM_QUANTITY
     )
 
-    resp = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": sample_order.id, "payment_method": "click"},
-        headers=auth_headers,
-    )
+    resp = retry_payment(app, sample_order.id, auth_headers)
 
-    assert resp.status_code in (200, 201), resp.get_json()
+    assert resp.status_code == 200, resp.get_json()
 
 
 def test_releasing_codes_returns_them_and_re_derives_stock(app, db, sample_product, sample_order):
@@ -170,7 +212,6 @@ def test_releasing_codes_returns_them_and_re_derives_stock(app, db, sample_produ
     OrderItem rows (see module docstring), so an explicit item is attached
     first or reserve_required_marking_codes has nothing to reserve.
     """
-    from business_app.models.payment import Payment
     from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 
     product_id = sample_product.id

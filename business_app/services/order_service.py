@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
-from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
+from typing import TYPE_CHECKING, List, Dict, Any, NamedTuple, Optional, Tuple
 from flask import current_app
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,7 @@ from business_app.utils.service_logging import log_service_call, log_business_ev
 logger = logging.getLogger(__name__)
 
 from business_app.models.order import Order, OrderItem, is_free_reward_item  # noqa: E402
+from business_app.models.payment import Payment  # noqa: E402
 from business_app.models.product import Product  # noqa: E402
 from business_app.utils.order_totals import compute_order_total  # noqa: E402
 from business_app.utils.order_timing import delivered_order_instants_select  # noqa: E402
@@ -28,13 +29,19 @@ from shared.enums import (  # noqa: E402
     PaymentStatus,
     DeliveryStatus,
     PaymentMethod,
+    SubscriptionStatus,
     UserRole,
 )
 from shared.business_config import CLICK_PAYMENT_WINDOW_HOURS  # noqa: E402
 from shared.constants import DISPLAY_TIMEZONE, ORDER_DISPLAY_AWAITING_NEW_DATE  # noqa: E402
 from shared.status_transitions import is_valid_order_transition  # noqa: E402
 from business_app.utils.timezone_utils import ensure_utc, get_utc_now  # noqa: E402
-from business_app.utils.payment_projection import FISCALIZED_RAILS, MONEY_HELD_PAYMENT_STATUSES  # noqa: E402
+from business_app.utils.payment_projection import (  # noqa: E402
+    FISCALIZED_RAILS,
+    MONEY_HELD_PAYMENT_STATUSES,
+    PAY_REFUSAL_DEADLINE_PASSED,
+    pay_refusal,
+)
 from shared.payment_methods import (  # noqa: E402
     UnknownPaymentMethodError,
     UnsupportedPaymentMethodError,
@@ -70,6 +77,37 @@ CUSTOMER_CANCEL_PAID = "PAID"
 # Since 2026-10-21: the driver has picked the order up, or it is out for delivery. The code
 # keeps its old name, which the customer bot and older builds already map.
 CUSTOMER_CANCEL_WITH_DRIVER = "WITH_DRIVER"
+
+# How the customer's own removal of an order goes (spec 2026-10-27 §5.1), published as `customer_actions.cancel.via`
+# and sent back as `expected_via` on POST /orders/<id>/cancel: an ACTIVE subscription's order is skipped (one customer
+# `delivery_skipped` log), an agent order still awaiting the store's answer is declined (the agent is told), and any
+# other order is cancelled.
+CUSTOMER_CANCEL_VIA_SKIP = "skip"
+CUSTOMER_CANCEL_VIA_CANCEL = "cancel"
+CUSTOMER_CANCEL_VIA_DECLINE = "decline"
+# The retired `customer_cancel_via` field's values (spec 2026-10-26 §12: "subscription" pointed to "Skip this
+# delivery" on the subscription, "order" to the order's own Cancel), published from the new answer until the clients
+# read `customer_actions.cancel` (plan 2026-10-27 Task 21 removes it).
+LEGACY_CUSTOMER_CANCEL_VIA = {
+    CUSTOMER_CANCEL_VIA_SKIP: "subscription",
+    CUSTOMER_CANCEL_VIA_CANCEL: "order",
+    CUSTOMER_CANCEL_VIA_DECLINE: "order",
+}
+
+
+class CustomerRemoval(NamedTuple):
+    """What `OrderService.remove_order_as_customer` did: the order, the `via` it took, the customer's sentence, and
+    the notification the route sends as `(kind, template_data)`, or None when nothing else is owed."""
+
+    order: Order
+    via: str
+    message: str
+    notification: Optional[Tuple[str, Dict[str, Any]]]
+
+
+# The order statuses in which an unpaid online order has a payment deadline (spec 2026-10-27 §4.4): before the
+# driver has it. `OrderService.payment_deadline_applies` is the whole rule.
+PAYMENT_DEADLINE_STATUSES = frozenset({OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PREPARING})
 
 # F6: an admin cancel or return names its reason. It is stored on the order's
 # history row and, for a Delivery-page return, on the delivery's too. Both
@@ -140,13 +178,17 @@ class OrderService:
     def payment_deadline(order: Order) -> datetime:
         """When an unpaid online order is cancelled, as an aware UTC instant (spec 2026-10-23 §2.5, §4.5).
 
-        The ONE rule: `cancel_abandoned_orders` applies it, and the subscription order notice and the
-        cancellation notice quote it. An ordinary order has CLICK_PAYMENT_WINDOW_HOURS from its creation. A
-        subscription order has the later of that and the end of its delivery window, or the end of its delivery
-        day (local) when it has no window: never less than the full window, never before its delivery is over.
+        The ONE rule: `cancel_abandoned_orders` applies it, Pay closes at it where `payment_deadline_applies`
+        (`payment_projection.pay_refusal`), and the subscription order notice, the cancellation notice and the
+        published "Pay by" quote it. An ordinary order has CLICK_PAYMENT_WINDOW_HOURS from when it became payable
+        on Click (`Order.payment_window_start`, spec 2026-10-27 §4.4, §17 Q3: its `online_payable_since`, else its
+        creation). A subscription order has the later of that and the end of its delivery window, or the end of its
+        delivery day (local) when it has no window: never less than the full window, never before its delivery is
+        over.
         """
-        created = ensure_utc(order.created_at) if order.created_at is not None else get_utc_now()
-        deadline = created + timedelta(hours=CLICK_PAYMENT_WINDOW_HOURS)
+        start = order.payment_window_start
+        opened = ensure_utc(start) if start is not None else get_utc_now()
+        deadline = opened + timedelta(hours=CLICK_PAYMENT_WINDOW_HOURS)
         if order.is_subscription_order and order.delivery_date is not None:
             end_of_delivery = datetime.combine(
                 order.delivery_date,
@@ -155,6 +197,22 @@ class OrderService:
             )
             deadline = max(deadline, end_of_delivery.astimezone(timezone.utc))
         return deadline
+
+    @staticmethod
+    def payment_deadline_applies(order: Order) -> bool:
+        """Does `payment_deadline` bind this order (spec 2026-10-27 §4.4)? Only before the driver has it: the
+        order is pending, confirmed or preparing (PAYMENT_DEADLINE_STATUSES), not with the driver
+        (`order_is_with_driver`) and not waiting for a new date. An order the driver has, or one already
+        delivered, is owed money, and cancelling it would be wrong, so its Pay stays until it is paid.
+
+        Pay's refusal (`payment_projection.pay_refusal`) and the published "Pay by" sentence ask this."""
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        return (
+            order.status in PAYMENT_DEADLINE_STATUSES
+            and not OrderService.order_is_with_driver(order)
+            and not OrderScheduleService.awaiting_new_date(order)
+        )
 
     @log_service_call(operation_type="order", track_performance=True)
     @log_business_event(event_type="created", entity_type="order")
@@ -173,10 +231,10 @@ class OrderService:
         Args:
             user_id: ID of the user placing the order
             order_data: Order information including items, delivery address, etc.
-            bypass_cod_check: When True, skip the COD active-debt cap. Reserved
-                for the PSP-failure rescue path (see
-                ``rescue_order_after_psp_failure``). Never expose this to the
-                normal create_order API path.
+            bypass_cod_check: When True, skip the COD active-debt cap. No customer
+                path sets it (the PSP-failure rescue, ``rescue_order_after_psp_failure``,
+                applies the cap too). Never expose this to the normal
+                create_order API path.
             subscription: When set, this order is generated by that subscription.
                 The order is stamped with subscription_id / is_subscription_order
                 inside the same transaction, and the subscription's
@@ -1462,6 +1520,17 @@ class OrderService:
         return order
 
     @staticmethod
+    def order_is_with_driver(order: Order) -> bool:
+        """The driver has the order: it is `out_for_delivery` (also when an admin moved it there by hand
+        without a pickup), or its delivery is picked up, in transit or arrived (DELIVERY_WITH_DRIVER_STATES),
+        whatever the order's own status. A driver who has only accepted the stop (`assigned`) does not have
+        it. `customer_cancel_block_code`'s WITH_DRIVER check, and the subscription page's "On the way"."""
+        delivery = order.delivery
+        return order.status == OrderStatus.OUT_FOR_DELIVERY or (
+            delivery is not None and delivery.status in DELIVERY_WITH_DRIVER_STATES
+        )
+
+    @staticmethod
     def customer_cancel_block_code(order: Order) -> Optional[str]:
         """Why the customer may not cancel this order themselves, or None when they may (F5).
 
@@ -1507,9 +1576,7 @@ class OrderService:
         if order.is_paid or (payment is not None and payment.status in MONEY_HELD_PAYMENT_STATUSES):
             return CUSTOMER_CANCEL_PAID
         delivery = order.delivery
-        if order.status == OrderStatus.OUT_FOR_DELIVERY or (
-            delivery is not None and delivery.status in DELIVERY_WITH_DRIVER_STATES
-        ):
+        if OrderService.order_is_with_driver(order):
             return CUSTOMER_CANCEL_WITH_DRIVER
         if (
             order.status != OrderStatus.PENDING
@@ -1519,6 +1586,122 @@ class OrderService:
             # A leftover final row: fail closed, with the generic copy.
             return CUSTOMER_CANCEL_NOT_CANCELLABLE
         return None
+
+    @staticmethod
+    def customer_cancel_via(order: Order) -> Optional[str]:
+        """How the customer's removal of this order goes, or None when they may not remove it (spec 2026-10-27
+        §5.1). The first match wins:
+
+        1. `customer_cancel_block_code` refuses: None.
+        2. The store has not answered the Confirm/Decline its sales agent's order asked
+           (`AgentOrderConfirmationService.pending_request`): CUSTOMER_CANCEL_VIA_DECLINE (D13).
+        3. Its subscription is ACTIVE and the order is dated: CUSTOMER_CANCEL_VIA_SKIP (D10). A skip records the
+           date it skips, so an order staff left undated (PATCH /admin/orders/<id>/schedule with no date, possible
+           until the order has a delivery) is not a skip.
+        4. Otherwise (an ordinary order, a paused or cancelled subscription's leftover (D11), an undated order):
+           CUSTOMER_CANCEL_VIA_CANCEL.
+
+        The ONE answer to "which removal does this order offer". `customer_actions.cancel` publishes it and
+        POST /orders/<id>/cancel (`remove_order_as_customer`) enforces it on locked rows, against the
+        `expected_via` the screen showed. Who may remove the order is still `customer_cancel_block_code`."""
+        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+
+        if OrderService.customer_cancel_block_code(order) is not None:
+            return None
+        if AgentOrderConfirmationService.pending_request(order) is not None:
+            return CUSTOMER_CANCEL_VIA_DECLINE
+        subscription = order.subscription if order.subscription_id else None
+        if (
+            subscription is not None
+            and subscription.status == SubscriptionStatus.ACTIVE
+            and order.delivery_date is not None
+        ):
+            return CUSTOMER_CANCEL_VIA_SKIP
+        return CUSTOMER_CANCEL_VIA_CANCEL
+
+    def remove_order_as_customer(
+        self,
+        order_id: int,
+        user_id: int,
+        *,
+        expected_via: Optional[str],
+        reason_code: Optional[str] = None,
+        reason_text: Optional[str] = None,
+    ) -> CustomerRemoval:
+        """The customer's POST /orders/<id>/cancel (spec 2026-10-27 §5.2): skip, cancel or decline the order, by
+        `customer_cancel_via`, decided on locked rows.
+
+        The rows are locked subscription, then Delivery, then Order: the order Skip-next and the pause/cancel
+        cascade take them in, so a pause and this write queue on the subscription row instead of deadlocking.
+        Then the rule answers first and the screen second: a refusal raises ValidationError
+        (ORDER_NOT_CUSTOMER_CANCELLABLE, `_refuse_customer_cancel`), and a `via` other than `expected_via` (the
+        screen is out of date, or sent none) raises StateChangedError. Either writes nothing.
+
+        - skip: `SubscriptionService.skip_order_for_user` cancels the order and records one customer
+          `delivery_skipped` log; the customer is sent the "delivery_skipped" notice.
+        - cancel: `cancel_order_as_customer`; the customer is sent the ORDER_UPDATE notice.
+        - decline: `AgentOrderConfirmationService.respond`, the bot's Decline, which tells the agent itself.
+
+        Raises NotFoundError for a missing or foreign order. Returns the order, the `via` taken, the
+        customer's sentence and the notification for the route to send (None when nothing else is owed)."""
+        from business_app.services.order_schedule_service import OrderScheduleService
+        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+        from business_app.services.subscription_service import SubscriptionService
+        from business_app.utils import display_labels
+        from business_app.utils.constants import NotificationType
+        from business_app.utils.exceptions import StateChangedError
+
+        order = db.session.get(Order, order_id)
+        if order is None or order.user_id != user_id:
+            raise NotFoundError("Order not found")
+        if order.subscription_id is not None:
+            SubscriptionService._fetch(Subscription.query.filter_by(id=order.subscription_id), lock=True)
+        _delivery, order = OrderScheduleService.lock_delivery_then_order(order_id)
+        block_code = self.customer_cancel_block_code(order)
+        if block_code is not None:
+            self._refuse_customer_cancel(order, block_code)
+        via = self.customer_cancel_via(order)
+        if via != expected_via:
+            db.session.rollback()
+            raise StateChangedError()
+
+        if via == CUSTOMER_CANCEL_VIA_SKIP:
+            skip = SubscriptionService().skip_order_for_user(
+                order_id, user_id, reason_code=reason_code, reason_text=reason_text
+            )
+            next_day = skip["new_next_delivery_date"]
+            message = (
+                get_translation("api.orders.actions.skip.done", date=display_labels.date_long(next_day))
+                if next_day is not None
+                else get_translation("api.orders.actions.skip.done_no_next")
+            )
+            notice = SubscriptionService.skip_notice_data(
+                skip["subscription"],
+                skipped_date=skip["original_delivery_date"],
+                next_date=next_day,
+                reason=skip["reason"],
+            )
+            return CustomerRemoval(skip["order"], via, message, ("delivery_skipped", notice))
+        if via == CUSTOMER_CANCEL_VIA_DECLINE:
+            AgentOrderConfirmationService.respond(order_id, user_id, "decline", None, channel="customer_cancel")
+            declined = db.session.get(Order, order_id)
+            return CustomerRemoval(declined, via, get_translation("api.orders.actions.decline.done"), None)
+        cancelled = self.cancel_order_as_customer(order_id, user_id)
+        notice = {"order_number": cancelled.order_number, "cancellation_reason": "Customer request"}
+        return CustomerRemoval(
+            cancelled, via, get_translation("api.orders.cancelled"), (NotificationType.ORDER_UPDATE, notice)
+        )
+
+    def _refuse_customer_cancel(self, order: Order, code: str) -> None:
+        """Refuse the customer's removal of `order` with `customer_cancel_block_code`'s `code`: roll back what the
+        caller locked, then raise ValidationError (ORDER_NOT_CUSTOMER_CANCELLABLE, `details["reason_code"]`)."""
+        message = f"Order {order.order_number} cannot be cancelled by the customer: {code}"
+        db.session.rollback()
+        raise ValidationError(
+            message,
+            details={"reason_code": code},
+            error_code="ORDER_NOT_CUSTOMER_CANCELLABLE",
+        )
 
     def cancel_order_as_customer(
         self,
@@ -1571,14 +1754,45 @@ class OrderService:
 
         block_code = self.customer_cancel_block_code(order)
         if block_code is not None:
-            message = f"Order {order.order_number} cannot be cancelled by the customer: {block_code}"
-            db.session.rollback()
-            raise ValidationError(
-                message,
-                details={"reason_code": block_code},
-                error_code="ORDER_NOT_CUSTOMER_CANCELLABLE",
-            )
+            self._refuse_customer_cancel(order, block_code)
         return self.cancel_order(order_id, user_id=user_id, reason=reason, actor_user_id=actor_user_id)
+
+    def cancel_unpaid_order_past_deadline(self, order_id: int, *, now: datetime) -> bool:
+        """Cancel one order `cancel_abandoned_orders` picked, if Pay still refuses it as DEADLINE_PASSED at `now`
+        (`payment_projection.pay_refusal`, spec 2026-10-27 §4.4). Returns True when it cancelled the order (committed,
+        with no status notice: the sweep sends its own), False when it left it (nothing written, its locks released).
+
+        The answer is decided on the order's rows locked and re-read from the database, and the cancel runs in that
+        same transaction. They are locked Delivery, then Payment, then Order. The Delivery comes first because the
+        customer's own cancel and a driver's Picked up lock it first. The Payment comes before the Order because Pay
+        (`PaymentService.pay_order_as_customer`) and the Click and Payme webhooks lock them in that order. So a pickup,
+        a COMPLETE or a Pay that committed first is seen here, and the order, now with the driver or paid, is left. One
+        that arrives later waits for this cancel and meets a cancelled order and a cancelled payment: Pay refuses it,
+        and a Click COMPLETE is answered with an error and books nothing. An Order another writer holds is skipped
+        (SKIP LOCKED), and the next run asks again.
+        """
+        from business_app.services.order_schedule_service import OrderScheduleService
+
+        delivery = OrderScheduleService._lock_delivery(order_id)
+        Payment.query.filter_by(order_id=order_id).with_for_update().populate_existing().all()
+        order = (
+            Order.query.filter(Order.id == order_id).with_for_update(skip_locked=True).populate_existing().one_or_none()
+        )
+        if order is None:
+            db.session.rollback()
+            return False
+        if delivery is None:
+            # A release may have committed after the first read and before the Order lock. With the Order held,
+            # nothing else can create the row, so this read is final.
+            OrderScheduleService._lock_delivery(order_id)
+        # `order.delivery` and `order.payment` may still hold what an earlier read saw. Expire them so the rule
+        # reads the rows locked above.
+        db.session.expire(order, ["delivery", "payment"])
+        if pay_refusal(order, now=now) != PAY_REFUSAL_DEADLINE_PASSED:
+            db.session.rollback()
+            return False
+        self.cancel_order(order_id, reason="Order cancelled - not paid by its payment deadline", notify=False)
+        return True
 
     def rescue_order_after_psp_failure(self, cancelled_order_id: int, user_id: int) -> Order:
         """Clone a tax-committee-cancelled order into a new PENDING cash order.
@@ -1586,9 +1800,9 @@ class OrderService:
         Rescue path for the case where a customer attempted a card/click
         payment, the Tax Committee (Asl belgisi) was unavailable, and the
         order was cancelled by ``business_app/api/orders.create_order``.
-        Customers with outstanding COD debts can only normally pay via card,
-        so a PSP outage leaves them with no working payment option without
-        this rescue.
+        The rescued order is an ordinary cash order: a customer over the COD
+        active-debt limit is refused here, as for any cash order (the 503
+        that offered the rescue published that state).
 
         Strategy: rather than mutate the cancelled row back to PENDING (which
         would require bypassing the order state machine + manually resetting
@@ -1597,8 +1811,8 @@ class OrderService:
         its items + address + delivery slot. The cancelled row stays as
         history. The new order goes through the canonical ``create_order``
         pipeline, so all downstream side-effects (inventory reservation,
-        payment record creation, audit logging, etc.) fire normally — only
-        the COD active-debt cap is bypassed.
+        payment record creation, audit logging, etc.) fire normally, and so
+        does the COD active-debt cap.
 
         Security: only orders cancelled with reason="tax_committee_unavailable"
         qualify. User- or admin-cancelled orders cannot use this path.
@@ -1657,7 +1871,7 @@ class OrderService:
             "order_source": cancelled.order_source or "telegram",
         }
 
-        new_order = self.create_order(user_id, order_data, bypass_cod_check=True)
+        new_order = self.create_order(user_id, order_data, bypass_cod_check=False)
 
         audit_logger.log_event(
             event_type=AuditEventType.ORDER_CREATED,
@@ -1668,7 +1882,7 @@ class OrderService:
             description=(
                 f"Order {new_order.order_number} created as cash rescue for "
                 f"cancelled order {cancelled.order_number} after Asl belgisi "
-                f"unavailability. COD active-debt limit was bypassed."
+                f"unavailability. COD active-debt limit was applied."
             ),
             additional_data={
                 "rescued_order_id": new_order.id,
@@ -2548,10 +2762,18 @@ class OrderService:
         return True
 
     def _sync_payment_status_for_terminal_order_state(self, order: Order, new_status: OrderStatus) -> bool:
-        """Cancel non-settled payments when the order reaches a terminal non-delivered state."""
+        """Cancel non-settled payments when the order reaches a terminal non-delivered state.
+
+        Decides on the payment row locked and re-read from the database, never on the copy the session holds. A
+        caller that holds only the Order (the admin Cancel, a status move) may have read the payment before a gateway
+        COMPLETE committed, and writing CANCELLED and amount 0 from that copy would wipe the paid row and leave its
+        money nowhere: the prepayment credit after this reads the same row. The session's own writes are flushed
+        first, so the re-read keeps them."""
         payment = getattr(order, "payment", None)
         if not payment:
             return False
+        db.session.flush()
+        payment = Payment.query.filter_by(id=payment.id).with_for_update().populate_existing().one()
 
         current_status = payment.status
         if isinstance(current_status, str):

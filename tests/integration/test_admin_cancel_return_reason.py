@@ -398,17 +398,17 @@ def test_the_closing_reason_is_the_latest_reasoned_cancel_or_return(
 
 def test_a_customer_cancel_leaves_no_closing_reason(client, db, admin_claim_headers, auth_headers, sample_user,
                                                      user_address):
-    """The customer's own cancel sends a `reason` too, but it is the customer's note. `cancel_order`'s
-    `reason` keeps its notes meaning and is never routed to the history `reason` column. So nothing
-    on the admin detail reads as a staff decision."""
+    """The customer's own cancel carries no words of the customer's any more (spec 2026-10-27 §5.2: the body is
+    the `expected_via` the screen showed), so its history row has no notes, and nothing is routed to the history
+    `reason` column. So nothing on the admin detail reads as a staff decision."""
     order_id = _order(db, sample_user, user_address, "ORD-AR-CUSTOMER", order_status=OrderStatus.PENDING)
 
     response = client.post(
-        f"{CUSTOMER_ORDERS}/{order_id}/cancel", json={"reason": "Changed my mind"}, headers=auth_headers
+        f"{CUSTOMER_ORDERS}/{order_id}/cancel", json={"expected_via": "cancel"}, headers=auth_headers
     )
 
     assert response.status_code == 200, response.get_data(as_text=True)
     db.session.expire_all()
     (row,) = OrderStatusHistory.query.filter_by(order_id=order_id).all()
-    assert (row.new_status, row.notes, row.reason) == (OrderStatus.CANCELLED, "Changed my mind", None)
+    assert (row.new_status, row.notes, row.reason) == (OrderStatus.CANCELLED, None, None)
     assert _closing_reason(client, admin_claim_headers, order_id) is None

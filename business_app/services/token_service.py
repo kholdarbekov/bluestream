@@ -6,14 +6,27 @@ import logging
 import redis
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Mapping
 from flask import current_app, request
 from flask_jwt_extended import create_access_token, create_refresh_token, decode_token, get_jti
 import jwt
 
 from business_app.models.user import User
+from shared.enums import UserRole
 
 logger = logging.getLogger(__name__)
+
+
+class RefreshRefused(ValueError):
+    """A routine refusal of the one refresh rule (`TokenService.refresh_access_token`): a revoked token or a
+    session cut-off, an inactive or unknown account, an ended session, a token that is not a refresh token. It
+    logs one INFO line; an unexpected failure keeps its traceback."""
+
+
+class NotACustomerLogin(RefreshRefused):
+    """The storefront renews a customer's login only (`TokenService.storefront_may_renew`). The admin UI signs in
+    through the same `/auth/login`, so a staff login's cookies sit on the storefront's cookie domain: the
+    storefront neither renews that login nor ends it."""
 
 
 class TokenService:
@@ -169,38 +182,79 @@ class TokenService:
             logger.exception("Failed to generate tokens for user %s", user.id)
             raise
 
-    def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
+    @staticmethod
+    def decode_refresh_token(refresh_token: str, csrf_value: Optional[str] = None) -> Dict[str, Any]:
+        """The claims of a refresh token, as every refresh door reads them (this service and
+        `AuthService.refresh_token`). `decode_token` checks the signature, the expiry and, given a CSRF value,
+        the double-submit value, but never the token's type, so an access token handed in as a refresh token
+        is refused here."""
+        claims = decode_token(refresh_token, csrf_value=csrf_value)
+        if claims.get("type") != "refresh":
+            raise RefreshRefused("Not a refresh token")
+        return claims
+
+    @staticmethod
+    def storefront_may_renew(user: User) -> bool:
+        """The one rule for the storefront's renewals (customer page auth and `POST /auth/refresh-cookie`): a
+        customer's login only. A customer-role user who is staff is not one: staff routes read their roles from
+        the database, so a revived customer-role access token would still open them. Staff means either reading:
+        the storefront's (`User.is_staff_user`, where a stored user type of individual or entity wins over
+        `staff_roles`) or the staff gate's and staff login's (`StaffService._extract_staff_roles`, whatever the
+        user type). Both are asked, so a user typed individual who holds staff roles is refused too."""
+        from business_app.services.staff_service import StaffService  # lazy: it imports the session services
+
+        return (
+            getattr(user.role, "value", user.role) == UserRole.CUSTOMER.value
+            and not user.is_staff_user
+            and not StaffService._extract_staff_roles(user)
+        )
+
+    def refresh_access_token(
+        self, refresh_token: str, csrf_value: Optional[str] = None, *, storefront: bool = False
+    ) -> Dict[str, Any]:
         """
         Generate new access token using refresh token
 
         Args:
             refresh_token: Valid refresh token
+            csrf_value: The browser's readable CSRF half of a refresh cookie, when the caller read one; the
+                token's double-submit value must equal it (customer page auth, `page_auth._renewed_access_token`)
+            storefront: The storefront is renewing (customer page auth, `POST /auth/refresh-cookie`): a login
+                `storefront_may_renew` refuses raises `NotACustomerLogin` as soon as the token is read, before
+                the revocation, account and session checks and before anything is minted
 
         Returns:
             Dictionary with new access_token and metadata
+
+        Raises:
+            RefreshRefused: a routine refusal (logged at INFO), `NotACustomerLogin` among them
         """
         from business_app.services.auth_service import may_sign_in  # lazy: AuthService imports TokenService
         from business_app.services.session_revocation_service import SessionRevocationService  # lazy: it imports us
 
         try:
-            # Decode refresh token to get claims
-            claims = decode_token(refresh_token)
+            # Decode refresh token to get claims (and, given a CSRF value, check it against the token's)
+            claims = self.decode_refresh_token(refresh_token, csrf_value=csrf_value)
             user_id = claims["sub"]
             lookup_user_id = self._normalize_user_lookup_id(user_id)
             session_id = claims.get("session_id")
 
+            user = User.query.get(lookup_user_id)
+            if storefront and user is not None and not self.storefront_may_renew(user):
+                raise NotACustomerLogin(
+                    f"the storefront renews customers only (role {getattr(user.role, 'value', user.role)})"
+                )
+
             # decode_token checks no revocation: the one rule the blocklist loader applies
             if SessionRevocationService.is_revoked(claims):
-                raise ValueError("Refresh token is revoked")
+                raise RefreshRefused("Refresh token is revoked")
 
-            # Get user
-            user = User.query.get(lookup_user_id)
             if not may_sign_in(user):
-                raise ValueError("User not found or inactive")
+                raise RefreshRefused("User not found or inactive")
 
             # Validate session
             if not self._validate_session(lookup_user_id, session_id):
-                raise ValueError("Invalid session")
+                raise RefreshRefused("Invalid session")
 
             # Get access token expiration from configuration
             access_token_expires = current_app.config.get("JWT_ACCESS_TOKEN_EXPIRES", timedelta(hours=1))
@@ -240,9 +294,38 @@ class TokenService:
                 "session_id": session_id,
             }
 
+        except (RefreshRefused, jwt.ExpiredSignatureError) as refusal:
+            logger.info("Token refresh refused: %s", refusal)
+            raise
         except Exception:
             logger.exception("Failed to refresh token")
             raise
+
+    def end_login(self, claims: Dict[str, Any]) -> None:
+        """Log out the login a verified access or refresh token belongs to (`POST /auth/logout`).
+
+        The token is blacklisted until it expires, which the one revocation rule
+        (`SessionRevocationService.is_revoked`) refuses on every signed-in request and every refresh, and the
+        login's session is removed, so its refresh token is refused by `refresh_access_token` too."""
+        remaining = timedelta(seconds=max(int(claims["exp"] - datetime.now(timezone.utc).timestamp()), 1))
+        self.blacklist_token(claims["jti"], expires_delta=remaining)
+        session_id = claims.get("session_id")
+        if session_id:
+            self._remove_session_info(self._normalize_user_lookup_id(claims["sub"]), session_id)
+
+    def end_cookie_logins(self, cookies: Mapping[str, str]) -> None:
+        """`end_login` for each JWT cookie a browser sent whose signature and expiry check out (an expired or
+        forged one has no login left to end): `POST /auth/logout` once the request proved a login, and the
+        sign-out page `frontend.logout`."""
+        for config_key in ("JWT_ACCESS_COOKIE_NAME", "JWT_REFRESH_COOKIE_NAME"):
+            token = cookies.get(current_app.config[config_key])
+            if not token:
+                continue
+            try:
+                claims = decode_token(token)
+            except Exception:  # noqa: BLE001 - expired, forged or garbage: nothing to end
+                continue
+            self.end_login(claims)
 
     def blacklist_token(
         self, token_jti: str, expires_delta: Optional[timedelta] = None, token: Optional[str] = None

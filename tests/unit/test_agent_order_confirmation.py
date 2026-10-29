@@ -24,6 +24,7 @@ from business_app.services.sales.agent_order_confirmation_service import (
     CONFIRMATION_STATES,
     AgentOrderConfirmationService,
 )
+from business_app.services.payment_service import PaymentService
 from business_app.services.sales.outlet_service import OutletService
 from business_app.services.sales.visit_service import VisitService
 from business_app.tasks import sales_agent_tasks
@@ -33,6 +34,7 @@ from business_app.utils.exceptions import ConflictError
 from shared.enums import EntitySubtype, OrderStatus, PaymentMethod, PaymentStatus
 from shared.staff_constants import SALES_AGENT_ORDER_STATES
 from tests.integration.test_outlet_create import GROCERY
+from tests.unit.test_order_tasks_abandoned import _aged_order
 from tests.unit.test_order_tasks_auto_confirm import _aged_cash_order
 from tests.unit.test_outlet_dedupe import PIN, _customer
 from tests.unit.test_sales_agent_role import make_sales_agent_user
@@ -497,20 +499,28 @@ def test_cancel_abandoned_sweep_also_leaves_an_order_the_store_still_owns(
     """C29: D5's rule reached only ONE of the two beat sweeps that scan PENDING orders.
 
     `cancel_abandoned_orders` does not confirm — it CANCELS, releases the reservation and tells
-    the store "no payment received within 24 hours" about a COD order nobody was ever going to
-    pay online. An agent order's Payment row is PENDING by construction, so every agent order
-    still awaiting its shop matched. A/B on one sweep: two aged PENDING cash orders, one of
-    which the store still owns.
+    the store "not paid by <deadline>" about an order it was never asked to pay. Since spec
+    2026-10-27 §4.4 the sweep cancels only unpaid ONLINE orders past their payment deadline. An
+    agent order is placed on cash or the business account (`AGENT_PAYMENT_METHODS`), but staff can
+    move one onto Click while the store still owns it (the admin payment-method edit, T-HOLD-3 in
+    test_sales_agent_order_hold_api.py), and the move opens its Click window. From then on D5's
+    clause is all that keeps the sweep off it.
+
+    A/B on one sweep, both on Click with a payment window opened 25 hours ago: the store still
+    owns one, the other is a plain customer order.
     """
     _spy(monkeypatch, sales_agent_tasks.push_agent_order_confirmation, "delay")
     awaiting, state = _place_order(agent, linked_outlet, sample_product)
     assert state == "pending_confirmation"
-    assert awaiting.payment is not None and awaiting.payment.status is not PaymentStatus.COMPLETED
-    awaiting.created_at = datetime.now(UTC) - timedelta(hours=25)
+    assert awaiting.payment is not None and awaiting.payment.status is PaymentStatus.PENDING
+    # On Click, as the admin's move leaves an agent order. The rail is set here because the edit
+    # moves a business-account order and this one is cash; the window opens through its one writer.
+    awaiting.payment_method = PaymentMethod.CLICK
+    awaiting.payment.payment_method = PaymentMethod.CLICK
+    PaymentService.open_click_payment_window(awaiting, now=datetime.now(UTC) - timedelta(hours=25))
     db.session.commit()
-    plain = _aged_cash_order(db, sample_user, delivery_date=date.today() + timedelta(days=3))
-    plain.created_at = datetime.now(UTC) - timedelta(hours=25)
-    db.session.commit()
+    plain = _aged_order(db, sample_user, hours=25, payment_status=PaymentStatus.PENDING)
+    assert (plain.payment_method, plain.payment.payment_method) == (PaymentMethod.CLICK, PaymentMethod.CLICK)
 
     cancel_abandoned_orders()
 
@@ -566,6 +576,21 @@ def test_expiry_sweep_leaves_a_request_that_is_not_due_alone(
     db.session.refresh(order)
     assert row.status == "pending"
     assert order.status is OrderStatus.PENDING
+
+
+def test_a_confirm_on_the_website_is_recorded_as_web(app, db, agent, linked_outlet, sample_product, monkeypatch):
+    """The website's Confirm (`channel` "web" on POST /orders/<id>/agent-confirmation) is recorded under its own
+    channel and says so in the order's history, never "via Telegram"."""
+    _spy(monkeypatch, sales_agent_tasks.push_agent_order_confirmation, "delay")
+    order, _ = _place_order(agent, linked_outlet, sample_product)
+    _spy(monkeypatch, sales_agent_tasks.push_sales_event, "delay")
+
+    AgentOrderConfirmationService.respond(order.id, linked_outlet.user_id, "confirm", None, channel="web")
+
+    row = OrderConfirmationRequest.query.filter_by(order_id=order.id).one()
+    assert (row.status, row.response_channel) == ("confirmed", "web")
+    notes = [h.notes for h in OrderStatusHistory.query.filter_by(order_id=order.id, new_status=OrderStatus.CONFIRMED)]
+    assert notes == ["Confirmed by customer via the website"]
 
 
 def test_customer_confirm_confirms_the_order_creates_the_delivery_and_pushes_the_agent(

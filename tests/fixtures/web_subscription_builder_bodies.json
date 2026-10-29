@@ -1,87 +1,132 @@
 {
-  "_comment": "The website builder (business_app/static/js/subscription-constructor.js) is driven through its real handlers with each case's clicks (day buttons carry the JS getDay number, 0 = Sunday); the body it posts must equal `body`. The SAME bodies are POSTed to the real /api/v1/subscriptions/ by tests/integration/test_web_subscription_builder_contract.py. Ids are placeholders the Python test swaps for real rows.",
-  "ids": {"address": 11, "slot": 22, "product": 33},
-  "cases": [
-    {
-      "name": "weekly Thursday",
-      "frequency": "weekly",
-      "js_day": 4,
-      "expected_weekday": 3,
-      "body": {
-        "name": "Weekly Thursday",
-        "description": "Custom subscription with 1 product(s)",
-        "frequency": "weekly",
-        "delivery_day_of_week": 3,
-        "delivery_time_slot_id": 22,
-        "delivery_address_id": 11,
-        "payment_method": "cash",
-        "auto_renew": true,
-        "items": [{"product_id": 33, "quantity": 2}]
-      }
-    },
-    {
-      "name": "weekly Monday",
-      "frequency": "weekly",
-      "js_day": 1,
-      "expected_weekday": 0,
-      "body": {
-        "name": "Weekly Monday",
-        "description": "Custom subscription with 1 product(s)",
-        "frequency": "weekly",
-        "delivery_day_of_week": 0,
-        "delivery_time_slot_id": 22,
-        "delivery_address_id": 11,
-        "payment_method": "cash",
-        "auto_renew": true,
-        "items": [{"product_id": 33, "quantity": 2}]
-      }
-    },
-    {
-      "name": "biweekly Sunday",
-      "frequency": "biweekly",
-      "js_day": 0,
-      "expected_weekday": 6,
-      "body": {
-        "name": "Biweekly Sunday",
-        "description": "Custom subscription with 1 product(s)",
-        "frequency": "biweekly",
-        "delivery_day_of_week": 6,
-        "delivery_time_slot_id": 22,
-        "delivery_address_id": 11,
-        "payment_method": "cash",
-        "auto_renew": true,
-        "items": [{"product_id": 33, "quantity": 2}]
-      }
-    },
-    {
-      "name": "monthly on the 15th",
-      "frequency": "monthly",
-      "day_of_month": 15,
-      "body": {
-        "name": "Monthly 15th",
-        "description": "Custom subscription with 1 product(s)",
-        "frequency": "monthly",
-        "delivery_day_of_month": 15,
-        "delivery_time_slot_id": 22,
-        "delivery_address_id": 11,
-        "payment_method": "cash",
-        "auto_renew": true,
-        "items": [{"product_id": 33, "quantity": 2}]
-      }
-    },
-    {
-      "name": "daily",
-      "frequency": "daily",
-      "body": {
-        "name": "Daily",
-        "description": "Custom subscription with 1 product(s)",
-        "frequency": "daily",
-        "delivery_time_slot_id": 22,
-        "delivery_address_id": 11,
-        "payment_method": "cash",
-        "auto_renew": true,
-        "items": [{"product_id": 33, "quantity": 2}]
-      }
-    }
-  ]
+ "_comment": "The website builder (business_app/static/js/subscription-constructor.js) is driven through its real handlers with each case's clicks (day buttons carry the JS getDay number, 0 = Sunday); the body it posts must equal `body`. The SAME bodies are POSTed to the real /api/v1/subscriptions/ by tests/integration/test_web_subscription_builder_contract.py. Ids are placeholders the Python test swaps for real rows.",
+ "ids": {
+  "address": 11,
+  "slot": 22,
+  "product": 33
+ },
+ "cases": [
+  {
+   "name": "weekly Thursday",
+   "frequency": "weekly",
+   "js_day": 4,
+   "expected_weekday": 3,
+   "body": {
+    "name": "Weekly Thursday",
+    "frequency": "weekly",
+    "delivery_day_of_week": 3,
+    "delivery_time_slot_id": 22,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "weekly Thursday at any time",
+   "frequency": "weekly",
+   "js_day": 4,
+   "expected_weekday": 3,
+   "body": {
+    "name": "Weekly Thursday any time",
+    "frequency": "weekly",
+    "delivery_day_of_week": 3,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   },
+   "any_time": true
+  },
+  {
+   "name": "weekly Monday",
+   "frequency": "weekly",
+   "js_day": 1,
+   "expected_weekday": 0,
+   "body": {
+    "name": "Weekly Monday",
+    "frequency": "weekly",
+    "delivery_day_of_week": 0,
+    "delivery_time_slot_id": 22,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "biweekly Sunday",
+   "frequency": "biweekly",
+   "js_day": 0,
+   "expected_weekday": 6,
+   "body": {
+    "name": "Biweekly Sunday",
+    "frequency": "biweekly",
+    "delivery_day_of_week": 6,
+    "delivery_time_slot_id": 22,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "monthly on the 15th",
+   "frequency": "monthly",
+   "day_of_month": 15,
+   "body": {
+    "name": "Monthly 15th",
+    "frequency": "monthly",
+    "delivery_day_of_month": 15,
+    "delivery_time_slot_id": 22,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "daily",
+   "frequency": "daily",
+   "body": {
+    "name": "Daily",
+    "frequency": "daily",
+    "delivery_time_slot_id": 22,
+    "delivery_address_id": 11,
+    "payment_method": "cash",
+    "auto_renew": true,
+    "items": [
+     {
+      "product_id": 33,
+      "quantity": 2
+     }
+    ]
+   }
+  }
+ ]
 }

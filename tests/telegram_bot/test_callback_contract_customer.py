@@ -84,13 +84,14 @@ from telegram.ext import (
 # telegram_bot/ first on sys.path.
 from config import config
 from flow_exit import FLOW_EXIT_GROUP, FlowExitHandler
-from handlers.orders import _cancel_confirmation_callback
 from handlers.subscriptions import (
     CONFIRM_SUBSCRIPTION,
     ITEM_SELECT_QUANTITY,
     SELECT_FREQUENCY,
 )
 from keyboards import (
+    order_remove_callback,
+    pay_callback,
     product_page_callback,
     CustomerNoticeKeyboards,
     DeliverySummaryKeyboards,
@@ -226,6 +227,9 @@ def _samples_matching(pattern_source: str) -> list[str]:
     # (`^subfreq_[a-z]+_\d+$`, `^subpay_[a-z_]+_\d+$`), where the middle segment
     # is a frequency or a payment rail and the trailing id is what makes the
     # screen survive a restart.
+    # The subscription writes carry an `expected_state` (16 hex characters) and a date; each is one sample of
+    # its own shape, so these patterns are read, not skipped.
+    body = body.replace("[0-9a-f]{16}", "0123456789abcdef").replace(r"\d{4}-\d{2}-\d{2}", "2026-11-06")
     body = (
         body.replace(r"\d+", "7").replace(r"\d*", "7").replace(r"\w+", "x")
         .replace("[a-z_]+", "x").replace("[a-z]+", "x")
@@ -379,10 +383,9 @@ async def test_the_collision_check_samples_the_branches_it_claims_to(bot):
         "toggle_reorder_reminders_on",
         "toggle_reorder_reminders_off",
     }
-    assert set(_samples_matching("^(pause|resume|cancel)_sub_")) == {
-        "pause_sub_",
-        "resume_sub_",
-        "cancel_sub_",
+    assert set(_samples_matching(r"^(pause|resume)_sub_\d+$")) == {
+        "pause_sub_7",
+        "resume_sub_7",
     }
     assert set(_samples_matching(r"^loyalty_history(_page_\d+)?$")) == {
         "loyalty_history",
@@ -602,6 +605,25 @@ _AVAILABLE_METHODS = [
 ]
 
 
+# `customer_actions.pay` / `.cancel` as `serialize_order` publishes them (tests/fixtures/customer_order_actions/): the
+# Pay every order screen draws, and the removal it confirms, one per `via`.
+_PUBLISHED_PAY = {"allowed": True, "label": "Pay 30 000 so'm", "expected_amount": "30000.00"}
+_PUBLISHED_REMOVALS = {
+    "skip": {
+        "allowed": True,
+        "via": "skip",
+        "label": "Skip this delivery",
+        "reasons": [
+            {"code": "still_have_water", "label": "I still have water"},
+            {"code": "away", "label": "I'll be away"},
+            {"code": "other", "label": "Other"},
+        ],
+    },
+    "cancel": {"allowed": True, "via": "cancel", "label": "Cancel order", "reasons": []},
+    "decline": {"allowed": True, "via": "decline", "label": "Decline order", "reasons": []},
+}
+
+
 def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     """Every ``callback_data`` ``telegram_bot/keyboards.py`` can emit.
 
@@ -618,19 +640,6 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
 
     # -- menus ---------------------------------------------------------------
     add("MenuKeyboards.cancel_button", MenuKeyboards.cancel_button(lang))
-    # The ONLY production caller (handlers/orders.py::cancel_order) passes these
-    # two explicitly; the builder's own defaults are never rendered. The strings
-    # come from production's own helper rather than being typed here, because
-    # they carry the order id — a literal copy would keep asserting that a
-    # callback shape production no longer emits is wired.
-    add(
-        "MenuKeyboards.yes_no_buttons",
-        MenuKeyboards.yes_no_buttons(
-            lang,
-            yes_callback=_cancel_confirmation_callback(42, "yes"),
-            no_callback=_cancel_confirmation_callback(42, "no"),
-        ),
-    )
 
     # -- language ------------------------------------------------------------
     add("LanguageKeyboards.select_language", LanguageKeyboards.select_language())
@@ -763,8 +772,15 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     for status in ("pending", "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"):
         add(
             f"OrderKeyboards.order_details({status})",
-            OrderKeyboards.order_details(51, status, lang),
+            OrderKeyboards.order_details(51, status, lang, pay=None, cancel=None),
         )
+    # The published Pay and each published removal, drawn and confirmed (spec 2026-10-27 §5.3).
+    for via, cancel in _PUBLISHED_REMOVALS.items():
+        add(
+            f"OrderKeyboards.order_details(pay, {via})",
+            OrderKeyboards.order_details(51, "pending", lang, pay=_PUBLISHED_PAY, cancel=cancel),
+        )
+        add(f"OrderKeyboards.remove_confirmation({via})", OrderKeyboards.remove_confirmation(51, cancel, lang))
     add("OrderKeyboards.order_tracking", OrderKeyboards.order_tracking(51, lang))
     add("OrderKeyboards.asl_belgisi_error", OrderKeyboards.asl_belgisi_error(lang))
 
@@ -777,10 +793,45 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
             lang,
         ),
     )
-    for status in ("active", "paused", "cancelled"):
+    # Every action allowed: the widest keyboard the bot can draw (the buttons follow `allowed_actions`).
+    every_action = {
+        name: {"allowed": True, "block_reason": None, "label": name.title()}
+        for name in ("pay", "skip", "pause", "resume", "cancel", "edit", "remove_item")
+    }
+    every_action["pay"].update(order_id=51, expected_amount="30000.00")
+    every_action["skip"].update(
+        date="2026-11-06", keep_label="Keep", reasons=[{"code": "away", "label": "Away"}],
+    )
+    every_action["pause"].update(confirm_label="Pause it", keep_label="Keep")
+    every_action["cancel"].update(confirm_label="Cancel it", keep_label="Keep")
+    every_action["expected_state"] = "0123456789abcdef"
+    add(
+        "SubscriptionKeyboards.subscription_actions(all allowed)",
+        SubscriptionKeyboards.subscription_actions(12, every_action, lang),
+    )
+    for action in ("pause", "cancel", "skip"):
         add(
-            f"SubscriptionKeyboards.subscription_actions({status})",
-            SubscriptionKeyboards.subscription_actions(12, status, lang),
+            f"SubscriptionKeyboards.action_confirmation({action})",
+            SubscriptionKeyboards.action_confirmation(12, action, every_action, lang),
+        )
+    add(
+        "SubscriptionKeyboards.history",
+        SubscriptionKeyboards.history(
+            12,
+            [{"order_id": 51, "date_label": "Thu 29 Oct", "customer_actions": {
+                "pay": {"allowed": True, "label": "Pay", "expected_amount": "30000.00"},
+                "cancel": {"allowed": True, "label": "Skip", "via": "skip"},
+            }}],
+            2, True, True, lang,
+        ),
+    )
+    add("SubscriptionKeyboards.subscription_frequency(edit)", SubscriptionKeyboards.subscription_frequency(lang, 12))
+    for frequency, day in (("daily", None), ("weekly", 5), ("monthly", 31)):
+        add(
+            f"SubscriptionKeyboards.time_slot_picker(edit, {frequency})",
+            SubscriptionKeyboards.time_slot_picker(
+                [{"id": 5, "time_range": "10:00-12:00"}], lang, subscription_id=12, frequency=frequency, day=day,
+            ),
         )
     for frequency in ("weekly", "biweekly", "monthly"):
         add(
@@ -806,7 +857,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     add(
         "SubscriptionKeyboards.item_management_menu",
         SubscriptionKeyboards.item_management_menu(
-            12, [{"id": 33, "product": {"name": "Aqua Element 19L"}, "quantity": 2}], lang
+            12, [{"id": 33, "product": {"name": "Aqua Element 19L"}, "quantity": 2}], every_action, lang
         ),
     )
     add(
@@ -874,7 +925,7 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     # Both buttons on, so every callback this keyboard can emit is checked.
     add(
         "PaymentKeyboards.payment_failed",
-        PaymentKeyboards.payment_failed(51, lang, may_pay=True, may_cancel=True),
+        PaymentKeyboards.payment_failed(51, lang, pay=_PUBLISHED_PAY, cancel=_PUBLISHED_REMOVALS["cancel"]),
     )
     add("PaymentKeyboards.payment_link", PaymentKeyboards.payment_link("https://pay.example/1", lang, 51))
 
@@ -967,6 +1018,16 @@ async def test_every_keyboard_callback_is_claimed_by_a_registered_handler(bot):
         f"these callbacks are now handled: {sorted(healed)}. Strike them off "
         "_KNOWN_UNCLAIMED_CALLBACKS so the ratchet holds the new ground."
     )
+
+
+def test_every_pay_and_remove_callback_fits_telegrams_64_bytes():
+    """Telegram refuses a keyboard whose callback_data passes 64 bytes, so the widest id and amount must fit."""
+    assert len(pay_callback(9_999_999, "99999999.99").encode()) <= 64
+    assert all(
+        len(order_remove_callback(9_999_999, "skip", r).encode()) <= 64
+        for r in ("still_have_water", "away", "other", None)
+    )
+    assert all(len(order_remove_callback(9_999_999, via).encode()) <= 64 for via in ("cancel", "decline"))
 
 
 async def test_callback_data_is_identical_in_every_supported_language(bot):

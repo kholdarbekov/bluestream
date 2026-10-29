@@ -198,6 +198,8 @@ class AgentConfirmationPayload(_Payload):
     # (SALES_CONFIRMATION_ACTION_INVALID), so the allowed set is written once, in the service.
     action: str
     reason: Optional[str] = None
+    # Which surface the store answered on: the customer bot (the default, so its body is unchanged) or the website.
+    channel: Literal["bot", "web"] = "bot"
 
 
 class OrderItemPayload(_Payload):

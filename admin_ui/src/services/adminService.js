@@ -314,6 +314,15 @@ class AdminService {
     return response.data;
   }
 
+  // The CUSTOMER's subscription payment menu at this address: the list the backend's subscription write
+  // guard checks (spec 2026-10-26 §8.1, B8), never the signed-in admin's own menu.
+  async getCustomerSubscriptionPaymentMethods(userId, deliveryAddressId) {
+    const params = { context: 'subscription' };
+    if (deliveryAddressId) params.delivery_address_id = deliveryAddressId;
+    const response = await api.get(`/admin/users/${userId}/payment-methods`, { params });
+    return response.data?.data?.available_methods || [];
+  }
+
   async getUserNotificationSettings(userId) {
     const response = await api.get(`/admin/users/${userId}/notification-settings`);
     return response.data;
@@ -580,11 +589,6 @@ class AdminService {
   async previewPersonalCardTransfer(orderId, payload) {
     const response = await api.post(`/admin/orders/${orderId}/personal-card-transfer/preview`, payload);
     return response.data;
-  }
-
-  async getPaymentMethods(context = 'order') {
-    const response = await api.get('/payments/methods', { params: { context } });
-    return response.data?.data?.available_methods || [];
   }
 
   // Order edit (admin)
@@ -866,6 +870,20 @@ class AdminService {
   }
 
   // Delivery Time Slot management
+  // The slots a recurring delivery may use on `weekday` (0 = Monday, or 'any') for `frequency`: the backend's
+  // own rule, the one subscription create and update enforce (spec 2026-10-26 §8.2).
+  async getSubscriptionTimeSlots({ weekday, frequency }) {
+    const response = await api.get('/delivery/time-slots', { params: { weekday, frequency } });
+    return response.data?.time_slots || [];
+  }
+
+  // The delivery days (0 = Monday) a recurring delivery may fall on: the backend publishes them with the slot list
+  // (spec 2026-10-27 §6.4), and the weekly and biweekly day select offers only these.
+  async getDeliveryWeekdays() {
+    const response = await api.get('/delivery/time-slots', { params: { weekday: 'any' } });
+    return response.data?.delivery_weekdays || [];
+  }
+
   async getTimeSlots(params = {}) {
     const response = await api.get('/admin/delivery/time-slots', { params });
     return response.data;

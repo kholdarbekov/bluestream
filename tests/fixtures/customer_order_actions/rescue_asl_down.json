@@ -1,0 +1,42 @@
+{
+ "case": "rescue_asl_down",
+ "exchange": {
+  "body": {
+   "delivery_address_id": 1,
+   "delivery_date": "2026-10-26",
+   "delivery_notes": null,
+   "delivery_window_end": null,
+   "delivery_window_start": null,
+   "items": [
+    {
+     "product_id": 1,
+     "quantity": 2
+    }
+   ],
+   "payment_method": "click",
+   "source": "web"
+  },
+  "method": "POST",
+  "path": "/api/v1/orders/",
+  "response": {
+   "data": {
+    "cancelled_order_id": 1,
+    "error_code": "ASL_BELGISI_UNAVAILABLE",
+    "payment_restrictions": {
+     "active_cod_debt_count": 0,
+     "available_prepayment_balance": 0.0,
+     "cluster_net_open_cod_debt_total": 0.0,
+     "cod_exempt": false,
+     "cod_restricted": false,
+     "cod_restriction_reason": null,
+     "is_grocery_store": false,
+     "place_active_cod_debt_count": null,
+     "restriction_scope": null
+    }
+   },
+   "message": "Tax authority system (Asl belgisi) is temporarily unavailable. Please try again or choose cash payment.",
+   "success": false
+  },
+  "status": 503
+ }
+}

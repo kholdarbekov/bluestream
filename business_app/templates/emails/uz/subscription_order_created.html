@@ -20,12 +20,18 @@
     </tr>
     <tr>
         <th>Yetkazib berish</th>
-        <td>{{ delivery_date }}, {% if window %}{{ window }}{% else %}vaqti keyinroq aniqlanadi{% endif %}</td>
+        <td>{{ delivery_date }}, {{ time_label }}</td>
     </tr>
     {% for item in items %}
     <tr>
         <th>{{ item.name }}</th>
         <td>× {{ item.qty }}</td>
+    </tr>
+    {% endfor %}
+    {% for name in not_included or [] %}
+    <tr>
+        <th>Kiritilmadi</th>
+        <td>{{ name }} (endi mavjud emas)</td>
     </tr>
     {% endfor %}
     <tr>

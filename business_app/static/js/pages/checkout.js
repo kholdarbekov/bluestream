@@ -10,17 +10,6 @@
     var deliveryWindowEnd = null;     // "HH:MM" or null (open)
     var selectedPaymentMethod = 'cash';
     var deliveryDate = null;
-    var currentOrderId = null;
-    var currentCardToken = null;
-
-    var verificationState = {
-        token: null,
-        maskedPhone: null,
-        waitSeconds: 60,
-        attemptsRemaining: 3,
-        timerInterval: null,
-        cardMetadata: null
-    };
 
     function escapeHtml(str) {
         if (str === null || str === undefined) return '';
@@ -327,22 +316,6 @@
         refreshEstimate();
     }
 
-    function formatCardNumber(input) {
-        var value = input.value.replace(/\D/g, '');
-        var formattedValue = '';
-        for (var i = 0; i < value.length; i++) {
-            if (i > 0 && i % 4 === 0) formattedValue += ' ';
-            formattedValue += value[i];
-        }
-        input.value = formattedValue;
-    }
-
-    function formatCardExpiry(input) {
-        var value = input.value.replace(/\D/g, '');
-        if (value.length >= 2) value = value.substring(0, 2) + '/' + value.substring(2, 4);
-        input.value = value;
-    }
-
     function showAddAddressModal() {
         showNotification(PAGE_DATA.i18n.address_coming_soon, 'info');
     }
@@ -355,218 +328,6 @@
     function saveAddress(event) {
         if (event) event.preventDefault();
         closeAddressModal();
-    }
-
-    // ==========================================
-    // PAYME VERIFICATION FLOW
-    // ==========================================
-
-    function showVerificationError(message) {
-        var errorEl = document.getElementById('verification-error');
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-    }
-
-    function closeVerificationModal() {
-        document.getElementById('verification-modal').style.display = 'none';
-        if (verificationState.timerInterval) {
-            clearInterval(verificationState.timerInterval);
-        }
-    }
-
-    function cancelVerification() {
-        closeVerificationModal();
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('place-order-btn').disabled = false;
-    }
-
-    function startVerificationCountdown(seconds) {
-        var remaining = seconds;
-        var resendBtn = document.getElementById('resend-btn');
-        var timerEl = document.getElementById('verification-timer');
-
-        if (verificationState.timerInterval) clearInterval(verificationState.timerInterval);
-
-        resendBtn.disabled = true;
-
-        timerEl.innerHTML = '';
-        var codeExpiresText = document.createTextNode(PAGE_DATA.i18n.code_expires_in + ' ');
-        var countdownSpan = document.createElement('span');
-        countdownSpan.id = 'countdown';
-        countdownSpan.textContent = remaining;
-        var suffix = document.createTextNode('s');
-        timerEl.appendChild(codeExpiresText);
-        timerEl.appendChild(countdownSpan);
-        timerEl.appendChild(suffix);
-
-        verificationState.timerInterval = setInterval(function () {
-            remaining--;
-            var cd = document.getElementById('countdown');
-            if (cd) cd.textContent = remaining;
-
-            if (remaining <= 0) {
-                clearInterval(verificationState.timerInterval);
-                if (cd) cd.textContent = '0';
-                resendBtn.disabled = false;
-
-                timerEl.innerHTML = '';
-                var expiredText = document.createTextNode(PAGE_DATA.i18n.code_expired + ' ');
-                var requestNew = document.createElement('a');
-                requestNew.href = '#';
-                requestNew.className = 'timer-expired-link';
-                requestNew.textContent = PAGE_DATA.i18n.request_new_code;
-                requestNew.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    resendVerificationCode();
-                });
-                timerEl.appendChild(expiredText);
-                timerEl.appendChild(requestNew);
-            }
-        }, 1000);
-    }
-
-    function showVerificationModal(data) {
-        verificationState.token = data.token;
-        verificationState.maskedPhone = data.masked_phone;
-        verificationState.waitSeconds = data.wait_seconds || 60;
-        verificationState.attemptsRemaining = 3;
-        verificationState.cardMetadata = {
-            masked_number: data.masked_number,
-            expire: data.expire,
-            cardholder_name: document.getElementById('card-holder').value,
-            recurrent: data.recurrent || false
-        };
-
-        document.getElementById('verification-phone').textContent = data.masked_phone;
-        document.getElementById('verification-code').value = '';
-        document.getElementById('verification-error').style.display = 'none';
-        document.getElementById('attempts-remaining').style.display = 'none';
-
-        startVerificationCountdown(verificationState.waitSeconds);
-
-        document.getElementById('verification-modal').style.display = 'flex';
-        document.getElementById('verification-code').focus();
-    }
-
-    function onVerificationCodeInput(input) {
-        input.value = input.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        if (input.value.length >= 6) {
-            submitVerificationCode();
-        }
-    }
-
-    async function resendVerificationCode() {
-        var resendBtn = document.getElementById('resend-btn');
-        resendBtn.disabled = true;
-        resendBtn.textContent = PAGE_DATA.i18n.sending;
-
-        try {
-            var response = await apiRequest('/payments/cards/resend-code', {
-                method: 'POST',
-                body: JSON.stringify({ token: verificationState.token })
-            });
-
-            var data = await response.json();
-
-            if (data.success) {
-                verificationState.waitSeconds = data.data.wait_seconds || 60;
-                verificationState.attemptsRemaining = 3;
-
-                startVerificationCountdown(verificationState.waitSeconds);
-
-                document.getElementById('verification-error').style.display = 'none';
-                document.getElementById('attempts-remaining').style.display = 'none';
-                showNotification(PAGE_DATA.i18n.new_code_sent, 'success');
-            } else {
-                showVerificationError(data.message || PAGE_DATA.i18n.resend_failed);
-            }
-        } catch (error) {
-            showVerificationError(PAGE_DATA.i18n.resend_failed);
-        } finally {
-            resendBtn.textContent = PAGE_DATA.i18n.resend_code;
-        }
-    }
-
-    async function submitVerificationCode() {
-        var code = document.getElementById('verification-code').value.trim();
-
-        if (!code || code.length < 4) {
-            showVerificationError(PAGE_DATA.i18n.enter_code);
-            return;
-        }
-
-        var verifyBtn = document.getElementById('verify-btn');
-        verifyBtn.disabled = true;
-        verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + PAGE_DATA.i18n.verifying;
-
-        try {
-            var response = await apiRequest('/payments/cards/verify', {
-                method: 'POST',
-                body: JSON.stringify({
-                    token: verificationState.token,
-                    code: code
-                })
-            });
-
-            var data = await response.json();
-
-            if (data.success && data.data.verified) {
-                closeVerificationModal();
-                await processPaymentWithVerifiedCard();
-            } else {
-                verificationState.attemptsRemaining =
-                    (data.data && data.data.attempts_remaining !== undefined) ?
-                        data.data.attempts_remaining :
-                        (verificationState.attemptsRemaining - 1);
-
-                if (verificationState.attemptsRemaining <= 0 || (data.data && data.data.request_new_code)) {
-                    showVerificationError(PAGE_DATA.i18n.too_many_attempts);
-                    document.getElementById('resend-btn').disabled = false;
-                } else {
-                    showVerificationError(data.message || PAGE_DATA.i18n.invalid_code);
-                    document.getElementById('attempts-remaining').style.display = 'block';
-                    document.getElementById('attempts-count').textContent = verificationState.attemptsRemaining;
-                }
-
-                document.getElementById('verification-code').value = '';
-                document.getElementById('verification-code').focus();
-            }
-        } catch (error) {
-            showVerificationError(PAGE_DATA.i18n.verify_failed);
-        } finally {
-            verifyBtn.disabled = false;
-            verifyBtn.innerHTML = PAGE_DATA.i18n.verify;
-        }
-    }
-
-    async function processPaymentWithVerifiedCard() {
-        document.getElementById('payment-processing-modal').style.display = 'flex';
-
-        try {
-            var response = await apiRequest('/payments/process-card-payment', {
-                method: 'POST',
-                body: JSON.stringify({
-                    order_id: currentOrderId,
-                    token: verificationState.token,
-                    save_card: true,
-                    card_metadata: verificationState.cardMetadata
-                })
-            });
-
-            var data = await response.json();
-
-            if (data.success) {
-                await clearCartAfterOrder();
-                window.location.href = data.data.redirect_url ||
-                    '/my-orders?order_id=' + data.data.order_id + '&payment=success';
-            } else {
-                throw new Error(data.message || 'Payment failed');
-            }
-        } catch (error) {
-            document.getElementById('payment-processing-modal').style.display = 'none';
-            showNotification(error.message || PAGE_DATA.i18n.payment_failed, 'error');
-            document.getElementById('place-order-btn').disabled = false;
-        }
     }
 
     // ==========================================
@@ -610,6 +371,9 @@
     }
 
     async function placeOrderWithClick() {
+        var stateEl = document.getElementById('checkoutPaymentState');
+        stateEl.textContent = '';
+        stateEl.hidden = true;
         document.getElementById('loading-overlay').style.display = 'flex';
         document.getElementById('place-order-btn').disabled = true;
 
@@ -634,7 +398,18 @@
 
             if (data.success && data.data.payment_url) {
                 await clearCartAfterOrder();
-                window.location.href = data.data.payment_url;
+                // The backend says how long Click needs (the items are being registered with the tax authority).
+                // The overlay hides so the wait is explained in the page; the button stays disabled until we leave.
+                document.getElementById('loading-overlay').style.display = 'none';
+                window.OrderActions.openPaymentWhenReady(data.data, { words: PAGE_DATA.order_actions, statusEl: stateEl });
+            } else if (data.data && data.data.error_code === 'ASL_BELGISI_UNAVAILABLE') {
+                // The tax system is down: nothing was charged, the cart is kept. Cash or another try.
+                document.getElementById('loading-overlay').style.display = 'none';
+                document.getElementById('place-order-btn').disabled = false;
+                window.OrderActions.showCashRescue(stateEl, data, {
+                    words: PAGE_DATA.order_actions,
+                    onRetry: placeOrderWithClick
+                });
             } else {
                 throw new Error(data.message || 'Order creation failed');
             }
@@ -738,15 +513,6 @@
 
         if (dateInput) dateInput.addEventListener('change', renderDeliveryWindows);
 
-        var cardNumInput = document.getElementById('card-number');
-        if (cardNumInput) cardNumInput.addEventListener('input', function () { formatCardNumber(this); });
-
-        var cardExpInput = document.getElementById('card-expiry');
-        if (cardExpInput) cardExpInput.addEventListener('input', function () { formatCardExpiry(this); });
-
-        var verificationCodeInput = document.getElementById('verification-code');
-        if (verificationCodeInput) verificationCodeInput.addEventListener('input', function () { onVerificationCodeInput(this); });
-
         var addressForm = document.getElementById('address-form');
         if (addressForm) addressForm.addEventListener('submit', saveAddress);
 
@@ -774,15 +540,6 @@
                     break;
                 case 'place-order':
                     placeOrder();
-                    break;
-                case 'cancel-verification':
-                    cancelVerification();
-                    break;
-                case 'resend-verification':
-                    resendVerificationCode();
-                    break;
-                case 'submit-verification':
-                    submitVerificationCode();
                     break;
             }
         });

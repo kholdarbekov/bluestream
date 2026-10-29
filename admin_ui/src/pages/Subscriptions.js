@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Button, Card, Col, DatePicker, Descriptions, Divider, Drawer,
   Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch,
@@ -10,10 +10,11 @@ import {
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import dayjs from 'dayjs';
 import adminService from '../services/adminService';
 import EmptyState from '../components/common/EmptyState';
-import { buildSubscriptionPayload, usesDayOfMonth, usesWeekday } from '../utils/subscriptionPayload';
+import {
+  ANY_TIME, buildSubscriptionPayload, mapDetailToForm, usesDayOfMonth, usesWeekday,
+} from '../utils/subscriptionPayload';
 import { formatUpcomingDelivery } from '../utils/subscriptionDisplay';
 
 const DEFAULT_PAGE = { page: 1, per_page: 20 };
@@ -23,26 +24,14 @@ const FREQUENCY_OPTIONS = ['daily', 'weekly', 'biweekly', 'monthly'];
 // 0 = Monday: the backend's weekday convention, shown by name so nobody types a number.
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
-const mapDetailToForm = (d) => ({
-  name: d.name,
-  description: d.description,
-  frequency: d.frequency,
-  delivery_day_of_week: d.delivery_day_of_week,
-  delivery_day_of_month: d.delivery_day_of_month,
-  delivery_time_slot_id: d.delivery_time_slot_id ?? d.delivery_time_slot?.id,
-  delivery_address_id: d.delivery_address_id,
-  payment_method: d.payment_method,
-  auto_renew: d.auto_renew,
-  discount_percentage: d.discount_percentage,
-  loyalty_points_multiplier: d.loyalty_points_multiplier,
-  start_date: d.start_date ? dayjs(d.start_date) : null,
-  end_date: d.end_date ? dayjs(d.end_date) : null,
-  billing_amount: d.billing_amount,
-  next_delivery_date: d.next_delivery_date ? dayjs(d.next_delivery_date) : null,
-  override_edit_any_status: false,
-  override_manual_billing_amount: false,
-  override_manual_billing_dates: false,
-});
+// The backend publishes, per action, whether it may be done now and why not (`allowed_actions`). The
+// admin never derives that from the status; a missing answer means "not allowed".
+// eslint-disable-next-line security/detect-object-injection
+const actionOf = (actions, name) => actions?.[name];
+const isAllowed = (actions, name) => Boolean(actionOf(actions, name)?.allowed);
+const actionReason = (actions, name) => (isAllowed(actions, name) ? undefined : actionOf(actions, name)?.block_reason || undefined);
+// "Edit" stays open when only the admin's edit-any-status override can lift the refusal.
+const canEdit = (actions) => isAllowed(actions, 'edit') || Boolean(actions?.edit?.override_available);
 
 const Subscriptions = () => {
   const { t } = useTranslation('subscriptions');
@@ -61,13 +50,24 @@ const Subscriptions = () => {
 
   const [form] = Form.useForm();
   const watchedUserId = Form.useWatch('user_id', form);
-  const watchedFrequency = Form.useWatch('frequency', form);
+  // `preserve`: read from the form's values, not only from mounted fields. The modal's fields mount after openEdit
+  // fills the form, so without it the first render of every open sees no address, frequency or day, and a menu
+  // or slot list still cached for "no address" would be reconciled against the stored values (re-review
+  // admin-bot-backend-2).
+  const watchedFrequency = Form.useWatch('frequency', { form, preserve: true });
+  const watchedWeekday = Form.useWatch('delivery_day_of_week', { form, preserve: true });
+  const watchedAddressId = Form.useWatch('delivery_address_id', { form, preserve: true });
   const watchedItems = Form.useWatch('items', form);
   const manualAmount = Form.useWatch('override_manual_billing_amount', form);
   const manualDates = Form.useWatch('override_manual_billing_dates', form);
 
   const isEdit = Boolean(modal.subscription);
   const formUserId = isEdit ? modal.subscription.user_id : watchedUserId;
+  // The weekday the slot list is asked for: the chosen one for weekly and biweekly, any for daily and monthly.
+  // Weekly and biweekly are never asked `any`: until their (required) day is chosen there is no list, because
+  // create and update judge the slot on that day (spec 2026-10-26 B9, re-review G1).
+  const slotWeekday = usesWeekday(watchedFrequency) ? watchedWeekday : 'any';
+  const slotsAskable = Boolean(watchedFrequency) && slotWeekday != null;
 
   const listQuery = useQuery({
     queryKey: ['admin-subscriptions', pagination, search, status, frequencyFilter],
@@ -91,11 +91,19 @@ const Subscriptions = () => {
     placeholderData: keepPreviousData,
   });
 
+  // Only the slots the backend offers this day and frequency (spec 2026-10-26 §8.2: monthly gets the slots
+  // offered every day), the rule the create and update guards check.
   const timeSlotsQuery = useQuery({
-    queryKey: ['admin-subscription-timeslots'],
-    queryFn: () => adminService.getTimeSlots({ page: 1, per_page: 100 }),
+    queryKey: ['admin-subscription-timeslots', slotWeekday, watchedFrequency],
+    queryFn: () => adminService.getSubscriptionTimeSlots({ weekday: slotWeekday, frequency: watchedFrequency }),
+    enabled: modal.open && slotsAskable,
+  });
+
+  // The delivery days the backend publishes (spec 2026-10-27 §6.4): the weekly and biweekly day select offers these.
+  const weekdaysQuery = useQuery({
+    queryKey: ['admin-subscription-delivery-weekdays'],
+    queryFn: () => adminService.getDeliveryWeekdays(),
     enabled: modal.open,
-    placeholderData: keepPreviousData,
   });
 
   const addressesQuery = useQuery({
@@ -111,10 +119,12 @@ const Subscriptions = () => {
     enabled: Boolean(drawerId),
   });
 
+  // The CUSTOMER's subscription menu at the chosen address: exactly what the backend's B8 guard accepts
+  // (spec 2026-10-26 §8.1), asked again whenever the customer or the address changes.
   const paymentMethodsQuery = useQuery({
-    queryKey: ['payment-methods', 'subscription'],
-    queryFn: () => adminService.getPaymentMethods('subscription'),
-    staleTime: 5 * 60 * 1000,
+    queryKey: ['admin-subscription-payment-methods', formUserId, watchedAddressId],
+    queryFn: () => adminService.getCustomerSubscriptionPaymentMethods(formUserId, watchedAddressId),
+    enabled: modal.open && Boolean(formUserId),
   });
 
   const rows = listQuery.data?.items || [];
@@ -124,10 +134,42 @@ const Subscriptions = () => {
   // A subscription line below the product's minimum order quantity is one billing's
   // create_order refuses every cycle, so every quantity input here is floored by it.
   const minQtyFor = (productId) => Number(products.find((p) => p.id === productId)?.min_order_quantity) || 1;
-  const timeSlots = timeSlotsQuery.data?.data?.items || timeSlotsQuery.data?.items || [];
+  const deliveryWeekdays = weekdaysQuery.data;
+  const timeSlots = (slotsAskable && timeSlotsQuery.data) || [];
   const addresses = addressesQuery.data?.data?.addresses || addressesQuery.data?.addresses || [];
   const detail = detailQuery.data || {};
   const paymentMethods = paymentMethodsQuery.data || [];
+
+  // The form never holds a value its own list does not offer (re-review G3). When the payment menu or the slot
+  // list is asked again because the admin changed what it depends on (customer, address; frequency, day) and
+  // the answer no longer has the current value, the value is cleared, and the payment method's required rule
+  // says so. A stored value the list does not offer while nothing it depends on changed stays: the update
+  // re-checks only a real change (B8, B9), so an unrelated edit still saves.
+  const stored = modal.subscription;
+  const menuUnchanged = isEdit && watchedAddressId === stored.delivery_address_id;
+  const slotsUnchanged = isEdit && watchedFrequency === stored.frequency
+    && (!usesWeekday(watchedFrequency) || watchedWeekday === stored.delivery_day_of_week);
+  useEffect(() => {
+    if (!modal.open || !paymentMethodsQuery.isSuccess) return;
+    const offered = paymentMethodsQuery.data || [];
+    const current = form.getFieldValue('payment_method');
+    if (current && !menuUnchanged && !offered.some((m) => m.method === current)) {
+      form.setFieldValue('payment_method', undefined);
+      form.validateFields(['payment_method']).catch(() => {});
+    }
+    // A new subscription starts on the method the menu itself flags as its default, if it flags one.
+    const preset = offered.find((m) => m.is_default);
+    if (!isEdit && preset && !form.getFieldValue('payment_method')) form.setFieldValue('payment_method', preset.method);
+  }, [modal.open, isEdit, menuUnchanged, paymentMethodsQuery.isSuccess, paymentMethodsQuery.data, form]);
+  useEffect(() => {
+    if (!modal.open || !slotsAskable || !timeSlotsQuery.isSuccess || slotsUnchanged) return;
+    const current = form.getFieldValue('delivery_time_slot_id');
+    // Only a numeric slot the new list lacks is cleared: Any time is always on offer.
+    if (typeof current === 'number' && !(timeSlotsQuery.data || []).some((slot) => slot.id === current)) {
+      form.setFieldValue('delivery_time_slot_id', undefined);
+      form.validateFields(['delivery_time_slot_id']).catch(() => {});
+    }
+  }, [modal.open, slotsAskable, slotsUnchanged, timeSlotsQuery.isSuccess, timeSlotsQuery.data, form]);
 
   const invalidateList = () => queryClient.invalidateQueries({ queryKey: ['admin-subscriptions'] });
   const invalidateDetail = () => queryClient.invalidateQueries({ queryKey: ['admin-subscription-detail'] });
@@ -202,9 +244,10 @@ const Subscriptions = () => {
   const openCreate = () => {
     setModal({ open: true, subscription: null });
     form.resetFields();
+    // No payment method until the customer's menu answers (re-review G3): it may not offer cash.
     form.setFieldsValue({
       frequency: 'weekly',
-      payment_method: 'cash',
+      delivery_time_slot_id: ANY_TIME,
       auto_renew: true,
       discount_percentage: 0,
       items: [{ quantity: 1 }],
@@ -244,7 +287,7 @@ const Subscriptions = () => {
     },
     {
       title: t('next_delivery', { defaultValue: 'Next delivery' }), key: 'upcoming_delivery', width: 210,
-      render: (_, r) => formatUpcomingDelivery(r, t('time_to_be_confirmed', { defaultValue: 'time to be confirmed' })),
+      render: (_, r) => formatUpcomingDelivery(r),
     },
     { title: t('sub_items', { defaultValue: 'Items' }), dataIndex: 'items_count', key: 'items_count', width: 70 },
     {
@@ -252,11 +295,17 @@ const Subscriptions = () => {
       render: (_, record) => (
         <Space>
           <Button type="text" icon={<EyeOutlined />} onClick={() => setDrawerId(record.id)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(record)}
+            disabled={!canEdit(record.allowed_actions)} title={actionReason(record.allowed_actions, 'edit')} />
         </Space>
       ),
     },
   ]), [t]);
+
+  // The drawer's item editors follow the published `edit` answer. The item routes take no edit-any-status
+  // override (that switch is the Edit form's), so `override_available` does not open them.
+  const canEditItems = isAllowed(detail.allowed_actions, 'edit');
+  const editItemsReason = actionReason(detail.allowed_actions, 'edit');
 
   const itemColumns = [
     { title: t('sub_product', { defaultValue: 'Product' }), dataIndex: 'product_name', key: 'product_name' },
@@ -269,10 +318,13 @@ const Subscriptions = () => {
             // eslint-disable-next-line security/detect-object-injection
             value={qtyDrafts[item.id] ?? v}
             onChange={(nv) => setQtyDrafts((d) => ({ ...d, [item.id]: nv }))}
+            disabled={!canEditItems}
             style={{ width: 80 }}
           />
           <Button
             size="small"
+            disabled={!canEditItems}
+            title={editItemsReason}
             loading={updateItemMutation.isPending && updateItemMutation.variables?.itemId === item.id}
             onClick={() => updateItemMutation.mutate({
               id: drawerId,
@@ -295,7 +347,8 @@ const Subscriptions = () => {
       render: (_, item) => (
         <Popconfirm title={t('remove_item_confirm', { defaultValue: 'Remove this item?' })}
           onConfirm={() => removeItemMutation.mutate({ id: drawerId, itemId: item.id })}>
-          <Button type="text" danger icon={<DeleteOutlined />} />
+          <Button type="text" danger icon={<DeleteOutlined />}
+            disabled={!isAllowed(detail.allowed_actions, 'remove_item')} title={actionReason(detail.allowed_actions, 'remove_item')} />
         </Popconfirm>
       ),
     },
@@ -434,16 +487,20 @@ const Subscriptions = () => {
             </Col>
             {usesWeekday(watchedFrequency) && (
               <Col span={8}>
-                <Form.Item name="delivery_day_of_week" label={t('day_of_week', { defaultValue: 'Delivery day' })}>
+                <Form.Item name="delivery_day_of_week" label={t('day_of_week', { defaultValue: 'Delivery day' })}
+                  rules={[{ required: true }]}>
                   <Select options={WEEKDAYS.map((name, index) => ({
                     value: index, label: t(`weekday_${index}`, { defaultValue: name.charAt(0).toUpperCase() + name.slice(1) }),
-                  }))} />
+                  })).filter((option) => !deliveryWeekdays || deliveryWeekdays.includes(option.value)
+                    // a stored day that is no longer a delivery day stays, so the Select shows its name, not the raw number
+                    || option.value === modal.subscription?.delivery_day_of_week)} />
                 </Form.Item>
               </Col>
             )}
             {usesDayOfMonth(watchedFrequency) && (
               <Col span={8}>
-                <Form.Item name="delivery_day_of_month" label={t('day_of_month', { defaultValue: 'Day of month' })}>
+                <Form.Item name="delivery_day_of_month" label={t('day_of_month', { defaultValue: 'Day of month' })}
+                  rules={[{ required: true }]}>
                   <InputNumber min={1} max={31} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
@@ -457,8 +514,13 @@ const Subscriptions = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="delivery_time_slot_id" label={t('time_slot', { defaultValue: 'Time slot' })}>
-                <Select allowClear options={timeSlots.map((s) => ({ value: s.id, label: s.name || `#${s.id}` }))} />
+              <Form.Item name="delivery_time_slot_id" label={t('time_slot', { defaultValue: 'Time slot' })}
+                rules={[{ required: true, message: t('sub_slot_or_any_time', { defaultValue: 'Choose a time slot or Any time' }) }]}>
+                <Select disabled={!slotsAskable} loading={slotsAskable && timeSlotsQuery.isLoading}
+                  options={[
+                    { value: ANY_TIME, label: t('sub_any_time', { defaultValue: 'Any time' }) },
+                    ...timeSlots.map((s) => ({ value: s.id, label: s.name || `#${s.id}` })),
+                  ]} />
               </Form.Item>
             </Col>
           </Row>
@@ -534,30 +596,34 @@ const Subscriptions = () => {
               <Descriptions.Item label={t('billing_amount', { defaultValue: 'Amount' })}>{Number(detail.billing_amount || 0).toLocaleString()}</Descriptions.Item>
               <Descriptions.Item label={t('payment_method', { defaultValue: 'Payment method' })}>{detail.payment_method || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('next_delivery', { defaultValue: 'Next delivery' })}>
-                {formatUpcomingDelivery(detail, t('time_to_be_confirmed', { defaultValue: 'time to be confirmed' }))}
+                {formatUpcomingDelivery(detail)}
               </Descriptions.Item>
               <Descriptions.Item label={t('total_orders', { defaultValue: 'Orders generated' })}>{detail.total_orders_generated ?? 0}</Descriptions.Item>
             </Descriptions>
 
             <Divider orientation="left">{t('lifecycle', { defaultValue: 'Actions' })}</Divider>
             <Space wrap>
-              <Button icon={<PauseCircleOutlined />} disabled={detail.status !== 'active'}
+              <Button icon={<PauseCircleOutlined />} disabled={!isAllowed(detail.allowed_actions, 'pause')}
+                title={actionReason(detail.allowed_actions, 'pause')}
                 onClick={() => lifecycleMutation.mutate({ action: 'pause', id: drawerId })}>
                 {t('pause', { defaultValue: 'Pause' })}
               </Button>
-              <Button icon={<PlayCircleOutlined />} disabled={detail.status !== 'paused'}
+              <Button icon={<PlayCircleOutlined />} disabled={!isAllowed(detail.allowed_actions, 'resume')}
+                title={actionReason(detail.allowed_actions, 'resume')}
                 onClick={() => lifecycleMutation.mutate({ action: 'resume', id: drawerId })}>
                 {t('resume', { defaultValue: 'Resume' })}
               </Button>
               <Popconfirm title={t('cancel_confirm', { defaultValue: 'Cancel (delete) this subscription?' })}
                 onConfirm={() => lifecycleMutation.mutate({ action: 'cancel', id: drawerId })}>
-                <Button danger icon={<CloseCircleOutlined />} disabled={detail.status === 'cancelled'}>
+                <Button danger icon={<CloseCircleOutlined />} disabled={!isAllowed(detail.allowed_actions, 'cancel')}
+                  title={actionReason(detail.allowed_actions, 'cancel')}>
                   {t('cancel_sub', { defaultValue: 'Cancel' })}
                 </Button>
               </Popconfirm>
               <Popconfirm title={t('bill_now_confirm', { defaultValue: 'Create the next order now?' })}
                 onConfirm={() => lifecycleMutation.mutate({ action: 'bill', id: drawerId })}>
-                <Button icon={<DollarOutlined />} disabled={detail.status === 'cancelled'}>{t('bill_now', { defaultValue: 'Create next order now' })}</Button>
+                <Button icon={<DollarOutlined />} disabled={!isAllowed(detail.allowed_actions, 'create_next_order')}
+                  title={actionReason(detail.allowed_actions, 'create_next_order')}>{t('bill_now', { defaultValue: 'Create next order now' })}</Button>
               </Popconfirm>
             </Space>
 
@@ -565,14 +631,14 @@ const Subscriptions = () => {
             <Table rowKey="id" size="small" pagination={false} columns={itemColumns}
               dataSource={detail.items || []} loading={detailQuery.isLoading} />
             <Space style={{ marginTop: 12 }} wrap>
-              <Select showSearch optionFilterProp="label" style={{ width: 240 }}
+              <Select showSearch optionFilterProp="label" style={{ width: 240 }} disabled={!canEditItems}
                 placeholder={t('sub_product', { defaultValue: 'Product' })} value={addItemValue.product_id}
                 onChange={(v) => setAddItemValue((s) => ({ product_id: v, quantity: Math.max(s.quantity || 0, minQtyFor(v)) }))}
                 options={products.map((p) => ({ value: p.id, label: p.name }))} />
-              <InputNumber min={minQtyFor(addItemValue.product_id)} value={addItemValue.quantity}
+              <InputNumber min={minQtyFor(addItemValue.product_id)} value={addItemValue.quantity} disabled={!canEditItems}
                 onChange={(v) => setAddItemValue((s) => ({ ...s, quantity: v }))} />
               <Button type="primary" icon={<PlusOutlined />} loading={addItemMutation.isPending}
-                disabled={!addItemValue.product_id}
+                disabled={!canEditItems || !addItemValue.product_id} title={editItemsReason}
                 onClick={() => addItemMutation.mutate({ id: drawerId, payload: { product_id: addItemValue.product_id, quantity: addItemValue.quantity } })}>
                 {t('add_item', { defaultValue: 'Add item' })}
               </Button>

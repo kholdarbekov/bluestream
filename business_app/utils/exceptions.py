@@ -101,6 +101,28 @@ class ConflictError(WaterBusinessException):
         self.conflict_type = conflict_type
 
 
+# The sentence a stale customer write answers with (`api_responses.state_changed_response`).
+STATE_CHANGED_MESSAGE_KEY = "api.common.state_changed"
+
+
+class StateChangedError(ConflictError):
+    """What the customer's screen showed no longer holds (spec 2026-10-27 §16 M2): the write carried the amount,
+    date or state the screen showed, and the backend's answer has moved since. Answered 409 `STATE_CHANGED`:
+    "This changed. Refresh to see the latest." The message is that sentence's translation key."""
+
+    def __init__(self, message: str = STATE_CHANGED_MESSAGE_KEY, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, details, error_code="STATE_CHANGED")
+
+
+class PayRefusedError(ConflictError):
+    """The one Pay rule refuses this order (`payment_projection.pay_refusal`). `refusal` is the code every order
+    payload publishes as `customer_actions.pay.refusal`; the route words it (`pay_refusal_message`)."""
+
+    def __init__(self, refusal: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(f"Pay refused: {refusal}", details, error_code="PAY_REFUSED")
+        self.refusal = refusal
+
+
 class PaymentError(WaterBusinessException):
     """Raised when payment processing fails"""
 

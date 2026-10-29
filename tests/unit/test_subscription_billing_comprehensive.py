@@ -497,7 +497,9 @@ class TestPauseSubscription:
             sub = _make_subscription(db, sample_user, addr, number="SUB-PA1")
             db.session.commit()
 
-            outcome = SubscriptionService().pause_subscription_for_user(sub.id, sample_user.id, "Holiday")
+            outcome = SubscriptionService().pause_subscription_for_user(
+                sub.id, sample_user.id, "Holiday", expected_state=SubscriptionService.state_token(sub)
+            )
 
             refreshed = Subscription.query.get(sub.id)
             assert refreshed.status == SubscriptionStatus.PAUSED

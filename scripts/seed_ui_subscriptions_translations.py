@@ -105,7 +105,8 @@ UI_SUBSCRIPTIONS_TRANSLATIONS = {
         "frequency": "Frequency",
         "next_delivery": "Next delivery",
         "next_delivery_date": "Next delivery date",
-        "time_to_be_confirmed": "time to be confirmed",
+        "sub_any_time": "Any time",
+        "sub_slot_or_any_time": "Choose a time slot or Any time",
         "weekday_0": "Monday",
         "weekday_1": "Tuesday",
         "weekday_2": "Wednesday",
@@ -184,7 +185,8 @@ UI_SUBSCRIPTIONS_TRANSLATIONS = {
         "frequency": "Chastota",
         "next_delivery": "Keyingi yetkazib berish",
         "next_delivery_date": "Keyingi yetkazib berish sanasi",
-        "time_to_be_confirmed": "vaqti tasdiqlanadi",
+        "sub_any_time": "Istalgan vaqtda",  # NATIVE-READ
+        "sub_slot_or_any_time": "Vaqt oralig'ini yoki «Istalgan vaqtda»ni tanlang",  # NATIVE-READ
         "weekday_0": "Dushanba",
         "weekday_1": "Seshanba",
         "weekday_2": "Chorshanba",
@@ -264,7 +266,8 @@ UI_SUBSCRIPTIONS_TRANSLATIONS = {
         "frequency": "Частота",
         "next_delivery": "Следующая доставка",
         "next_delivery_date": "Дата следующей доставки",
-        "time_to_be_confirmed": "время уточняется",
+        "sub_any_time": "В любое время",  # NATIVE-READ
+        "sub_slot_or_any_time": "Выберите интервал или «В любое время»",  # NATIVE-READ
         "weekday_0": "Понедельник",
         "weekday_1": "Вторник",
         "weekday_2": "Среда",

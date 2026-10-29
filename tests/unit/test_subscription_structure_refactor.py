@@ -33,7 +33,9 @@ def test_subscriptions_api_delegates_user_scoped_operations_to_service():
         "add_subscription_item_for_user(",
         "update_subscription_item_for_user(",
         "remove_subscription_item_for_user(",
-        "get_subscription_billing_history_for_user(",
+        "subscription_history_for_user(",
+        "replace_items_for_user(",
+        "preview_changes_for_user(",
         "get_subscription_logs_paginated_for_user(",
         "get_subscription_statistics_for_user(",
         "skip_next_delivery_for_user(",
@@ -51,5 +53,7 @@ def test_subscription_service_contains_user_scoped_entrypoints():
     assert "def update_subscription_for_user(" in text
     assert "def skip_next_delivery_for_user(" in text
     assert "def change_payment_method_for_user(" in text
-    # The retry-billing route and its validator are gone (spec 2026-10-23 §4.7): nothing bills.
+    # The retry-billing route and its validator are gone (spec 2026-10-23 §4.7): nothing bills. So is the
+    # always-empty billing history (spec 2026-10-26 §5 B6): the subscription's orders are its history.
     assert "def validate_retry_billing_for_user(" not in text
+    assert "def get_subscription_billing_history_for_user(" not in text

@@ -37,39 +37,27 @@
         document.addEventListener('DOMContentLoaded', initMap);
     }
 
+    // The page refreshes itself every 30 seconds while the order is live, but never under a customer who has
+    // an inline confirm open or a write in flight.
     if (PAGE_DATA.auto_refresh) {
-        setInterval(function () { location.reload(); }, 30000);
+        setInterval(function () {
+            if (window.OrderActions && window.OrderActions.isBusy()) return;
+            window.location.reload();
+        }, 30000);
     }
 
-    function cancelOrder() {
-        if (!confirm(PAGE_DATA.i18n.confirm_cancel)) return;
-
-        var reason = prompt(PAGE_DATA.i18n.prompt_reason);
-
-        // The shared helper sends the session cookies, the CSRF header and X-Platform.
-        // The web keeps its token in an httpOnly cookie, so a Bearer header read from
-        // localStorage was always "Bearer null" and this cancel never went through.
-        apiRequest('/orders/' + PAGE_DATA.order_id + '/cancel', {
-            method: 'POST',
-            body: JSON.stringify({ reason: reason || 'Customer request' })
-        })
-        .then(function (response) { return response.json(); })
-        .then(function (data) {
-            if (data.success) {
-                showNotification(PAGE_DATA.i18n.cancel_success, 'success');
-                setTimeout(function () { location.reload(); }, 1500);
-            } else {
-                showNotification(data.message || PAGE_DATA.i18n.cancel_failed, 'error');
-            }
-        })
-        .catch(function (err) {
-            console.error('Error cancelling order:', err);
-            showNotification(PAGE_DATA.i18n.error, 'error');
-        });
-    }
-
+    // Pay, Skip/Cancel/Decline and Confirm: the backend's `customer_actions`, the same answer GET /orders/<id>
+    // publishes, drawn by the one script every order surface shares (order-actions.js). After a write the page
+    // reloads from the server, once the customer has read the toast.
     document.addEventListener('DOMContentLoaded', function () {
-        var btn = document.querySelector('[data-action="cancel-order"]');
-        if (btn) btn.addEventListener('click', cancelOrder);
+        var container = document.getElementById('orderActions');
+        if (!container || !PAGE_DATA.order) return;
+        window.OrderActions.render(container, PAGE_DATA.order, {
+            words: PAGE_DATA.order_actions,
+            subscriptionsUrl: PAGE_DATA.subscriptions_url,
+            onChanged: function (result) {
+                setTimeout(function () { window.location.reload(); }, result.ok ? 1500 : 2500);
+            }
+        });
     });
 })();

@@ -130,6 +130,9 @@
             });
         });
 
+        // A write in the order modal (a cancel, a skip, a Pay) makes the recent orders behind it out of date.
+        document.addEventListener('orders:changed', function () { window.location.reload(); });
+
         document.querySelectorAll('[data-action="show-order"]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var orderId = this.dataset.orderId;

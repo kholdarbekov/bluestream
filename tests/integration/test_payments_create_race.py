@@ -58,18 +58,20 @@ def test_cross_method_race_reuses_winner_row_with_requested_method(
 ):
     """uq_payments_order_id is on order_id alone, so the racing winner can hold a
     DIFFERENT payment method. A losing click request must not inherit the winner's
-    CASH method (nor answer 'cash created' while the row stays CLICK): the retry
-    must UPDATE-reuse the winner row onto the requested method via the service SSOT."""
+    PAYME method: the retry must UPDATE-reuse the winner row onto the requested
+    method via the service SSOT. Legacy Payme -> Click is the one rail move a
+    customer may make (spec 2026-10-27 §4.3), so the order is a legacy Payme order."""
     order = order_with_address
+    order.payment_method = PaymentMethod.PAYME
     client = matrix_app.test_client()
     winner = Payment(
         order_id=order.id,
         user_id=order.user_id,
-        payment_method=PaymentMethod.CASH,
+        payment_method=PaymentMethod.PAYME,
         amount=order.total_amount,
         currency="UZS",
         status=PaymentStatus.CANCELLED,
-        payment_id="PAY_CASH_WINNER",
+        payment_id="PAY_PAYME_WINNER",
         provider_data={},
     )
     db.session.add(winner)

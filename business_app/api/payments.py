@@ -19,7 +19,7 @@ except ImportError:
 
     UTC = timezone.utc
 
-from business_app.utils.service_factory import get_payment_service, get_notification_service, get_order_service
+from business_app.utils.service_factory import get_payment_service, get_order_service
 from business_app.utils.translations import get_translation
 from shared.redis_keyspace import RedisKeyspace
 from business_app.serializers.payment_serializers import (
@@ -396,6 +396,9 @@ def create_payment():
 
         return created_response(data={"payment": serialize_payment(payment), "payment_link": payment_link})
 
+    except ValidationError as e:
+        # `create_payment`'s rail rule (RAIL_MOVE_NOT_ALLOWED, MARKING_CODES_POOL_SHORT) answers in its own words.
+        return validation_error_response(e.message, error_code=e.error_code)
     except ValueError as e:
         return error_response(message=str(e))
     except Exception as e:
@@ -1414,93 +1417,3 @@ def verify_card_code():
     except Exception as e:
         current_app.logger.error(f"Verify card error: {e}")
         return internal_error_response(message=get_translation("api.payments.error.verify_card_failed"))
-
-
-@payments_bp.route("/process-card-payment", methods=["POST"])
-@jwt_required()
-@validate_json(["order_id", "token"])
-@rate_limit(5, 60)  # 5 payment attempts per minute
-def process_card_payment():
-    """
-    Process payment with a verified card token.
-
-    This is the final step in the payment flow. The card must be verified
-    (via /cards/verify) before calling this endpoint.
-
-    Request body:
-        order_id: Order ID to pay for
-        token: Verified card token
-        save_card: (optional) Whether to save card for future use, default true
-        card_metadata: (optional) Card details for saving
-            - masked_number: Masked card number
-            - expire: Expiry date
-            - cardholder_name: Cardholder name
-
-    Response (Success):
-        success: true
-        payment_id: Our payment record ID
-        order_id: Order ID
-        receipt_id: Payme receipt ID
-        amount: Amount paid
-        redirect_url: URL to redirect user
-
-    Response (Failure):
-        success: false
-        message: Error description
-    """
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
-
-        order_id = data.get("order_id")
-        token = data.get("token")
-        save_card = data.get("save_card", True)
-        card_metadata = data.get("card_metadata", {})
-
-        if not order_id:
-            return error_response(message=get_translation("error.validation.order_id_required"))
-        if not token:
-            return error_response(message=get_translation("error.validation.card_token_required"))
-
-        payment_service = get_payment_service()
-
-        result = payment_service.process_payme_payment_full(
-            order_id=order_id,
-            card_token=token,
-            user_id=current_user_id,
-            save_card=save_card,
-            card_metadata=card_metadata,
-        )
-
-        # Send notification on successful payment
-        try:
-            notification_service = get_notification_service()
-            notification_service.send_payment_notification(result["payment_id"])
-        except Exception as notify_error:
-            current_app.logger.warning(f"Failed to send payment notification: {notify_error}")
-
-        return success_response(
-            data={
-                "success": True,
-                "payment_id": result["payment_id"],
-                "order_id": result["order_id"],
-                "receipt_id": result["receipt_id"],
-                "amount": result.get("amount"),
-                "redirect_url": result.get("redirect_url", f"/my-orders?order_id={order_id}&payment=success"),
-            }
-        )
-
-    except NotFoundError as e:
-        return not_found_response(message=str(e))
-    except ValidationError as e:
-        return validation_error_response(errors=str(e))
-    except Exception as e:
-        current_app.logger.error(f"Process card payment error: {e}")
-        return error_response(
-            message=get_translation("api.payments.error.process_card_payment_failed"),
-            status_code=500,
-            data={
-                "order_id": data.get("order_id") if "data" in dir() else None,
-                "redirect_url": f"/checkout?error=payment_failed",  # noqa: F541
-            },
-        )

@@ -231,14 +231,16 @@ def _notice(log_id, kind, **facts):
     }
 
 
-def _order_created_facts(order, **payment):
+def _order_created_facts(order, not_included=(), **payment):
     return {
         "order_id": order.id,
         "order_number": order.order_number,
         "delivery_date": THURSDAY.isoformat(),
         "window_start": "10:00",
         "window_end": "12:00",
+        "time_kind": "window",
         "items": [{"name": "Pure Water 19L", "qty": 2}],
+        "not_included": list(not_included),
         "total": float(order.total_amount),
         **payment,
     }
@@ -294,7 +296,7 @@ class TestTheOrderNotice:
         facts = bot.calls[0]["payload"]
         assert (facts["payment"], facts["amount_due"], facts["prepaid_applied"]) == ("cash", 25000.0, 5000.0)
 
-    def test_a_click_order_carries_the_payment_deadline_and_no_window_reads_time_to_be_confirmed(
+    def test_a_click_order_carries_the_payment_deadline_and_no_slot_reads_any_time(
         self, db, clock, on_telegram, user_address, sample_product, published, bot
     ):
         """No slot: dated, no window. The deadline is §4.5's: the end of the delivery day (no window), local,
@@ -315,6 +317,7 @@ class TestTheOrderNotice:
                     order,
                     window_start=None,
                     window_end=None,
+                    time_kind="any_time",
                     payment="online_unpaid",
                     amount_due=None,
                     prepaid_applied=None,
@@ -336,6 +339,43 @@ class TestTheOrderNotice:
 
         assert bot.calls[0]["payload"]["deadline"] == "2027-01-07T12:00:00+05:00"
         assert bot.calls[0]["payload"]["payment"] == "online_unpaid"
+
+    def test_an_order_whose_slot_is_switched_off_reads_time_to_be_confirmed(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        morning_slot.is_active = False
+        db.session.commit()
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [log_id] = published
+
+        send_subscription_notice_task(log_id)
+
+        [call] = bot.calls
+        payload = call["payload"]
+        assert (payload["time_kind"], payload["window_start"], payload["window_end"]) == ("to_be_confirmed", None, None)
+
+    @pytest.mark.parametrize(
+        "language, any_time",
+        [("en", "any time"), ("uz", "istalgan vaqtda"), ("ru", "в любое время")],
+    )
+    def test_the_email_reads_any_time_in_the_customers_language(
+        self, app, monkeypatch, db, clock, on_email, user_address, sample_product, published, bot, language, any_time
+    ):
+        seed_translations(db, [f"api.subscriptions.time.{name}" for name in ("any_time_inline", "to_be_confirmed_inline")])
+        on_email.preferred_language = language
+        db.session.commit()
+        sub_id = _subscription(db, on_email, user_address, sample_product, payment_method=PaymentMethod.CLICK)
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        assert _orders(db, sub_id)
+
+        with live_send_path(app, monkeypatch, bot_url=BOT_URL, extra_config=CLICK_CONFIG) as post:
+            assert send_subscription_notice_task(published[0]) == "email"
+
+        [call] = post.call_args_list
+        assert f", {any_time}</td>" in call.kwargs["json"]["htmlContent"]
 
     def test_a_company_account_order_is_charged_and_no_payment_confirmation_goes_out(
         self, db, clock, sample_product, morning_slot, published, timeline, bot, generic
@@ -784,7 +824,9 @@ class TestASkippedDelivery:
         sub_id = _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
         clock.at(date(2027, 1, 4))
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        resp = client.post(
+            f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": THURSDAY.isoformat()}
+        )
 
         assert resp.status_code == 200, resp.get_json()
         assert len(_logs(db, sub_id, subscription_notices.DELIVERY_SKIPPED)) == 1
@@ -814,7 +856,8 @@ class TestAPaidOrderStays:
     @pytest.mark.parametrize(
         "path, body, trigger, next_day",
         [
-            ("skip-next-delivery", {}, "skip", "2027-01-21"),
+            # The skip names the delivery after the paid one (spec 2026-10-26 §12).
+            ("skip-next-delivery", {"expected_date": "2027-01-14"}, "skip", "2027-01-21"),
             ("pause", {}, "pause", None),
             ("cancel", {"reason": "Moving"}, "cancel", None),
         ],
@@ -823,6 +866,11 @@ class TestAPaidOrderStays:
         self, client, db, auth_headers, paid_thursday_order, published, timeline, bot, path, body, trigger, next_day
     ):
         sub_id, order = paid_thursday_order
+        if path in ("pause", "cancel"):
+            # Pause and cancel carry what the screen showed (spec 2026-10-27 §16 M2): read fresh, as the guards' `_state`.
+            shown = client.get(f"{BASE}/{sub_id}", headers=auth_headers)
+            assert shown.status_code == 200, shown.get_json()
+            body = {**body, "expected_state": shown.get_json()["data"]["subscription"]["allowed_actions"]["expected_state"]}
 
         resp = client.post(f"{BASE}/{sub_id}/{path}", headers=auth_headers, json=body)
 
@@ -849,6 +897,194 @@ class TestAPaidOrderStays:
 # --------------------------------------------------------------------------- the email templates
 
 
+# --------------------------------------------------------------------------- discontinued products (spec 2026-10-26 §8.5)
+
+
+def _second_product(db, sample_product, *, name="Cooler cups"):
+    """A second active product in the same category."""
+    from business_app.models.product import Product
+
+    product = Product(
+        name=name,
+        description="cups",
+        size="5L",
+        volume=5.0,
+        category_id=sample_product.category_id,
+        base_price=Decimal("5000.00"),
+        stock_quantity=100,
+        min_stock_level=10,
+        max_stock_level=500,
+        is_active=True,
+    )
+    db.session.add(product)
+    db.session.commit()
+    return product
+
+
+def _add_line(db, sub_id, product, quantity=1):
+    db.session.add(
+        SubscriptionItem(
+            subscription_id=sub_id,
+            product_id=product.id,
+            quantity=quantity,
+            unit_price=product.base_price,
+            total_price=product.base_price * quantity,
+        )
+    )
+    db.session.commit()
+
+
+def _discontinue(db, product):
+    product.is_active = False
+    db.session.commit()
+
+
+def _delete_product(db, product):
+    """A product gone since the subscription was made (the SQLite test database keeps no FK)."""
+    db.session.execute(
+        sa_text("UPDATE subscription_items SET product_id = 987654 WHERE product_id = :id"), {"id": product.id}
+    )
+    db.session.commit()
+
+
+class TestDiscontinuedProductsAreLeftOut:
+    def test_an_inactive_product_is_left_out_and_the_notice_names_it(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        seed_translations(db, ["api.subscriptions.skip_reason.out_of_stock"])
+        cups = _second_product(db, sample_product)
+        sub_id = _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        _add_line(db, sub_id, cups, quantity=3)
+        _discontinue(db, cups)
+        clock.at(WEDNESDAY)
+
+        summary = process_daily_subscription_billing()
+
+        assert summary["successful"] == 1
+        [order] = _orders(db, sub_id)
+        assert [(line.product_id, line.quantity) for line in order.order_items] == [(sample_product.id, 2)]
+        assert _logs(db, sub_id, subscription_notices.DELIVERY_SKIPPED) == []
+        assert _row(db, sub_id).next_delivery_date == THURSDAY + WEEK
+        [log] = _logs(db, sub_id, subscription_notices.ORDER_CREATED)
+        assert log.extra_data["not_included_product_ids"] == [cups.id]
+
+        assert send_subscription_notice_task(log.id) == "telegram"
+
+        expected = _notice(
+            log.id,
+            "subscription_order_created",
+            **_order_created_facts(
+                order,
+                ["Cooler cups"],
+                payment="cash",
+                amount_due=float(order.total_amount),
+                prepaid_applied=None,
+                deadline=None,
+            ),
+        )
+        assert bot.calls == [expected]
+        assert set(expected["payload"]) == CONTRACT_KEYS["subscription_order_created"]
+        assert expected["payload"]["items"] == [{"name": "Pure Water 19L", "qty": 2}]
+        assert expected["payload"]["total"] == 30000.0  # the available line only
+
+    def test_a_deleted_product_is_left_out_the_same_way(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        cups = _second_product(db, sample_product)
+        sub_id = _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        _add_line(db, sub_id, cups)
+        _delete_product(db, cups)
+        clock.at(WEDNESDAY)
+
+        process_daily_subscription_billing()
+
+        [order] = _orders(db, sub_id)
+        assert [line.product_id for line in order.order_items] == [sample_product.id]
+        [log] = _logs(db, sub_id, subscription_notices.ORDER_CREATED)
+        assert log.extra_data["not_included_product_ids"] == [987654]
+        send_subscription_notice_task(log.id)
+        assert bot.calls[0]["payload"]["not_included"] == ["#987654"]
+        assert bot.calls[0]["payload"]["items"] == [{"name": "Pure Water 19L", "qty": 2}]
+
+    def test_an_order_with_every_product_available_names_nothing(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+
+        send_subscription_notice_task(published[0])
+
+        assert bot.calls[0]["payload"]["not_included"] == []
+
+    @pytest.mark.parametrize("discontinue", [_discontinue, _delete_product], ids=["inactive", "deleted"])
+    def test_when_no_product_is_left_the_delivery_is_skipped_with_the_out_of_stock_notice(
+        self, db, clock, on_telegram, user_address, sample_product, published, bot, discontinue
+    ):
+        seed_translations(db, ["api.subscriptions.skip_reason.out_of_stock"])
+        cups = _second_product(db, sample_product)
+        sub_id = _subscription(db, on_telegram, user_address, sample_product)
+        _add_line(db, sub_id, cups)
+        discontinue(db, sample_product)
+        discontinue(db, cups)
+        clock.at(WEDNESDAY)
+
+        process_daily_subscription_billing()
+
+        assert _orders(db, sub_id) == []
+        assert _row(db, sub_id).next_delivery_date == THURSDAY + WEEK
+        [log] = _logs(db, sub_id, subscription_notices.DELIVERY_SKIPPED)
+        assert (log.extra_data["reason_code"], log.extra_data["skipped_dates"]) == ("out_of_stock", ["2027-01-07"])
+        assert published == [log.id]
+
+        send_subscription_notice_task(log.id)
+
+        assert bot.calls == [
+            _notice(
+                log.id,
+                "subscription_delivery_skipped",
+                subscription_name="Water",
+                skipped_dates=["2027-01-07"],
+                reason="a product was out of stock",
+                next_delivery_date="2027-01-14",
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "language, subject, heading, line",
+        [
+            ("en", "Subscription order #", "Not included", "Cooler cups (no longer available)"),
+            ("uz", "Obuna buyurtmasi #", "Kiritilmadi", "Cooler cups (endi mavjud emas)"),
+            ("ru", "Заказ по подписке #", "Не включено", "Cooler cups (больше недоступно)"),
+        ],
+    )
+    def test_the_email_names_the_left_out_product_in_the_customers_language(
+        self, app, monkeypatch, db, clock, on_email, user_address, sample_product, morning_slot, published, bot,
+        language, subject, heading, line,
+    ):
+        cups = _second_product(db, sample_product)
+        on_email.preferred_language = language
+        db.session.commit()
+        sub_id = _subscription(db, on_email, user_address, sample_product, slot=morning_slot)
+        _add_line(db, sub_id, cups)
+        _discontinue(db, cups)
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        assert len(_orders(db, sub_id)[0].order_items) == 1
+
+        with live_send_path(app, monkeypatch, bot_url=BOT_URL) as post:
+            assert send_subscription_notice_task(published[0]) == "email"
+
+        assert bot.calls == []
+        [call] = post.call_args_list
+        body = call.kwargs["json"]
+        html = body["htmlContent"]
+        assert subject in body["subject"]
+        assert f"<th>{heading}</th>" in html and line in html
+        assert "Pure Water 19L" in html
+
+
+
 @pytest.mark.parametrize("language", ["en", "uz", "ru"])
 @pytest.mark.parametrize("kind", sorted(CONTRACT_KEYS))
 def test_every_notice_has_an_email_template_and_subject_in_every_language(app, kind, language):
@@ -863,6 +1099,7 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "delivery_date": "2027-01-07",
             "window_start": "10:00",
             "window_end": "12:00",
+            "time_kind": "window",
             "items": [{"name": "Pure Water 19L", "qty": 2}],
             "total": 30000.0,
             "payment": "online_unpaid",
@@ -888,6 +1125,18 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "order_number": "TG_000777_27",
             "deadline": "2027-01-07T12:00:00+05:00",
         },
+        "subscription_schedule_changed": {
+            "subscription_id": 7,
+            "subscription_name": "Office water",
+            "changes": ["time_cleared", "time_changed", "day_moved", "date_moved", "days_added"],
+            "old_window": "10:00–12:00",
+            "new_window": "11:00–13:00",
+            "old_weekday": 6,
+            "new_weekday": 0,
+            "added_weekdays": [5, 6],
+            "next_delivery_date": "2027-01-11",
+            "time_kind": "window",
+        },
     }[kind]
 
     with app.app_context():
@@ -902,3 +1151,7 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
     if kind == "subscription_order_created":
         assert 'href="https://pay.example/7"' in rendered["content"]
         assert "07.01.2027" in rendered["content"] or "01/07/2027" in rendered["content"]
+    if kind == "subscription_schedule_changed":
+        # One paragraph per change, each naming its own facts.
+        assert "Office water" in rendered["content"]
+        assert "10:00–12:00" in rendered["content"] and "11:00–13:00" in rendered["content"]

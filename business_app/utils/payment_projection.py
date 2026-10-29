@@ -1,11 +1,14 @@
 """Helpers for deriving consistent payment amount projections."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from sqlalchemy import and_, or_
 
+from business_app.utils.timezone_utils import get_utc_now
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
+from shared.payment_methods import canonical_rail
 
 PREPAID_METHOD_VALUES = {
     PaymentMethod.CARD.value,
@@ -182,6 +185,20 @@ ONLINE_PAYABLE_METHOD_VALUES = {method.value for method in FISCALIZED_RAILS}
 MONEY_HELD_PAYMENT_STATUSES = frozenset({PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_PAID})
 
 
+def order_holds_money(order: Any) -> bool:
+    """Is money already in against this order? Its payment is COMPLETED or PARTIALLY_PAID, or some amount has
+    been collected or reserved toward it (`paid_amount`), whatever the row's status says.
+
+    Pay's partly-paid refusal (`pay_refusal`) asks this (spec 2026-10-27 §4.1, §17 Q1): the driver collects the
+    rest at the door, so no second online payment is opened over money already taken.
+    """
+    payment = getattr(order, "payment", None)
+    if payment is None:
+        return False
+    held = {status.value for status in MONEY_HELD_PAYMENT_STATUSES}
+    return _enum_value(getattr(payment, "status", None)) in held or paid_amount(payment) > Decimal("0.00")
+
+
 def order_is_payable_online(order: Any, payment: Any) -> bool:
     """May the customer still pay this order's gateway link RIGHT NOW?
 
@@ -241,6 +258,80 @@ def is_settled_prepayment(payment: Any) -> bool:
     method_value = _enum_value(getattr(payment, "payment_method", None))
     status_value = _enum_value(getattr(payment, "status", None))
     return method_value in PREPAID_METHOD_VALUES and status_value == PaymentStatus.COMPLETED.value
+
+
+# Why the customer may not pay this order online now: `pay_refusal` answers one of these, or None.
+PAY_REFUSAL_ALREADY_PAID = "already_paid"
+PAY_REFUSAL_ORDER_CLOSED = "order_closed"
+PAY_REFUSAL_NOT_ONLINE = "not_online"
+PAY_REFUSAL_PARTLY_PAID = "partly_paid"
+PAY_REFUSAL_DEADLINE_PASSED = "deadline_passed"
+
+# The online rails, canonically (legacy `card` folds into Click). Wider than FISCALIZED_RAILS on purpose: Payme
+# keeps its retry (see `pay_refusal`). Read only through `is_online_rail`.
+_ONLINE_RAILS = frozenset({PaymentMethod.CLICK, PaymentMethod.PAYME})
+
+
+def is_online_rail(method: Any) -> bool:
+    """Is `method` (a `PaymentMethod`, its value, or None) a rail the customer's Pay can open a Click checkout
+    for? THE one expression of "the online rails" (spec 2026-10-27 §4.1, §4.3). `pay_refusal` asks it of the
+    order's rail and of its payment row's rail, and `payment_service.create_payment`'s rail rule asks it of the
+    rails a customer write moves an order off, so the Pay every payload publishes and the write that serves it
+    cannot disagree on which rails are online. None and anything unrecognised are not online."""
+    return canonical_rail(method) in _ONLINE_RAILS
+
+
+def pay_refusal(order: Any, *, now: Optional[datetime] = None) -> Optional[str]:
+    """Why the customer may not open a payment for this order now, or None when they may.
+
+    THE one Pay rule (spec 2026-10-27 §4.1). Every customer order payload publishes it as `customer_actions.pay`
+    (`customer_order_actions.pay_action`), a subscription's `allowed_actions.pay`, `upcoming_delivery.can_pay`
+    and history rows read it, and the retry-payment route (`POST /orders/<id>/retry-payment`) enforces it, so
+    the Pay a customer is shown and the write it sends cannot disagree. `now` is the instant the deadline is
+    checked against (the wall clock when None). The checks run in this order and the first match wins:
+
+    1. ALREADY_PAID: the order is paid.
+    2. ORDER_CLOSED: the order is gone (CANCELLED / RETURNED). `order_is_resolved` (rail-blind), not the
+       full `order_is_payable_online`: that one's rail half excludes Payme by construction, and gating on
+       it would silently delete Payme retry.
+    3. ALREADY_PAID: a settled prepayment whose order flag has not caught up (retrying would REWRITE a
+       COMPLETED payment back to PENDING and mint a second link), or nothing to pay (a total of 0). A
+       reserved customer prepayment exists only on CASH orders, which check 4 refuses, so this does not read it.
+    4. NOT_ONLINE: the order, or its payment row, is not on a rail a checkout can be opened for (cash, business
+       account; `is_online_rail`). The retry-payment write refuses to move a row off an offline rail, so Pay is
+       not published for an online order sitting on an offline row either.
+    5. PARTLY_PAID: money is already in (`order_holds_money`); the driver collects the rest at the door.
+    6. DEADLINE_PASSED: the order's payment deadline binds it (`OrderService.payment_deadline_applies`) and has
+       passed (`OrderService.payment_deadline`), so Pay disappears exactly at the deadline.
+
+    A failed or abandoned attempt does not refuse: the customer may try again.
+    """
+    if getattr(order, "is_paid", False):
+        return PAY_REFUSAL_ALREADY_PAID
+    if order_is_resolved(order):
+        return PAY_REFUSAL_ORDER_CLOSED
+    payment = getattr(order, "payment", None)
+    settled = payment is not None and is_settled_prepayment(payment)
+    if settled or _to_decimal(getattr(order, "total_amount", 0)) <= Decimal("0.00"):
+        return PAY_REFUSAL_ALREADY_PAID
+    if not is_online_rail(getattr(order, "payment_method", None)):
+        return PAY_REFUSAL_NOT_ONLINE
+    row_rail = getattr(payment, "payment_method", None)  # no row, or a row with no rail, does not vote
+    if row_rail is not None and not is_online_rail(row_rail):
+        return PAY_REFUSAL_NOT_ONLINE
+    if order_holds_money(order):
+        return PAY_REFUSAL_PARTLY_PAID
+    # order_service imports this module, so the deadline's one home is imported here.
+    from business_app.services.order_service import OrderService
+
+    if OrderService.payment_deadline_applies(order) and OrderService.payment_deadline(order) <= (now or get_utc_now()):
+        return PAY_REFUSAL_DEADLINE_PASSED
+    return None
+
+
+def can_pay(order: Any, *, now: Optional[datetime] = None) -> bool:
+    """May the customer pay this order online now? `pay_refusal` is None."""
+    return pay_refusal(order, now=now) is None
 
 
 def get_payment_projection(payment: Any) -> Dict[str, Any]:

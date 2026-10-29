@@ -1,0 +1,186 @@
+{
+ "bodies": [
+  {
+   "body": {
+    "delivery_time_slot_id": 1,
+    "frequency": "daily"
+   },
+   "name": "daily"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 0,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-0"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 1,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-1"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 2,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-2"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 3,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-3"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 4,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-4"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 5,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-5"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 6,
+    "delivery_time_slot_id": 1,
+    "frequency": "weekly"
+   },
+   "name": "weekly-6"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 0,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-0"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 1,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-1"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 2,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-2"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 3,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-3"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 4,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-4"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 5,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-5"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 6,
+    "delivery_time_slot_id": 1,
+    "frequency": "biweekly"
+   },
+   "name": "biweekly-6"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 1,
+    "delivery_time_slot_id": 1,
+    "frequency": "monthly"
+   },
+   "name": "monthly-1"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 15,
+    "delivery_time_slot_id": 1,
+    "frequency": "monthly"
+   },
+   "name": "monthly-15"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 28,
+    "delivery_time_slot_id": 1,
+    "frequency": "monthly"
+   },
+   "name": "monthly-28"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 29,
+    "delivery_time_slot_id": 1,
+    "frequency": "monthly"
+   },
+   "name": "monthly-29"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 31,
+    "delivery_time_slot_id": 1,
+    "frequency": "monthly"
+   },
+   "name": "monthly-31"
+  },
+  {
+   "body": {
+    "delivery_time_slot_id": null,
+    "frequency": "daily"
+   },
+   "name": "daily-any"
+  },
+  {
+   "body": {
+    "delivery_day_of_week": 3,
+    "delivery_time_slot_id": null,
+    "frequency": "weekly"
+   },
+   "name": "weekly-3-any"
+  },
+  {
+   "body": {
+    "delivery_day_of_month": 15,
+    "delivery_time_slot_id": null,
+    "frequency": "monthly"
+   },
+   "name": "monthly-15-any"
+  }
+ ]
+}

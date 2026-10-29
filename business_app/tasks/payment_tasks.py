@@ -485,52 +485,6 @@ def process_click_fiscalization_task(self, payment_id: int, force: bool = False)
             return {"success": False, "payment_id": payment_id, "retries_exhausted": True}
 
 
-@shared_task(time_limit=300, soft_time_limit=270)
-def retry_failed_payments():
-    """Retry failed payments that might be recoverable"""
-    try:
-        logger.info("Retrying failed payments")
-
-        # Get payments that failed in the last 24 hours
-        threshold_time = datetime.now(timezone.utc) - timedelta(hours=24)
-        failed_payments = Payment.query.filter(
-            Payment.status == PaymentStatus.FAILED, Payment.updated_at > threshold_time
-        ).all()
-
-        retried_count = 0
-
-        for payment in failed_payments:
-            try:
-                # Only retry certain types of failures (network issues, temporary gateway problems)
-                if payment.gateway_response and "temporary" in payment.gateway_response.get("error", "").lower():
-                    # Reset payment status to pending for retry
-                    payment.status = PaymentStatus.PENDING
-                    payment.updated_at = datetime.now(timezone.utc)
-                    db.session.commit()
-
-                    # Send notification to user about retry
-                    notification_service = NotificationService()
-                    notification_service.send_notification(
-                        payment.user_id,
-                        "payment_retry",
-                        template_data={"order_number": payment.order.order_number, "payment_amount": payment.amount},
-                    )
-
-                    retried_count += 1
-                    logger.info(f"Retrying payment {payment.id}")
-
-            except Exception as e:
-                logger.error(f"Error retrying payment {payment.id}: {e}")
-                continue
-
-        logger.info(f"Retried {retried_count} failed payments")
-        return {"retried_count": retried_count}
-
-    except Exception as e:
-        logger.error(f"Error retrying failed payments: {e}")
-        return {"error": str(e)}
-
-
 @shared_task(bind=True, max_retries=2, default_retry_delay=300, time_limit=300, soft_time_limit=270)
 def mark_overdue_cod_reconciliation_sessions(self):
     """Mark active driver COD sessions past the warning window for manager visibility."""

@@ -162,7 +162,7 @@ class TestOrdersAndDeliveryAPI:
         assert response.get_json()['success'] is False
 
     def test_cancel_nonexistent_order_returns_not_found(self, client, auth_headers, db):
-        response = client.post('/api/v1/orders/999999/cancel', json={'reason': 'test'}, headers=auth_headers)
+        response = client.post('/api/v1/orders/999999/cancel', json={'expected_via': 'cancel'}, headers=auth_headers)
 
         assert response.status_code == 404
         assert response.get_json()['success'] is False

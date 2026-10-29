@@ -319,6 +319,10 @@ def test_agent_confirmation_payload_carries_the_action_and_an_optional_reason():
     payload = AgentConfirmationPayload(action="decline", reason="Bugun pul yo'q")
 
     assert (payload.action, payload.reason) == ("decline", "Bugun pul yo'q")
+    # The bot's body names no channel; the website's names "web" (spec 2026-10-27 §8). Nothing else is a channel.
+    assert (AgentConfirmationPayload(action="confirm").channel, AgentConfirmationPayload(action="confirm", channel="web").channel) == ("bot", "web")
+    with pytest.raises(ValueError):
+        AgentConfirmationPayload(action="confirm", channel="sms")
 
 
 def test_start_opens_a_visit_at_the_checkin_step_and_flags_a_due_outlet(db, outlet, sales_agent_user):

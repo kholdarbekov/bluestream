@@ -89,6 +89,49 @@ describe('AdminService', () => {
     });
   });
 
+  describe('getCustomerSubscriptionPaymentMethods', () => {
+    it("asks the admin route for the CUSTOMER's subscription menu at the address", async () => {
+      api.get.mockResolvedValue({ data: { data: { available_methods: [{ method: 'business_account' }] } } });
+
+      const result = await adminService.getCustomerSubscriptionPaymentMethods(42, 9);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/42/payment-methods', {
+        params: { context: 'subscription', delivery_address_id: 9 },
+      });
+      expect(result).toEqual([{ method: 'business_account' }]);
+    });
+
+    it('asks without an address while none is chosen', async () => {
+      api.get.mockResolvedValue({ data: { data: { available_methods: [] } } });
+
+      await adminService.getCustomerSubscriptionPaymentMethods(42, undefined);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/42/payment-methods', { params: { context: 'subscription' } });
+    });
+  });
+
+  describe('getSubscriptionTimeSlots', () => {
+    it('asks the slots a recurring delivery may use on that weekday for that frequency', async () => {
+      api.get.mockResolvedValue({ data: { weekday: 'any', time_slots: [{ id: 1 }] } });
+
+      const result = await adminService.getSubscriptionTimeSlots({ weekday: 'any', frequency: 'monthly' });
+
+      expect(api.get).toHaveBeenCalledWith('/delivery/time-slots', { params: { weekday: 'any', frequency: 'monthly' } });
+      expect(result).toEqual([{ id: 1 }]);
+    });
+  });
+
+  describe('getDeliveryWeekdays', () => {
+    it('reads the delivery days the backend publishes with the slot list', async () => {
+      api.get.mockResolvedValue({ data: { weekday: 'any', time_slots: [], delivery_weekdays: [0, 1, 2, 3, 4] } });
+
+      const result = await adminService.getDeliveryWeekdays();
+
+      expect(api.get).toHaveBeenCalledWith('/delivery/time-slots', { params: { weekday: 'any' } });
+      expect(result).toEqual([0, 1, 2, 3, 4]);
+    });
+  });
+
   describe('user notification settings', () => {
     it('fetches user notification settings', async () => {
       const mockData = {

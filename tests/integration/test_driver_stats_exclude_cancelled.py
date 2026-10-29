@@ -91,7 +91,9 @@ def test_a_customer_cancel_leaves_the_drivers_stats(
     assert _bot_stats(client, app, delivery_driver) == _every_period(BEFORE_THE_CANCEL)
     stored_counters = (profile.total_deliveries, profile.successful_deliveries)
 
-    cancelled = client.post(CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user))
+    cancelled = client.post(
+        CANCEL_URL.format(order_id=order.id), headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+    )
 
     assert cancelled.status_code == 200, cancelled.get_json()
     db.session.expire_all()

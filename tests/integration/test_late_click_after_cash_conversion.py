@@ -548,7 +548,7 @@ def test_a_cancelled_converted_order_is_not_restored_and_the_click_money_is_prep
     click_total = _money(order.total_amount)
     order = _personal_card_transfer_of_nothing(app, admin, order)
     resp = app.test_client().post(
-        f"/api/v1/orders/{order.id}/cancel", json={"reason": "Changed my mind"}, headers=customer_headers(app, user)
+        f"/api/v1/orders/{order.id}/cancel", json={"expected_via": "cancel"}, headers=customer_headers(app, user)
     )
     assert resp.status_code == 200, resp.get_data(as_text=True)
     assert _reload(order.id).status == OrderStatus.CANCELLED

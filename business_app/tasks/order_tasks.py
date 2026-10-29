@@ -11,19 +11,23 @@ from flask import current_app
 from sqlalchemy import or_
 
 from business_app.models.order import Order
-from business_app.models.payment import Payment
 from business_app.models.user import User
 from business_app.models.product import Product
-from business_app.services.order_service import OrderService
+from business_app.services.order_service import PAYMENT_DEADLINE_STATUSES, OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import NotificationChannel
-from shared.enums import DeliveryStatus, OrderStatus, PaymentStatus, UserRole, UserStatus
+from business_app.utils.payment_projection import is_online_rail
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app.utils.timezone_utils import get_utc_now
 from business_app import db
 from shared.business_config import CLICK_PAYMENT_WINDOW_HOURS
 
 logger = get_task_logger(__name__)
+
+# The stored rails `cancel_abandoned_orders` looks at: those a customer's Pay opens a checkout for
+# (`payment_projection.is_online_rail`, the one expression of "online"), so its query cannot drift from the rule.
+_ONLINE_METHODS = [method for method in PaymentMethod if is_online_rail(method)]
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=600, time_limit=600, soft_time_limit=540)
@@ -148,14 +152,21 @@ def auto_confirm_pending_orders():
 
 @shared_task(time_limit=600, soft_time_limit=540)
 def cancel_abandoned_orders():
-    """Cancel unpaid orders whose payment deadline has passed (spec 2026-10-23 §4.5).
+    """Cancel unpaid online orders whose payment deadline has passed (spec 2026-10-27 §4.4; 2026-10-23 §4.5).
 
-    The deadline is `OrderService.payment_deadline`, the ONE rule: an ordinary order has
-    CLICK_PAYMENT_WINDOW_HOURS, a subscription order also waits for the end of its delivery window. The
-    candidates are still the orders older than that window (so the query stays cheap); each is cancelled
-    only once its own deadline has passed. The customer is told "not paid by <deadline>" by
-    `send_payment_expired_notice_task`, published after the cancel committed, instead of the generic
-    "status changed: cancelled" message."""
+    It cancels exactly the orders whose Pay is refused as DEADLINE_PASSED (`payment_projection.pay_refusal`, the one
+    Pay rule, asked at this run's instant), so Pay disappears and the sweep cancels at the same deadline
+    (`OrderService.payment_deadline`: CLICK_PAYMENT_WINDOW_HOURS from when the order became payable on Click, later
+    for a subscription order still inside its delivery window). That one check also spares a paid order, one
+    holding money, a cash or business-account order and one the driver has.
+
+    The candidate query is only a cheap superset, read without locks: online orders that are pending, confirmed or
+    preparing, whose payment window opened at least CLICK_PAYMENT_WINDOW_HOURS ago and that no store or staff
+    answer still owns. Each candidate is then decided and cancelled in its own transaction, on its rows locked and
+    re-read (`OrderService.cancel_unpaid_order_past_deadline`): a Click payment or a driver's pickup that committed
+    after the candidate read is seen there, and one that arrives later waits for the cancel. The customer is told
+    "not paid by <deadline>" by `send_payment_expired_notice_task`, published after the cancel committed, instead of
+    the generic "status changed: cancelled" message."""
     try:
         logger.info("Cancelling abandoned orders")
 
@@ -166,23 +177,19 @@ def cancel_abandoned_orders():
         from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
         from business_app.services.order_schedule_service import OrderScheduleService
 
-        # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders.
-        # Order.payment is a relationship(uselist=False) — it has no .is_() and no
-        # .status. Use the relationship's EXISTS comparator instead.
-        abandoned_orders = (
-            Order.query.filter(
-                Order.status == OrderStatus.PENDING,
-                Order.created_at < cutoff_time,
-                or_(
-                    ~Order.payment.has(),
-                    Order.payment.has(Payment.status != PaymentStatus.COMPLETED),
-                ),
+        candidate_ids = [
+            order_id
+            for (order_id,) in db.session.query(Order.id)
+            .filter(
+                Order.status.in_(PAYMENT_DEADLINE_STATUSES),
+                Order.payment_method.in_(_ONLINE_METHODS),
+                # `<=`: Pay closes AT the deadline, so an order whose window opened exactly 24 h ago is a candidate.
+                Order.payment_window_start <= cutoff_time,
                 # D5, the SAME clause `auto_confirm_pending_orders` applies: an order a sales
                 # agent placed on a store's behalf belongs to the store until it answers or the
-                # request expires. A cash agent order's Payment row is PENDING by construction,
-                # so without this every such order matched — and this sweep does not confirm, it
-                # CANCELS, releasing the prepayment and telling the shop "no payment received"
-                # about an order it was never asked to pay online.
+                # request expires. This sweep does not confirm, it CANCELS, releasing the
+                # prepayment and telling the shop "no payment received" about an order it was
+                # never asked to pay online.
                 AgentOrderConfirmationService.pending_request_filter(),
                 # F1 (docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md):
                 # a failed delivery never ends its order. One that waits for a new date is
@@ -190,33 +197,36 @@ def cancel_abandoned_orders():
                 # SQL twin, correlated to this order through its delivery.
                 ~Order.delivery.has(OrderScheduleService.awaiting_new_date_filter()),
             )
-            .with_for_update(skip_locked=True)
+            .order_by(Order.id)
             .all()
-        )
+        ]
+        # End the read. No lock is held from one order's transaction into the next.
+        db.session.rollback()
 
         order_service = OrderService()
         cancelled_count = 0
 
-        for order in abandoned_orders:
-            if OrderService.payment_deadline(order) > now:
-                continue  # a subscription order still inside its delivery window
+        for order_id in candidate_ids:
             try:
-                # `cancel_order` commits. The notice is published only after that commit.
-                order_service.cancel_order(
-                    order.id, reason="Order cancelled - not paid by its payment deadline", notify=False
-                )
-            except Exception as e:
-                logger.error(f"Failed to cancel abandoned order {order.id}: {e}")
+                # Decides on the order's locked rows and commits the cancel; False when the order no longer qualifies
+                # (paid, holding money, with the driver, inside its deadline) or another writer holds it.
+                cancelled = order_service.cancel_unpaid_order_past_deadline(order_id, now=now)
+            except Exception:
+                # A deadlock or any other failure leaves the session unusable until it is rolled back; without
+                # this, every later order in the run would fail too.
+                db.session.rollback()
+                logger.exception("Failed to cancel abandoned order %s", order_id)
+                continue
+            if not cancelled:
                 continue
 
             cancelled_count += 1
-            logger.info(f"Cancelled abandoned order {order.id}")
+            logger.info(f"Cancelled abandoned order {order_id}")
             try:
-                send_payment_expired_notice_task.delay(order.id)
+                send_payment_expired_notice_task.delay(order_id)
             except Exception:  # noqa: BLE001 - the cancel stands; only the notice is lost
-                logger.exception("Failed to publish the payment-deadline notice for order %s", order.id)
+                logger.exception("Failed to publish the payment-deadline notice for order %s", order_id)
 
-        db.session.commit()  # Release row locks
         logger.info(f"Cancelled {cancelled_count} abandoned orders")
         return {"cancelled_count": cancelled_count}
 

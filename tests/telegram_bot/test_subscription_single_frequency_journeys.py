@@ -47,7 +47,10 @@ TRANSLATIONS = {
     "telegram.subscription.select_address": "WHERE-TO",
     "telegram.subscription.select_payment": "HOW-TO-PAY",
     "telegram.subscription.select_new_frequency": "PICK-NEW-FREQUENCY",
-    "telegram.subscription.frequency_updated_successfully": "FREQUENCY-UPDATED",
+    "telegram.subscription.select_new_time_slot": "PICK-NEW-SLOT",
+    "telegram.subscription.preview_title": "PREVIEW-TITLE",
+    "telegram.subscription.save_change": "SAVE",
+    "telegram.subscription.schedule_updated_successfully": "SCHEDULE-UPDATED",
     "telegram.subscription.confirm_title": "CONFIRM-TITLE",
     "telegram.subscription.created_success": "CREATED",
     "telegram.subscription.details_title": "DETAILS",
@@ -100,9 +103,8 @@ def subscription(**overrides):
         "frequency": "weekly",
         "billing_amount": 50000.0,
         "next_delivery_date": "2026-10-29",
-        "upcoming_delivery": {
-            "date": "2026-10-29", "window_start": "10:00", "window_end": "12:00", "order_id": None,
-        },
+        "schedule_sentence": "Every Thursday, 10:00–12:00",
+        "upcoming_delivery": {"date": "2026-10-29", "time_label": "10:00–12:00", "order_id": None},
     }
     base.update(overrides)
     return base
@@ -112,9 +114,12 @@ def subscription(**overrides):
 async def bot(monkeypatch):
     harness = await build_bot_harness(monkeypatch, translations=TRANSLATIONS)
     backend = harness.backend
+    # The picker reads the subscription catalog (`GET /subscriptions/products`, re-review G6).
     backend.route(
-        "GET", "/api/v1/products",
-        lambda _c: {"data": {"items": [{"id": PRODUCT_ID, "name": "Aqua 19L", "base_price": 25000}]}},
+        "GET", "/api/v1/subscriptions/products",
+        lambda _c: {"data": {"items": [
+            {"id": PRODUCT_ID, "product_name": "Aqua 19L", "unit_price_label": "25 000 so'm"},
+        ]}},
     )
     backend.route(
         "GET", f"/api/v1/products/{PRODUCT_ID}",
@@ -132,8 +137,10 @@ async def bot(monkeypatch):
     backend.route(
         "POST", f"{SUBSCRIPTIONS}/preview",
         lambda c: {"data": {"preview": {
-            "items": [{"product_name": "Aqua 19L", "quantity": 2}],
-            "frequency": c.data["frequency"], "total_amount": 50000.0, "deliveries_per_month": 4.33,
+            "items": [{"product_name": "Aqua 19L", "quantity": 2, "unit_price_label": "25 000 so'm",
+                       "line_total_label": "50 000 so'm"}],
+            "frequency": c.data["frequency"], "total_amount": 50000.0, "total_amount_label": "50 000 so'm",
+            "deliveries_per_month": 4.33,
         }}},
     )
     backend.route(
@@ -235,7 +242,7 @@ async def test_a_weekly_subscription_sends_one_frequency_the_weekday_and_the_slo
     await bot.send(user.tap("subscription_day_3"))  # Thursday, 0 = Monday
     assert last_text(bot) == "WHICH-TIME"
     assert creation_state(bot) == SELECT_SLOT
-    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": 3}
+    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": 3, "frequency": "weekly"}
     assert [b for b in buttons(bot) if b.startswith("subscription_slot_")] == [
         f"subscription_slot_{MORNING}", f"subscription_slot_{EVENING}", "subscription_slot_any",
     ]
@@ -278,7 +285,7 @@ async def test_a_monthly_subscription_asks_the_day_of_the_month_and_offers_every
     ]
 
     await bot.send(user.tap("subscription_day_31"))
-    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": "any"}
+    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": "any", "frequency": "monthly"}
     await finish_from_slot(bot, user, f"subscription_slot_{MORNING}")
 
     body = created_body(bot)
@@ -292,7 +299,7 @@ async def test_a_daily_subscription_has_no_day_picker_but_still_picks_a_slot(bot
     await bot.send(user.tap("subscription_freq_daily"))
     assert last_text(bot) == "WHICH-TIME"
     assert creation_state(bot) == SELECT_SLOT
-    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": "any"}
+    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": "any", "frequency": "daily"}
     await finish_from_slot(bot, user, f"subscription_slot_{MORNING}")
 
     body = created_body(bot)
@@ -353,7 +360,7 @@ async def test_the_confirm_screen_names_the_frequency_day_and_time(bot, user):
     assert "Frequency: Weekly" in text
     assert "Delivery day: Thursday" in text
     assert "Delivery time: 18:00-20:00" in text
-    assert "Total: 50000.0 UZS" in text
+    assert "Total: 50 000 so'm" in text  # the quote's published label (re-review admin-bot-backend-4)
 
 
 async def test_the_created_screen_shows_the_backends_upcoming_delivery(bot, user):
@@ -435,21 +442,22 @@ async def test_the_card_shows_one_next_delivery_from_the_backend(bot, user):
     text = last_text(bot)
     assert "Next delivery: 29.10.2026, 10:00–12:00" in text
     assert "2026-10-29" not in text  # dd.mm.yyyy, as the order notices print it, never the raw ISO date
-    assert "Frequency: Weekly" in text
+    assert "📅 Every Thursday, 10:00–12:00" in text  # the backend's schedule sentence, not a bot-built frequency line
     assert "Status: Active" in text
     assert "Next billing" not in text and "2026-10-28" not in text
-    assert "weekly" not in text.replace("Weekly", "") and "frequency_weekly" not in text
+    assert "weekly" not in text and "frequency_weekly" not in text
 
 
-async def test_a_delivery_without_a_window_says_the_time_is_to_be_confirmed(bot, user):
+async def test_a_delivery_without_a_window_prints_the_time_label_the_backend_published(bot, user):
+    """"Time to be confirmed" and "Any time" are the backend's `time_label`; the bot adds no wording of its own."""
     bot.backend.route(
         f"GET", f"{SUBSCRIPTIONS}/{SUB_ID}",
         lambda _c: {"data": {"subscription": subscription(upcoming_delivery={
-            "date": "2026-10-29", "window_start": None, "window_end": None, "order_id": 301})}},
+            "date": "2026-10-29", "time_label": "Time to be confirmed", "order_id": 301})}},
     )
     await bot.send(user.tap(f"subscription_{SUB_ID}"))
 
-    assert "Next delivery: 29.10.2026 (time to be confirmed)" in last_text(bot)
+    assert "Next delivery: 29.10.2026, Time to be confirmed" in last_text(bot)
 
 
 async def test_a_paused_subscription_has_no_next_delivery_line(bot, user):
@@ -497,8 +505,10 @@ async def test_the_list_labels_each_subscription_with_its_seeded_frequency(bot, 
 
 
 # ---------------------------------------------------------------------------
-# Change frequency persists, with the day it needs
+# Change frequency: the day, then the slot, then a preview, then one save (spec 2026-10-27 §6.2)
 # ---------------------------------------------------------------------------
+
+STATE = "0123456789abcdef"
 
 
 def put_body(bot):
@@ -506,12 +516,46 @@ def put_body(bot):
     return call.data
 
 
-async def test_changing_to_daily_persists_at_once(bot, user):
+def preview_body(bot):
+    (call,) = calls(bot, "POST", f"{SUBSCRIPTIONS}/{SUB_ID}/preview")
+    return call.data
+
+
+def answers(bot):
+    return [a.params.get("text") for a in bot.telegram.visible_answers]
+
+
+@pytest.fixture(autouse=True)
+def the_backend_previews_a_schedule(bot):
+    bot.backend.route(
+        "POST", f"{SUBSCRIPTIONS}/{SUB_ID}/preview",
+        lambda _c: {"data": {"preview": {
+            "schedule_sentence": "SCHEDULE-SENTENCE", "sentence": "FIRST-DELIVERY", "expected_state": STATE,
+            "upcoming_dates": [],
+        }}},
+    )
+    bot.backend.route("PUT", f"{SUBSCRIPTIONS}/{SUB_ID}", lambda _c: {"data": {"subscription": subscription()}})
+
+
+async def test_changing_to_daily_asks_the_slot_then_previews_then_saves(bot, user):
     await bot.send(user.tap(f"change_frequency_{SUB_ID}"))
     await bot.send(user.tap(f"subfreq_daily_{SUB_ID}"))
 
-    assert put_body(bot) == {"frequency": "daily"}
-    assert last_text(bot) == "✅ FREQUENCY-UPDATED"
+    assert not calls(bot, "PUT", f"{SUBSCRIPTIONS}/{SUB_ID}"), "persisted before the slot was chosen"
+    assert last_text(bot) == "PICK-NEW-SLOT"
+    assert calls(bot, "GET", SLOTS)[-1].params == {"weekday": "any", "frequency": "daily"}
+    assert f"subsched_daily_x_{MORNING}_{SUB_ID}" in buttons(bot) and f"subsched_daily_x_any_{SUB_ID}" in buttons(bot)
+
+    await bot.send(user.tap(f"subsched_daily_x_{MORNING}_{SUB_ID}"))
+
+    assert preview_body(bot) == {"frequency": "daily", "delivery_time_slot_id": MORNING}
+    assert not calls(bot, "PUT", f"{SUBSCRIPTIONS}/{SUB_ID}"), "the preview saved"
+    assert buttons(bot)[0] == f"subschedok_daily_x_{MORNING}_{SUB_ID}_{STATE}"
+
+    await bot.send(user.tap(f"subschedok_daily_x_{MORNING}_{SUB_ID}_{STATE}"))
+
+    assert put_body(bot) == {"frequency": "daily", "delivery_time_slot_id": MORNING, "expected_state": STATE}
+    assert "SCHEDULE-UPDATED" in answers(bot)
 
 
 @pytest.mark.parametrize(
@@ -522,7 +566,9 @@ async def test_changing_to_daily_persists_at_once(bot, user):
         ("monthly", 15, {"frequency": "monthly", "delivery_day_of_month": 15}),
     ],
 )
-async def test_changing_to_a_dated_frequency_asks_the_day_then_persists_both(bot, user, frequency, day, expected):
+async def test_changing_to_a_dated_frequency_asks_the_day_then_the_slot_then_persists_all_three(
+    bot, user, frequency, day, expected
+):
     await bot.send(user.tap(f"change_frequency_{SUB_ID}"))
 
     await bot.send(user.tap(f"subfreq_{frequency}_{SUB_ID}"))
@@ -531,16 +577,28 @@ async def test_changing_to_a_dated_frequency_asks_the_day_then_persists_both(bot
     assert last_text(bot) == ("WHICH-MONTH-DAY" if frequency == "monthly" else "WHICH-WEEKDAY")
     assert f"subday_{frequency}_{day}_{SUB_ID}" in buttons(bot)
 
-    bot.application.user_data[DEFAULT_USER_ID].clear()  # a deploy between the two taps
+    bot.application.user_data[DEFAULT_USER_ID].clear()  # a deploy between the taps
     await bot.send(user.tap(f"subday_{frequency}_{day}_{SUB_ID}"))
 
-    assert put_body(bot) == expected
-    assert last_text(bot) == "✅ FREQUENCY-UPDATED"
+    assert not calls(bot, "PUT", f"{SUBSCRIPTIONS}/{SUB_ID}"), "persisted before the slot was chosen"
+    assert last_text(bot) == "PICK-NEW-SLOT"
+    assert calls(bot, "GET", SLOTS)[-1].params == {
+        "weekday": day if frequency != "monthly" else "any", "frequency": frequency,
+    }
+    slot_tap = f"subsched_{frequency}_{day}_{MORNING}_{SUB_ID}"
+    assert slot_tap in buttons(bot)
+
+    await bot.send(user.tap(slot_tap))
+    assert preview_body(bot) == {**expected, "delivery_time_slot_id": MORNING}
+
+    await bot.send(user.tap(f"subschedok_{frequency}_{day}_{MORNING}_{SUB_ID}_{STATE}"))
+    assert put_body(bot) == {**expected, "delivery_time_slot_id": MORNING, "expected_state": STATE}
+    assert "SCHEDULE-UPDATED" in answers(bot)
 
 
-async def test_a_failed_frequency_change_is_shown_and_not_reported_as_saved(bot, user):
+async def test_a_failed_schedule_change_is_shown_and_not_reported_as_saved(bot, user):
     bot.backend.route("PUT", f"{SUBSCRIPTIONS}/{SUB_ID}", lambda _c: backend_failure("Cannot change", 400))
-    await bot.send(user.tap(f"subday_weekly_1_{SUB_ID}"))
+    await bot.send(user.tap(f"subschedok_weekly_1_any_{SUB_ID}_{STATE}"))
 
-    assert "FREQUENCY-UPDATED" not in " ".join(texts(bot))
-    assert any("Cannot change" in (c.text or "") for c in bot.telegram.shown + bot.telegram.of("answerCallbackQuery"))
+    assert "SCHEDULE-UPDATED" not in answers(bot)
+    assert "❌ Cannot change" in answers(bot)

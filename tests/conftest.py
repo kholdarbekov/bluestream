@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 from decimal import Decimal
 from unittest.mock import Mock, MagicMock
 import asyncio
+from contextlib import contextmanager
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 import requests
@@ -316,6 +317,54 @@ def reset_test_client_cookies():
     _clear()
     yield
     _clear()
+
+
+@contextmanager
+def celery_default_app_current():
+    """Make Celery's default app current on this thread for the block, then put back the app that was current.
+
+    Uses Celery's own calls: `celery._state.get_current_app()` (which also creates the default app on first use, the
+    one the hermetic block above points at `memory://`) and `Celery.set_current()`.
+    """
+    from celery import _state as celery_state
+
+    previous = celery_state.get_current_app()
+    celery_state.default_app.set_current()
+    try:
+        yield
+    finally:
+        previous.set_current()
+
+
+@pytest.fixture(autouse=True)
+def celery_default_app_is_current():
+    """Every test starts with Celery's DEFAULT app as the main thread's current app, whatever ran before it.
+
+    Celery keeps its current app per thread (`celery._state._tls`). Importing `business_app.tasks.celery_app` builds
+    the business app (`celery = make_celery()`), and `Celery.__init__` makes it current on the importing thread.
+    Several unit modules import it with `create_app` patched to the session SQLite `app` (e.g. the module-scoped
+    `celery_app_module` in tests/unit/test_order_tasks_abandoned.py), so for the rest of that xdist worker every
+    `@shared_task` a test called directly on the main thread resolved through its Proxy to the business app's task.
+    That task's `ContextTask.__call__` (business_app/tasks/celery_app.py) wraps the call in `with app.app_context()`:
+    Flask-SQLAlchemy scopes its session to the app context, so the task body ran in a session of its own, which the
+    context's teardown then removed. What the task handed back was detached, or the task ran against another app's
+    database. In a worker that never imported the module, the same call was a plain function call on the default
+    app. So a test's result depended on which modules ran before it in its worker. It bit three tests:
+    - tests/integration/test_click_payment_deadline.py::TestTheSweepDecidesOnLockedRows::
+      test_a_click_payment_that_lands_while_the_sweep_cancels_waits_and_is_refused and
+      test_a_click_payment_that_completed_before_the_sweep_locked_the_order_keeps_it (the sweep ran on the dropped
+      SQLite tables instead of `pg_app`'s Postgres);
+    - tests/integration/test_order_skip_cancel_decline.py::
+      test_a_skipped_date_the_missed_runs_pass_is_not_reported_as_passed (DetachedInstanceError on the
+      SubscriptionLog the billing run handed to `subscription_notices.deliver`).
+
+    The previous current app is put back after the test. A test that needs the business Celery app (beat schedule,
+    routing, `ContextTask` itself) uses the `celery` object from `business_app.tasks.celery_app` directly, never
+    "current". The default app is not made eager, and its broker stays the hermetic `memory://`. Pinned by
+    tests/unit/test_celery_current_app_isolation.py. Takes no fixture argument, like `reset_test_client_cookies`.
+    """
+    with celery_default_app_current():
+        yield
 
 
 @pytest.fixture(autouse=True)

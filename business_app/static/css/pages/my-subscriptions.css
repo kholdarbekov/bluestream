@@ -1,0 +1,718 @@
+/* ==========================================================================
+   /my-subscriptions (spec 2026-10-26 §4; UX brief tokens, structure and "avoid" list).
+   Scoped under .subs with custom properties (the loyalty-guide.css pattern). Mobile-first: 360px is the
+   design width; from 768px the hero gets two columns and the sections a summary-list grid.
+   One elevated surface (the next-delivery card); sections are flat rows separated by 1px rules.
+   Button rows wrap and no label is kept on one line, so long ru/uz labels are never clipped.
+   ========================================================================== */
+
+.subs {
+  --subs-ink: #061a3a;
+  --subs-ink-soft: #41607c;
+  --subs-aqua: #00d1f9;
+  --subs-aqua-deep: #0077b6;
+  --subs-navy: #002c8f;
+  --subs-pale: #e7f7fc;
+  --subs-bg: #f6fbfe;
+  --subs-surface: #ffffff;
+  --subs-line: #d7e9f3;
+  --subs-control: #6f8ca3;
+  --subs-danger: #b02a37;
+  --subs-display: 'Spartan', 'Open Sans', sans-serif;
+  --subs-body: 'Open Sans', sans-serif;
+  --subs-shadow: 0 10px 30px -16px rgba(3, 62, 138, .35);
+
+  color: var(--subs-ink);
+  font-family: var(--subs-body);
+  font-size: 15px;
+  line-height: 1.6;
+  background: var(--subs-surface);
+}
+
+.subs *,
+.subs *::before,
+.subs *::after { box-sizing: border-box; }
+
+/* The theme animates every p, a and heading for 500ms; this page moves only its inline panels. */
+.subs p, .subs a, .subs h2, .subs h3, .subs button { transition: none; }
+
+.subs p { color: var(--subs-ink); font-size: 15px; line-height: 1.6; margin: 0; }
+.subs h2, .subs h3 { color: var(--subs-ink); margin: 0; }
+.subs ul, .subs ol, .subs li { list-style: none; margin: 0; padding: 0; }
+.subs a { color: var(--subs-aqua-deep); font-weight: 600; text-decoration: none; }
+.subs a:hover { color: var(--subs-navy); text-decoration: underline; }
+.subs small { font-size: 13px; line-height: 1.45; }
+.subs [hidden] { display: none !important; }
+
+.subs-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Focus: one ring on every interactive element (the theme removes button outlines). */
+.subs a:focus-visible,
+.subs button:focus-visible,
+.subs [tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 3px solid var(--subs-aqua-deep);
+  outline-offset: 2px;
+}
+.subs #sub-h:focus { outline: none; }
+
+/* ------------------------------------------------------------------ the bottle glyph */
+.subs-bottle { display: block; width: 22px; height: 34px; fill: #fff; stroke: var(--subs-aqua-deep); stroke-width: 1.5; }
+.subs-bottle--placed { fill: var(--subs-aqua); }
+.subs-bottle--planned { fill: #fff; }
+.subs-bottle--skipped { fill: #fff; stroke: var(--subs-control); stroke-dasharray: 2 2; }
+.subs-bottle--draft { fill: #fff; stroke-dasharray: 2.5 2; }
+.subs-bottle--muted { fill: #fff; stroke: var(--subs-control); stroke-dasharray: 2 2; }
+.subs-bottle--thumb { width: 18px; height: 28px; fill: var(--subs-pale); }
+
+/* ------------------------------------------------------------------ chips (one palette) */
+.subs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.subs-chip i { font-size: 12px; }
+.subs-chip--success { color: #155724; background: #d4edda; }
+.subs-chip--warning { color: #856404; background: #fff3cd; }
+.subs-chip--info { color: #004085; background: #cce5ff; }
+.subs-chip--neutral { color: #383d41; background: #e2e3e5; }
+.subs-chip--danger { color: #721c24; background: #f8d7da; }
+
+/* ------------------------------------------------------------------ buttons */
+.subs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 0;
+  font: 600 15px/1.3 var(--subs-body);
+  text-align: center;
+  white-space: normal;
+  cursor: pointer;
+}
+.subs .subs-btn--primary { min-height: 48px; padding: 12px 24px; font-size: 16px; background: var(--subs-aqua-deep); color: #fff; }
+.subs .subs-btn--primary:hover, .subs .subs-btn--primary:active { background: var(--subs-navy); color: #fff; }
+.subs .subs-btn--secondary { background: #fff; color: var(--subs-navy); border: 1.5px solid var(--subs-line); }
+.subs .subs-btn--secondary:hover { background: var(--subs-pale); color: var(--subs-navy); }
+.subs a.subs-btn:hover { text-decoration: none; }
+.subs-btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+
+.subs-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 44px;
+  color: var(--subs-aqua-deep);
+  font: 600 15px/1.4 var(--subs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.subs-link:hover { color: var(--subs-navy); text-decoration: underline; }
+
+.subs-change {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  min-height: 44px;
+  min-width: 44px;
+  color: var(--subs-aqua-deep);
+  font: 600 15px/1.3 var(--subs-body);
+  cursor: pointer;
+}
+.subs-change:hover { color: var(--subs-navy); text-decoration: underline; }
+
+.subs-danger {
+  background: none;
+  border: 0;
+  padding: 10px 0;
+  min-height: 44px;
+  color: var(--subs-danger);
+  font: 600 15px/1.3 var(--subs-body);
+  cursor: pointer;
+}
+.subs-danger:hover, .subs-danger:focus-visible { text-decoration: underline; }
+
+.subs-money { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ------------------------------------------------------------------ the strip */
+.subs-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 2px 16px;
+  margin: 0 0 6px;
+}
+.subs-strip__item { flex: 0 0 78%; scroll-snap-align: start; display: flex; }
+.subs-strip__item--toggle, .subs-strip__item--new { flex-basis: 60%; }
+
+.subs-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 68px;
+  padding: 12px 14px;
+  border: 1px solid var(--subs-line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--subs-ink);
+  font-weight: 400;
+}
+.subs a.subs-card { color: var(--subs-ink); font-weight: 400; }
+.subs a.subs-card:hover { text-decoration: none; border-color: var(--subs-control); }
+.subs-card .subs-bottle { flex: 0 0 auto; width: 20px; height: 30px; }
+.subs-card .subs-chip { padding: 3px 8px; gap: 5px; }
+.subs-card__text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.subs-card__name { font-weight: 600; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.subs-card__meta { font-size: 13px; line-height: 1.45; color: var(--subs-ink-soft); }
+.subs-card[aria-current="true"] {
+  border: 2px solid var(--subs-aqua-deep);
+  background: var(--subs-pale);
+  padding: 11px 13px;
+}
+.subs-card[aria-current="true"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 16px;
+  height: 16px;
+  background: var(--subs-pale);
+  border-right: 2px solid var(--subs-aqua-deep);
+  border-bottom: 2px solid var(--subs-aqua-deep);
+  transform: translateX(-50%) rotate(45deg);
+}
+.subs-card--muted { color: var(--subs-ink-soft); }
+.subs-card--toggle {
+  justify-content: center;
+  color: var(--subs-ink-soft);
+  font: 600 14px/1.3 var(--subs-body);
+  text-align: center;
+  cursor: pointer;
+}
+.subs a.subs-card--new {
+  justify-content: center;
+  border: 1.5px dashed var(--subs-control);
+  color: var(--subs-aqua-deep);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ body header and jump links */
+.subs-body { padding-top: 4px; }
+.subs-bh { margin: 14px 0 6px; }
+.subs-bh__title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.subs .subs-bh h2 { font-family: var(--subs-display); font-weight: 800; font-size: 22px; line-height: 1.25; letter-spacing: -.2px; }
+.subs .subs-bh p { margin-top: 4px; color: var(--subs-ink-soft); }
+
+.subs-jump { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 14px; font-size: 14px; }
+.subs-jump a { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* ------------------------------------------------------------------ the next-delivery card */
+.subs-hero {
+  border: 1px solid var(--subs-line);
+  border-radius: 12px;
+  box-shadow: var(--subs-shadow);
+  overflow: hidden;
+  background: #fff;
+}
+.subs-hero__top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 20px 18px 16px; }
+.subs .subs-hero__label { font-size: 14px; font-weight: 600; color: var(--subs-ink-soft); }
+.subs .subs-hero__date {
+  font-family: var(--subs-display);
+  font-weight: 800;
+  font-size: 26px;
+  line-height: 1.15;
+  color: var(--subs-navy);
+  margin: 6px 0 2px;
+}
+.subs .subs-hero__date--state { font-size: 22px; margin-top: 0; }
+.subs .subs-hero__win { color: var(--subs-ink); }
+.subs .subs-hero__note { margin-top: 10px; font-size: 14px; color: var(--subs-ink-soft); line-height: 1.5; }
+.subs-hero__order { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 10px; }
+.subs-hero__actions { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.subs-hero__actions > .subs-btn { width: 100%; }
+.subs-hero__row { display: flex; flex-wrap: wrap; gap: 8px; }
+.subs-hero__row > .subs-btn { flex: 1 1 auto; }
+.subs .subs-hint { font-size: 13px; line-height: 1.45; color: var(--subs-ink-soft); }
+.subs .subs-hero__status { font-size: 14px; color: var(--subs-navy); }
+.subs .subs-hero__status:empty { display: none; }
+.subs-hero--cancelled { box-shadow: none; background: var(--subs-bg); }
+
+.subs .subs-warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff3cd;
+  color: #856404;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.subs-warning i { margin-top: 3px; }
+
+/* The waterline: the next deliveries standing on one line. Static: no waves, no gradient. */
+.subs-wl-band { background: var(--subs-pale); border-top: 1px solid var(--subs-line); padding: 16px 12px 10px; }
+.subs-wl { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 6px; }
+.subs-wl::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 37px;
+  height: 2px;
+  background: var(--subs-aqua);
+}
+/* Paused: one bottle on a short line, its caption beside it (the date is in the caption). */
+.subs-wl-band--single { display: flex; align-items: center; gap: 4px 16px; flex-wrap: wrap; }
+.subs-wl--single { grid-template-columns: minmax(0, 1fr); width: 88px; }
+.subs-wl--single .subs-wl__date { display: none; }
+.subs-wl--single .subs-wl__item { padding-bottom: 6px; }
+.subs-wl--single::before { top: 37px; }
+.subs-wl__item { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 4px; text-align: center; }
+.subs-wl__date { margin-top: 8px; font-size: 13px; line-height: 1.3; font-weight: 600; color: var(--subs-navy); overflow-wrap: anywhere; }
+.subs-wl__note { font-size: 13px; line-height: 1.3; color: var(--subs-ink-soft); }
+.subs-wl__item--skipped .subs-wl__date { color: var(--subs-ink-soft); text-decoration: line-through; }
+.subs .subs-wl__legend, .subs .subs-wl__caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  justify-content: flex-end;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--subs-ink-soft);
+}
+.subs .subs-wl__caption { justify-content: flex-start; margin-top: 0; color: var(--subs-navy); font-weight: 600; }
+.subs-wl__key i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 1.5px solid var(--subs-aqua-deep);
+  vertical-align: -1px;
+}
+.subs-wl__key--placed i, .subs-wl__key--on_the_way i { background: var(--subs-aqua); }
+.subs-wl__key--skipped i { border-style: dashed; border-color: var(--subs-control); }
+
+/* ------------------------------------------------------------------ sections (flat summary rows) */
+.subs-sec {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 16px;
+  align-items: start;
+  padding: 24px 0;
+  border-top: 1px solid var(--subs-line);
+}
+.subs-hero + .subs-sec { border-top: 0; margin-top: 14px; }
+.subs .subs-sec h3 { font-family: var(--subs-display); font-weight: 700; font-size: 18px; line-height: 1.3; grid-column: 1; grid-row: 1; }
+.subs-sec__action { grid-column: 2; grid-row: 1; justify-self: end; margin-top: -10px; }
+.subs-sec__value { grid-column: 1 / -1; min-width: 0; }
+.subs .subs-val { margin: 0; }
+.subs .subs-val small { display: block; color: var(--subs-ink-soft); }
+
+.subs-item { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 4px 0 10px; }
+.subs-item__thumb {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid var(--subs-line);
+  background: var(--subs-bg);
+  overflow: hidden;
+}
+.subs-item__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.subs-item__text { min-width: 0; }
+.subs-item__text b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.subs-item__text small { display: block; color: var(--subs-ink-soft); }
+.subs-item > .subs-money { text-align: right; }
+.subs-item.is-unavailable .subs-item__thumb { filter: grayscale(1); opacity: .6; }
+.subs-item.is-unavailable .subs-item__text b, .subs-item.is-unavailable > .subs-money { color: var(--subs-ink-soft); }
+.subs .subs-item__warn { display: flex; gap: 6px; margin-top: 2px; color: #856404; }
+.subs-item__warn i { margin-top: 3px; }
+
+.subs-totals {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 16px;
+  margin: 4px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--subs-line);
+}
+.subs-totals dt { font-weight: 400; color: var(--subs-ink-soft); }
+.subs-totals dd { margin: 0; text-align: right; }
+.subs .subs-benefit { margin-top: 12px; font-size: 14px; color: var(--subs-ink-soft); }
+.subs-benefit b { color: var(--subs-ink); font-weight: 600; }
+
+/* Orders from this subscription. */
+.subs-orow { display: flex; align-items: center; gap: 8px; min-height: 56px; border-bottom: 1px solid var(--subs-line); }
+.subs-orow:last-child { border-bottom: 0; }
+.subs-orow__open {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: var(--subs-ink);
+  font: 400 15px/1.4 var(--subs-body);
+  text-align: left;
+}
+button.subs-orow__open { cursor: pointer; }
+button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
+.subs-orow__when { font-weight: 600; min-width: 84px; }
+.subs-orow__why { color: var(--subs-ink-soft); font-size: 14px; }
+.subs-orow__why:empty { display: none; }
+.subs-orow__amt { margin-left: auto; text-align: right; }
+.subs-orow__amt:empty { display: none; }
+.subs-orow__pay { flex: 0 0 auto; }
+/* A row's Skip or Cancel sits beside Pay; its inline confirm opens under the row, on a line of its own. */
+.subs-orow__act { flex: 0 0 auto; }
+.subs-orow__confirm { flex: 1 0 100%; margin-bottom: 12px; }
+.subs-orders:focus { outline: none; } /* a programmatic focus target only (after the last "Show more") */
+.subs-orders__more { margin-top: 14px; }
+.subs .subs-orders__empty { color: var(--subs-ink-soft); }
+
+/* The footer zone: 48px above, then the quiet Cancel and the help line. */
+.subs-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--subs-line);
+}
+.subs .subs-help { color: var(--subs-ink-soft); font-size: 14px; }
+
+/* Cancelled: read-only on a tint, history still visible. */
+.subs-body.is-readonly .subs-sec { background: var(--subs-bg); padding-left: 16px; padding-right: 16px; border-top-color: #fff; }
+
+/* No subscriptions yet. */
+.subs-empty { padding: 32px 0 16px; text-align: center; max-width: 520px; margin: 0 auto; }
+.subs-empty .subs-bottle { width: 44px; height: 68px; margin: 0 auto 16px; }
+.subs .subs-empty h2 { font-family: var(--subs-display); font-weight: 800; font-size: 22px; line-height: 1.25; }
+.subs .subs-empty p { margin: 8px 0 20px; color: var(--subs-ink-soft); }
+
+.subs-error { padding: 24px 0; }
+.subs-error p { margin-bottom: 12px; }
+
+/* The skeleton: static bars, shown only after a slow 300ms. */
+.subs-skeleton { visibility: hidden; padding-top: 14px; }
+.subs-skeleton.is-visible { visibility: visible; }
+.subs-skeleton__bar { display: block; height: 14px; width: 55%; margin: 0 0 10px; border-radius: 8px; background: var(--subs-bg); }
+.subs-skeleton__bar--title { height: 22px; width: 40%; }
+.subs-skeleton__card { display: block; height: 180px; margin-top: 16px; border-radius: 12px; background: var(--subs-bg); }
+
+/* ------------------------------------------------------------------ the write side (plan Task 4b)
+   Inline confirms in the card, read-then-edit sections with a sticky save bar inside the section, the
+   Cancel and product-picker modals. 150ms ease-out on opacity only; every target at least 44px. */
+
+.subs .subs-btn--danger { background: var(--subs-danger); color: #fff; }
+.subs .subs-btn--danger:hover, .subs .subs-btn--danger:active { background: #8c1f2a; color: #fff; }
+.subs-btn.is-busy { cursor: progress; }
+.subs-btn .spinner-border-sm { width: 14px; height: 14px; border-width: 2px; flex: 0 0 auto; }
+.subs input:focus-visible,
+.subs select:focus-visible,
+.subs textarea:focus-visible { outline: 3px solid var(--subs-aqua-deep); outline-offset: 2px; }
+
+.subs .subs-error-line { margin-top: 8px; font-size: 14px; line-height: 1.45; color: var(--subs-danger); }
+.subs .subs-hero__status.is-error,
+.subs .subs-sec__status.is-error { color: var(--subs-danger); }
+.subs .subs-sec__status { margin-top: 10px; font-size: 14px; color: var(--subs-navy); }
+.subs .subs-sec__status:empty { display: none; }
+.subs .subs-label { display: block; margin: 12px 0 6px; font-size: 14px; font-weight: 600; color: var(--subs-ink); }
+.subs .subs-input {
+  min-height: 44px;
+  border: 1.5px solid var(--subs-control);
+  border-radius: 8px;
+  color: var(--subs-ink);
+  font: 400 15px/1.4 var(--subs-body);
+}
+.subs textarea.subs-input { min-height: 72px; }
+
+/* The inline two-step (Skip, Pause, an Orders row's Skip or Cancel): under its buttons, never a modal. */
+.subs-hero__confirm,
+.subs-orow__confirm {
+  border: 1.5px solid var(--subs-aqua-deep);
+  border-radius: 12px;
+  padding: 16px;
+  background: #fff;
+  animation: subs-fade-in 150ms ease-out;
+}
+.subs-hero__confirm:focus,
+.subs-orow__confirm:focus { outline: none; }
+.subs .subs-confirm__text { margin-bottom: 10px; }
+.subs-confirm__row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.subs-confirm__row > .subs-btn { flex: 1 1 auto; }
+.subs-reasons { border: 0; margin: 0; padding: 0; min-width: 0; }
+.subs-reasons legend { float: none; width: auto; margin: 0 0 6px; padding: 0; }
+.subs-reasons__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.subs-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1.5px solid var(--subs-control);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--subs-ink);
+  font: 400 14px/1.3 var(--subs-body);
+  cursor: pointer;
+}
+.subs-reason[aria-pressed="true"] { border: 2px solid var(--subs-aqua-deep); background: var(--subs-pale); color: var(--subs-navy); font-weight: 600; }
+
+/* Read-then-edit: the open section spans the value and action columns. */
+.subs-sec.is-editing .subs-sec__value { grid-column: 1 / -1; }
+.subs .subs-change--emphasis { color: var(--subs-navy); text-decoration: underline; }
+.subs .subs-val__chip { margin-top: 8px; }
+.subs-edit { animation: subs-fade-in 150ms ease-out; }
+.subs .subs-edit__note { margin-top: 12px; }
+.subs .subs-edit__msg { margin-top: 10px; font-size: 14px; line-height: 1.45; color: #856404; }
+
+.subs-fieldset { border: 0; margin: 0 0 18px; padding: 0; min-width: 0; }
+.subs-fieldset legend {
+  float: none;
+  width: auto;
+  margin: 0 0 8px;
+  padding: 0;
+  font: 600 14px/1.4 var(--subs-body);
+  color: var(--subs-ink);
+}
+.subs-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.subs-tiles--methods { grid-template-columns: minmax(0, 1fr); }
+.subs-tiles--addresses { grid-template-columns: minmax(0, 1fr); margin-bottom: 10px; }
+.subs-tile, .subs-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 56px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--subs-control);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--subs-ink);
+  cursor: pointer;
+}
+.subs-tile small { display: block; font-size: 13px; line-height: 1.45; color: var(--subs-ink-soft); font-weight: 400; }
+.subs-tile__name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; line-height: 1.3; }
+.subs-tile__name i { color: var(--subs-aqua-deep); font-size: 12px; }
+.subs-tile.is-checked, .subs-day.is-checked { border: 2px solid var(--subs-aqua-deep); background: var(--subs-pale); color: var(--subs-navy); }
+.subs-tile:focus-within, .subs-day:focus-within { outline: 3px solid var(--subs-aqua-deep); outline-offset: 2px; }
+/* The radio itself is the control (keyboard and screen reader), drawn as the tile. */
+.subs-tile__input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.subs-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.subs-day { align-items: center; min-height: 44px; padding: 6px 2px; font-weight: 600; font-size: 14px; text-transform: capitalize; }
+/* The chosen day is underlined too, so it is never shown by colour alone. */
+.subs-day.is-checked > span[aria-hidden="true"] { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.subs .subs-select { max-width: 220px; min-height: 44px; border: 1.5px solid var(--subs-control); border-radius: 8px; color: var(--subs-ink); }
+.subs .subs-select + .subs-hint { margin-top: 6px; }
+
+.subs-preview { margin-top: 4px; padding: 14px 16px 10px; border-radius: 8px; background: var(--subs-pale); }
+.subs .subs-preview__sentence { margin-top: 10px; font-size: 14px; color: var(--subs-navy); }
+.subs-preview .subs-wl::before { top: 37px; }
+/* The address move's consequences: one sentence per line, the backend's own words. */
+.subs-preview__list { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; color: var(--subs-navy); }
+.subs-preview__list li + li { margin-top: 6px; }
+
+/* Items in edit mode: the stepper and the remove button sit under the name on phones, beside it from 768px. */
+.subs-item--edit { grid-template-columns: 48px minmax(0, 1fr) auto; row-gap: 8px; }
+.subs-item__controls { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.subs-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1.5px solid var(--subs-control);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.subs-stepper__btn {
+  width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: #fff;
+  color: var(--subs-aqua-deep);
+  cursor: pointer;
+}
+.subs-stepper__btn:hover { background: var(--subs-pale); }
+/* The stepper clips its children (one rounded outline), so their focus ring is drawn inside. */
+.subs .subs-stepper__btn:focus-visible, .subs .subs-stepper__input:focus-visible { outline-offset: -3px; }
+.subs-stepper__btn[aria-disabled="true"] { color: var(--subs-control); cursor: not-allowed; background: #fff; }
+.subs-stepper__input {
+  width: 56px;
+  min-height: 44px;
+  border: 0;
+  border-left: 1px solid var(--subs-line);
+  border-right: 1px solid var(--subs-line);
+  text-align: center;
+  font: 600 15px/1 var(--subs-body);
+  color: var(--subs-ink);
+  font-variant-numeric: tabular-nums;
+}
+.subs-remove {
+  width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--subs-danger);
+  cursor: pointer;
+}
+.subs-remove:hover { background: #f8d7da; }
+.subs-remove[aria-disabled="true"] { color: var(--subs-control); cursor: not-allowed; background: none; }
+.subs-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 8px 18px;
+  border: 1.5px dashed var(--subs-control);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--subs-aqua-deep);
+  font: 600 15px/1.3 var(--subs-body);
+  cursor: pointer;
+}
+.subs-add:hover { background: var(--subs-pale); }
+
+/* The save bar: sticky to the bottom of its own section (never fixed), above the phone's safe area.
+   Its slot is only the re-draw target and generates no box, so the bar's containing block is the whole open
+   form: inside a parent of exactly its own size a sticky box has nowhere to move. */
+.subs-savebar-slot { display: contents; }
+/* The theme gives .boxed_wrapper overflow:hidden (style.css), which makes that never-scrolling box the bar's
+   sticky scrollport, so the bar stayed below the fold. overflow:clip clips the same way without being a scroll
+   container, so the bar follows the viewport. Where clip or :has is unsupported, the bar simply ends the form. */
+.boxed_wrapper:has(.subs) { overflow: clip !important; }
+.subs-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 16px;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  border: 1px solid var(--subs-line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 -6px 18px -12px rgba(3, 62, 138, .35);
+  animation: subs-fade-in 150ms ease-out;
+}
+.subs-savebar:focus { outline: 3px solid var(--subs-aqua-deep); outline-offset: 2px; }
+.subs .subs-savebar__title { font-weight: 600; }
+.subs .subs-savebar__figure { font-size: 14px; color: var(--subs-ink-soft); }
+.subs .subs-savebar__guard { font-size: 14px; font-weight: 600; color: var(--subs-navy); }
+.subs-savebar__text { min-width: 0; flex: 1 1 200px; }
+.subs-savebar__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The fixed mobile social bar and the scroll-top button would cover the bar while it shows. */
+body.subs-editing .social-float-links,
+body.subs-editing .scroll-top { display: none !important; }
+
+/* Orders rows: an error under a row's Pay, which stays beside its row. */
+.subs-orow { flex-wrap: wrap; }
+.subs-orow > .subs-orow__open { flex-basis: 0; }
+.subs .subs-orow__error { flex: 1 0 100%; margin: 0 0 8px; }
+/* Phones: a row's date, chip and amount wrap, so the text takes the whole row and its amount ends the row,
+   flush with the row's end as on desktop (beside Pay it was left mid-row, on a line of its own). Pay follows
+   it, at the row's end too. */
+@media (max-width: 767.98px) {
+  .subs-orow > .subs-orow__open { flex: 1 0 100%; }
+  .subs-orow__pay { margin: 0 0 8px; margin-inline-start: auto; }
+  /* Skip or Cancel follows Pay at the row's end, or ends the row itself when there is no Pay. */
+  .subs-orow__act { margin: 0 0 8px; }
+  .subs-orow__open + .subs-orow__act { margin-inline-start: auto; }
+  .subs-orow__confirm { flex: 1 0 100%; }
+}
+
+/* The modals keep Bootstrap's frame; only the type, the buttons and the list are this page's. */
+.subs-modal .modal-content { border-radius: 12px; border: 1px solid var(--subs-line); color: var(--subs-ink); }
+.subs .subs-modal__title { font-family: var(--subs-display); font-weight: 800; font-size: 20px; line-height: 1.3; color: var(--subs-ink); }
+.subs-modal__close { min-width: 44px; min-height: 44px; }
+.subs-modal__list { margin: 0 0 16px; }
+.subs-modal__list li { position: relative; padding: 4px 0 4px 18px; }
+.subs-modal__list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 14px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--subs-aqua-deep);
+}
+.subs-modal__alt { margin: 0 0 8px; padding: 12px 14px; border-radius: 8px; background: var(--subs-bg); }
+.subs-modal__alt .subs-confirm__row { margin-top: 8px; }
+.subs-modal__footer { flex-wrap: wrap; gap: 8px; }
+.subs-modal__footer > * { margin: 0; }
+.subs-picker .subs-pick { grid-template-columns: 48px minmax(0, 1fr); }
+.subs-picker .subs-item__controls { grid-column: 2; }
+
+@keyframes subs-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Spartan has no Cyrillic: Russian headings in Open Sans at the same weights. The backend's ru date labels
+   are nominative and lower case ("четверг, 29 октября"); standing alone as the hero date it starts a line. */
+:lang(ru) .subs h2,
+:lang(ru) .subs h3,
+:lang(ru) .subs .subs-hero__date { font-family: var(--subs-body); }
+:lang(ru) .subs .subs-hero__date::first-letter { text-transform: uppercase; }
+
+@media (min-width: 768px) {
+  .subs-strip__item { flex: 0 0 236px; }
+  .subs-strip__item--toggle, .subs-strip__item--new { flex-basis: 170px; }
+  .subs-bh { margin: 22px 0 16px; }
+  .subs .subs-bh h2 { font-size: 24px; }
+  .subs-jump { display: none; }
+  .subs-hero__top { grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; padding: 26px 28px 22px; }
+  .subs .subs-hero__date { font-size: 30px; }
+  .subs .subs-hero__date--state { font-size: 24px; }
+  .subs-wl-band { padding: 16px 28px 12px; }
+  .subs-sec { grid-template-columns: 180px minmax(0, 1fr) auto; gap: 6px 20px; padding: 32px 0; }
+  .subs-sec__value { grid-column: 2; grid-row: 1; }
+  .subs-sec__action { grid-column: 3; grid-row: 1; margin-top: -10px; }
+  .subs-orow__open { display: grid; grid-template-columns: 120px auto minmax(0, 1fr) auto; }
+  .subs-orow__why:empty { display: block; }
+  .subs-orow__amt:empty { display: block; }
+  .subs-tiles--freq { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .subs-tiles--slots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .subs-tiles--methods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .subs-tiles--addresses { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .subs-item--edit { grid-template-columns: 48px minmax(0, 1fr) auto auto; }
+  .subs-item--edit .subs-item__controls { grid-column: 4; grid-row: 1; flex-wrap: nowrap; }
+  /* An open form sits under its heading row and spans the value and action columns. */
+  .subs-sec.is-editing .subs-sec__value { grid-column: 2 / -1; grid-row: 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subs *,
+  .subs *::before,
+  .subs *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

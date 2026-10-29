@@ -131,6 +131,27 @@ def _seed_payme_payment(db, order, payment_id_str: str = 'PAY_PAYME_TEST') -> Pa
     return payment
 
 
+def _seed_payme_transaction(db, order, trans_id: str) -> PaymentTransaction:
+    """A Payme payment plus the pending charge row a pre-deploy CreateTransaction left behind.
+
+    CreateTransaction no longer opens new charges (step 4, spec §4.2), so the tests that drive Perform and
+    Cancel start from the row it used to write.
+    """
+    payment = _seed_payme_payment(db, order, payment_id_str=f'PAY_{trans_id}')
+    transaction = PaymentTransaction(
+        payment_id=payment.id,
+        transaction_type='charge',
+        amount=order.total_amount,
+        currency='UZS',
+        status='pending',
+        provider_transaction_id=trans_id,
+        provider_response={},
+    )
+    db.session.add(transaction)
+    db.session.commit()
+    return transaction
+
+
 def _seed_click_payment(
     db,
     order,
@@ -456,74 +477,84 @@ class TestWebhookStateMachine:
 
     # ---- Payme ------------------------------------------------------------
 
-    def test_payme_check_then_create_then_perform_marks_paid(
-        self, matrix_app, matrix_client, db, order_with_address, no_fiscalization, payme_basic_auth_header,
+    @pytest.mark.parametrize('method', ['CheckPerformTransaction', 'CreateTransaction'])
+    @pytest.mark.parametrize('order_kind', ['live_unpaid_payme', 'unknown'])
+    def test_payme_refuses_every_new_payment(
+        self, method, order_kind, matrix_app, matrix_client, db, order_with_address, payme_basic_auth_header,
     ):
         order = order_with_address
-        # Patch verify_payme_signature to True — Payme uses Basic-auth header
-        # which we DO build correctly via fixture, but mock to avoid coupling
-        # to the request-context plumbing in the verifier helper.
+        order_id = order.id if order_kind == 'live_unpaid_payme' else 999_999
+        amount_tiyin = _payme_amount(order)
+        txs_before = PaymentTransaction.query.count()
+        payments_before = Payment.query.count()
+        params = {'amount': amount_tiyin, 'account': {'order_id': order_id}}
+        if method == 'CreateTransaction':
+            params.update({'id': 'payme-new-1', 'time': int(datetime.now(timezone.utc).timestamp() * 1000)})
         with patch(
             'business_app.services.providers.payme_provider.PaymeProvider.verify_payme_signature',
             return_value=True,
         ):
-            amount_tiyin = _payme_amount(order)
-
-            # 1. CheckPerformTransaction
-            body_check = make_payme_webhook_body(
-                method='CheckPerformTransaction',
-                params={'amount': amount_tiyin, 'account': {'order_id': order.id}},
-                request_id=101,
-            )
-            resp_check = matrix_client.post(
+            resp = matrix_client.post(
                 WEBHOOK_PATH.format(provider='payme'),
-                json=body_check,
+                json=make_payme_webhook_body(method=method, params=params, request_id=101),
                 headers=payme_basic_auth_header,
             )
-            assert resp_check.status_code == 200
-            assert resp_check.get_json()['result'] == {'allow': True}
+        body = resp.get_json()
+        assert resp.status_code == 200
+        assert body['error']['code'] == -31008 and 'result' not in body
+        assert body['error']['message'] == 'New Payme payments are not accepted'
+        assert PaymentTransaction.query.count() == txs_before and Payment.query.count() == payments_before
 
-            # 2. CreateTransaction
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            body_create = make_payme_webhook_body(
-                method='CreateTransaction',
-                params={
-                    'id': 'payme-tx-1',
-                    'time': now_ms,
-                    'amount': amount_tiyin,
-                    'account': {'order_id': order.id},
-                },
-                request_id=102,
-            )
-            resp_create = matrix_client.post(
+    def test_payme_replayed_create_for_a_pre_deploy_transaction_still_answers(
+        self, matrix_app, matrix_client, db, order_with_address, payme_basic_auth_header,
+    ):
+        """Payme replays CreateTransaction on a timeout. A transaction created before deploy keeps answering."""
+        order = order_with_address
+        transaction = _seed_payme_transaction(db, order, 'payme-pre-deploy-1')
+        with patch(
+            'business_app.services.providers.payme_provider.PaymeProvider.verify_payme_signature',
+            return_value=True,
+        ):
+            resp = matrix_client.post(
                 WEBHOOK_PATH.format(provider='payme'),
-                json=body_create,
+                json=make_payme_webhook_body(
+                    method='CreateTransaction',
+                    params={
+                        'id': 'payme-pre-deploy-1',
+                        'time': int(datetime.now(timezone.utc).timestamp() * 1000),
+                        'amount': _payme_amount(order),
+                        'account': {'order_id': order.id},
+                    },
+                    request_id=104,
+                ),
                 headers=payme_basic_auth_header,
             )
-            assert resp_create.status_code == 200
-            create_result = resp_create.get_json()['result']
-            assert create_result['state'] == PaymeState.CREATED.value
+        result = resp.get_json()['result']
+        assert result['state'] == PaymeState.CREATED.value
+        assert result['transaction'] == str(transaction.id)
+        assert PaymentTransaction.query.count() == 1
 
-            # 3. PerformTransaction
-            body_perform = make_payme_webhook_body(
-                method='PerformTransaction',
-                params={'id': 'payme-tx-1'},
-                request_id=103,
-            )
+    def test_payme_perform_of_a_pre_deploy_transaction_marks_paid(
+        self, matrix_app, matrix_client, db, order_with_address, no_fiscalization, payme_basic_auth_header,
+    ):
+        order = order_with_address
+        _seed_payme_transaction(db, order, 'payme-tx-1')
+        with patch(
+            'business_app.services.providers.payme_provider.PaymeProvider.verify_payme_signature',
+            return_value=True,
+        ):
             resp_perform = matrix_client.post(
                 WEBHOOK_PATH.format(provider='payme'),
-                json=body_perform,
+                json=make_payme_webhook_body(method='PerformTransaction', params={'id': 'payme-tx-1'}, request_id=103),
                 headers=payme_basic_auth_header,
             )
             assert resp_perform.status_code == 200
-            perform_result = resp_perform.get_json()['result']
-            assert perform_result['state'] == PaymeState.COMPLETED.value
+            assert resp_perform.get_json()['result']['state'] == PaymeState.COMPLETED.value
 
             payment = Payment.query.filter_by(order_id=order.id, payment_method=PaymentMethod.PAYME).one()
             assert payment.status == PaymentStatus.COMPLETED
             assert payment.provider_transaction_id == 'payme-tx-1'
-            refreshed = Order.query.get(order.id)
-            assert refreshed.status == OrderStatus.CONFIRMED
+            assert Order.query.get(order.id).status == OrderStatus.CONFIRMED
 
     def test_payme_check_perform_invalid_amount(
         self, matrix_app, matrix_client, db, sample_order, payme_basic_auth_header,
@@ -692,24 +723,7 @@ class TestConcurrentWebhooks:
             'business_app.services.providers.payme_provider.PaymeProvider.verify_payme_signature',
             return_value=True,
         ):
-            amount_tiyin = _payme_amount(order)
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-            create_body = make_payme_webhook_body(
-                method='CreateTransaction',
-                params={
-                    'id': 'payme-replay-1',
-                    'time': now_ms,
-                    'amount': amount_tiyin,
-                    'account': {'order_id': order.id},
-                },
-                request_id=301,
-            )
-            matrix_client.post(
-                WEBHOOK_PATH.format(provider='payme'),
-                json=create_body,
-                headers=payme_basic_auth_header,
-            )
+            _seed_payme_transaction(db, order, 'payme-replay-1')
 
             # Two perform attempts with the same params.id but distinct nonces
             # (mirrors real Payme retry behavior). PAY-002 collapses on params.id.
@@ -813,38 +827,18 @@ class TestRefundReversalsMidFlow:
             'business_app.services.providers.payme_provider.PaymeProvider.verify_payme_signature',
             return_value=True,
         ):
-            amount_tiyin = _payme_amount(order)
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            _seed_payme_transaction(db, order, 'payme-tx-cancel')
 
-            # Run create+perform to drive payment to COMPLETED.
-            for body, rid in [
-                (
-                    make_payme_webhook_body(
-                        method='CreateTransaction',
-                        params={
-                            'id': 'payme-tx-cancel',
-                            'time': now_ms,
-                            'amount': amount_tiyin,
-                            'account': {'order_id': order.id},
-                        },
-                        request_id=401,
-                    ),
-                    401,
+            # Run perform to drive payment to COMPLETED.
+            matrix_client.post(
+                WEBHOOK_PATH.format(provider='payme'),
+                json=make_payme_webhook_body(
+                    method='PerformTransaction',
+                    params={'id': 'payme-tx-cancel'},
+                    request_id=402,
                 ),
-                (
-                    make_payme_webhook_body(
-                        method='PerformTransaction',
-                        params={'id': 'payme-tx-cancel'},
-                        request_id=402,
-                    ),
-                    402,
-                ),
-            ]:
-                matrix_client.post(
-                    WEBHOOK_PATH.format(provider='payme'),
-                    json=body,
-                    headers=payme_basic_auth_header,
-                )
+                headers=payme_basic_auth_header,
+            )
 
             # CancelTransaction after COMPLETED triggers OrderService.cancel_order
             # + refund. Patch OrderService.cancel_order to a no-op so we don't

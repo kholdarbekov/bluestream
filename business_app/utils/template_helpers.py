@@ -4,6 +4,7 @@ Provides Jinja2 filters and functions for easy access to translatable content
 """
 
 from flask import current_app
+from jinja2 import pass_context
 
 
 def get_translated_content(entity, field_name, language=None):
@@ -239,7 +240,6 @@ def register_multilingual_filters(app):
         """Render multilingual text with badge: {{ product|render_multilingual('name', show_badge=True) }}"""
         return render_multilingual_text(entity, field_name, language, fallback, show_badge)
 
-    @app.template_filter("translate")
     def translate_filter(key, language=None, **kwargs):
         """Translate static text: {{ 'api.order.success.created'|translate }}"""
         from business_app.utils.translations import get_translation
@@ -303,8 +303,17 @@ def register_multilingual_filters(app):
         """Alias for plural filter: {{ 'item.count'|pluralize(10) }}"""
         return plural_filter(key, count, language, **kwargs)
 
+    # `pass_context` is what stops Jinja folding `{{ 'literal'|t }}` into the cached compiled template at
+    # the first render (a filter with no context is "pure", so the first visitor's language would stick).
+    @app.template_filter("translate")
+    @pass_context
+    def translate_context_filter(_context, key, language=None, **kwargs):
+        """Translate static text: {{ 'api.order.success.created'|translate }}"""
+        return translate_filter(key, language, **kwargs)
+
     @app.template_filter("t")
-    def t_filter(key, language=None, **kwargs):
+    @pass_context
+    def t_filter(_context, key, language=None, **kwargs):
         """Short alias for translate: {{ 'ui.button.save'|t }}"""
         return translate_filter(key, language, **kwargs)
 

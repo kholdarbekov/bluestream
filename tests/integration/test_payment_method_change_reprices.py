@@ -1,6 +1,6 @@
 """Changing an order's payment method re-prices it (spec 2026-10-09 §5, owner ruling D6)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -11,6 +11,7 @@ from business_app.models.order import Order
 from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.corporate_contract_service import CorporateContractService
+from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import CashCollectionSource, OrderStatus, PaymentMethod, PaymentStatus
 from tests.integration.contract_pricing_factory import (
     BANK,
@@ -180,23 +181,22 @@ def test_business_account_to_click_issues_a_link_for_the_catalogue_total(
     link.assert_called_once_with(order.payment.id)
 
 
-def test_a_customer_switching_an_unpaid_cash_order_to_click_pays_the_catalogue(app, db, world, sample_product):
+def test_business_account_to_click_starts_the_click_window(app, db, admin_user, world, sample_product):
+    """Spec 2026-10-27 §4.4, §17 Q3: an order staff move onto Click becomes payable on Click now, so its 24 hours
+    count from the move, not from when it was placed."""
     user, address, _row = world
-    order = _place(app, user, address, sample_product, "cash")
+    order = _place(app, user, address, sample_product, "business_account")
+    order.created_at = datetime.now(timezone.utc) - timedelta(days=3)
+    _db.session.commit()
 
+    before = datetime.now(timezone.utc)
     with patch(CLICK_LINK, return_value={"payment_url": "https://click.test/pay"}):
-        resp = app.test_client().post(
-            "/api/v1/payments/create",
-            json={"order_id": order.id, "payment_method": "click"},
-            headers=customer_headers(app, user),
-        )
+        resp = _change(app, admin_user, order.id, "click")
+    after = datetime.now(timezone.utc)
 
-    assert resp.status_code in (200, 201), resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.get_data(as_text=True)
     order = _reload(order.id)
-    catalogue_total = CATALOGUE * QUANTITY + _fee(order)
-    assert order.payment_method == PaymentMethod.CLICK
-    assert Decimal(str(order.total_amount)) == catalogue_total
-    assert Decimal(str(order.payment.amount)) == catalogue_total
+    assert before <= ensure_utc(order.online_payable_since) <= after
 
 
 def test_ambiguous_contract_coverage_blocks_the_edit_instead_of_breaking_the_order_page(

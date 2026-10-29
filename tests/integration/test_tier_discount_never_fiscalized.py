@@ -6,13 +6,13 @@ without revoking ``tier_discount`` or recomputing ``total_amount``. Before
 this feature that was harmless, because ``tier_discount`` was always 0.00.
 
 Concrete failure this test pins: customer checks out on Click
-(``tier_discount = 0``). Before delivery they switch to Cash via
-``POST /api/v1/payments/create`` -- Task 17's grant path fires,
-``tier_discount`` becomes non-zero and ``total_amount`` drops. The order is
-delivered and settled in cash for the discounted total. Later a stale
-in-flight Click charge from the original checkout finally posts. Case C fires,
-restores the Click rail, and calls ``queue_click_fiscalization``. The fiscal
-payload prices ``received_card = to_tiyin(order.total_amount)`` off a
+(``tier_discount = 0``). They pay the driver in cash at the door instead
+(``CashCollectionService.convert_electronic_order_to_cash``) -- Task 17's
+grant path fires, ``tier_discount`` becomes non-zero and ``total_amount``
+drops. The order is delivered and settled in cash for the discounted total.
+Later a stale in-flight Click charge from the original checkout finally posts.
+Case C fires, restores the Click rail, and calls ``queue_click_fiscalization``.
+The fiscal payload prices ``received_card = to_tiyin(order.total_amount)`` off a
 DISCOUNTED total while ``build_click_fiscalization_payload`` fills per-item
 ``Discount`` from ``loyalty_discount`` ALONE, so
 ``Sum(Price - Discount) != received_card`` -- a tax-committee reconciliation
@@ -43,6 +43,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.user import User, UserAddress
+from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.rail_pricing import quote_order_for_rail
 from shared.enums import (
     CorporateContractTrackingMode,
@@ -167,13 +168,12 @@ def test_late_click_debit_after_tier_discounted_cash_settlement_revokes_the_disc
         Payment.query.get(payment_id), click_trans_id="950101", click_paydoc_id="5231199101"
     )
 
-    # 2. Before delivery, the customer switches to cash -- Task 17's grant path.
-    resp = client.post(
-        "/api/v1/payments/create",
-        json={"order_id": order.id, "payment_method": "cash"},
-        headers=headers,
+    # 2. The customer pays the driver in cash at the door instead -- Task 17's grant path. A customer cannot
+    #    move the order onto cash themselves (spec 2026-10-27 D5); the door conversion is the path that does.
+    CashCollectionService().convert_electronic_order_to_cash(
+        order, actor_user_id=driver_profile.user_id, reason="paid in cash at the door"
     )
-    assert resp.status_code in (200, 201), resp.get_json()
+    _db.session.commit()
     order = _reload(order.id)
     granted_tier_discount = Decimal(str(order.tier_discount))
     assert granted_tier_discount > Decimal("0.00"), "the flip to cash must grant the tier discount"
@@ -183,10 +183,6 @@ def test_late_click_debit_after_tier_discounted_cash_settlement_revokes_the_disc
 
     payment = Payment.query.get(payment_id)
     assert Decimal(str(payment.amount)) == discounted_total
-    # create_payment's provider_data overwrite (a separate, pre-existing gap --
-    # not this task's concern) clobbers the click sub-dict on every flip;
-    # restamp so the late-complete webhook below can resolve this payment.
-    _stamp_click_identifiers(payment, click_trans_id="950101", click_paydoc_id="5231199101")
 
     # 3. The order is delivered and settled in cash for the DISCOUNTED total.
     order.status = OrderStatus.OUT_FOR_DELIVERY

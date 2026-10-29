@@ -48,14 +48,30 @@ _NOTICE_ORDER_CREATED = 'subscription_order_created'
 _NOTICE_DELIVERY_SKIPPED = 'subscription_delivery_skipped'
 _NOTICE_PAID_ORDER_KEPT = 'subscription_paid_order_kept'
 _NOTICE_PAYMENT_EXPIRED = 'order_payment_expired'
+_NOTICE_SCHEDULE_CHANGED = 'subscription_schedule_changed'
 _CUSTOMER_NOTICE_KINDS = frozenset(
-    {_NOTICE_ORDER_CREATED, _NOTICE_DELIVERY_SKIPPED, _NOTICE_PAID_ORDER_KEPT, _NOTICE_PAYMENT_EXPIRED}
+    {
+        _NOTICE_ORDER_CREATED,
+        _NOTICE_DELIVERY_SKIPPED,
+        _NOTICE_PAID_ORDER_KEPT,
+        _NOTICE_PAYMENT_EXPIRED,
+        _NOTICE_SCHEDULE_CHANGED,
+    }
 )
 # A paid order that stays: one copy per action that kept it (spec 2026-10-23 §2.7).
 _PAID_ORDER_KEPT_KEYS = {
     'skip': 'telegram.customer_notice.paid_order_kept_skip',
     'pause': 'telegram.customer_notice.paid_order_kept_pause',
     'cancel': 'telegram.customer_notice.paid_order_kept_cancel',
+}
+# What a slot write changed in a subscription's schedule (spec 2026-10-27 §6.5): one line per change, in the order
+# the backend lists them (business_app/services/subscription_notices.py::SCHEDULE_CHANGES).
+_SCHEDULE_CHANGE_KEYS = {
+    'time_cleared': 'telegram.customer_notice.schedule_change.time_cleared',
+    'time_changed': 'telegram.customer_notice.schedule_change.time_changed',
+    'day_moved': 'telegram.customer_notice.schedule_change.day_moved',
+    'date_moved': 'telegram.customer_notice.schedule_change.date_moved',
+    'days_added': 'telegram.customer_notice.schedule_change.days_added',
 }
 
 # Answered with HTTP 410 when Telegram refuses the send because this account blocked the bot
@@ -161,7 +177,43 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         return f'language must be one of {", ".join(SUPPORTED_LANGUAGES)}'
     if data['kind'] == _NOTICE_PAID_ORDER_KEPT and data.get('trigger') not in _PAID_ORDER_KEPT_KEYS:
         return f"Unknown trigger: {data.get('trigger')!r}"
+    if data['kind'] == _NOTICE_SCHEDULE_CHANGED:
+        changes = data.get('changes')
+        if not isinstance(changes, list) or not changes or not all(
+            isinstance(code, str) and code in _SCHEDULE_CHANGE_KEYS for code in changes
+        ):
+            return f"Unknown changes: {changes!r}"
+        added = data.get('added_weekdays')
+        if not isinstance(added, list) or not all(_is_weekday(day) for day in added):
+            return f"added_weekdays must be a list of weekdays 0-6, not {added!r}"
     return None
+
+
+def _is_weekday(value) -> bool:
+    """0 (Monday) to 6 (Sunday), as the backend sends a weekday; a bool is not one."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 6
+
+
+def _notice_weekday(language: str, value) -> str:
+    """A backend weekday (0 = Monday) by name; a dash when absent."""
+    return i18n.get(f'telegram.subscription.weekday_{value}', language) if _is_weekday(value) else '—'
+
+
+def _schedule_change_line(language: str, code: str, data: dict) -> str:
+    """One change of a schedule notice, with the values its copy names (windows HTML-escaped)."""
+    old_window = _html_escaped(data.get('old_window')) or '—'
+    old_day = _notice_weekday(language, data.get('old_weekday'))
+    if code == 'time_cleared':
+        values = {'old_window': old_window}
+    elif code == 'time_changed':
+        values = {'new_window': _html_escaped(data.get('new_window')) or '—', 'old_window': old_window}
+    elif code == 'day_moved':
+        values = {'old_day': old_day, 'new_day': _notice_weekday(language, data.get('new_weekday'))}
+    elif code == 'date_moved':
+        values = {'old_day': old_day}
+    else:  # days_added
+        values = {'days': ', '.join(_notice_weekday(language, day) for day in data['added_weekdays']) or '—'}
+    return i18n.get(_SCHEDULE_CHANGE_KEYS[code], language, **values)
 
 
 def _notice_deadline(language: str, value) -> str:
@@ -209,11 +261,17 @@ def _customer_notice_text(language: str, data: dict) -> str:
     kind = data['kind']
     if kind == _NOTICE_ORDER_CREATED:
         when = format_date(data.get('delivery_date')) or '—'
-        if data.get('window_start') and data.get('window_end'):
+        has_window = bool(data.get('window_start') and data.get('window_end'))
+        # `time_kind` (window / any_time / to_be_confirmed) is the backend's answer; a notice queued before it
+        # existed has none, and the old rule applies: a window, or "to be confirmed".
+        time_kind = data.get('time_kind') or ('window' if has_window else 'to_be_confirmed')
+        if time_kind == 'window' and has_window:
             delivery = i18n.get(
                 'telegram.customer_notice.delivery_window', language, date=when,
                 start=_html_escaped(data['window_start']), end=_html_escaped(data['window_end']),
             )
+        elif time_kind == 'any_time':
+            delivery = i18n.get('telegram.customer_notice.delivery_any_time', language, date=when)
         else:
             delivery = i18n.get('telegram.customer_notice.delivery_tbc', language, date=when)
         items = '\n'.join(
@@ -223,6 +281,15 @@ def _customer_notice_text(language: str, data: dict) -> str:
             )
             for item in (data.get('items') or [])
         )
+        not_included = '\n'.join(
+            i18n.get(
+                'telegram.customer_notice.not_included', language,
+                name=_html_escaped(name),
+            )
+            for name in (data.get('not_included') or [])
+        )
+        if not_included:
+            items = f"{items}\n{not_included}" if items else not_included
         return i18n.get(
             'telegram.customer_notice.order_created', language,
             order_number=_html_escaped(data.get('order_number')),
@@ -249,6 +316,16 @@ def _customer_notice_text(language: str, data: dict) -> str:
         if trigger == 'skip':
             values['next_date'] = format_date(data.get('next_delivery_date')) or '—'
         return i18n.get(_PAID_ORDER_KEPT_KEYS[trigger], language, **values)
+    if kind == _NOTICE_SCHEDULE_CHANGED:
+        lines = [_schedule_change_line(language, code, data) for code in data['changes']]
+        next_date = format_date(data.get('next_delivery_date'))
+        if next_date:  # a paused subscription has no next delivery
+            lines.append(i18n.get('telegram.customer_notice.schedule_changed_next', language, date=next_date))
+        return i18n.get(
+            'telegram.customer_notice.schedule_changed', language,
+            subscription_name=_html_escaped(data.get('subscription_name')) or '—',
+            lines='\n\n'.join(lines),
+        )
     return i18n.get(
         'telegram.customer_notice.payment_expired', language,
         order_number=_html_escaped(data.get('order_number')),
@@ -1287,7 +1364,7 @@ class WebhookServer:
         {
             "notice_id": "subscription-log:41",   # stable across the backend's retries: one message per id
             "kind": "subscription_order_created", # | subscription_delivery_skipped | subscription_paid_order_kept
-                                                  # | order_payment_expired
+                                                  # | order_payment_expired | subscription_schedule_changed
             "telegram_id": "810000001",
             "language": "ru",                     # resolved by the backend; never read from the customer here
             ... the kind's facts (business_app/services/customer_notices.py documents each set) ...

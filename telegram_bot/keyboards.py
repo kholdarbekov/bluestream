@@ -2,11 +2,12 @@
 Telegram keyboard layouts and UI components
 """
 import re
-from typing import List, Dict, Optional, Any, Sequence, Tuple
+from typing import Callable, List, Dict, Literal, NamedTuple, Optional, Any, Sequence, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from i18n import i18n
 from config import config
+from utils import format_date
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
 from shared import reorder_reminder_copy
 
@@ -14,68 +15,190 @@ from shared import reorder_reminder_copy
 MAX_DISPLAYED_ADDRESSES = 5
 
 
-def customer_may_pay(order: Optional[Dict[str, Any]]) -> bool:
-    """Should this customer be offered a way to pay THIS order right now?
+# ---------------------------------------------------------------------------
+# An order's Pay and its removal (Skip / Cancel / Decline), in ONE place (spec 2026-10-27 §4.2, §5.1-§5.3).
+#
+# The backend publishes both answers on every order payload (`customer_actions`). The bot holds no copy of either
+# rule: it draws what is allowed, with the label it was given, and every tap goes back to the one write route that
+# enforces the same function (`retry-payment`, `cancel`). Each callback carries what the screen showed, so a screen
+# that went stale is answered 409 instead of acted on. The builders and parsers live together so the string this
+# module renders and the one the handlers read back cannot drift apart.
+# ---------------------------------------------------------------------------
 
-    THE bot's single expression of the question. Both keyboards that draw a Pay
-    button and the `retry_payment` handler that services the tap read it, so the
-    button and the handler can never disagree about the same order.
+# `payment_retry_<id>_<amount>`: Pay, with the amount the screen showed. `payment_retry_<id>` and
+# `payment_switch_<id>` are the shapes earlier releases drew; Telegram keeps those messages forever.
+_PAY_CALLBACK = re.compile(r'^payment_(?:retry|switch)_(\d+)(?:_(\d+\.\d{2}))?$')
+# `cancel_order_<id>_confirm_yes_<via>` writes a cancel or a decline; `cancel_order_<id>_skip_<reason|none>` a skip.
+# The reason codes are the backend's (`customer_actions.cancel.reasons`), so the bot keeps no list of them.
+_REMOVE_CALLBACK = re.compile(r'^cancel_order_(\d+)_(?:confirm_yes_([a-z]+)|skip_([a-z_]+))$')
+_SKIP_WITHOUT_REASON = 'none'
 
-    It is the BACKEND'S answer, plus exactly one case the backend field
-    deliberately does not cover:
 
-    * ``payment_info.is_payable`` is `order_is_payable_online` published
-      verbatim (payment_projection.py, THE authority — the same predicate the
-      Click PREPARE guard refuses on). Under policy 2026-08-24 it stays True
-      THROUGH delivery for an unpaid Click order (case B), which is the whole
-      point of B3: the old gate here was `order_status == 'pending'`, so the one
-      population whose link we deliberately keep payable was shown no way to pay
-      it.
+def pay_callback(order_id: int, expected_amount: str) -> str:
+    """The Pay button's callback: the order and the `expected_amount` its published Pay carried."""
+    return f"payment_retry_{order_id}_{expected_amount}"
 
-    * A PENDING order whose rail is not online yet. `is_payable` asks "is THIS
-      payment's gateway link live", and a cash order has no link — but the
-      customer has always been able to move a pending cash order onto Click from
-      this screen, and POST /api/v1/payments/create owns that flip together with
-      its marking-code pool guard (`MARKING_CODES_POOL_SHORT`). Without this
-      disjunct B3 would DELETE the Pay button from every cash order, i.e.
-      narrow a change whose entire purpose is to widen. It is deliberately
-      spelled `status == 'pending'` and not "any live order": the rail flip is
-      a checkout-window affordance, and widening it past the window is a
-      separate decision nobody has made.
 
-    Unpaid is required on both sides — `is_payable` already excludes a settled
-    order, and offering a second payment on a paid one is how double-payments
-    start.
+def parse_pay_callback(data: Optional[str]) -> Optional[Tuple[int, Optional[str]]]:
+    """`(order_id, expected_amount)` off a Pay callback; the amount is None for a button from before it rode there."""
+    match = _PAY_CALLBACK.match(data or '')
+    if not match:
+        return None
+    return int(match.group(1)), match.group(2)
+
+
+# ---------------------------------------------------------------------------
+# A subscription's schedule and item edits (spec 2026-10-27 §6.2, §7).
+#
+# A schedule change is previewed and then saved, in two taps: `subsched_<freq>_<day|x>_<slot|any>_<sub>` asks the
+# backend for the preview, `subschedok_<same>_<state>` saves exactly what that preview showed, carrying its
+# `expected_state`. An items change is the same two taps with the whole list rebuilt from the card
+# (`subitems_<op>_<sub>_<product>_<qty>_<state>`). Everything the write needs rides the callback, so the screen
+# survives the restart that empties `user_data`; the longest of these is 52 bytes, inside Telegram's 64.
+# ---------------------------------------------------------------------------
+
+_SCHEDULE_CALLBACK = re.compile(
+    r'^subsched(ok)?_(daily|weekly|biweekly|monthly)_(\d+|x)_(\d+|any)_(\d+)(?:_([0-9a-f]{16}))?$'
+)
+_ITEMS_SAVE_CALLBACK = re.compile(r'^subitems_(add|set|del)_(\d+)_(\d+)_(\d+)_([0-9a-f]{16})$')
+
+
+class ScheduleChoice(NamedTuple):
+    """What a schedule callback carries. `day` and `slot_id` are None for daily and for Any time; `state` is the
+    preview's `expected_state` on a save (`subschedok_`), None on a preview request (`subsched_`)."""
+    frequency: str
+    day: Optional[int]
+    slot_id: Optional[int]
+    subscription_id: int
+    state: Optional[str]
+
+
+def schedule_callback(frequency: str, day: Optional[int], slot_id: Optional[int], subscription_id: int,
+                      state: Optional[str] = None) -> str:
+    """`subsched_<freq>_<day|x>_<slot|any>_<sub>`, or `subschedok_<same>_<state>` once there is a preview state."""
+    prefix = 'subsched' if state is None else 'subschedok'
+    body = f"{prefix}_{frequency}_{'x' if day is None else day}_{'any' if slot_id is None else slot_id}_{subscription_id}"
+    return body if state is None else f"{body}_{state}"
+
+
+def parse_schedule_callback(data: Optional[str]) -> Optional[ScheduleChoice]:
+    """The `ScheduleChoice` off a `subsched_` or `subschedok_` callback, else None. A save without its state, or a
+    preview request with one, is not a schedule callback."""
+    match = _SCHEDULE_CALLBACK.match(data or '')
+    if not match:
+        return None
+    is_save, frequency, day, slot, subscription_id, state = match.groups()
+    if bool(is_save) != (state is not None):
+        return None
+    return ScheduleChoice(
+        frequency, None if day == 'x' else int(day), None if slot == 'any' else int(slot), int(subscription_id), state,
+    )
+
+
+def items_save_callback(op: Literal['add', 'set', 'del'], subscription_id: int, product_id: int, quantity: int,
+                        state: str) -> str:
+    """`subitems_<op>_<sub>_<product>_<qty>_<state>`: the one line the preview showed, and the state it carried."""
+    return f"subitems_{op}_{subscription_id}_{product_id}_{quantity}_{state}"
+
+
+def parse_items_save_callback(data: Optional[str]) -> Optional[Tuple[str, int, int, int, str]]:
+    """`(op, subscription_id, product_id, quantity, state)` off an items save callback, else None."""
+    match = _ITEMS_SAVE_CALLBACK.match(data or '')
+    if not match:
+        return None
+    op, subscription_id, product_id, quantity, state = match.groups()
+    return op, int(subscription_id), int(product_id), int(quantity), state
+
+
+# ---------------------------------------------------------------------------
+# A subscription's payment method and delivery address changes (spec 2026-10-27 §7; step 4 Task 15b).
+#
+# Each is previewed, then saved with the preview's `expected_state` riding the callback:
+#   `subpay_<method>_<sub>` shows the consequence, `subpayok_<method>_<sub>_<state>` writes;
+#   `subaddr_<address>_<sub>` previews a new address, `subaddrpay_<method>_<address>_<sub>` is the method asked for
+#   when the current one is not offered there, `subaddrok_<address>_<method|keep>_<sub>_<state>` writes.
+# The longest is `subaddrok_9999999_business_account_9999999_<16 hex>`: 59 bytes, inside Telegram's 64.
+# ---------------------------------------------------------------------------
+
+_PAYMENT_SAVE_CALLBACK = re.compile(r'^subpayok_([a-z_]+)_(\d+)_([0-9a-f]{16})$')
+_ADDRESS_SAVE_CALLBACK = re.compile(r'^subaddrok_(\d+)_([a-z_]+)_(\d+)_([0-9a-f]{16})$')
+_ADDRESS_METHOD_CALLBACK = re.compile(r'^subaddrpay_([a-z_]+)_(\d+)_(\d+)$')
+_KEEP_METHOD = 'keep'
+
+
+def payment_save_callback(method: str, subscription_id: int, state: str) -> str:
+    """`subpayok_<method>_<sub>_<state>`: the method the consequence screen named, and the state it carried."""
+    return f"subpayok_{method}_{subscription_id}_{state}"
+
+
+def parse_payment_save_callback(data: Optional[str]) -> Optional[Tuple[str, int, str]]:
+    """`(method, subscription_id, state)` off a payment save callback, else None."""
+    match = _PAYMENT_SAVE_CALLBACK.match(data or '')
+    return (match.group(1), int(match.group(2)), match.group(3)) if match else None
+
+
+def address_method_callback(method: str, address_id: int, subscription_id: int) -> str:
+    """`subaddrpay_<method>_<address>_<sub>`: the method picked for the new address (the second preview)."""
+    return f"subaddrpay_{method}_{address_id}_{subscription_id}"
+
+
+def parse_address_method_callback(data: Optional[str]) -> Optional[Tuple[str, int, int]]:
+    """`(method, address_id, subscription_id)` off an address-method callback, else None."""
+    match = _ADDRESS_METHOD_CALLBACK.match(data or '')
+    return (match.group(1), int(match.group(2)), int(match.group(3))) if match else None
+
+
+def address_confirm_callback(address_id: int, method: Optional[str], subscription_id: int, state: str) -> str:
+    """`subaddrok_<address>_<method|keep>_<sub>_<state>`: the address change to save, the method picked for it (or
+    `keep`, the current one stays), and the preview's `expected_state`."""
+    return f"subaddrok_{address_id}_{method or _KEEP_METHOD}_{subscription_id}_{state}"
+
+
+def parse_address_confirm_callback(data: Optional[str]) -> Optional[Tuple[int, Optional[str], int, str]]:
+    """`(address_id, method or None, subscription_id, state)` off an address save callback, else None."""
+    match = _ADDRESS_SAVE_CALLBACK.match(data or '')
+    if not match:
+        return None
+    address_id, method, subscription_id, state = match.groups()
+    return int(address_id), None if method == _KEEP_METHOD else method, int(subscription_id), state
+
+
+def _published_action(order: Optional[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    action = ((order or {}).get('customer_actions') or {}).get(name)
+    return action if isinstance(action, dict) and action.get('allowed') else None
+
+
+def published_pay(order: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The order's published Pay when it is allowed, else None. A payload without the field fails closed."""
+    return _published_action(order, 'pay')
+
+
+def published_cancel(order: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The order's published removal (skip, cancel or decline) when it is allowed, else None. Fails closed."""
+    return _published_action(order, 'cancel')
+
+
+def order_remove_callback(order_id: int, via: str, reason: Optional[str] = None) -> str:
+    """The callback that writes a removal: the `via` the screen showed, and for a skip its reason (or none)."""
+    if via == 'skip':
+        return f"cancel_order_{order_id}_skip_{reason or _SKIP_WITHOUT_REASON}"
+    return f"cancel_order_{order_id}_confirm_yes_{via}"
+
+
+def parse_order_remove_callback(data: Optional[str]) -> Optional[Tuple[int, str, Optional[str]]]:
+    """`(order_id, via, reason_code)` off a removal write; None for every other cancel callback.
+
+    The legacy `cancel_order_<id>_confirm_yes` (it named no `via`) and `cancel_order_<id>_confirm_no` are not
+    writes, so they parse to None.
     """
-    if not order:
-        return False
-    payment_info = order.get('payment_info') or {}
-    if payment_info.get('is_payable'):
-        return True
-    if order.get('is_paid'):
-        return False
-    if (payment_info.get('payment_status') or '').lower() == 'completed':
-        # A COMPLETED payment on an order whose `is_paid` flag has not caught up
-        # yet. The open-checkout arm would otherwise draw a Pay button whose tap
-        # runs `create_payment`, which REWRITES the row to PENDING and mints a
-        # second link -- downgrading a settled payment and inviting a second
-        # debit. `is_payable` already excludes this; the OR-arm has to as well.
-        return False
-    return (order.get('status') or '').lower() == 'pending'
-
-
-def customer_may_cancel(order: Optional[Dict[str, Any]]) -> bool:
-    """May this customer cancel THIS order themselves?
-
-    The backend's answer, read verbatim: ``can_customer_cancel``, which
-    ``serialize_order`` publishes from ``OrderService.customer_cancel_block_code``,
-    the predicate ``POST /orders/<id>/cancel`` enforces (F5). The bot holds no
-    copy of the rule, so a payload without the field fails closed: no Cancel.
-
-    A SIBLING of :func:`customer_may_pay`, never folded into it: payability runs
-    through delivery (case B), self-cancel does not.
-    """
-    return bool((order or {}).get('can_customer_cancel'))
+    match = _REMOVE_CALLBACK.match(data or '')
+    if not match:
+        return None
+    order_id = int(match.group(1))
+    if match.group(2):
+        return order_id, match.group(2), None
+    reason = match.group(3)
+    return order_id, 'skip', None if reason == _SKIP_WITHOUT_REASON else reason
 
 
 def get_product_display_price(product: Dict[str, Any]) -> Any:
@@ -116,7 +239,7 @@ def i18n_button(key: str, language: str, callback_data: str, **fmt) -> Dict[str,
 # The category and the single-category Back target therefore ride on the
 # CALLBACK rather than in `context.user_data`, for exactly the reason the
 # cancel-confirmation card carries its order id
-# (handlers/orders.py::_cancel_confirmation_callback): the Application is built
+# (`order_remove_callback` above): the Application is built
 # with no `persistence`, so bot memory is empty after every deploy, and a
 # product list still open on a customer's screen has to keep working.
 #
@@ -277,17 +400,6 @@ class MenuKeyboards:
         """Simple cancel button"""
         buttons = [
             [{'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_action'}]
-        ]
-        return KeyboardBuilder.build_inline_keyboard(buttons)
-
-    @staticmethod
-    def yes_no_buttons(language: str = 'en', yes_callback: str = 'confirm_yes', no_callback: str = 'confirm_no') -> InlineKeyboardMarkup:
-        """Yes/No confirmation buttons"""
-        buttons = [
-            [
-                {'text': i18n.get('telegram.yes', language), 'callback_data': yes_callback},
-                {'text': i18n.get('telegram.no', language), 'callback_data': no_callback}
-            ]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -881,16 +993,17 @@ class OrderKeyboards:
     def order_details(
         order_id: int,
         order_status: str,
-        language: str = 'en',
-        may_pay: bool = False,
-        may_cancel: bool = False,
+        language: str,
+        *,
+        pay: Optional[Dict[str, Any]],
+        cancel: Optional[Dict[str, Any]],
     ) -> InlineKeyboardMarkup:
         """Order details action buttons.
 
-        ``may_pay`` is `customer_may_pay(order)`, computed by the caller from
-        the order it already fetched. It is passed in rather than re-derived
-        here because this builder is handed a status STRING and cannot see the
-        published `payment_info.is_payable`.
+        ``pay`` and ``cancel`` are the order's published answers (`published_pay` / `published_cancel`), passed
+        by the caller that fetched the order: each button is drawn only when the backend allows it, with the
+        label it published. Pay carries the amount the screen showed; the removal (skip, cancel or decline) opens
+        its confirmation, which names the consequence.
         """
         buttons = []
 
@@ -901,21 +1014,10 @@ class OrderKeyboards:
                 'callback_data': f'track_order_{order_id}'
             }])
 
-        # PAY and CANCEL were one `order_status == 'pending'` block and had to
-        # SPLIT. Payability runs through delivery (case B). Cancel is drawn only
-        # from the order's published `can_customer_cancel` (F5,
-        # `OrderService.customer_cancel_block_code`), passed in as `may_cancel`;
-        # a stale tap on a Cancel drawn earlier gets the coded refusal.
-        if may_pay:
-            buttons.append([{
-                'text': i18n.get('telegram.payment.pay_now', language),
-                'callback_data': f'payment_retry_{order_id}'
-            }])
-        if may_cancel:
-            buttons.append([{
-                'text': i18n.get('telegram.payment.cancel_order', language),
-                'callback_data': f'cancel_order_{order_id}'
-            }])
+        if pay:
+            buttons.append([{'text': pay['label'], 'callback_data': pay_callback(order_id, pay['expected_amount'])}])
+        if cancel:
+            buttons.append([{'text': cancel['label'], 'callback_data': f'cancel_order_{order_id}'}])
 
         # Add reorder button for delivered orders
         if order_status == 'delivered':
@@ -929,6 +1031,32 @@ class OrderKeyboards:
             'callback_data': 'back_to_orders'
         }])
 
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def remove_confirmation(order_id: int, cancel: Dict[str, Any], language: str) -> InlineKeyboardMarkup:
+        """The confirmation under an order's published removal (spec 2026-10-27 §5.3).
+
+        A skip asks its reason with the backend's own chips, or none, and keeps the delivery. A cancel or a
+        decline is confirmed with its published label, or the order is kept. Every write names the `via` the
+        screen showed; the keep button goes back to the order.
+        """
+        keep = f'cancel_order_{order_id}_confirm_no'
+        if cancel.get('via') == 'skip':
+            buttons = [
+                [{'text': reason['label'], 'callback_data': order_remove_callback(order_id, 'skip', reason['code'])}]
+                for reason in cancel.get('reasons') or []
+            ]
+            buttons.append([{
+                'text': i18n.get('telegram.orders.skip_no_reason', language),
+                'callback_data': order_remove_callback(order_id, 'skip'),
+            }])
+            buttons.append([{'text': i18n.get('telegram.orders.keep_delivery', language), 'callback_data': keep}])
+        else:
+            buttons = [
+                [{'text': cancel['label'], 'callback_data': order_remove_callback(order_id, cancel['via'])}],
+                [{'text': i18n.get('telegram.orders.keep_order', language), 'callback_data': keep}],
+            ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -951,15 +1079,18 @@ class OrderKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def asl_belgisi_error(language: str = 'en') -> InlineKeyboardMarkup:
+    def asl_belgisi_error(language: str = 'en', *, cod_restricted: bool = False) -> InlineKeyboardMarkup:
         """Shown when Tax Committee (Asl belgisi) is unavailable during order creation.
-        Offers two recovery paths: switch to cash or retry the card order."""
-        buttons = [
-            [{'text': i18n.get('telegram.orders.asl_belgisi_switch_cash', language),
-              'callback_data': 'select_payment_cash'}],
-            [{'text': i18n.get('telegram.orders.asl_belgisi_retry', language),
-              'callback_data': 'confirm_order'}],
-        ]
+
+        Offers the cash rescue and a retry of the card order. ``cod_restricted`` is the 503's published
+        `payment_restrictions.cod_restricted`: a customer the cash-debt limit keeps off cash is offered the retry
+        only (the backend's message already says so), never a button the rescue would refuse."""
+        buttons = []
+        if not cod_restricted:
+            buttons.append([{'text': i18n.get('telegram.orders.asl_belgisi_switch_cash', language),
+                             'callback_data': 'select_payment_cash'}])
+        buttons.append([{'text': i18n.get('telegram.orders.asl_belgisi_retry', language),
+                         'callback_data': 'confirm_order'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 
@@ -1002,7 +1133,9 @@ class SubscriptionKeyboards:
                 {'text': i18n.get('telegram.subscription.frequency_biweekly', language), 'callback_data': freq_callback('biweekly')},
                 {'text': i18n.get('telegram.subscription.frequency_monthly', language), 'callback_data': freq_callback('monthly')}
             ],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
+            # The edit screen returns to the subscription being edited; creation returns to the list.
+            [{'text': i18n.get('telegram.back', language),
+              'callback_data': 'back_to_subscriptions' if subscription_id is None else f'subscription_{subscription_id}'}]
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1019,43 +1152,124 @@ class SubscriptionKeyboards:
                 'callback_data': f"subscription_{sub['id']}"
             }])
 
-        buttons.extend([
-            [{'text': i18n.get('telegram.subscription.create', language), 'callback_data': 'create_subscription'}],
-            [{'text': i18n.get('telegram.subscription.statistics', language), 'callback_data': 'subscription_statistics'}]
-        ])
+        buttons.append([{'text': i18n.get('telegram.subscription.create', language), 'callback_data': 'create_subscription'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def subscription_actions(subscription_id: int, status: str, language: str = 'en') -> InlineKeyboardMarkup:
-        """Subscription action buttons"""
+    def item_name(item: Dict, language: str = 'en') -> str:
+        """A subscription item's name as the backend publishes it (``product_name``, spec 2026-10-26 B10). A
+        deleted product is published as ``product: None`` with no name, and reads as unknown."""
+        return (
+            item.get('product_name')
+            or (item.get('product') or {}).get('name')
+            or i18n.get('telegram.common.unknown', language)
+        )
+
+    @staticmethod
+    def is_allowed(allowed_actions: Optional[Dict], action: str) -> bool:
+        """Whether the backend's published ``allowed_actions`` allows ``action``. The bot never derives this
+        from the subscription's status: a payload that publishes nothing offers nothing."""
+        return bool(((allowed_actions or {}).get(action) or {}).get('allowed'))
+
+    @staticmethod
+    def subscription_actions(subscription_id: int, allowed_actions: Optional[Dict], language: str = 'en') -> InlineKeyboardMarkup:
+        """Subscription card buttons, in the order Pay, Skip, Pause/Resume, Edit, Items, Orders, Cancel, Back.
+
+        Exactly the actions the backend published as allowed (spec 2026-10-26 §6), and Pay, Skip, Pause, Resume
+        and Cancel wear the label it published (spec 2026-10-27 §16 M3), so the bot and the website say the same
+        words. Edit, Items, Orders and Back are the bot's own. Pay carries the amount the screen showed, and Skip
+        names the delivery it will skip (``skip_sub_<id>_<yyyy-mm-dd>``), so the backend can refuse either with a
+        409 when the card has gone stale. Pause and Cancel ask first (`action_confirmation`)."""
+        allow = lambda action: SubscriptionKeyboards.is_allowed(allowed_actions, action)  # noqa: E731
         buttons = []
 
-        if status == 'active':
+        if allow('pay'):
+            pay = allowed_actions['pay']
+            buttons.append([{'text': pay['label'], 'callback_data': pay_callback(pay['order_id'], pay['expected_amount'])}])
+        if allow('skip'):
+            skip = allowed_actions['skip']
+            skip_date = skip.get('date')
             buttons.append([{
-                'text': i18n.get('telegram.subscription.pause', language),
-                'callback_data': f'pause_sub_{subscription_id}'
+                'text': skip['label'],
+                'callback_data': f'skip_sub_{subscription_id}_{skip_date}' if skip_date else f'skip_sub_{subscription_id}'
             }])
-            buttons.append([{
-                'text': i18n.get('telegram.subscription.skip_next', language),
-                'callback_data': f'skip_sub_{subscription_id}'
-            }])
-        elif status == 'paused':
-            buttons.append([{
-                'text': i18n.get('telegram.subscription.resume', language),
-                'callback_data': f'resume_sub_{subscription_id}'
-            }])
+        if allow('pause'):
+            buttons.append([{'text': allowed_actions['pause']['label'], 'callback_data': f'pause_sub_{subscription_id}'}])
+        if allow('resume'):
+            buttons.append([{'text': allowed_actions['resume']['label'], 'callback_data': f'resume_sub_{subscription_id}'}])
+        if allow('edit'):
+            buttons.append([{'text': i18n.get('telegram.subscription.edit', language), 'callback_data': f'edit_sub_{subscription_id}'}])
+            buttons.append([{'text': i18n.get('telegram.subscription.manage_items', language), 'callback_data': f'manage_items_{subscription_id}'}])
+        buttons.append([{'text': i18n.get('telegram.subscription.orders', language), 'callback_data': f'subhist_{subscription_id}_1'}])
+        if allow('cancel'):
+            buttons.append([{'text': allowed_actions['cancel']['label'], 'callback_data': f'cancel_sub_{subscription_id}'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}])
 
-        buttons.extend([
-            [{'text': i18n.get('telegram.subscription.edit', language), 'callback_data': f'edit_sub_{subscription_id}'}],
-            [{'text': i18n.get('telegram.subscription.manage_items', language), 'callback_data': f'manage_items_{subscription_id}'}],
-            [
-                {'text': i18n.get('telegram.subscription.billing', language), 'callback_data': f'billing_history_{subscription_id}'},
-                {'text': i18n.get('telegram.subscription.logs', language), 'callback_data': f'view_logs_{subscription_id}'}
-            ],
-            [{'text': i18n.get('telegram.cancel', language), 'callback_data': f'cancel_sub_{subscription_id}'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
-        ])
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def action_confirmation(subscription_id: int, action: str, allowed_actions: Dict, language: str = 'en') -> InlineKeyboardMarkup:
+        """The buttons under a consequence confirm (spec 2026-10-27 §5.3 D12, §7 D19), all in the backend's words.
+
+        * ``pause`` and ``cancel``: its ``confirm_label`` writes (``confirmpause_sub_<id>_<state>`` /
+          ``confirmcancel_sub_<id>_<state>``, the ``expected_state`` the card showed), its ``keep_label`` goes back.
+        * ``skip``: one button per published reason (``skip_sub_<id>_<date>_<code>``), then none
+          (``…_none``), then its ``keep_label``.
+        The id, the 16-character state and the date keep every callback inside Telegram's 64 bytes."""
+        published = allowed_actions[action]
+        keep = {'text': published['keep_label'], 'callback_data': f'subscription_{subscription_id}'}
+        if action == 'skip':
+            prefix = f"skip_sub_{subscription_id}_{published['date']}"
+            buttons = [
+                [{'text': reason['label'], 'callback_data': f"{prefix}_{reason['code']}"}]
+                for reason in published.get('reasons') or []
+            ]
+            buttons.append([{'text': i18n.get('telegram.orders.skip_no_reason', language), 'callback_data': f'{prefix}_none'}])
+        else:
+            buttons = [[{
+                'text': published['confirm_label'],
+                'callback_data': f"confirm{action}_sub_{subscription_id}_{allowed_actions['expected_state']}",
+            }]]
+        buttons.append([keep])
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def history(subscription_id: int, rows: List[Dict], page: int, has_prev: bool, has_next: bool,
+                language: str = 'en') -> InlineKeyboardMarkup:
+        """One page of a subscription's order history. A row whose order publishes `customer_actions` gets
+        its Pay (the amount it showed) and its removal (opens the order's own confirm), each with the backend's
+        label; then Previous / Next where the backend says there is another page, and Back to the card."""
+        buttons = []
+        for row in rows:
+            order_id = row.get('order_id')
+            pay = published_pay(row)
+            cancel = published_cancel(row)
+            if pay:
+                buttons.append([{
+                    'text': f"{row['date_label']} · {pay['label']}",
+                    'callback_data': pay_callback(order_id, pay['expected_amount']),
+                }])
+            if cancel:
+                buttons.append([{
+                    'text': f"{row['date_label']} · {cancel['label']}",
+                    'callback_data': f'cancel_order_{order_id}',
+                }])
+
+        nav_row = []
+        if has_prev:
+            nav_row.append({
+                'text': i18n.get('telegram.pagination.previous', language),
+                'callback_data': f'subhist_{subscription_id}_{page - 1}',
+            })
+        if has_next:
+            nav_row.append({
+                'text': i18n.get('telegram.pagination.next', language),
+                'callback_data': f'subhist_{subscription_id}_{page + 1}',
+            })
+        if nav_row:
+            buttons.append(nav_row)
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -1070,13 +1284,17 @@ class SubscriptionKeyboards:
         return i18n.get(f'telegram.subscription.weekday_{weekday}', language)
 
     @staticmethod
-    def day_picker(frequency: str, language: str = 'en', subscription_id: int = None) -> InlineKeyboardMarkup:
+    def day_picker(frequency: str, language: str = 'en', subscription_id: int = None, *,
+                   delivery_weekdays: Sequence[int] = range(7)) -> InlineKeyboardMarkup:
         """The delivery day: a weekday for weekly and biweekly (0 = Monday), a day of the month for monthly.
+
+        Weekly and biweekly offer only the ``delivery_weekdays`` the backend published (a weekday with no active
+        slot is no delivery day, spec 2026-10-27 §6.4); the default is all seven, for a payload that carries none.
 
         Two screens render this, in separate callback namespaces for the reason `subscription_frequency`
         gives: CREATION (`subscription_id=None`) emits `subscription_day_<n>`, claimed inside the creation
         conversation's SELECT_DAY state and Back to the frequency list; EDIT emits
-        `subday_<frequency>_<n>_<id>`, claimed top level, carrying everything the update needs so it
+        `subday_<frequency>_<n>_<id>`, claimed top level, carrying everything the next step needs so it
         survives the restart that empties `user_data`.
         """
         def day_callback(day: int) -> str:
@@ -1090,7 +1308,7 @@ class SubscriptionKeyboards:
         else:
             weekdays = [
                 {'text': SubscriptionKeyboards.weekday_label(day, language), 'callback_data': day_callback(day)}
-                for day in range(7)
+                for day in sorted(set(delivery_weekdays))
             ]
             buttons = [weekdays[i:i + 2] for i in range(0, len(weekdays), 2)]
         back = 'back_to_sub_frequency' if subscription_id is None else f'change_frequency_{subscription_id}'
@@ -1098,18 +1316,39 @@ class SubscriptionKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def time_slot_picker(slots: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """The delivery time slot of a new subscription: the slots the backend offered for the chosen day,
-        then "any time" (the slot is optional; the order is dated and its time confirmed later)."""
+    def time_slot_picker(slots: List[Dict], language: str = 'en', subscription_id: int = None, *,
+                         frequency: Optional[str] = None, day: Optional[int] = None) -> InlineKeyboardMarkup:
+        """The delivery time slot: the slots the backend offered for the chosen day, then "Any time".
+
+        Two screens render this, in separate callback namespaces for the reason `subscription_frequency`
+        gives. CREATION (`subscription_id=None`) emits `subscription_slot_<id>` / `subscription_slot_any` and
+        Back to the day. EDIT emits `schedule_callback(frequency, day, <slot|None>, subscription_id)`: the
+        schedule being asked about rides every button, Any time included, and Back goes to the day picker
+        (`subfreq_<frequency>_<id>`), or to the frequency list for daily, which has no day. `frequency` is
+        required with a `subscription_id`: a button with no frequency would name a callback nothing claims."""
+        if subscription_id is not None and frequency is None:
+            raise ValueError('time_slot_picker needs the frequency of the schedule it edits')
+
+        def slot_callback(slot_id: Optional[int]) -> str:
+            if subscription_id is None:
+                return 'subscription_slot_any' if slot_id is None else f'subscription_slot_{slot_id}'
+            return schedule_callback(frequency, day, slot_id, subscription_id)
+
         buttons = [
             [{
                 'text': f"{slot.get('name')} · {slot.get('time_range')}" if slot.get('name') else str(slot.get('time_range')),
-                'callback_data': f"subscription_slot_{slot['id']}",
+                'callback_data': slot_callback(slot['id']),
             }]
             for slot in slots
         ]
-        buttons.append([{'text': i18n.get('telegram.subscription.any_time', language), 'callback_data': 'subscription_slot_any'}])
-        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_sub_day'}])
+        buttons.append([{'text': i18n.get('telegram.subscription.any_time', language), 'callback_data': slot_callback(None)}])
+        if subscription_id is None:
+            back = 'back_to_sub_day'
+        elif frequency == 'daily':
+            back = f'change_frequency_{subscription_id}'
+        else:
+            back = f'subfreq_{frequency}_{subscription_id}'
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': back}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -1150,6 +1389,8 @@ class SubscriptionKeyboards:
         language: str = 'en',
         back_callback: str = 'back_to_address_selection',
         subscription_id: int = None,
+        *,
+        callback: Optional[Callable[[str], str]] = None,
     ) -> InlineKeyboardMarkup:
         """Payment method selection for subscription.
 
@@ -1164,15 +1405,21 @@ class SubscriptionKeyboards:
         underscore, so the type is everything between the prefix and the
         trailing id — never a fixed index.
 
+        `callback(method) -> str` overrides both, for a screen with its own namespace (the address change's
+        `subaddrpay_<method>_<address>_<sub>`). It receives the method code the backend published (`click`, not
+        the "Card" button's name), because that is what the write must send.
+
         Two screens render this: the creation flow, whose previous step was the
         address list (the default Back), and the "change payment method" screen
         reached from an existing subscription's edit menu, which passes
         `edit_sub_<id>`. One Back callback for both would have to mean two
         different destinations, so it meant neither and the button was dead.
         """
-        from payment_methods import build_payment_method_buttons
+        from payment_methods import build_payment_method_buttons, published_method
 
         def pay_callback(method_type: str) -> str:
+            if callback is not None:
+                return callback(published_method(method_type, available_methods))
             if subscription_id is None:
                 return f'sub_payment_{method_type}'
             return f'subpay_{method_type}_{subscription_id}'
@@ -1185,24 +1432,25 @@ class SubscriptionKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def item_management_menu(subscription_id: int, items: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """Item management keyboard"""
+    def item_management_menu(subscription_id: int, items: List[Dict], allowed_actions: Optional[Dict],
+                             language: str = 'en') -> InlineKeyboardMarkup:
+        """Item management keyboard. Change and Add follow the backend's ``edit``, the bin its ``remove_item``
+        (refused on the last item, and on a subscription that cannot be edited)."""
+        can_edit = SubscriptionKeyboards.is_allowed(allowed_actions, 'edit')
+        can_remove = SubscriptionKeyboards.is_allowed(allowed_actions, 'remove_item')
         buttons = []
 
-        # Add buttons for each existing item
-        for item in items:
-            item_id = item.get('id')
-            product_name = item.get('product', {}).get('name', 'Unknown')
-            quantity = item.get('quantity', 1)
-            buttons.append([
-                {'text': f"✏️ {product_name} x{quantity}", 'callback_data': f'update_item_{subscription_id}_{item_id}'},
-                {'text': '🗑️', 'callback_data': f'remove_item_{subscription_id}_{item_id}'}
-            ])
+        if can_edit:
+            for item in items:
+                item_id = item.get('id')
+                product_name = SubscriptionKeyboards.item_name(item, language)
+                quantity = item.get('quantity', 1)
+                row = [{'text': f"✏️ {product_name} x{quantity}", 'callback_data': f'update_item_{subscription_id}_{item_id}'}]
+                if can_remove:
+                    row.append({'text': '🗑️', 'callback_data': f'remove_item_{subscription_id}_{item_id}'})
+                buttons.append(row)
+            buttons.append([{'text': i18n.get('telegram.subscription.add_item', language), 'callback_data': f'add_item_{subscription_id}'}])
 
-        # Add new item button
-        buttons.append([{'text': i18n.get('telegram.subscription.add_item', language), 'callback_data': f'add_item_{subscription_id}'}])
-
-        # Back button
         buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1212,9 +1460,11 @@ class SubscriptionKeyboards:
         """Edit subscription menu"""
         buttons = [
             [{'text': i18n.get('telegram.subscription.change_frequency', language), 'callback_data': f'change_frequency_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.change_time_slot', language), 'callback_data': f'change_slot_{subscription_id}'}],
             [{'text': i18n.get('telegram.subscription.change_payment', language), 'callback_data': f'change_payment_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.change_address', language), 'callback_data': f'change_address_{subscription_id}'}],
             [{'text': i18n.get('telegram.subscription.manage_items', language), 'callback_data': f'manage_items_{subscription_id}'}],
-            [{'text': i18n.get('telegram.subscription.view_logs', language), 'callback_data': f'view_logs_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.orders', language), 'callback_data': f'subhist_{subscription_id}_1'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1573,30 +1823,27 @@ class PaymentKeyboards:
     @staticmethod
     def payment_failed(
         order_id: int,
-        language: str = 'en',
+        language: str,
         *,
-        may_pay: bool,
-        may_cancel: bool,
+        pay: Optional[Dict[str, Any]],
+        cancel: Optional[Dict[str, Any]],
     ) -> InlineKeyboardMarkup:
         """Recovery options for an order that exists but is not paid.
 
         Every button carries `order_id` (My Orders needs none — it lists them),
         so the whole screen keeps working against THAT order after a bot
-        restart, when `context.user_data` is gone. Rendered both when a payment
-        is cancelled and when the payment link could not be created at all
-        (`confirm_order`), which is why My Orders is here: after a failed link
-        the customer's first question is "so does my order exist?", and the
-        answer has to be one tap away.
+        restart, when `context.user_data` is gone. Rendered when the checkout
+        answer carried no payment link (`confirm_order`) and for a stale
+        `payment_cancel_<id>` tap, which is why My Orders is here: after a
+        failed link the customer's first question is "so does my order exist?",
+        and the answer has to be one tap away.
 
-        ``may_pay`` is `customer_may_pay(order)` and ``may_cancel`` is
-        `customer_may_cancel(order)` — THE SAME SPLIT `order_details` applies,
-        and it belongs here for the same reason. Before B3 a DELIVERED order
-        could never reach this screen; it can now, because `retry_payment`
-        renders it on any link-creation failure and case B is precisely the
-        population B3 routes here. Cancel is drawn only from the order's
-        published `can_customer_cancel` (F5,
-        `OrderService.customer_cancel_block_code`), and a stale tap gets the
-        coded refusal. Both are required: every caller holds the order, so
+        ``pay`` and ``cancel`` are the order's published answers
+        (`published_pay` / `published_cancel`), the same pair `order_details`
+        draws: Retry is drawn only when Pay is published and pays with the
+        amount it carried, and Cancel is the published removal with its label.
+        Retry keeps its own name because the screen's copy tells the customer to
+        tap «Retry Payment». Both are required: every caller holds the order, so
         every caller decides.
 
         SWITCH METHOD IS DELIBERATELY ABSENT. `payment_switch_{id}` parsed the
@@ -1607,20 +1854,16 @@ class PaymentKeyboards:
         because an unpaid order deliberately keeps its cart, the Confirm button
         it leads to places a SECOND order for the same basket: the exact
         double-order this screen's "your order is placed" copy exists to
-        prevent. The rail move a customer really has is Retry —
-        POST /api/v1/payments/create normalizes card->click and flips a pending
-        cash order onto Click behind the marking-code pool guard. Two
-        expressions of one affordance, one of them broken; this is the deletion.
+        prevent. A customer moves no rail from here (spec 2026-10-27 §4.3).
         """
         buttons = []
-        if may_pay:
+        if pay:
             buttons.append([{'text': i18n.get('telegram.payment.retry', language),
-                             'callback_data': f'payment_retry_{order_id}'}])
+                             'callback_data': pay_callback(order_id, pay['expected_amount'])}])
         buttons.append([{'text': i18n.get('telegram.menu.orders', language),
                          'callback_data': 'menu_orders'}])
-        if may_cancel:
-            buttons.append([{'text': i18n.get('telegram.payment.cancel_order', language),
-                             'callback_data': f'cancel_order_{order_id}'}])
+        if cancel:
+            buttons.append([{'text': cancel['label'], 'callback_data': f'cancel_order_{order_id}'}])
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -1695,9 +1938,9 @@ class CustomerNoticeKeyboards:
 
     @staticmethod
     def notice(language: str, *, order_id: Optional[int], pay_now: bool) -> Optional[InlineKeyboardMarkup]:
-        """Pay now (an unpaid Click order: `retry_payment`'s own `payment_retry_<id>`, which re-checks the
-        order is still payable and builds the Click link) above View order. None for a notice without an
-        order (a skipped delivery)."""
+        """Pay now (an unpaid Click order: `payment_retry_<id>`, which carries no amount, so `retry_payment`
+        opens the order with its published Pay and writes nothing) above View order. None for a notice without
+        an order (a skipped delivery)."""
         if order_id is None:
             return None
         rows = []

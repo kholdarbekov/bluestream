@@ -285,9 +285,9 @@ class AuthService:
             New tokens dict
         """
         try:
-            from flask_jwt_extended import decode_token
+            from business_app.services.token_service import TokenService
 
-            decoded_token = decode_token(refresh_token)
+            decoded_token = TokenService.decode_refresh_token(refresh_token)  # never an access token
             user_id = decoded_token["sub"]
 
             # decode_token checks no revocation: the one rule the blocklist loader applies

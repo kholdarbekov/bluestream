@@ -3641,13 +3641,6 @@
     "rule": "/api/v1/payments/orders/<int:order_id>/timeline"
   },
   {
-    "endpoint": "payments.process_card_payment",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/payments/process-card-payment"
-  },
-  {
     "endpoint": "payments.request_refund",
     "methods": [
       "POST"
@@ -4467,13 +4460,6 @@
     "rule": "/api/v1/subscriptions/<int:subscription_id>"
   },
   {
-    "endpoint": "subscriptions.get_billing_history",
-    "methods": [
-      "GET"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/billing-history"
-  },
-  {
     "endpoint": "subscriptions.cancel_subscription",
     "methods": [
       "POST"
@@ -4488,6 +4474,13 @@
     "rule": "/api/v1/subscriptions/<int:subscription_id>/change-payment-method"
   },
   {
+    "endpoint": "subscriptions.get_subscription_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/history"
+  },
+  {
     "endpoint": "subscriptions.add_subscription_item",
     "methods": [
       "POST"
@@ -4498,6 +4491,13 @@
     "endpoint": "subscriptions.get_subscription_items",
     "methods": [
       "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
+  },
+  {
+    "endpoint": "subscriptions.replace_subscription_items",
+    "methods": [
+      "PUT"
     ],
     "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
   },
@@ -4530,6 +4530,13 @@
     "rule": "/api/v1/subscriptions/<int:subscription_id>/pause"
   },
   {
+    "endpoint": "subscriptions.preview_subscription_change",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/preview"
+  },
+  {
     "endpoint": "subscriptions.resume_subscription",
     "methods": [
       "POST"
@@ -4549,6 +4556,13 @@
       "POST"
     ],
     "rule": "/api/v1/subscriptions/preview"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription_products",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/products"
   },
   {
     "endpoint": "subscriptions.get_subscription_statistics",

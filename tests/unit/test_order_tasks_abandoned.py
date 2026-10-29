@@ -42,13 +42,15 @@ def celery_app_module(app):
     return sys.modules[module_name]
 
 
-def _aged_order(db, user, *, hours, status=OrderStatus.PENDING, payment_status=None):
+def _aged_order(
+    db, user, *, hours, status=OrderStatus.PENDING, payment_status=None, payment_method=PaymentMethod.CLICK
+):
     order = Order(
         user_id=user.id,
         status=status,
         subtotal=Decimal("25000.00"),
         total_amount=Decimal("25000.00"),
-        payment_method=PaymentMethod.CLICK,
+        payment_method=payment_method,
     )
     db.session.add(order)
     db.session.flush()
@@ -59,7 +61,7 @@ def _aged_order(db, user, *, hours, status=OrderStatus.PENDING, payment_status=N
                 order_id=order.id,
                 user_id=user.id,
                 amount=order.total_amount,
-                payment_method=PaymentMethod.CLICK,
+                payment_method=payment_method,
                 status=payment_status,
             )
         )
@@ -94,6 +96,18 @@ def test_cancels_old_pending_order_with_pending_payment(app, db, sample_user):
 def test_spares_paid_order(app, db, sample_user):
     with app.app_context():
         order = _aged_order(db, sample_user, hours=30, payment_status=PaymentStatus.COMPLETED)
+        cancel_abandoned_orders()
+        db.session.refresh(order)
+        assert order.status is OrderStatus.PENDING
+
+
+def test_spares_an_old_pending_cash_order(app, db, sample_user):
+    """Spec 2026-10-27 §4.4: the sweep cancels unpaid ONLINE orders. Cash is paid at the door, so a cash order has
+    no payment deadline, however old it is."""
+    with app.app_context():
+        order = _aged_order(
+            db, sample_user, hours=30, payment_method=PaymentMethod.CASH, payment_status=PaymentStatus.PENDING
+        )
         cancel_abandoned_orders()
         db.session.refresh(order)
         assert order.status is OrderStatus.PENDING

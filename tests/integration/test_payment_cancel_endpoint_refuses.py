@@ -382,7 +382,9 @@ class TestOrderCancellabilityAgreesWithTheRealCancelPath:
             db.session.commit()
 
         _advice_response, advice = _post(client, app, sample_user, payment.id)
-        cancel = client.post(f"/api/v1/orders/{order.id}/cancel", headers=_headers(app, sample_user))
+        cancel = client.post(
+            f"/api/v1/orders/{order.id}/cancel", headers=_headers(app, sample_user), json={"expected_via": "cancel"}
+        )
         cancel_body = cancel.get_json()
 
         # A refusal must be the coded F5 answer, never a 500 or some other 400.

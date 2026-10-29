@@ -79,6 +79,8 @@ class BackendCall:
     # Whether the wrapper asked `_make_request` to HMAC-sign the body (`sign=True`). Recorded for
     # the same reason: the signature header is built inside the seam, so this is the only witness.
     sign: bool = False
+    # The language the wrapper asked for (`Accept-Language`, built inside the seam), the same way.
+    language: Optional[str] = None
 
 
 class FakeBackend:
@@ -103,7 +105,8 @@ class FakeBackend:
 
     async def handle(self, method, endpoint, data=None, params=None, **_kwargs):
         call = BackendCall(
-            method.upper(), endpoint, data, params, _kwargs.get("user_token"), bool(_kwargs.get("sign"))
+            method.upper(), endpoint, data, params, _kwargs.get("user_token"), bool(_kwargs.get("sign")),
+            _kwargs.get("language"),
         )
         self.calls.append(call)
 

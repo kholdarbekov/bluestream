@@ -207,21 +207,27 @@ def get_live_tracking(delivery_id):
 
 @delivery_bp.route("/time-slots", methods=["GET"])
 def get_time_slots():
-    """Get available delivery time slots for a date, or (`weekday`) the slots a recurring delivery can pick"""
+    """Get available delivery time slots for a date, or (`weekday`) the slots a recurring delivery can pick and
+    the delivery days"""
     try:
         weekday_arg = request.args.get("weekday")
         if weekday_arg is not None:
             # A subscription's day-and-slot chooser (spec 2026-10-23 §2.9): no date exists yet, so the
-            # slots offered that weekday (0 = Monday), or every active slot with `weekday=any`.
+            # slots offered that weekday (0 = Monday), or every active slot with `weekday=any`, and the
+            # delivery days the day pickers offer (spec 2026-10-27 §6.4).
             if weekday_arg == "any":
                 weekday = None
             elif weekday_arg.isdigit() and int(weekday_arg) in range(7):
                 weekday = int(weekday_arg)
             else:
                 return jsonify({"error": get_translation("api.delivery.error.invalid_weekday")}), 400
-            return jsonify(
-                {"weekday": weekday_arg, "time_slots": get_delivery_service().get_slots_offered_on_weekday(weekday)}
-            )
+            # Optional `frequency`: the subscription schedule's own slot rule, the one its save guard checks
+            # (a monthly delivery needs a slot offered on every delivery day, spec 2026-10-26 §8.2).
+            try:
+                choice = get_delivery_service().recurring_slot_choice(weekday, request.args.get("frequency"))
+            except ValidationError as exc:
+                return jsonify({"error": get_translation(exc.message)}), 400
+            return jsonify({"weekday": weekday_arg, **choice})
 
         target_date_str = request.args.get("date")
 

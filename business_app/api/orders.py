@@ -3,6 +3,8 @@ Orders API endpoints
 This file should be placed in business_app/api/orders.py
 """
 
+import math
+
 from flasgger import swag_from
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -17,7 +19,8 @@ from business_app.utils.service_factory import (
     get_payment_service,
 )
 from business_app.utils.translations import get_translation
-from business_app.utils.payment_projection import is_settled_prepayment, order_is_resolved
+from business_app.utils import display_labels
+from business_app.services.customer_order_actions import pay_refusal_message
 from business_app.serializers.order_serializers import (
     serialize_order,
     serialize_reorder_info,
@@ -27,6 +30,8 @@ from business_app.serializers.order_serializers import (
     CreateOrderRequest,
     OrderFeedbackRequest,
     CartEstimateRequest,
+    RetryPaymentRequest,
+    CustomerCancelOrderRequest,
 )
 from business_app.serializers.sales_serializers import AgentConfirmationPayload
 from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
@@ -34,7 +39,7 @@ from business_app.utils.decorators import validate_json, rate_limit, require_ver
 from business_app.utils.delivery_window import schedule_date_bounds
 from business_app.services.order_service import ADMIN_REASON_REQUIRED_STATUSES
 from business_app.utils.constants import NotificationType
-from shared.enums import OrderStatus, PaymentMethod
+from shared.enums import OrderStatus
 from shared.status_transitions import order_transitions_as_strings
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
@@ -43,6 +48,8 @@ from business_app.utils.exceptions import (
     NotFoundError,
     ForbiddenError,
     ConflictError,
+    PayRefusedError,
+    StateChangedError,
     TaxCommitteeUnavailableError,
 )
 from business_app.utils.api_responses import (
@@ -53,12 +60,31 @@ from business_app.utils.api_responses import (
     validation_error_response,
     forbidden_response,
     internal_error_response,
+    state_changed_response,
 )
 from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 from business_app import db
 from pydantic import ValidationError as PydanticValidationError
 
 orders_bp = Blueprint("orders", __name__)
+
+# `AgentConfirmationPayload.channel` -> the `response_channel` the answer is recorded under: the bot's body names
+# "bot" (or nothing), which the request row has always recorded as "telegram".
+AGENT_CONFIRMATION_CHANNELS = {"bot": "telegram", "web": "web"}
+
+
+def _customer_payment_restrictions(user_id, order):
+    """The customer's cash-on-delivery state for `order`'s destination, as a customer may see it.
+
+    Place-aware: reported against the address the order goes to, not just the customer's own cluster (spec 5.5).
+    Customer-facing: the place-scope NET total is a coworker's money at a shared address, never this customer's,
+    so it is stripped before it leaves the server (spec §7)."""
+    from business_app.services.cash_collection_service import CashCollectionService
+    from business_app.utils.cod_cap import strip_place_scope_money_for_customer
+
+    return strip_place_scope_money_for_customer(
+        CashCollectionService().get_cod_restriction_context(user_id, delivery_address_id=order.delivery_address_id)
+    )
 
 
 def _rollback_session():
@@ -135,6 +161,8 @@ def get_order(order_id):
                 "delivery": delivery_info,
                 "timeline": details["timeline"],
                 "payment_timeline": payment_timeline,
+                # The website's order modal shows these as they are (spec 2026-10-26 §12).
+                "labels": display_labels.order_detail(order),
             },
             message=get_translation("api.orders.retrieved"),
         )
@@ -460,12 +488,21 @@ def create_order():
                     get_order_service().cancel_order(order.id, reason="tax_committee_unavailable")
                 except Exception:
                     _rollback_session()
+                # Whether the cash rescue is open to this customer (the rescue applies the cash-debt limit).
+                restrictions = _customer_payment_restrictions(current_user_id, order)
+                # One published answer: a customer the limit keeps off cash is not told to "choose cash".
+                message_key = (
+                    "api.orders.tax_committee_unavailable_retry_only"
+                    if restrictions.get("cod_restricted")
+                    else "api.orders.tax_committee_unavailable"
+                )
                 return error_response(
-                    message=get_translation("api.orders.tax_committee_unavailable"),
+                    message=get_translation(message_key),
                     status_code=503,
                     data={
                         "error_code": "ASL_BELGISI_UNAVAILABLE",
                         "cancelled_order_id": order.id,
+                        "payment_restrictions": restrictions,
                     },
                 )
             except ValidationError:
@@ -492,25 +529,20 @@ def create_order():
             response_data["pre_utilization_at"] = pre_utilization_at.isoformat()
             if pre_utilization_fast_path:
                 # Pool covered the order — no wait, the bot delivers the link instantly.
-                response_data["payment_ready_at"] = pre_utilization_at.isoformat()
+                payment_ready_at = pre_utilization_at
             else:
                 wait_seconds = int(current_app.config.get("PRE_PAYMENT_UTILISATION_WAIT_SECONDS", 45) or 45)
-                response_data["payment_ready_at"] = (pre_utilization_at + timedelta(seconds=wait_seconds)).isoformat()
+                payment_ready_at = pre_utilization_at + timedelta(seconds=wait_seconds)
+            response_data["payment_ready_at"] = payment_ready_at.isoformat()
+            # The wait as the backend counts it: clients keep it and never work it out from the instant.
+            if payment_ready_at.tzinfo is None:
+                payment_ready_at = payment_ready_at.replace(tzinfo=UTC)
+            response_data["payment_ready_in_seconds"] = max(
+                0, math.ceil((payment_ready_at - datetime.now(UTC)).total_seconds())
+            )
 
         if (order.payment_method.value if hasattr(order.payment_method, "value") else order.payment_method) == "cash":
-            from business_app.services.cash_collection_service import CashCollectionService
-            from business_app.utils.cod_cap import strip_place_scope_money_for_customer
-
-            # Place-aware: report the cap against the address this order is
-            # actually going to, not just the customer's own cluster (spec 5.5).
-            # Customer-facing response: the place-scope NET total is a
-            # coworker's money at a shared address, never this customer's —
-            # strip it before it leaves the server (spec §7).
-            response_data["payment_restrictions"] = strip_place_scope_money_for_customer(
-                CashCollectionService().get_cod_restriction_context(
-                    current_user_id, delivery_address_id=order.delivery_address_id
-                )
-            )
+            response_data["payment_restrictions"] = _customer_payment_restrictions(current_user_id, order)
 
         return created_response(data=response_data, message=get_translation("api.orders.created"))
 
@@ -535,113 +567,97 @@ def create_order():
 @orders_bp.route("/<int:order_id>/retry-payment", methods=["POST"])
 @jwt_required()
 def retry_order_payment(order_id):
-    """Create or refresh a payment link for an existing unpaid order."""
+    """The customer's Pay: a Click link for one of their unpaid orders (spec 2026-10-27 §4.2).
+
+    The one route the bot and the website open a payment on an existing order with. The body is what the screen
+    showed: `{"channel": "bot"|"web", "expected_amount": "30000.00"}`. `PaymentService.pay_order_as_customer`
+    enforces the one Pay rule, then that amount. It answers 200 with the link, 409 `PAY_REFUSED` with the
+    published refusal and its sentence, 409 `STATE_CHANGED` when the amount moved, 404 for someone else's order,
+    and 400 for a malformed body or a payment that cannot be opened (its sentence in `message`, its `error_code`
+    in `data`)."""
     try:
-        current_user_id = get_jwt_identity()
-        order = get_order_service().get_order(order_id, current_user_id)
+        body = RetryPaymentRequest.model_validate(request.get_json(silent=True) or {})
+    except PydanticValidationError as e:
+        return validation_error_response(e.errors())
 
-        if getattr(order, "is_paid", False):
-            return error_response(
-                message=get_translation("api.payments.error.already_paid"),
-                status_code=409,
-            )
-
-        # PAYABILITY GUARD (B3 fix round 1). This endpoint is the WEB twin of the
-        # customer bot's Retry, fired by an ungated button on
-        # `templates/frontend/payment_cancelled.html` via
-        # `static/js/pages/payment-cancelled.js`, and it had no order-status test
-        # at all. On a CANCELLED / RETURNED order it did not merely send the
-        # customer to a checkout PREPARE would refuse with -9: `create_payment`
-        # rewrites `payment.status = PENDING` and `payment.amount =
-        # order.total_amount`, undoing the zeroing
-        # `_sync_payment_status_for_terminal_order_state` applied when the order
-        # died — so a dead order RE-APPEARED as owing money to
-        # `open_receivable_amount`, on every debtor list and toward the COD cap.
-        #
-        # 🔴 The order-side half only, deliberately. `order_is_payable_online` is
-        # the fuller authority and `order_is_resolved` is its documented ORDER
-        # half (derived from it, not a second copy) — but the payment half also
-        # requires the rail to be in FISCALIZED_RAILS, which excludes PAYME BY
-        # CONSTRUCTION, while this endpoint's own whitelist below admits payme.
-        # Gating on the full predicate would silently delete Payme retry, the
-        # same narrowing the bot's cash rail would have suffered. The money bug
-        # is entirely the dead-order cell, and this is exactly that cell.
-        payment = getattr(order, "payment", None)
-        if order_is_resolved(order):
-            return error_response(
-                message=get_translation("api.payments.error.lifecycle.advice_order_already_cancelled"),
-                status_code=409,
-            )
-        # A settled prepayment whose order flag has not caught up: retrying
-        # REWRITES a COMPLETED payment back to PENDING and mints a second link.
-        # `is_settled_prepayment` is the same carve-out every read surface uses.
-        if payment is not None and is_settled_prepayment(payment):
-            return error_response(
-                message=get_translation("api.payments.error.already_paid"),
-                status_code=409,
-            )
-
-        payment_method_value = (
-            order.payment_method.value if hasattr(order.payment_method, "value") else order.payment_method
-        )
-        if payment_method_value not in {"click", "card", "payme"}:
-            return validation_error_response("Order does not have a retryable online payment method")
-
-        payment_enum = PaymentMethod(payment_method_value)
-        payment = get_payment_service().create_payment(
-            order_id=order.id,
-            payment_method=payment_enum,
-            amount=order.total_amount,
-            description=f"Payment for order #{order.order_number}",
-        )
-        payment_link = get_payment_service().create_payment_link(payment.id)
-
-        return success_response(
-            data={
-                "payment": serialize_order_payment(payment),
-                "payment_link": payment_link,
-                "payment_url": payment_link.get("payment_url") if isinstance(payment_link, dict) else payment_link,
-            },
-            message=get_translation("api.payments.initiated"),
+    try:
+        result = get_payment_service().pay_order_as_customer(
+            order_id, int(get_jwt_identity()), channel=body.channel, expected_amount=body.expected_amount
         )
     except NotFoundError:
+        _rollback_session()
         return not_found_response(message=get_translation("api.orders.not_found"))
+    except PayRefusedError as e:
+        _rollback_session()
+        return error_response(
+            message=pay_refusal_message(e.refusal),
+            status_code=409,
+            data={"reason_code": e.error_code, "refusal": e.refusal},
+        )
+    except StateChangedError:
+        _rollback_session()
+        return state_changed_response()
     except ValidationError as e:
-        return error_response(message=e.message, status_code=400)
+        _rollback_session()
+        # `error_response`, not `validation_error_response`, which would replace `message` with "Validation failed":
+        # the bot and the website both show `message` (MARKING_CODES_POOL_SHORT's sentence, say).
+        return error_response(
+            message=e.message, status_code=400, data={"error_code": e.error_code} if e.error_code else None
+        )
     except Exception as e:
         _rollback_session()
         current_app.logger.error(f"Retry order payment error: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
 
+    return success_response(
+        data={
+            "payment": serialize_order_payment(result["payment"]),
+            "payment_link": result["payment_link"],
+            "payment_url": result["payment_url"],
+        },
+        message=get_translation("api.payments.initiated"),
+    )
+
 
 @orders_bp.route("/<int:order_id>/cancel", methods=["POST"])
 @jwt_required()
 def cancel_order(order_id):
-    """Cancel an order"""
+    """The customer's removal of their order: skip, cancel or decline (spec 2026-10-27 §5.2).
+
+    The one route the bot and the website remove an order with. The body is what the screen showed:
+    `{"expected_via": "skip"|"cancel"|"decline"}`, plus for a skip an optional `reason_code` (and `reason_text`
+    for "other"). `OrderService.remove_order_as_customer` checks the rule first, then that `via`. It answers 200
+    with the order, the `via` taken and its sentence; 400 ORDER_NOT_CUSTOMER_CANCELLABLE with the refusal's
+    `reason_code`; 409 STATE_CHANGED when the screen's `via` is stale or missing; 404 for someone else's order;
+    and 400 for a malformed body."""
+    try:
+        body = CustomerCancelOrderRequest.model_validate(request.get_json(silent=True) or {})
+    except PydanticValidationError:
+        return error_response(message=get_translation("api.orders.error.invalid_request_data"), status_code=400)
+
     try:
         current_user_id = get_jwt_identity()
-        data = request.get_json(silent=True) or {}
-
-        order = get_order_service().cancel_order_as_customer(
-            order_id=order_id,
-            user_id=int(current_user_id),
-            reason=data.get("reason"),
+        removal = get_order_service().remove_order_as_customer(
+            order_id,
+            int(current_user_id),
+            expected_via=body.expected_via,
+            reason_code=body.reason_code,
+            reason_text=body.reason_text,
         )
 
-        # Send cancellation notification
-        get_notification_service().send_notification(
-            current_user_id,
-            NotificationType.ORDER_UPDATE,
-            template_data={
-                "order_number": order.order_number,
-                "cancellation_reason": data.get("reason", "Customer request"),
-            },
-        )
+        if removal.notification is not None:
+            kind, template_data = removal.notification
+            get_notification_service().send_notification(current_user_id, kind, template_data=template_data)
 
-        return success_response(data={"order": serialize_order(order)}, message=get_translation("api.orders.cancelled"))
+        return success_response(
+            data={"order": serialize_order(removal.order), "via": removal.via}, message=removal.message
+        )
 
     except NotFoundError:
         return not_found_response(message=get_translation("api.orders.not_found"))
+    except StateChangedError:
+        _rollback_session()
+        return state_changed_response()
     except ValidationError as e:
         _rollback_session()
         if e.error_code != "ORDER_NOT_CUSTOMER_CANCELLABLE":
@@ -691,6 +707,7 @@ def agent_order_confirmation(order_id):
         int(get_jwt_identity()),
         payload.action,
         payload.reason,
+        channel=AGENT_CONFIRMATION_CHANNELS[payload.channel],
     )
     return success_response(data=result)
 
@@ -817,11 +834,13 @@ def retry_order_with_cash(order_id):
     """Switch a PSP-cancelled order to cash payment.
 
     Used when the Tax Committee (Asl belgisi) was unavailable during the
-    initial card/click order creation, cancelling the order. The bot's
-    rescue UI calls this endpoint so the customer can complete the same
-    order via cash even if they would normally be COD-restricted (e.g. 2+
-    outstanding COD debts). The COD active-debt cap is intentionally
-    bypassed here; the rescue is audited at the service layer.
+    initial card/click order creation, cancelling the order. The bot's and
+    the checkout page's rescue UI call this endpoint so the customer can
+    complete the same order via cash. The new order is an ordinary cash
+    order: the COD active-debt limit APPLIES, and a customer over it is
+    refused with 400 and the limit's message. The 503 that offered this
+    rescue carries `payment_restrictions` so a client can leave the cash
+    button out for such a customer.
 
     Implementation: clones the cancelled order's items into a fresh PENDING
     cash order via the canonical create_order pipeline, then mirrors the
@@ -847,20 +866,7 @@ def retry_order_with_cash(order_id):
             current_app.logger.error(f"retry_order_with_cash: failed to clear cart: {e}")
 
         response_data = {"order": serialize_order(order, include_items=True, include_payment=True)}
-        from business_app.services.cash_collection_service import CashCollectionService
-        from business_app.utils.cod_cap import strip_place_scope_money_for_customer
-
-        # Place-aware (spec 5.5). The rescue itself deliberately bypasses the cap
-        # (see rescue_order_after_psp_failure), but the payload must still report
-        # the real restriction state of the destination place. Customer-facing
-        # response: the place-scope NET total is a coworker's money at a shared
-        # address, never this customer's — strip it before it leaves the server
-        # (spec §7).
-        response_data["payment_restrictions"] = strip_place_scope_money_for_customer(
-            CashCollectionService().get_cod_restriction_context(
-                current_user_id, delivery_address_id=order.delivery_address_id
-            )
-        )
+        response_data["payment_restrictions"] = _customer_payment_restrictions(current_user_id, order)
         return created_response(data=response_data, message=get_translation("api.orders.created"))
     except NotFoundError:
         return not_found_response(message=get_translation("api.orders.not_found"))

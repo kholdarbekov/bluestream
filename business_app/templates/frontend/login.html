@@ -84,7 +84,7 @@
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'my_account_url': url_for('frontend.my_account'),
+    'after_login_url': after_login_url,
     'i18n': {
         'login_success': 'Login successful!' | t,
         'login_failed': 'Login failed' | t,

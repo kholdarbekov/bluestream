@@ -5,13 +5,23 @@
     window.API_BASE_URL = PAGE_DATA.api_base_url;
     window.CURRENT_USER = PAGE_DATA.current_user;
 
+    // A customer page reached through the same-site hop or the quiet refresh carries the server's `_hop`
+    // marker (business_app/utils/page_auth.py HOP_MARKER). It has done its job once the page renders: drop it
+    // from the address, keeping the rest of the query and the #fragment, so a bookmark never carries it.
+    (function dropHopMarker() {
+        var query = window.location.search.replace(/^\?/, '');
+        if (!query) return;
+        var kept = query.split('&').filter(function (part) { return part.split('=')[0] !== '_hop'; });
+        if (kept.length === query.split('&').length) return;
+        var search = kept.length ? '?' + kept.join('&') : '';
+        window.history.replaceState(window.history.state, '', window.location.pathname + search + window.location.hash);
+    })();
+
     function getAuthToken() { return null; }
 
     function setAuthToken(token, refreshToken) {
         console.warn('setAuthToken called but tokens are now handled via httpOnly cookies');
     }
-
-    function getRefreshToken() { return null; }
 
     function removeAuthTokens() {
         localStorage.removeItem('access_token');
@@ -26,12 +36,23 @@
         document.cookie = cookieString;
     }
 
+    // Log out. The server ends the login and its answer clears the httpOnly cookies, which script cannot touch
+    // (business_app/api/auth.py logout). The call proves the login with the refresh cookie: its readable CSRF
+    // value lasts the whole login, while the 30-minute access cookie may have run out. A call that did not
+    // succeed (offline, a 5xx, a rate limit) never counts as signed out: the browser goes to the server's
+    // sign-out page, which always clears the cookies, instead of the login page.
     async function logout() {
+        var signedOut = false;
         try {
-            await apiRequest('/auth/logout', {
+            var headers = { 'X-Platform': 'web' };
+            var csrfToken = getCookie('csrf_refresh_token') || getCookie('csrf_access_token');
+            if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken;
+            var response = await fetch(window.API_BASE_URL + '/auth/logout', {
                 method: 'POST',
+                headers: headers,
                 credentials: 'include'
             });
+            signedOut = response.ok;
         } catch (error) {
             console.error('Logout API call failed:', error);
         }
@@ -40,42 +61,14 @@
         window.cart = [];
         localStorage.removeItem('cart');
 
+        // The readable halves go now, whatever happens next: a customer page never renews a refresh cookie
+        // whose readable half is gone (business_app/utils/page_auth.py _renewed_access_token).
         deleteCookie('csrf_access_token', '/', '.aqua-element.uz');
         deleteCookie('csrf_refresh_token', '/', '.aqua-element.uz');
         deleteCookie('csrf_access_token', '/');
         deleteCookie('csrf_refresh_token', '/');
 
-        window.location.replace(PAGE_DATA.login_url);
-    }
-
-    async function refreshToken() {
-        var refreshTokenValue = getRefreshToken();
-
-        if (!refreshTokenValue) {
-            logout();
-            return null;
-        }
-
-        try {
-            var response = await fetch(window.API_BASE_URL + '/auth/refresh-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ refresh_token: refreshTokenValue })
-            });
-
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                setAuthToken(result.data.access_token);
-                return result.data.access_token;
-            }
-            logout();
-            return null;
-        } catch (error) {
-            console.error('Token refresh failed:', error);
-            logout();
-            return null;
-        }
+        window.location.replace(signedOut ? PAGE_DATA.login_url : PAGE_DATA.logout_url);
     }
 
     // Cart management
@@ -243,8 +236,9 @@
         return null;
     }
 
-    async function apiRequest(url, options) {
-        options = options || {};
+    // The request as the storefront sends it: the httpOnly cookies, `X-Platform: web`, and for a write the
+    // readable `csrf_access_token` in X-CSRF-TOKEN, read when the request is built (a renewal sets a new one).
+    function apiFetchOptions(options) {
         var headers = Object.assign(
             { 'Content-Type': 'application/json' },
             options.headers || {}
@@ -258,22 +252,42 @@
             if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken;
         }
 
-        var fetchOptions = Object.assign({}, options, {
+        return Object.assign({}, options, {
             headers: headers,
             credentials: 'include'
         });
+    }
 
-        var response = await fetch(window.API_BASE_URL + url, fetchOptions);
+    // The backend marks the 401s that mean "this login lapsed, sign in again" with `reauth: true` (the JWT
+    // layer's answers, business_app/__init__.py setup_jwt_handlers). Any other 401, such as a wrong password, is
+    // the caller's answer. The body is read from a clone, so the caller can still read it.
+    async function asksToSignInAgain(response) {
+        try {
+            var body = await response.clone().json();
+            return Boolean(body) && body.reauth === true;
+        } catch (error) {
+            return false;
+        }
+    }
 
-        if (response.status === 401 && !url.includes('/auth/refresh-token')) {
+    async function apiRequest(url, options) {
+        options = options || {};
+        var response = await fetch(window.API_BASE_URL + url, apiFetchOptions(options));
+
+        if (response.status === 401 && !url.includes('/auth/refresh-cookie') && await asksToSignInAgain(response)) {
             try {
-                var refreshResponse = await fetch(window.API_BASE_URL + '/auth/refresh-token', {
+                // The httpOnly refresh cookie renews the access cookie; its CSRF value is the readable one.
+                var refreshHeaders = {};
+                var refreshCsrf = getCookie('csrf_refresh_token');
+                if (refreshCsrf) refreshHeaders['X-CSRF-TOKEN'] = refreshCsrf;
+                var refreshResponse = await fetch(window.API_BASE_URL + '/auth/refresh-cookie', {
                     method: 'POST',
+                    headers: refreshHeaders,
                     credentials: 'include'
                 });
 
                 if (refreshResponse.ok) {
-                    return fetch(window.API_BASE_URL + url, fetchOptions);
+                    return fetch(window.API_BASE_URL + url, apiFetchOptions(options));
                 }
             } catch (error) {
                 console.error('Token refresh failed:', error);
@@ -365,10 +379,8 @@
     // Expose globals for page scripts and inline handlers already converted via data-action
     window.getAuthToken = getAuthToken;
     window.setAuthToken = setAuthToken;
-    window.getRefreshToken = getRefreshToken;
     window.removeAuthTokens = removeAuthTokens;
     window.logout = logout;
-    window.refreshToken = refreshToken;
     window.updateCartCount = updateCartCount;
     window.addToCart = addToCart;
     window.removeFromCart = removeFromCart;

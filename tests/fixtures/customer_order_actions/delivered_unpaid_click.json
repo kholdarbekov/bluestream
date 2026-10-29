@@ -1,0 +1,465 @@
+{
+ "case": "delivered_unpaid_click",
+ "exchanges": {
+  "pay_web": {
+   "body": {
+    "channel": "web",
+    "expected_amount": "30000.00"
+   },
+   "method": "POST",
+   "path": "/api/v1/orders/1/retry-payment",
+   "response": {
+    "data": {
+     "payment": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "amount_paid": 0.0,
+      "collection_events_count": 0,
+      "currency": "UZS",
+      "fiscalization": null,
+      "fiscalization_status": null,
+      "id": 1,
+      "is_payable": true,
+      "last_collected_at": null,
+      "net_outstanding_amount": 30000.0,
+      "outstanding_amount": 30000.0,
+      "paid_at": null,
+      "payable_payment_link": null,
+      "payment_link": null,
+      "payment_method": "click",
+      "payment_provider": "click",
+      "payment_status": "pending",
+      "provider_transaction_id": null,
+      "transaction_id": null
+     },
+     "payment_link": {
+      "payment_url": "http://localhost/my-orders#click-checkout"
+     },
+     "payment_url": "http://localhost/my-orders#click-checkout"
+    },
+    "message": "Payment initiated",
+    "success": true
+   },
+   "status": 200
+  }
+ },
+ "language": "en",
+ "order_id": 1,
+ "requests": {
+  "GET /api/v1/orders/1": {
+   "body": {
+    "data": {
+     "delivery": null,
+     "labels": {
+      "delivery_fee": "0 so'm",
+      "items": {},
+      "placed_on": "Monday, 26 October",
+      "reward_discount": null,
+      "subscription_discount": null,
+      "subtotal": "30 000 so'm",
+      "tax": null,
+      "tier_discount": null,
+      "total": "30 000 so'm"
+     },
+     "order": {
+      "can_customer_cancel": false,
+      "confirmed_at": null,
+      "created_at": "<wall-clock>",
+      "customer_actions": {
+       "cancel": {
+        "allowed": false,
+        "confirm_text": null,
+        "label": null,
+        "reasons": [],
+        "refusal": "NOT_CANCELLABLE",
+        "subscription_id": null,
+        "via": null
+       },
+       "confirm": {
+        "allowed": false,
+        "label": null
+       },
+       "pay": {
+        "allowed": true,
+        "amount_label": "30 000 so'm",
+        "deadline_label": null,
+        "expected_amount": "30000.00",
+        "label": "Pay 30 000 so'm",
+        "refusal": null
+       }
+      },
+      "customer_cancel_via": null,
+      "delivered_at": null,
+      "delivery_address": {
+       "apartment_number": null,
+       "city": "Tashkent",
+       "country": "Uzbekistan",
+       "delivery_instructions": null,
+       "district": null,
+       "floor_number": null,
+       "full_address": "1 Matrix street",
+       "id": 2,
+       "is_business": false,
+       "is_default": false,
+       "landmark": null,
+       "latitude": 41.3111,
+       "longitude": 69.2797,
+       "postal_code": null,
+       "street_address": null,
+       "title": null
+      },
+      "delivery_date": null,
+      "delivery_fee": 0.0,
+      "delivery_notes": null,
+      "delivery_window": {
+       "end": null,
+       "kind": "anytime",
+       "label": "anytime",
+       "start": null
+      },
+      "discount_amount": 0.0,
+      "display_status": "delivered",
+      "id": 1,
+      "is_paid": false,
+      "is_urgent": false,
+      "loyalty_discount": 0.0,
+      "loyalty_points_used": 0,
+      "order_items": [],
+      "order_number": "TG_000001_26",
+      "order_source": "web",
+      "paid_at": null,
+      "payment_info": {
+       "amount": 30000.0,
+       "amount_collected": 0.0,
+       "amount_paid": 0.0,
+       "collection_events_count": 0,
+       "currency": "UZS",
+       "fiscalization": null,
+       "fiscalization_status": null,
+       "id": 1,
+       "is_payable": true,
+       "last_collected_at": null,
+       "net_outstanding_amount": 30000.0,
+       "outstanding_amount": 30000.0,
+       "paid_at": null,
+       "payable_payment_link": null,
+       "payment_link": null,
+       "payment_method": "click",
+       "payment_provider": "click",
+       "payment_status": "pending",
+       "provider_transaction_id": null,
+       "transaction_id": null
+      },
+      "payment_method": "click",
+      "promo_code_used": null,
+      "special_instructions": null,
+      "status": "delivered",
+      "subscription_id": null,
+      "tax_amount": 0.0,
+      "tier_discount": 0.0,
+      "total_amount": 30000.0,
+      "updated_at": "<wall-clock>",
+      "user_id": 1
+     },
+     "payment_timeline": {
+      "amount": 30000.0,
+      "amount_collected": 0.0,
+      "customer_id": 1,
+      "customer_name": "Test User",
+      "customer_phone": "+998901234567",
+      "order_id": 1,
+      "order_number": "TG_000001_26",
+      "outstanding_amount": 30000.0,
+      "payment_id": 1,
+      "status": "pending",
+      "timeline": [
+       {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "outstanding_amount": 30000.0,
+        "status": "pending",
+        "timestamp": "<wall-clock>",
+        "type": "payment_created"
+       }
+      ]
+     },
+     "timeline": [
+      {
+       "is_current": false,
+       "notes": null,
+       "status": "created",
+       "timestamp": "<wall-clock>"
+      }
+     ]
+    },
+    "message": "Order retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/orders/?page=1&per_page=10": {
+   "body": {
+    "data": {
+     "orders": [
+      {
+       "can_customer_cancel": false,
+       "confirmed_at": null,
+       "created_at": "<wall-clock>",
+       "customer_actions": {
+        "cancel": {
+         "allowed": false,
+         "confirm_text": null,
+         "label": null,
+         "reasons": [],
+         "refusal": "NOT_CANCELLABLE",
+         "subscription_id": null,
+         "via": null
+        },
+        "confirm": {
+         "allowed": false,
+         "label": null
+        },
+        "pay": {
+         "allowed": true,
+         "amount_label": "30 000 so'm",
+         "deadline_label": null,
+         "expected_amount": "30000.00",
+         "label": "Pay 30 000 so'm",
+         "refusal": null
+        }
+       },
+       "customer_cancel_via": null,
+       "delivered_at": null,
+       "delivery_address": {
+        "apartment_number": null,
+        "city": "Tashkent",
+        "country": "Uzbekistan",
+        "delivery_instructions": null,
+        "district": null,
+        "floor_number": null,
+        "full_address": "1 Matrix street",
+        "id": 2,
+        "is_business": false,
+        "is_default": false,
+        "landmark": null,
+        "latitude": 41.3111,
+        "longitude": 69.2797,
+        "postal_code": null,
+        "street_address": null,
+        "title": null
+       },
+       "delivery_date": null,
+       "delivery_fee": 0.0,
+       "delivery_notes": null,
+       "delivery_window": {
+        "end": null,
+        "kind": "anytime",
+        "label": "anytime",
+        "start": null
+       },
+       "discount_amount": 0.0,
+       "display_status": "delivered",
+       "id": 1,
+       "is_paid": false,
+       "is_urgent": false,
+       "loyalty_discount": 0.0,
+       "loyalty_points_used": 0,
+       "order_items": [],
+       "order_number": "TG_000001_26",
+       "order_source": "web",
+       "paid_at": null,
+       "payment_info": {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "amount_paid": 0.0,
+        "collection_events_count": 0,
+        "currency": "UZS",
+        "fiscalization": null,
+        "fiscalization_status": null,
+        "id": 1,
+        "is_payable": true,
+        "last_collected_at": null,
+        "net_outstanding_amount": 30000.0,
+        "outstanding_amount": 30000.0,
+        "paid_at": null,
+        "payable_payment_link": null,
+        "payment_link": null,
+        "payment_method": "click",
+        "payment_provider": "click",
+        "payment_status": "pending",
+        "provider_transaction_id": null,
+        "transaction_id": null
+       },
+       "payment_method": "click",
+       "promo_code_used": null,
+       "special_instructions": null,
+       "status": "delivered",
+       "subscription_id": null,
+       "tax_amount": 0.0,
+       "tier_discount": 0.0,
+       "total_amount": 30000.0,
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ],
+     "pagination": {
+      "has_next": false,
+      "has_prev": false,
+      "page": 1,
+      "pages": 1,
+      "per_page": 10,
+      "total": 1
+     }
+    },
+    "message": "Orders retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "GET /api/v1/orders?page=1&per_page=10": {
+   "body": {
+    "data": {
+     "orders": [
+      {
+       "can_customer_cancel": false,
+       "confirmed_at": null,
+       "created_at": "<wall-clock>",
+       "customer_actions": {
+        "cancel": {
+         "allowed": false,
+         "confirm_text": null,
+         "label": null,
+         "reasons": [],
+         "refusal": "NOT_CANCELLABLE",
+         "subscription_id": null,
+         "via": null
+        },
+        "confirm": {
+         "allowed": false,
+         "label": null
+        },
+        "pay": {
+         "allowed": true,
+         "amount_label": "30 000 so'm",
+         "deadline_label": null,
+         "expected_amount": "30000.00",
+         "label": "Pay 30 000 so'm",
+         "refusal": null
+        }
+       },
+       "customer_cancel_via": null,
+       "delivered_at": null,
+       "delivery_address": {
+        "apartment_number": null,
+        "city": "Tashkent",
+        "country": "Uzbekistan",
+        "delivery_instructions": null,
+        "district": null,
+        "floor_number": null,
+        "full_address": "1 Matrix street",
+        "id": 2,
+        "is_business": false,
+        "is_default": false,
+        "landmark": null,
+        "latitude": 41.3111,
+        "longitude": 69.2797,
+        "postal_code": null,
+        "street_address": null,
+        "title": null
+       },
+       "delivery_date": null,
+       "delivery_fee": 0.0,
+       "delivery_notes": null,
+       "delivery_window": {
+        "end": null,
+        "kind": "anytime",
+        "label": "anytime",
+        "start": null
+       },
+       "discount_amount": 0.0,
+       "display_status": "delivered",
+       "id": 1,
+       "is_paid": false,
+       "is_urgent": false,
+       "loyalty_discount": 0.0,
+       "loyalty_points_used": 0,
+       "order_items": [],
+       "order_number": "TG_000001_26",
+       "order_source": "web",
+       "paid_at": null,
+       "payment_info": {
+        "amount": 30000.0,
+        "amount_collected": 0.0,
+        "amount_paid": 0.0,
+        "collection_events_count": 0,
+        "currency": "UZS",
+        "fiscalization": null,
+        "fiscalization_status": null,
+        "id": 1,
+        "is_payable": true,
+        "last_collected_at": null,
+        "net_outstanding_amount": 30000.0,
+        "outstanding_amount": 30000.0,
+        "paid_at": null,
+        "payable_payment_link": null,
+        "payment_link": null,
+        "payment_method": "click",
+        "payment_provider": "click",
+        "payment_status": "pending",
+        "provider_transaction_id": null,
+        "transaction_id": null
+       },
+       "payment_method": "click",
+       "promo_code_used": null,
+       "special_instructions": null,
+       "status": "delivered",
+       "subscription_id": null,
+       "tax_amount": 0.0,
+       "tier_discount": 0.0,
+       "total_amount": 30000.0,
+       "updated_at": "<wall-clock>",
+       "user_id": 1
+      }
+     ],
+     "pagination": {
+      "has_next": false,
+      "has_prev": false,
+      "page": 1,
+      "pages": 1,
+      "per_page": 10,
+      "total": 1
+     }
+    },
+    "message": "Orders retrieved successfully",
+    "success": true
+   },
+   "status": 200
+  },
+  "tracking_island": {
+   "customer_actions": {
+    "cancel": {
+     "allowed": false,
+     "confirm_text": null,
+     "label": null,
+     "reasons": [],
+     "refusal": "NOT_CANCELLABLE",
+     "subscription_id": null,
+     "via": null
+    },
+    "confirm": {
+     "allowed": false,
+     "label": null
+    },
+    "pay": {
+     "allowed": true,
+     "amount_label": "30 000 so'm",
+     "deadline_label": null,
+     "expected_amount": "30000.00",
+     "label": "Pay 30 000 so'm",
+     "refusal": null
+    }
+   },
+   "id": 1
+  }
+ }
+}

@@ -36,6 +36,7 @@ from business_app.utils.local_windows import local_day_bounds
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, SubscriptionFrequency, SubscriptionStatus
 from tests.integration.sales_pay_builders import freeze_local_now
+from tests.integration.test_subscription_action_guards import _state
 
 pytestmark = pytest.mark.integration
 
@@ -230,6 +231,12 @@ def _weekly_thursday(client, auth_headers, user_address, sample_product, morning
 
 def _order_ref(order):
     return {"id": order.id, "order_number": order.order_number, "delivery_date": order.delivery_date.isoformat()}
+
+
+def _ids(refs):
+    """Returned order refs without their display labels (tests/integration/test_subscription_page_data.py pins
+    those)."""
+    return [{key: ref[key] for key in ("id", "order_number", "delivery_date", "reason_code") if key in ref} for ref in refs]
 
 
 # --------------------------------------------------------------------------- §5.1 the daily job
@@ -689,7 +696,9 @@ class TestSkip:
         sub_id = _weekly_thursday(client, auth_headers, user_address, sample_product, morning_slot)
         thursday = monday + timedelta(days=3)
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        resp = client.post(
+            f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": thursday.isoformat()}
+        )
 
         assert resp.status_code == 200, resp.get_json()
         data = resp.get_json()["data"]
@@ -697,7 +706,7 @@ class TestSkip:
             thursday.isoformat(),
             (thursday + WEEK).isoformat(),
         )
-        assert (data["cancelled_orders"], data["kept_orders"]) == ([], [])
+        assert (_ids(data["cancelled_orders"]), _ids(data["kept_orders"])) == ([], [])
         assert _row(db, sub_id).next_delivery_date == thursday + WEEK
         assert _orders(db, sub_id) == []
 
@@ -707,7 +716,9 @@ class TestSkip:
         sub_id, order_id = thursday_order()
         thursday = monday + timedelta(days=3)
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        resp = client.post(
+            f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": thursday.isoformat()}
+        )
 
         assert resp.status_code == 200, resp.get_json()
         data = resp.get_json()["data"]
@@ -717,7 +728,7 @@ class TestSkip:
             thursday.isoformat(),
             (thursday + WEEK).isoformat(),
         )
-        assert data["cancelled_orders"] == [_order_ref(order)]
+        assert _ids(data["cancelled_orders"]) == [_order_ref(order)]
         assert _row(db, sub_id).next_delivery_date == thursday + WEEK  # already one cycle on since creation
 
     def test_a_paid_created_order_stays_and_the_following_delivery_is_skipped(
@@ -726,7 +737,12 @@ class TestSkip:
         sub_id, order_id = thursday_order(payment_method="click", paid=True)
         thursday = monday + timedelta(days=3)
 
-        resp = client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={})
+        # The page names the delivery after the paid one (spec 2026-10-26 §12).
+        resp = client.post(
+            f"{BASE}/{sub_id}/skip-next-delivery",
+            headers=auth_headers,
+            json={"expected_date": (thursday + WEEK).isoformat()},
+        )
 
         assert resp.status_code == 200, resp.get_json()
         data = resp.get_json()["data"]
@@ -736,7 +752,7 @@ class TestSkip:
             (thursday + WEEK).isoformat(),
             thursday.isoformat(),  # the paid order is still the upcoming delivery
         )
-        assert data["kept_orders"] == [{**_order_ref(order), "reason_code": "PAID"}]
+        assert _ids(data["kept_orders"]) == [{**_order_ref(order), "reason_code": "PAID"}]
         assert _row(db, sub_id).next_delivery_date == thursday + 2 * WEEK
         kept = {
             "order_id": order.id,
@@ -760,7 +776,8 @@ ACTORS = ["customer", "admin"]
 
 def _pause(client, actor, sub_id, auth_headers, admin_headers):
     if actor == "customer":
-        return client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={})
+        token = _state(client, sub_id, auth_headers)
+        return client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": token})
     return client.post(
         f"{ADMIN_BASE}/{sub_id}/pause", headers=admin_headers, json={"pause_reason": "Paused by administrator"}
     )
@@ -776,7 +793,9 @@ def _cancel(client, actor, sub_id, auth_headers, admin_headers):
     if actor == "customer":
         # `immediate: False` once asked for the end-of-period cancel; a cancel is always immediate now (§4.6).
         return client.post(
-            f"{BASE}/{sub_id}/cancel", headers=auth_headers, json={"reason": "Moving", "immediate": False}
+            f"{BASE}/{sub_id}/cancel",
+            headers=auth_headers,
+            json={"reason": "Moving", "immediate": False, "expected_state": _state(client, sub_id, auth_headers)},
         )
     return client.post(
         f"{ADMIN_BASE}/{sub_id}/cancel",
@@ -787,7 +806,8 @@ def _cancel(client, actor, sub_id, auth_headers, admin_headers):
 
 def _update(client, actor, sub_id, auth_headers, admin_headers, body):
     if actor == "customer":
-        return client.put(f"{BASE}/{sub_id}", headers=auth_headers, json=body)
+        token = _state(client, sub_id, auth_headers)
+        return client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={**body, "expected_state": token})
     return client.put(f"{ADMIN_BASE}/{sub_id}", headers=admin_headers, json=body)
 
 
@@ -804,7 +824,7 @@ class TestPause:
         [order] = _orders(db, sub_id)
         assert order.status is OrderStatus.CANCELLED
         data = resp.get_json()["data"]
-        assert (data["cancelled_orders"], data["kept_orders"]) == ([_order_ref(order)], [])
+        assert (_ids(data["cancelled_orders"]), _ids(data["kept_orders"])) == ([_order_ref(order)], [])
         assert _row(db, sub_id).status is SubscriptionStatus.PAUSED
 
     def test_a_paid_upcoming_order_stays(
@@ -818,7 +838,7 @@ class TestPause:
         [order] = _orders(db, sub_id)
         assert order.status is not OrderStatus.CANCELLED
         data = resp.get_json()["data"]
-        assert (data["cancelled_orders"], data["kept_orders"]) == ([], [{**_order_ref(order), "reason_code": "PAID"}])
+        assert (_ids(data["cancelled_orders"]), _ids(data["kept_orders"])) == ([], [{**_order_ref(order), "reason_code": "PAID"}])
         assert _row(db, sub_id).status is SubscriptionStatus.PAUSED
         [log] = _logs(db, sub_id, subscription_notices.PAID_ORDER_KEPT)
         assert log.extra_data == {
@@ -899,7 +919,7 @@ class TestCancel:
         assert row.end_date is not None
         [order] = _orders(db, sub_id)
         assert order.status is OrderStatus.CANCELLED
-        assert resp.get_json()["data"]["cancelled_orders"] == [_order_ref(order)]
+        assert _ids(resp.get_json()["data"]["cancelled_orders"]) == [_order_ref(order)]
 
     def test_a_paid_upcoming_order_stays(self, client, db, auth_headers, admin_headers, thursday_order, actor):
         sub_id, _ = thursday_order(payment_method="click", paid=True)
@@ -910,7 +930,7 @@ class TestCancel:
         assert _row(db, sub_id).status is SubscriptionStatus.CANCELLED
         [order] = _orders(db, sub_id)
         assert order.status is not OrderStatus.CANCELLED
-        assert resp.get_json()["data"]["kept_orders"] == [{**_order_ref(order), "reason_code": "PAID"}]
+        assert _ids(resp.get_json()["data"]["kept_orders"]) == [{**_order_ref(order), "reason_code": "PAID"}]
         [log] = _logs(db, sub_id, subscription_notices.PAID_ORDER_KEPT)
         assert log.extra_data["trigger"] == "cancel"
 
@@ -1047,6 +1067,12 @@ class TestAdminScheduleControls:
 # --------------------------------------------------------------------------- what the backend publishes
 
 
+def _schedule_keys(upcoming):
+    """`upcoming_delivery`'s schedule half; its labels and payment state are pinned in
+    tests/integration/test_subscription_page_data.py."""
+    return {key: upcoming[key] for key in ("date", "window_start", "window_end", "order_id")}
+
+
 class TestPublishedSchedule:
     def test_upcoming_delivery_before_and_after_the_order_is_created(
         self, client, db, auth_headers, admin_headers, user_address, sample_product, morning_slot, clock, monday
@@ -1069,7 +1095,7 @@ class TestPublishedSchedule:
                 weekly,
                 thursday.isoformat(),
             )
-            assert view["upcoming_delivery"] == {
+            assert _schedule_keys(view["upcoming_delivery"]) == {
                 "date": thursday.isoformat(),
                 "window_start": "10:00",
                 "window_end": "12:00",
@@ -1082,7 +1108,7 @@ class TestPublishedSchedule:
 
         for view in published():
             assert view["next_delivery_date"] == (thursday + WEEK).isoformat()
-            assert view["upcoming_delivery"] == {
+            assert _schedule_keys(view["upcoming_delivery"]) == {
                 "date": thursday.isoformat(),
                 "window_start": "10:00",
                 "window_end": "12:00",
@@ -1093,7 +1119,9 @@ class TestPublishedSchedule:
         self, client, db, auth_headers, user_address, sample_product, morning_slot, monday
     ):
         sub_id = _weekly_thursday(client, auth_headers, user_address, sample_product, morning_slot)
-        assert client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={}).status_code == 200
+        token = _state(client, sub_id, auth_headers)
+        paused = client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": token})
+        assert paused.status_code == 200
 
         view = client.get(f"{BASE}/{sub_id}", headers=auth_headers).get_json()["data"]["subscription"]
 
@@ -1286,22 +1314,32 @@ def _orm_selects():
         event.remove(Session, "do_orm_execute", record)
 
 
+# `t` is the customer's `expected_state`, read before the write (spec 2026-10-27 §16 M2), so the write's own first
+# subscription read is the one these tests watch.
 _LOCKED_ACTIONS = {
-    "customer-skip": lambda c, s, a, h, m: c.post(f"{BASE}/{s}/skip-next-delivery", headers=a, json={}),
-    "customer-update": lambda c, s, a, h, m: c.put(f"{BASE}/{s}", headers=a, json={"delivery_day_of_week": FRIDAY}),
-    "customer-pause": lambda c, s, a, h, m: c.post(f"{BASE}/{s}/pause", headers=a, json={}),
-    "customer-cancel": lambda c, s, a, h, m: c.post(f"{BASE}/{s}/cancel", headers=a, json={"reason": "Moving"}),
-    "admin-update": lambda c, s, a, h, m: c.put(f"{ADMIN_BASE}/{s}", headers=h, json={"delivery_day_of_week": FRIDAY}),
-    "admin-set-next-delivery": lambda c, s, a, h, m: c.put(
+    "customer-skip": lambda c, s, a, h, m, t: c.post(
+        f"{BASE}/{s}/skip-next-delivery", headers=a, json={"expected_date": (m + timedelta(days=3)).isoformat()}
+    ),
+    "customer-update": lambda c, s, a, h, m, t: c.put(
+        f"{BASE}/{s}", headers=a, json={"delivery_day_of_week": FRIDAY, "expected_state": t}
+    ),
+    "customer-pause": lambda c, s, a, h, m, t: c.post(f"{BASE}/{s}/pause", headers=a, json={"expected_state": t}),
+    "customer-cancel": lambda c, s, a, h, m, t: c.post(
+        f"{BASE}/{s}/cancel", headers=a, json={"reason": "Moving", "expected_state": t}
+    ),
+    "admin-update": lambda c, s, a, h, m, t: c.put(
+        f"{ADMIN_BASE}/{s}", headers=h, json={"delivery_day_of_week": FRIDAY}
+    ),
+    "admin-set-next-delivery": lambda c, s, a, h, m, t: c.put(
         f"{ADMIN_BASE}/{s}",
         headers=h,
         json={"override_manual_billing_dates": True, "next_delivery_date": (m + timedelta(days=10)).isoformat()},
     ),
-    "admin-pause": lambda c, s, a, h, m: c.post(f"{ADMIN_BASE}/{s}/pause", headers=h, json={"pause_reason": "x"}),
-    "admin-cancel": lambda c, s, a, h, m: c.post(
+    "admin-pause": lambda c, s, a, h, m, t: c.post(f"{ADMIN_BASE}/{s}/pause", headers=h, json={"pause_reason": "x"}),
+    "admin-cancel": lambda c, s, a, h, m, t: c.post(
         f"{ADMIN_BASE}/{s}/cancel", headers=h, json={"cancellation_reason": "x"}
     ),
-    "admin-create-next-order-now": lambda c, s, a, h, m: c.post(
+    "admin-create-next-order-now": lambda c, s, a, h, m, t: c.post(
         f"{ADMIN_BASE}/{s}/billing/process", headers=h, json={}
     ),
 }
@@ -1316,9 +1354,10 @@ class TestActionsLockTheSubscription:
         self, client, db, auth_headers, admin_headers, user_address, sample_product, morning_slot, monday, action
     ):
         sub_id = _weekly_thursday(client, auth_headers, user_address, sample_product, morning_slot)
+        token = _state(client, sub_id, auth_headers)
 
         with _orm_selects() as statements:
-            resp = _LOCKED_ACTIONS[action](client, sub_id, auth_headers, admin_headers, monday)
+            resp = _LOCKED_ACTIONS[action](client, sub_id, auth_headers, admin_headers, monday, token)
 
         assert resp.status_code == 200, resp.get_json()
         selects = _subscription_selects(statements)
@@ -1349,7 +1388,10 @@ class TestActionsLockTheSubscription:
         real = SubscriptionService.create_next_order
 
         def cancel_first(self, subscription_id, **kwargs):
-            SubscriptionService().cancel_subscription_for_user(subscription_id, sample_user.id, reason="Moving")
+            shown = SubscriptionService.state_token(db.session.get(Subscription, subscription_id))
+            SubscriptionService().cancel_subscription_for_user(
+                subscription_id, sample_user.id, reason="Moving", expected_state=shown
+            )
             return real(self, subscription_id, **kwargs)
 
         monkeypatch.setattr(SubscriptionService, "create_next_order", cancel_first)
@@ -1381,7 +1423,10 @@ class TestActionsLockTheSubscription:
         clock.at(date(2027, 1, 6))
 
         def refused_then_paused(self, *args, **kwargs):
-            SubscriptionService().pause_subscription_for_user(sub_id, sample_user.id, reason="Away")
+            shown = SubscriptionService.state_token(db.session.get(Subscription, sub_id))
+            SubscriptionService().pause_subscription_for_user(
+                sub_id, sample_user.id, reason="Away", expected_state=shown
+            )
             raise ValidationError("Minimum order amount is 1000000", error_code="ORDER_MIN_AMOUNT")
 
         monkeypatch.setattr(OrderService, "create_order", refused_then_paused)
@@ -1464,7 +1509,11 @@ class TestAChangeInsideTheLeadCreatesTheOrderNow:
     ):
         sub_id = _weekly_thursday(client, auth_headers, user_address, sample_product, morning_slot)
 
-        resp = client.put(f"{BASE}/{sub_id}", headers=auth_headers, json={"delivery_day_of_week": FRIDAY})
+        resp = client.put(
+            f"{BASE}/{sub_id}",
+            headers=auth_headers,
+            json={"delivery_day_of_week": FRIDAY, "expected_state": _state(client, sub_id, auth_headers)},
+        )
 
         assert resp.status_code == 200, resp.get_json()
         delay.assert_not_called()
@@ -1475,7 +1524,12 @@ class TestAChangeInsideTheLeadCreatesTheOrderNow:
     ):
         sub_id = _weekly_thursday(client, auth_headers, user_address, sample_product, morning_slot)
         thursday = monday + timedelta(days=3)
-        assert client.post(f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={}).status_code == 200
+        assert (
+            client.post(
+                f"{BASE}/{sub_id}/skip-next-delivery", headers=auth_headers, json={"expected_date": thursday.isoformat()}
+            ).status_code
+            == 200
+        )
         clock.at(monday + timedelta(days=2), 10)  # Wednesday: the admin puts Thursday back
 
         resp = client.put(
@@ -1583,13 +1637,12 @@ def test_a_slot_change_gives_the_next_created_order_the_new_window(
 
 
 def test_next_delivery_has_one_published_answer(client, db, auth_headers, user_address, sample_product, monday):
-    """Final review M2: the detail's `billing_info` and the billing-history `summary` no longer publish the raw
-    clock next to `upcoming_delivery`."""
+    """Final review M2: the detail's `billing_info` no longer publishes the raw clock next to
+    `upcoming_delivery`. The always-empty billing history is retired (spec 2026-10-26 §5 B6)."""
     sub_id = _create(client, auth_headers, user_address.id, sample_product.id)
 
     detail = client.get(f"{BASE}/{sub_id}", headers=auth_headers).get_json()["data"]
-    history = client.get(f"{BASE}/{sub_id}/billing-history", headers=auth_headers).get_json()["data"]
 
     assert detail["subscription"]["upcoming_delivery"]["date"] == (monday + timedelta(days=1)).isoformat()
-    for block in (detail["billing_info"], history["summary"]):
-        assert not {"next_delivery_date", "days_until_delivery"} & block.keys(), block
+    assert not {"next_delivery_date", "days_until_delivery"} & detail["billing_info"].keys(), detail["billing_info"]
+    assert client.get(f"{BASE}/{sub_id}/billing-history", headers=auth_headers).status_code == 404

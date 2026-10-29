@@ -405,12 +405,12 @@ class TestCheckoutPaymentRestrictionsPayload:
     def test_retry_with_cash_response_restrictions_are_place_aware(
         self, db, app, client, sample_user, sample_product, user_address
     ):
-        """The rescue path deliberately BYPASSES the cap, but its response
-        payload must still report the place arm truthfully."""
+        """The rescue applies the cap like any cash order (Task 10b), so this one goes to an UNCAPPED place
+        (one coworker debt, below the limit): it is created, and its payload reports the place arm truthfully."""
         from business_app.models.order import Order, OrderItem, OrderStatusHistory
         from shared.enums import OrderStatus
 
-        _cap_the_place(db, user_address)
+        _group_under_cap(db, user_address)
 
         cancelled = Order(
             user_id=sample_user.id,
@@ -451,8 +451,57 @@ class TestCheckoutPaymentRestrictionsPayload:
         )
         assert resp.status_code == 201, resp.get_json()
         restrictions = resp.get_json()["data"]["payment_restrictions"]
-        assert restrictions["restriction_scope"] == "place"
-        assert restrictions["place_active_cod_debt_count"] >= 2
+        assert restrictions["place_active_cod_debt_count"] == 1
+        assert restrictions["cod_restricted"] is False
+
+    def test_retry_with_cash_is_refused_for_a_capped_place(
+        self, db, app, client, sample_user, sample_product, user_address
+    ):
+        """The rescued cash order meets the same cap as any cash order: a place at the limit refuses it (400)
+        and no cash order is written."""
+        from business_app.models.order import Order, OrderItem, OrderStatusHistory
+        from shared.enums import OrderStatus
+
+        _cap_the_place(db, user_address)
+        cancelled = Order(
+            user_id=sample_user.id,
+            order_number="ORD-T10B-RESCUE",
+            status=OrderStatus.CANCELLED,
+            subtotal=Decimal("30000.00"),
+            delivery_fee=Decimal("0.00"),
+            discount_amount=Decimal("0.00"),
+            loyalty_discount=Decimal("0.00"),
+            total_amount=Decimal("30000.00"),
+            payment_method=PaymentMethod.CLICK,
+            delivery_address_id=user_address.id,
+        )
+        db.session.add(cancelled)
+        db.session.flush()
+        db.session.add(
+            OrderItem(
+                order_id=cancelled.id,
+                product_id=sample_product.id,
+                quantity=2,
+                unit_price=sample_product.base_price,
+                total_price=sample_product.base_price * 2,
+            )
+        )
+        db.session.add(
+            OrderStatusHistory(
+                order_id=cancelled.id,
+                old_status=OrderStatus.PENDING,
+                new_status=OrderStatus.CANCELLED,
+                notes="tax_committee_unavailable",
+            )
+        )
+        db.session.commit()
+
+        resp = client.post(
+            f"/api/v1/orders/{cancelled.id}/retry-with-cash",
+            headers=_auth(app, sample_user.id),
+        )
+        assert resp.status_code == 400, resp.get_json()
+        assert Order.query.filter_by(user_id=sample_user.id, payment_method=PaymentMethod.CASH).count() == 0
 
 
 @pytest.mark.unit

@@ -78,10 +78,15 @@ NOT_STAFF_FACING: dict[str, str] = {
     "WEB_LINK_NOT_AVAILABLE": f"{_NOT_ON_ROUTE} (customer_telegram_link_service.py: customer bot /bot/web-link/*)",
     # Customer ordering and payments.
     "ASL_BELGISI_UNAVAILABLE": f"{_NOT_ON_ROUTE} (api/orders.py:442, customer POST /orders card path)",
-    "MARKING_CODES_POOL_SHORT": f"{_NOT_ON_ROUTE} (api/payments.py:326 /payments/create; admin payment-method edit)",
+    "MARKING_CODES_POOL_SHORT": f"{_NOT_ON_ROUTE} (payment_service.create_payment: customer POST "
+    "/orders/<id>/retry-payment and /payments/create; admin payment-method edit)",
     "ORDER_NOT_CUSTOMER_CANCELLABLE": f"{_NOT_ON_ROUTE} (order_service.py cancel_order_as_customer: customer "
     "POST /orders/<id>/cancel)",
+    "PAY_REFUSED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
+    "STATE_CHANGED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
     "PAYMENT_NOT_CANCELLABLE": f"{_NOT_ON_ROUTE} (api/payments.py:694 /payments/<id>/cancel)",
+    "RAIL_MOVE_NOT_ALLOWED": f"{_NOT_ON_ROUTE} (payment_service.create_payment: customer POST "
+    "/orders/<id>/retry-payment and /payments/create)",
     "PAYMENT_NOT_REFUNDABLE": f"{_NOT_ON_ROUTE} (api/payments.py:1196 /payments/refund)",
     "REPEAT_LEGACY_ORDER_UNSUPPORTED": f"{_NOT_ON_ROUTE} (order_service.py:812: customer /orders/repeat/<id>)",
     "SALES_CONFIRMATION_ACTION_INVALID": f"{_NOT_ON_ROUTE} (agent_order_confirmation_service.py:215: customer "
@@ -90,6 +95,19 @@ NOT_STAFF_FACING: dict[str, str] = {
     "/orders/<id>/agent-confirmation)",
     "SUBSCRIPTION_ITEM_BELOW_MIN_ORDER_QUANTITY": f"{_NOT_ON_ROUTE} (subscription_service.py "
     "_ensure_meets_min_order_quantity: customer /subscriptions/*, admin /admin/subscriptions/*)",
+    # The subscription action guards (spec 2026-10-26 B1, B8, B9): customer and admin subscription routes only.
+    "SUBSCRIPTION_ACTION_NOT_ALLOWED": f"{_NOT_ON_ROUTE} (subscription_service.py _require: customer "
+    "/subscriptions/*, admin /admin/subscriptions/*, /admin/bulk-actions)",
+    "SUBSCRIPTION_SCHEDULE_INVALID": f"{_NOT_ON_ROUTE} (subscription_service.py _ensure_schedule_valid: customer "
+    "POST /subscriptions/ and PUT /subscriptions/<id>, admin POST /admin/subscriptions and PUT "
+    "/admin/subscriptions/<id>)",
+    "SUBSCRIPTION_PAYMENT_METHOD_NOT_OFFERED": f"{_NOT_ON_ROUTE} (subscription_service.py "
+    "_ensure_payment_method_offered: customer /subscriptions/*, admin /admin/subscriptions/*)",
+    # The customer's subscription address change (spec 2026-10-27 §7, §17 Q6).
+    "SUBSCRIPTION_PAYMENT_METHOD_REQUIRED": f"{_NOT_ON_ROUTE} (subscription_service.py "
+    "update_subscription_for_user: customer PUT /subscriptions/<id> with delivery_address_id)",
+    "ORDER_WITH_DRIVER": f"{_NOT_ON_ROUTE} (order_address_change_service.py change(for_customer=True): the customer "
+    "PUT /subscriptions/<id> address change, which reports it per order as orders_at_old_address)",
     # The same-day hold (compensation spec C14).
     "ORDER_AWAITING_STAFF_APPROVAL": f"{_NOT_ON_ROUTE} (order_service.update_order_status guard: a held order "
     "has no delivery, so no staff-bot route confirms one)",

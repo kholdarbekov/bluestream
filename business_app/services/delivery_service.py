@@ -555,27 +555,43 @@ class DeliveryService:
 
         return slots_data
 
-    def get_slots_offered_on_weekday(self, weekday: Optional[int]) -> List[Dict[str, Any]]:
-        """The active delivery slots a RECURRING delivery can pick (a subscription's day-and-slot chooser).
+    def recurring_slot_choice(self, weekday: Optional[int], frequency: Optional[str] = None) -> Dict[str, Any]:
+        """A RECURRING delivery's day-and-slot chooser (a subscription's): the active slots it can pick and the
+        delivery days (`subscription_schedule.delivery_weekdays`, spec 2026-10-27 §6.4), the one place they are
+        published. Every day picker offers only these days, and the save refuses any other.
 
         `weekday` is Python's `weekday()` (0 = Monday): only the slots offered that weekday. `None` lists
         every active slot, for a subscription whose delivery day is not a weekday (monthly) or is set by
-        the slot itself (daily). No date means no capacity count; a single date is what
-        `get_time_slot_availability` answers. The slot's own fees are not repeated here: a subscription
-        order never applies them (`subscription_schedule.window_for`)."""
+        the slot itself (daily). With `frequency` the subscription schedule's own rule picks
+        (`subscription_schedule.slot_offered_for`, the rule its save guard checks): a monthly delivery is
+        offered only the slots available on every delivery day. No date means no capacity count; a
+        single date is what `get_time_slot_availability` answers. The slot's own fees are not repeated
+        here: a subscription order never applies them (`subscription_schedule.window_for`)."""
+        from business_app.services import subscription_schedule
+        from business_app.services.subscription_service import SubscriptionService
+
+        frequency = SubscriptionService.frequency_filter(frequency)  # an unknown value is a 400
+        delivery_days = subscription_schedule.delivery_weekdays()
         slots = DeliveryTimeSlot.query.filter_by(is_active=True).order_by(DeliveryTimeSlot.start_time).all()
-        return [
-            {
-                "id": slot.id,
-                "name": slot.name,
-                "start_time": slot.start_time,
-                "end_time": slot.end_time,
-                "time_range": f"{slot.start_time}-{slot.end_time}",
-                "available_days": list(slot.available_days or []),
-            }
-            for slot in slots
-            if weekday is None or weekday in (slot.available_days or ())
-        ]
+        return {
+            "time_slots": [
+                {
+                    "id": slot.id,
+                    "name": slot.name,
+                    "start_time": slot.start_time,
+                    "end_time": slot.end_time,
+                    "time_range": f"{slot.start_time}-{slot.end_time}",
+                    "available_days": list(slot.available_days or []),
+                }
+                for slot in slots
+                if (
+                    subscription_schedule.slot_offered_for(slot, frequency, weekday, delivery_days=delivery_days)
+                    if frequency is not None
+                    else weekday is None or weekday in (slot.available_days or ())
+                )
+            ],
+            "delivery_weekdays": sorted(delivery_days),
+        }
 
     def track_delivery(self, tracking_code: str) -> Dict[str, Any]:
         """Get delivery tracking information"""

@@ -60,7 +60,7 @@ def _page_defaults() -> dict:
 def test_every_static_default_on_the_page_equals_the_english_seed():
     en = UI_SUBSCRIPTIONS_TRANSLATIONS["en"]
     defaults = _page_defaults()
-    assert {"frequency", "next_delivery", "bill_now", "override_dates", "time_to_be_confirmed"} <= defaults.keys()
+    assert {"frequency", "next_delivery", "bill_now", "override_dates", "sub_any_time", "sub_slot_or_any_time"} <= defaults.keys()
     assert {key: en.get(key) for key in defaults} == defaults
 
 
@@ -69,7 +69,7 @@ def test_every_static_default_on_the_page_equals_the_english_seed():
 def test_the_billing_cycle_keys_are_gone_and_the_new_ones_exist_in_every_language(language):
     translations = UI_SUBSCRIPTIONS_TRANSLATIONS[language]
     assert not _OLD_BILLING_KEYS & translations.keys()
-    for key in ("frequency", "next_delivery", "next_delivery_date", "time_to_be_confirmed", "day_of_week"):
+    for key in ("frequency", "next_delivery", "next_delivery_date", "sub_any_time", "sub_slot_or_any_time", "day_of_week"):
         assert translations[key]
     assert [translations[f"weekday_{i}"] for i in range(7)] == list(dict.fromkeys(translations[f"weekday_{i}"] for i in range(7)))
     assert set(UI_SUBSCRIPTIONS_TRANSLATIONS["en"]) == set(translations)

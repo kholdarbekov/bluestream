@@ -521,7 +521,7 @@
                                 <h6>{{ subscription.name }}</h6>
                                 <p class="text-muted">{{ subscription.description }}</p>
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ subscription.frequency.value }}</span>
+                                    <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ ('cabinet.subs.frequency.' ~ subscription.frequency.value)|t }}</span>
                                     <span class="badge badge-success">{{ 'Active'|t }}</span>
                                 </div>
                             </div>
@@ -617,11 +617,12 @@
     </div>
 </div>
 
-<!-- Order Detail Modal (shared partial) -->
-{% include 'frontend/partials/order_detail_modal.html' %}
 {% endblock %}
 
 {% block cabinet_extra_js %}
+{# The shared order modal, after the base scripts: its script reads getPageData and apiRequest as it loads
+   (inside the content block it ran before them and threw). #}
+{% include 'frontend/partials/order_detail_modal.html' %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
     'email_verified': true if user.email_verified_at else false,

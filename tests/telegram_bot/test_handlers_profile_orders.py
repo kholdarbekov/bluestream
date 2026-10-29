@@ -802,31 +802,42 @@ class TestOrderHandlerFlows:
         update.callback_query.answer.assert_awaited_once()
 
     async def test_cancel_order_confirmation_prompt(self, monkeypatch):
+        """The Cancel tap re-reads the order and confirms its PUBLISHED removal (spec 2026-10-27 §5.3)."""
         handler = orders_module.OrderHandlers()
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="cancel_order_123")
         context = make_context()
+        published = {
+            "allowed": True, "via": "cancel", "label": "Cancel order", "confirm_text": "Cancel this order?",
+            "reasons": [],
+        }
+        order = {"id": 123, "customer_actions": {"cancel": published}}
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
+        monkeypatch.setattr(
+            orders_module,
+            "api_client",
+            FakeAPIClientContext(get_order=_resp(success=True, data={"data": {"order": order}})),
+        )
         rendered = {}
 
-        def _yes_no(*_args, **kwargs):
-            rendered.update(kwargs)
-            return "yes-no-kbd"
+        def _remove_confirmation(order_id, cancel, language):
+            rendered.update(order_id=order_id, cancel=cancel, language=language)
+            return "remove-kbd"
 
-        monkeypatch.setattr(orders_module.MenuKeyboards, "yes_no_buttons", _yes_no)
+        monkeypatch.setattr(orders_module.OrderKeyboards, "remove_confirmation", _remove_confirmation)
 
         await handler.cancel_order(update, context)
 
         # The order id goes onto the BUTTONS, not into bot memory: user_data is
         # empty after a deploy while the card stays in the customer's chat.
-        assert rendered["yes_callback"] == "cancel_order_123_confirm_yes"
-        assert rendered["no_callback"] == "cancel_order_123_confirm_no"
+        assert rendered == {"order_id": 123, "cancel": published, "language": "en"}
         assert "cancelling_order_id" not in context.user_data
         update.callback_query.edit_message_text.assert_awaited_once_with(
-            text="telegram.orders.cancel_confirm:en",
-            reply_markup="yes-no-kbd",
+            text="Cancel this order?",
+            reply_markup="remove-kbd",
         )
         update.callback_query.answer.assert_awaited_once()
 
@@ -853,28 +864,6 @@ class TestOrderHandlerFlows:
         assert context.user_data["keep_me"] == "value"
         update.callback_query.edit_message_text.assert_awaited_once_with(text="telegram.action_cancelled:en")
         update.callback_query.answer.assert_awaited_once_with("telegram.action_cancelled_short:en")
-
-    async def test_cancel_order_confirm_yes_success(self, monkeypatch):
-        handler = orders_module.OrderHandlers()
-        handler.orders_menu = AsyncMock()
-        update = DummyUpdate()
-        update.callback_query = DummyCallbackQuery(data="cancel_order_456_confirm_yes")
-        context = make_context()
-
-        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
-        monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
-        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
-        monkeypatch.setattr(
-            orders_module,
-            "api_client",
-            FakeAPIClientContext(cancel_order=_resp(success=True)),
-        )
-
-        await handler.cancel_order_confirm_yes(update, context)
-
-        assert "cancelling_order_id" not in context.user_data
-        update.callback_query.answer.assert_awaited_once_with("telegram.orders.cancel_success:en")
-        handler.orders_menu.assert_awaited_once_with(update, context)
 
     async def test_cancel_order_confirm_no_returns_to_order_details(self, monkeypatch):
         handler = orders_module.OrderHandlers()

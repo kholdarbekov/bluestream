@@ -10,8 +10,9 @@ able to switch anybody back on. Undo reverts only what that unsubscribe changed:
 mints the token only when the POST turned reminders from on to off, and `resubscribe_by_token`
 acts only while the customer's effective setting is still the email-link off that POST wrote.
 
-`site_url` is the one spelling of the website base every link of the reminder email starts with
-(the unsubscribe link here, the shop button in `messaging.email_template_data`).
+Every link of the reminder email (the unsubscribe link here, the shop button in
+`messaging.email_template_data`) starts with `customer_links.website_url`, the one spelling of the
+website base.
 """
 
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from typing import Dict, Optional
 
 from flask import current_app
 from itsdangerous import BadData, URLSafeSerializer, URLSafeTimedSerializer
+
+from business_app.services.customer_links import website_url
 
 _SALT = "reorder-reminder-unsubscribe"
 
@@ -80,14 +83,8 @@ def read_undo_token(token: Optional[str]) -> Optional[int]:
     return _read_user_id(_undo_serializer(), token, max_age=UNDO_MAX_AGE_SECONDS)
 
 
-def site_url(path: str) -> str:
-    """`path` (starting with "/") on the public website: COMPANY_WEBSITE without a trailing slash,
-    so a configured "https://aqua-element.uz/" never yields "//"."""
-    return f"{current_app.config['COMPANY_WEBSITE'].rstrip('/')}{path}"
-
-
 def unsubscribe_url(user_id: int, language: str) -> str:
-    return site_url(f"{UNSUBSCRIBE_PATH}/{make_unsubscribe_token(user_id)}?lang={language}")
+    return website_url(f"{UNSUBSCRIBE_PATH}/{make_unsubscribe_token(user_id)}?lang={language}")
 
 
 def unsubscribe_headers(url: str) -> Dict[str, str]:

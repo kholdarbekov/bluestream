@@ -30,8 +30,9 @@ the customer SAW (`bot.telegram`) and what reached the backend
 from __future__ import annotations
 
 import copy
-
+import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -53,6 +54,9 @@ from tests.telegram_bot.ptb_harness import (
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+
+# The backend's recorded answers (tests/integration/test_web_payment_return_pages.py writes them).
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def expire_dedup_window() -> None:
@@ -1330,6 +1334,38 @@ async def test_a_tax_committee_outage_offers_a_cash_rescue_that_revives_the_same
     assert "Order BS-7101" in rescued.text
     assert "Cash note" in rescued.text
     assert rescued.callback_data() == []
+
+
+async def test_a_cash_rescue_already_placed_elsewhere_shows_the_backends_sentence(bot, shop, user):
+    """The website offers the same rescue, so the cancelled order may already have been rescued there (or from this
+    chat's older screen). The backend refuses the second rescue with 409 and its sentence (the answer recorded in
+    tests/fixtures/customer_order_actions/rescue_already_placed.json); the bot shows that sentence and claims no
+    new order."""
+    path = FIXTURES / "customer_order_actions" / "rescue_already_placed.json"
+    refused = json.loads(path.read_text("utf-8"))["exchange"]
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+    shop.raw_responses[("POST", "/api/v1/orders")] = api_failure_with_body(
+        "Asl belgisi unavailable", 503,
+        {
+            "message": "Asl belgisi unavailable",
+            "data": {"cancelled_order_id": 7101, "payment_restrictions": {"cod_restricted": False}},
+        },
+    )
+    await bot.send(user.tap("confirm_order"))
+    bot.backend.route(
+        "POST", "/api/v1/orders/7101/retry-with-cash",
+        lambda call: backend_failure(refused["response"]["message"], refused["status"]),
+    )
+
+    await bot.send(user.tap("select_payment_cash"))
+
+    assert backend_calls(bot, "POST", "/api/v1/orders/7101/retry-with-cash")
+    assert f"❌ {refused['response']['message']}" in toasts(bot)
+    assert "Placed success" not in bot.telegram.last_shown().text
+    assert user_data(bot)["psp_failed_order_id"] == 7101, "a refused rescue keeps the stash, as any failed one does"
+    assert len(order_payloads(bot)) == 1, "the refused rescue posts no order of its own"
 
 
 async def test_checkout_without_a_link_shows_the_order_stands_screen_with_published_pay(

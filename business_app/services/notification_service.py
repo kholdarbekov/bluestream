@@ -55,6 +55,7 @@ from business_app.utils.translations import get_translation
 from business_app.utils.helpers import scrub_bot_token
 from shared.validators import is_deliverable_email
 from business_app.services.customer_link_service import CustomerLinkService
+from business_app.services.customer_links import tracking_url
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.bottle_tracking_service import (
     BottleTrackingService,
@@ -162,10 +163,6 @@ OTP_SMS_TEMPLATES = {
         "ru": "Kod dlya podtverjdeniya vashego nomera telefona na platforme Aqua Element: {otp_code}",
         "en": "Code to verify your phone number on the Aqua Element platform: {otp_code}",
     },
-    # Allowed, but no moderated text exists yet, so every send returns
-    # "template not found" rather than burning a provider call. Fill this in
-    # once a password-reset text has been moderated at my.eskiz.uz.
-    "sms.password_reset.otp": {},
 }
 
 OTP_SMS_TEMPLATE_KEYS = frozenset(OTP_SMS_TEMPLATES)
@@ -584,6 +581,7 @@ class NotificationService:
         template_data = {
             "order_number": order.order_number,
             "order_status": order.status.value,
+            "order_tracking_url": tracking_url(order.id),
             "order_total": float(order.total_amount) if order.total_amount is not None else None,
             "delivery_address": order.delivery_address.street_address if order.delivery_address else None,
             "estimated_delivery": (
@@ -873,7 +871,9 @@ class NotificationService:
     def send_payment_notification(
         self, payment_id: int, cash_collection_event_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Send payment confirmation notification via Telegram (if user has telegram) or email.
+        """Send the payment confirmation through the customer's one channel: Telegram when the bot is connected,
+        else a real email, else nothing (`_resolve_telegram_else_email`, the rule
+        `PaymentService.dispatch_payment_confirmation` also reads; spec 2026-10-27 §10).
 
         ``cash_collection_event_id`` is the collection that triggered the message;
         the message describes that collection alone.
@@ -896,6 +896,11 @@ class NotificationService:
         if not user:
             raise NotificationError(get_translation("error.not_found"))
 
+        channels = self._resolve_telegram_else_email(user)
+        if not channels:
+            logger.info("Skipping payment confirmation for payment %s: the customer has no channel", payment_id)
+            return {"skipped": True, "reason": "no_channel"}
+
         language = self._normalize_language_code(getattr(user, "preferred_language", "en") or "en")
 
         # What was handed over, and where it went, is read from the
@@ -910,16 +915,28 @@ class NotificationService:
             "payment_follow_up_message": self._get_payment_follow_up_message(payment, language),
             "payment_details": self._render_payment_collection_details(breakdown, language),
             "payment_status_header": self._payment_status_header(breakdown["case"], language),
+            "order_tracking_url": tracking_url(payment.order.id) if payment.order else None,
         }
 
-        # Determine channels: use Telegram if user has telegram_id, otherwise email
-        channels = []
-        if user.telegram_id:
-            channels.append(NotificationChannel.TELEGRAM)
-        else:
-            channels.append(NotificationChannel.EMAIL)
-
         return self.send_notification(payment.user_id, NotificationType.PAYMENT_CONFIRMATION, channels, template_data)
+
+    def send_payment_late_debit_credited(self, user_id: int, order_number: str, amount: str) -> Dict[str, Any]:
+        """Tell the customer a late Click debit became their prepaid balance, through their one channel: Telegram when
+        the bot is connected, else a real email, else nothing (`_resolve_telegram_else_email`, spec 2026-10-27 §10;
+        never SMS). Sent by `send_late_debit_credit_notice_task`, published after the commit that books the credit."""
+        user = db.session.get(User, user_id)
+        if not user:
+            raise NotificationError(get_translation("error.not_found"))
+        channels = self._resolve_telegram_else_email(user)
+        if not channels:
+            logger.info("Skipping the late-debit credit notice for order %s: the customer has no channel", order_number)
+            return {"skipped": True, "reason": "no_channel"}
+        return self.send_notification(
+            user_id,
+            "payment_late_debit_credited",
+            channels=channels,
+            template_data={"order_number": order_number, "amount": amount},
+        )
 
     def send_subscription_notification(self, subscription_id: int, event_type: str) -> Dict[str, Any]:
         """Send subscription-related notification"""

@@ -44,9 +44,11 @@
 
 <hr class="divider">
 
+{% if order_tracking_url %}
 <p style="text-align: center;">
     <a href="{{ order_tracking_url }}" class="btn-primary">View Order</a>
 </p>
+{% endif %}
 
 <div class="info-box">
     <p>{{ payment_follow_up_message }}</p>

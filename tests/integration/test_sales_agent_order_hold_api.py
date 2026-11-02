@@ -37,7 +37,7 @@ from business_app.services.order_service import ADMIN_REASON_MAX_LENGTH, CUSTOME
 from business_app.services.sales.agent_order_approval_service import ORDER_APPROVALS_PATH
 from business_app.services.sales.exception_feed_service import ExceptionFeedService
 from business_app.services.sales.pay_ledger_service import SalesPayLedgerService
-from business_app.tasks import sales_agent_tasks
+from business_app.tasks import notification_tasks, sales_agent_tasks
 from business_app.tasks.inventory_tasks import cleanup_expired_inventory_reservations
 from business_app.tasks.order_tasks import auto_confirm_pending_orders, cancel_abandoned_orders
 from business_app.tasks.payment_tasks import process_payment_confirmation
@@ -56,6 +56,7 @@ from tests.integration.sales_pay_builders import (
     make_order,
     place_visit_order,
 )
+from tests.integration.test_payment_confirmation_one_per_payment import _pay_by_click
 from tests.integration.test_scheduled_order_release_e2e import driver_on_shift  # noqa: F401  (fixture)
 from tests.integration.test_staff_sales_outlets_api import BOT_PAYLOAD, _create
 from tests.integration.test_staff_sales_visits_api import (
@@ -571,8 +572,10 @@ def test_t_hold_3_a_completed_click_payment_does_not_confirm_a_held_order(
     client, db, workplace, sales_agent_auth_headers, admin_claim_headers, sample_product, monkeypatch
 ):
     """A held business-account order edited to Click, whose link the store then pays. The task
-    that confirms paid PENDING orders must skip it, still send the payment notification, and not
-    retry (the guard's 409 would make it retry three times and never notify)."""
+    that confirms paid PENDING orders must skip it, still settle the payment's one confirmation,
+    and not retry (the guard's 409 would make it retry three times and never notify). The store
+    has no bot and no real email, so the confirmation has no channel (spec 2026-10-27 §10): nothing
+    is sent, and the payment is marked so no sweep sends it later."""
     _first, second = _hold_two(client, sales_agent_auth_headers, workplace, sample_product, "business_account")
     edited = client.post(
         f"{ADMIN_ORDERS}/{second['order']['id']}/payment-method",
@@ -587,7 +590,14 @@ def test_t_hold_3_a_completed_click_payment_does_not_confirm_a_held_order(
     payment.status = PaymentStatus.COMPLETED
     payment.paid_at = datetime.now(UTC)
     db.session.commit()
-    notified = _spy(monkeypatch, NotificationService, "send_payment_notification")
+    pushes = []
+
+    def trigger_bot_webhook(endpoint, payload=None, *, request_id=None):
+        pushes.append((endpoint, request_id))
+        return {"success": True}
+
+    monkeypatch.setattr("business_app.utils.bot_webhook.trigger_bot_webhook", trigger_bot_webhook)
+    emails = _spy_task(monkeypatch, notification_tasks.send_payment_confirmation_task)
 
     result = process_payment_confirmation.run(payment.id)
 
@@ -595,7 +605,77 @@ def test_t_hold_3_a_completed_click_payment_does_not_confirm_a_held_order(
     db.session.refresh(order)
     assert order.status is OrderStatus.PENDING
     assert _hold_of(order.id).status == "pending"
-    assert [args[1:] for args, _kwargs in notified] == [(payment.id,)]
+    assert (pushes, emails) == ([], [])
+    db.session.refresh(payment)
+    assert payment.provider_data["post_payment"]["confirmation_enqueued_at"]
+    assert NotificationService().send_payment_notification(payment.id) == {"skipped": True, "reason": "no_channel"}
+
+
+@pytest.mark.parametrize("channel", ["bot", "email"])
+def test_t_hold_3_a_held_order_paid_by_click_is_confirmed_once(
+    client,
+    db,
+    matrix_app,
+    no_fiscalization,
+    workplace,
+    sales_agent_auth_headers,
+    admin_claim_headers,
+    sample_product,
+    monkeypatch,
+    channel,
+):
+    """The store pays the Click link of its held order (Prepare, then Complete, on the real webhook). The webhook
+    sends the payment's one confirmation by the store's channel and the order stays held. The confirmation task
+    the reconcile chain publishes then finds the payment confirmed and sends nothing more; it used to send a
+    second message straight from the task (spec 2026-10-27 §10)."""
+    _first, second = _hold_two(client, sales_agent_auth_headers, workplace, sample_product, "business_account")
+    edited = client.post(
+        f"{ADMIN_ORDERS}/{second['order']['id']}/payment-method",
+        json={"new_method": "click", "reason": "Store pays by the Click link"},
+        headers=admin_claim_headers,
+    )
+    assert edited.status_code == 200, edited.get_data(as_text=True)
+    order = db.session.get(Order, second["order"]["id"])
+    store = order.user
+    if channel == "bot":
+        store.telegram_id, store.is_bot_active = "820017101", True
+    else:
+        store.email = "bahor.store@example.com"
+    db.session.commit()
+    payment_id = order.payment.id
+    pushes = []
+
+    def trigger_bot_webhook(endpoint, payload=None, *, request_id=None):
+        pushes.append((endpoint, request_id, dict(payload or {})))
+        return {"success": True, "message": "Notification sent"}
+
+    monkeypatch.setattr("business_app.utils.bot_webhook.trigger_bot_webhook", trigger_bot_webhook)
+    emails = _spy_task(monkeypatch, notification_tasks.send_payment_confirmation_task)
+
+    _pay_by_click(client, order, "917101")
+    result = process_payment_confirmation.run(payment_id)
+
+    assert result == {"success": True, "skipped": True, "reason": "awaiting_staff_approval"}
+    db.session.expire_all()
+    order = db.session.get(Order, second["order"]["id"])
+    assert (order.status, order.payment.status) == (OrderStatus.PENDING, PaymentStatus.COMPLETED)
+    assert _hold_of(order.id).status == "pending"
+    if channel == "bot":
+        push = (
+            "/internal/payment-success",
+            f"payment-confirm:{payment_id}",
+            {
+                "user_id": store.id,
+                "telegram_id": "820017101",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "amount": float(order.total_amount),
+                "currency": "UZS",
+            },
+        )
+        assert (pushes, emails) == ([push], [])
+    else:
+        assert (pushes, emails) == ([], [((payment_id,), {})])
 
 
 @pytest.mark.parametrize("headers_fixture", ["operator_auth_headers", "manager_claim_headers", "admin_claim_headers"])

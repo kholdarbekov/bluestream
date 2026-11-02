@@ -29,10 +29,7 @@ def get_user_identifier():
 
 
 def get_ip_address():
-    """Get client IP address"""
-    # Check for forwarded IP (proxy/load balancer)
-    if request.headers.get("X-Forwarded-For"):
-        return request.headers.get("X-Forwarded-For").split(",")[0].strip()
+    """The client address ProxyFix resolved (the customer); X-Forwarded-For's first entry is what the client typed"""
     return request.remote_addr
 
 

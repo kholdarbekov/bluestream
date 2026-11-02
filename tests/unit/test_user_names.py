@@ -81,3 +81,25 @@ def test_the_generated_name_is_spelled_once_in_the_producers_and_comparers():
         if literal.search(line.split("#", 1)[0])
     ]
     assert offenders == []
+
+
+def test_to_dict_full_name_drops_missing_parts():
+    from business_app.models.user import User
+
+    assert User(first_name="Ali", last_name=None).to_dict()["full_name"] == "Ali"
+    assert User(first_name=None, last_name=None).to_dict()["full_name"] == ""
+
+
+def test_contact_email_hides_placeholders():
+    from business_app.models.user import User
+
+    assert User(email="telegram_810000001@bluestream.local").contact_email is None
+    assert User(email=None).contact_email is None
+    assert User(email="ali@example.com").contact_email == "ali@example.com"
+
+
+def test_greeting_name_drops_the_telegram_placeholder():
+    from business_app.models.user import User
+
+    assert User(first_name="Telegram User").greeting_name is None
+    assert User(first_name="Ali", last_name="Valiyev").greeting_name == "Ali"

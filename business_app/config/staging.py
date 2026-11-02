@@ -166,6 +166,7 @@ class StagingConfig(BaseConfig):
                 from sentry_sdk.integrations.redis import RedisIntegration
 
                 from business_app.utils.sentry import before_send as _sentry_before_send
+                from business_app.utils.sentry import before_send_transaction as _sentry_before_send_transaction
 
                 sentry_sdk.init(
                     dsn=cls.SENTRY_DSN,
@@ -180,6 +181,7 @@ class StagingConfig(BaseConfig):
                     debug=False,
                     send_default_pii=False,
                     before_send=_sentry_before_send,
+                    before_send_transaction=_sentry_before_send_transaction,
                 )
             except ImportError:
                 app.logger.warning("Sentry SDK not installed, skipping error tracking initialization")

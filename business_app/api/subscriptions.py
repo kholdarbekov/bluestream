@@ -13,13 +13,10 @@ from business_app.serializers.subscription_serializers import (
     CLEARABLE_SUBSCRIPTION_FIELDS,
     serialize_subscription,
     serialize_subscription_item,
-    serialize_subscription_log,
     CreateSubscriptionRequest,
     UpdateSubscriptionRequest,
     PauseSubscriptionRequest,
     CancelSubscriptionRequest,
-    AddSubscriptionItemRequest,
-    UpdateSubscriptionItemRequest,
     SubscriptionPreviewRequest,
     SubscriptionPreviewResponse,
     ChangePaymentMethodRequest,
@@ -389,104 +386,6 @@ def get_subscription_items(subscription_id):
         return internal_error_response(get_translation("api.subscriptions.error.get_items_failed"))
 
 
-@subscriptions_bp.route("/<int:subscription_id>/items", methods=["POST"])
-@jwt_required()
-@validate_json_with_model(AddSubscriptionItemRequest, message_key=_INVALID_BODY)
-def add_subscription_item(subscription_id):
-    """Add item to subscription"""
-    try:
-        current_user_id = get_jwt_identity()
-        validated_data = request.validated_json
-        language = get_current_language()
-        item_result = get_subscription_service().add_subscription_item_for_user(
-            subscription_id=subscription_id,
-            user_id=current_user_id,
-            product_id=validated_data.product_id,
-            quantity=validated_data.quantity,
-            special_instructions=validated_data.special_instructions,
-            language=language,
-        )
-        item = item_result["item"]
-        billing_amount = item_result["billing_amount"]
-
-        item_response = item.to_dict()
-        current_app.logger.info(f"Add subscription item SUCCESS: item_response: {item_response}")
-
-        return created_response(
-            data={"item": item_response, "new_billing_amount": float(billing_amount)},
-            message=get_translation("api.subscriptions.item_added"),
-        )
-
-    except (NotFoundError, ValidationError, ConflictError) as e:
-        return _refused(e)
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Add subscription item error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.add_item_failed"))
-
-
-@subscriptions_bp.route("/<int:subscription_id>/items/<int:item_id>", methods=["PUT"])
-@jwt_required()
-@validate_json_with_model(UpdateSubscriptionItemRequest, message_key=_INVALID_BODY)
-def update_subscription_item(subscription_id, item_id):
-    """Update subscription item quantity"""
-    try:
-        current_user_id = get_jwt_identity()
-        validated_data = request.validated_json
-        update_result = get_subscription_service().update_subscription_item_for_user(
-            subscription_id=subscription_id,
-            item_id=item_id,
-            user_id=current_user_id,
-            quantity=validated_data.quantity,
-            special_instructions=validated_data.special_instructions,
-        )
-        item = update_result["item"]
-        billing_amount = update_result["billing_amount"]
-
-        # Same shape as add_subscription_item. SubscriptionItemSchema requires a
-        # `product_name` attribute the model does not have, so it fell back to a raw
-        # attribute dump (SQLAlchemy MetaData included) and every update 500'd after
-        # its commit.
-        item_response = item.to_dict()
-
-        return success_response(
-            data={"item": item_response, "new_billing_amount": float(billing_amount)},
-            message=get_translation("api.subscriptions.item_updated"),
-        )
-
-    except (NotFoundError, ValidationError) as e:
-        return _refused(e)
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Update subscription item error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.update_item_failed"))
-
-
-@subscriptions_bp.route("/<int:subscription_id>/items/<int:item_id>", methods=["DELETE"])
-@jwt_required()
-def remove_subscription_item(subscription_id, item_id):
-    """Remove item from subscription"""
-    try:
-        current_user_id = get_jwt_identity()
-        subscription = get_subscription_service().remove_subscription_item_for_user(
-            subscription_id=subscription_id,
-            item_id=item_id,
-            user_id=current_user_id,
-        )
-
-        return success_response(
-            data={"new_billing_amount": float(subscription.billing_amount)},
-            message=get_translation("api.subscriptions.item_removed"),
-        )
-
-    except (NotFoundError, ValidationError) as e:
-        return _refused(e)
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Remove subscription item error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.remove_item_failed"))
-
-
 @subscriptions_bp.route("/<int:subscription_id>/items", methods=["PUT"])
 @jwt_required()
 @validate_json_with_model(ReplaceSubscriptionItemsRequest, message_key=_INVALID_BODY)
@@ -551,37 +450,6 @@ def get_subscription_history(subscription_id):
     except Exception as e:
         current_app.logger.error(f"Get subscription history error: {e}")
         return internal_error_response(get_translation("api.subscriptions.error.get_failed"))
-
-
-@subscriptions_bp.route("/<int:subscription_id>/logs", methods=["GET"])
-@jwt_required()
-def get_subscription_logs(subscription_id):
-    """Get subscription activity logs"""
-    try:
-        current_user_id = get_jwt_identity()
-        page, per_page = _page_args()
-
-        pagination = get_subscription_service().get_subscription_logs_paginated_for_user(
-            subscription_id=subscription_id,
-            user_id=current_user_id,
-            page=page,
-            per_page=per_page,
-        )
-
-        return paginated_response(
-            items=[serialize_subscription_log(log) for log in pagination.items],
-            page=page,
-            per_page=per_page,
-            total=pagination.total,
-        )
-
-    except NotFoundError as e:
-        return not_found_response(get_translation(e.message))
-    except ValidationError as e:
-        return error_response(get_translation(e.message), status_code=400)
-    except Exception as e:
-        current_app.logger.error(f"Get subscription logs error: {e}")
-        return internal_error_response(get_translation("api.subscriptions.error.get_logs_failed"))
 
 
 @subscriptions_bp.route("/preview", methods=["POST"])

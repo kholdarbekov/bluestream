@@ -45,11 +45,14 @@ CONTRACT_KEYS = {
         "amount_due",
         "prepaid_applied",
         "deadline",
+        "subscription_id",
+        "actions",
     },
-    "subscription_delivery_skipped": ENVELOPE | {"subscription_name", "skipped_dates", "reason", "next_delivery_date"},
+    "subscription_delivery_skipped": ENVELOPE
+    | {"subscription_id", "subscription_name", "skipped_dates", "reason", "next_delivery_date"},
     "subscription_paid_order_kept": ENVELOPE
-    | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date"},
-    "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline"},
+    | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date", "subscription_id", "actions"},
+    "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline", "subscription_id", "actions"},
     # A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5).
     "subscription_schedule_changed": ENVELOPE
     | {
@@ -61,7 +64,9 @@ CONTRACT_KEYS = {
         "old_weekday",
         "new_weekday",
         "added_weekdays",
+        "removed_weekdays",
         "next_delivery_date",
+        "kept_order_note",
         "time_kind",
     },
 }

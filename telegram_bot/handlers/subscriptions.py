@@ -1770,8 +1770,8 @@ class SubscriptionHandlers(BaseHandler):
     # ========== CHANGE ADDRESS ==========
 
     async def change_address_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """`change_address_<sub>`: the customer's saved addresses, the current one ticked. No address is created
-        here: adding one stays in the address screens (spec 2026-10-27 §7)."""
+        """`change_address_<sub>`: the current address named, and the customer's other saved addresses to choose from.
+        No address is created here: adding one stays in the address screens (spec 2026-10-27 §7)."""
         try:
             query = update.callback_query
             language = await i18n.get_user_language(update.effective_user.id)
@@ -1798,20 +1798,24 @@ class SubscriptionHandlers(BaseHandler):
                 await self._handle_api_error(update, addresses.error, language)
                 return
 
+            # The current address is named, never offered: moving to it is no change, and the website cannot send one.
             current = subscription.get('delivery_address_id')
+            saved = (addresses.data or {}).get('data', {}).get('addresses') or []
+
+            def label(address):
+                return address.get('title') or address.get('full_address') or i18n.get('telegram.common.address', language)
+
             rows = [
-                [InlineKeyboardButton(
-                    ("✓ " if address['id'] == current else "")
-                    + (address.get('title') or address.get('full_address') or i18n.get('telegram.common.address', language)),
-                    callback_data=f"subaddr_{address['id']}_{sub_id}",
-                )]
-                for address in (addresses.data or {}).get('data', {}).get('addresses') or []
+                [InlineKeyboardButton(label(address), callback_data=f"subaddr_{address['id']}_{sub_id}")]
+                for address in saved if address['id'] != current
             ]
             rows.append([InlineKeyboardButton(i18n.get('telegram.back', language), callback_data=f'edit_sub_{sub_id}')])
-            await self._show(
-                update, i18n.get('telegram.subscription.select_new_address', language),
-                reply_markup=InlineKeyboardMarkup(rows),
-            )
+            lines = [
+                i18n.get('telegram.subscription.current_address', language, address=label(address))
+                for address in saved if address['id'] == current
+            ]
+            lines.append(i18n.get('telegram.subscription.select_new_address', language))
+            await self._show(update, "\n\n".join(lines), reply_markup=InlineKeyboardMarkup(rows))
             await self._ack(query)
 
         except Exception as e:

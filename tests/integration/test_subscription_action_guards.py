@@ -408,6 +408,13 @@ def _second_item_id(db, sub_id):
     return items[-1].id
 
 
+def _items_without(db, sub_id, item_id):
+    """The item list the website's and the bot's Items save sends after a removal: every other line, as is."""
+    db.session.expire_all()
+    items = SubscriptionItem.query.filter_by(subscription_id=sub_id).order_by(SubscriptionItem.id).all()
+    return [{"product_id": item.product_id, "quantity": item.quantity} for item in items if item.id != item_id]
+
+
 def _customer_call(web, db, sub_id, action, published, payload):
     if action == "pay":
         order_id = published.get("order_id") or _latest_order_id(db, sub_id)
@@ -429,7 +436,11 @@ def _customer_call(web, db, sub_id, action, published, payload):
     if action == "edit":
         return web.put(f"{BASE}/{sub_id}", {"name": "Renamed water"})
     if action == "remove_item":
-        return web.delete(f"{BASE}/{sub_id}/items/{_second_item_id(db, sub_id)}")
+        # Both clients remove an item through the one item write, with the whole remaining list.
+        return web.put(
+            f"{BASE}/{sub_id}/items",
+            {"items": _items_without(db, sub_id, _second_item_id(db, sub_id)), "expected_state": _state(web, sub_id)},
+        )
     raise AssertionError(action)
 
 
@@ -514,7 +525,9 @@ def test_the_last_item_cannot_be_removed_and_says_why(db, web, client, admin_hea
     published = _published(web, sub_id)["allowed_actions"]["remove_item"]
     [item] = SubscriptionItem.query.filter_by(subscription_id=sub_id).all()
 
-    customer = web.delete(f"{BASE}/{sub_id}/items/{item.id}")
+    customer = web.put(
+        f"{BASE}/{sub_id}/items", {"items": _items_without(db, sub_id, item.id), "expected_state": _state(web, sub_id)}
+    )
     admin = client.delete(f"{ADMIN_BASE}/{sub_id}/items/{item.id}", headers=admin_headers)
 
     assert published["allowed"] is False
@@ -527,16 +540,23 @@ def test_the_last_item_cannot_be_removed_and_says_why(db, web, client, admin_hea
 def test_every_customer_edit_path_of_a_cancelled_subscription_gives_the_published_reason(
     db, web, build, sample_product, cups
 ):
-    """PUT, add item, update item and change payment method are all "edit": one rule, one reason."""
+    """PUT, the items save (adding a product, changing a quantity) and change payment method are all "edit": one
+    rule, one reason."""
     sub_id = build("cancelled")
     reason = _published(web, sub_id)["allowed_actions"]["edit"]["block_reason"]
-    item_id = _second_item_id(db, sub_id)
+    kept = _items_without(db, sub_id, None)
     before = _row(db, sub_id).updated_at
 
     responses = [
         web.put(f"{BASE}/{sub_id}", {"name": "Renamed water"}),
-        web.post(f"{BASE}/{sub_id}/items", {"product_id": cups.id, "quantity": 1}),
-        web.put(f"{BASE}/{sub_id}/items/{item_id}", {"quantity": 3}),
+        web.put(
+            f"{BASE}/{sub_id}/items",
+            {"items": [*kept, {"product_id": cups.id, "quantity": 1}], "expected_state": _state(web, sub_id)},
+        ),
+        web.put(
+            f"{BASE}/{sub_id}/items",
+            {"items": [*kept[:-1], {**kept[-1], "quantity": 3}], "expected_state": _state(web, sub_id)},
+        ),
         web.post(
             f"{BASE}/{sub_id}/change-payment-method",
             {"payment_method": "cash", "expected_state": _state(web, sub_id)},

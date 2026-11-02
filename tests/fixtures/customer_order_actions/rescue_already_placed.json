@@ -1,0 +1,13 @@
+{
+ "case": "rescue_already_placed",
+ "exchange": {
+  "body": {},
+  "method": "POST",
+  "path": "/api/v1/orders/1/retry-with-cash",
+  "response": {
+   "message": "This order has already been placed for cash payment. You'll find it in My orders.",
+   "success": false
+  },
+  "status": 409
+ }
+}

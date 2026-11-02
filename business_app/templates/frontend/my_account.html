@@ -378,7 +378,7 @@
         <div class="card-body">
             <div class="row align-items-center">
                 <div class="col-md-8">
-                    <h3>{{ 'Welcome back'|t }}, {{ user.first_name }}!</h3>
+                    <h3>{{ 'Welcome back'|t }}{% if user.greeting_name %}, {{ user.greeting_name }}{% endif %}!</h3>
                     <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|t }}</p>
                     <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if telegram_connected %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
                 </div>
@@ -417,7 +417,7 @@
                         <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
                         <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
                         <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
-                        <small class="text-success">{{ 'Manage'|t }}</small>
+                        <small class="text-success">{{ 'cabinet.account.manage'|t }}</small>
                     </div>
                 </div>
             </div>
@@ -429,7 +429,7 @@
                         <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
                         <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
                         <p class="text-muted">{{ 'AquaCoins'|t }}</p>
-                        <small class="text-warning">{{ 'Tier'|t }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
+                        <small class="text-warning">{{ 'cabinet.account.tier'|t }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
                     </div>
                 </div>
             </div>
@@ -441,7 +441,7 @@
                         <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
                         <h4 class="mt-2" id="addressesCount">0</h4>
                         <p class="text-muted">{{ 'Saved Addresses'|t }}</p>
-                        <small class="text-info">{{ 'Manage'|t }}</small>
+                        <small class="text-info">{{ 'cabinet.account.manage'|t }}</small>
                     </div>
                 </div>
             </div>
@@ -453,7 +453,7 @@
 <div class="recent-orders-section mb-4">
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h5>{{ 'Recent Orders'|t }}</h5>
+            <h5>{{ 'cabinet.account.recent_orders'|t }}</h5>
             <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'landing.button.view_all'|t }}</a>
         </div>
         <div class="card-body">
@@ -462,11 +462,11 @@
                 <table class="table table-hover">
                     <thead>
                         <tr>
-                            <th>{{ 'Order #'|t }}</th>
-                            <th>{{ 'Date'|t }}</th>
-                            <th>{{ 'Status'|t }}</th>
-                            <th>{{ 'Total'|t }}</th>
-                            <th>{{ 'Actions'|t }}</th>
+                            <th>{{ 'cabinet.account.order_number'|t }}</th>
+                            <th>{{ 'cabinet.account.date'|t }}</th>
+                            <th>{{ 'cabinet.account.status'|t }}</th>
+                            <th>{{ 'cabinet.account.total'|t }}</th>
+                            <th>{{ 'cabinet.account.actions'|t }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -484,7 +484,7 @@
                             </td>
                             <td>{{ "{:,.0f}".format(order.total_amount)|replace(",", " ") }} UZS</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary" data-action="show-order" data-order-id="{{ order.id }}">{{ 'View'|t }}</button>
+                                <button class="btn btn-sm btn-outline-primary" data-action="show-order" data-order-id="{{ order.id }}">{{ 'cabinet.account.view'|t }}</button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -522,7 +522,7 @@
                                 <p class="text-muted">{{ subscription.description }}</p>
                                 <div class="d-flex justify-content-between align-items-center">
                                     <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ ('cabinet.subs.frequency.' ~ subscription.frequency.value)|t }}</span>
-                                    <span class="badge badge-success">{{ 'Active'|t }}</span>
+                                    <span class="badge badge-success">{{ 'cabinet.account.active'|t }}</span>
                                 </div>
                             </div>
                         </div>
@@ -549,7 +549,7 @@
                         <div class="platform-usage">
                             <div class="platform-item">
                                 <span class="platform-name">{{ 'Web App'|t }}</span>
-                                <span class="badge badge-success">{{ 'Active'|t }}</span>
+                                <span class="badge badge-success">{{ 'cabinet.account.active'|t }}</span>
                             </div>
                             {% if telegram_connected %}
                             <div class="platform-item">
@@ -571,7 +571,7 @@
                         <ul class="recent-activity-list">
                             <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|t }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
                             <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|t }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
-                            <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|t }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
+                            <li><i class="far fa-shopping-bag text-primary"></i> {{ 'cabinet.account.last_order'|t }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
                         </ul>
                     </div>
                 </div>
@@ -603,7 +603,7 @@
                 <div class="col-md-3">
                     <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
                         <i class="far fa-map-marker-alt"></i>
-                        {{ 'Manage Addresses'|t }}
+                        {{ 'cabinet.account.manage_addresses'|t }}
                     </a>
                 </div>
                 <div class="col-md-3">

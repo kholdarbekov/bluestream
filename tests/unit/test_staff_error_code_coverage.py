@@ -79,14 +79,14 @@ NOT_STAFF_FACING: dict[str, str] = {
     # Customer ordering and payments.
     "ASL_BELGISI_UNAVAILABLE": f"{_NOT_ON_ROUTE} (api/orders.py:442, customer POST /orders card path)",
     "MARKING_CODES_POOL_SHORT": f"{_NOT_ON_ROUTE} (payment_service.create_payment: customer POST "
-    "/orders/<id>/retry-payment and /payments/create; admin payment-method edit)",
+    "/orders/<id>/retry-payment; admin payment-method edit)",
     "ORDER_NOT_CUSTOMER_CANCELLABLE": f"{_NOT_ON_ROUTE} (order_service.py cancel_order_as_customer: customer "
     "POST /orders/<id>/cancel)",
     "PAY_REFUSED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
     "STATE_CHANGED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
     "PAYMENT_NOT_CANCELLABLE": f"{_NOT_ON_ROUTE} (api/payments.py:694 /payments/<id>/cancel)",
     "RAIL_MOVE_NOT_ALLOWED": f"{_NOT_ON_ROUTE} (payment_service.create_payment: customer POST "
-    "/orders/<id>/retry-payment and /payments/create)",
+    "/orders/<id>/retry-payment)",
     "PAYMENT_NOT_REFUNDABLE": f"{_NOT_ON_ROUTE} (api/payments.py:1196 /payments/refund)",
     "REPEAT_LEGACY_ORDER_UNSUPPORTED": f"{_NOT_ON_ROUTE} (order_service.py:812: customer /orders/repeat/<id>)",
     "SALES_CONFIRMATION_ACTION_INVALID": f"{_NOT_ON_ROUTE} (agent_order_confirmation_service.py:215: customer "

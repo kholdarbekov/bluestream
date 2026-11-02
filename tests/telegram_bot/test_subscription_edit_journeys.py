@@ -54,7 +54,6 @@ PAYMENT_METHODS = "/api/v1/payments/methods"
 TRANSLATIONS = {
     "telegram.subscription.select_new_frequency": "PICK-NEW-FREQUENCY",
     "telegram.subscription.select_new_payment_method": "PICK-NEW-PAYMENT",
-    "telegram.subscription.frequency_updated_successfully": "FREQUENCY-UPDATED",
     "telegram.subscription.payment_method_updated_successfully": "PAYMENT-UPDATED",
     "telegram.subscription.billing_history": "BILLING-HISTORY",
     "telegram.subscription.no_billing_history": "no billing yet",

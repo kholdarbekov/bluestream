@@ -305,6 +305,21 @@ class ProductionConfig(BaseConfig):
         if secret_key == jwt_secret:
             raise ValueError("JWT_SECRET_KEY must differ from SECRET_KEY in production (no shared-secret collapse)")
 
+    @staticmethod
+    def trust_the_front_proxy(app):
+        """Read the client and the scheme from nginx, the one proxy in front of the app (Task Gfix, 2026-10-29).
+
+        x_for=1: request.remote_addr is the last X-Forwarded-For entry, the one nginx appends ($remote_addr, the
+        customer behind the Cloudflare Tunnel); the entries before it are whatever the client typed.
+        x_proto=1: nginx always sends X-Forwarded-Proto https.
+        No x_host: nginx always sends the Host it served (admin /api/ pins aqua-element.uz) and passes a client's
+        X-Forwarded-Host through untouched, so trusting it let any client rewrite request.host and every
+        url_for(_external=True) (it rewrote every href of /.well-known/api-catalog on prod).
+        """
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
     @classmethod
     def init_app(cls, app):
         """Initialize production-specific configuration"""
@@ -321,6 +336,7 @@ class ProductionConfig(BaseConfig):
             from sentry_sdk.integrations.celery import CeleryIntegration
 
             from business_app.utils.sentry import before_send as _sentry_before_send
+            from business_app.utils.sentry import before_send_transaction as _sentry_before_send_transaction
 
             sentry_sdk.init(
                 dsn=cls.SENTRY_DSN(),
@@ -338,6 +354,7 @@ class ProductionConfig(BaseConfig):
                 attach_stacktrace=True,
                 send_default_pii=False,
                 before_send=_sentry_before_send,
+                before_send_transaction=_sentry_before_send_transaction,
             )
         except ImportError:
             raise ImportError("Sentry SDK is required in production environment")
@@ -372,9 +389,7 @@ class ProductionConfig(BaseConfig):
         except ImportError:
             raise ImportError("Flask-Talisman is required in production environment")
 
-        from werkzeug.middleware.proxy_fix import ProxyFix
-
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+        cls.trust_the_front_proxy(app)
 
         # Note: Logging is configured in business_app.utils.logging_config.setup_enhanced_logging()
         # which is called from setup_logging() in __init__.py

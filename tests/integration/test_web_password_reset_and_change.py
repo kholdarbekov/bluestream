@@ -26,13 +26,17 @@ double-submit check.
 """
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from flask_jwt_extended import get_csrf_token
 
 from business_app.models.user import User
-from business_app.tasks.notification_tasks import send_password_reset_email_task
+from business_app.services.auth_service import AuthService
+from business_app.tasks import notification_tasks
+from business_app.tasks.notification_tasks import send_password_reset_email_task, send_verification_email_task
 from business_app.utils.password_security import verify_password
+from tests.notification_send_fakes import live_send_path
 
 pytestmark = pytest.mark.integration
 
@@ -136,3 +140,70 @@ def test_a_cookie_change_password_without_the_csrf_header_is_refused(app, db, sa
 
     assert changed.status_code == 401, changed.get_json()
     assert verify_password(OLD_PASSWORD, _password_of(db, sample_user.id))
+
+
+@pytest.mark.parametrize("domain", ["bot.internal", "bluestream.local"])
+@pytest.mark.parametrize("phone_verified", [True, False])
+def test_a_bot_customer_asking_for_a_reset_gets_nothing_sent_to_a_placeholder(
+    app, db, sample_user, emailed_reset_links, domain, phone_verified
+):
+    """A bot customer's email is a placeholder. The page answers exactly as it does for a real account (no
+    enumeration), but no mail goes to the placeholder, no SMS task exists to send a code, and no reset code is
+    stored."""
+    bot_customer = User(
+        email=f"telegram_4242@{domain}",
+        phone="+998901112233",
+        password_hash=sample_user.password_hash,
+        first_name="Bot",
+        registration_source="telegram",
+        phone_verified_at=datetime.now(timezone.utc) if phone_verified else None,
+    )
+    db.session.add(bot_customer)
+    db.session.commit()
+    browser = app.test_client()
+
+    real = browser.post(FORGOT_URL, headers=WEB_HEADERS, data=json.dumps({"identifier": sample_user.email}))
+    by_email = browser.post(FORGOT_URL, headers=WEB_HEADERS, data=json.dumps({"identifier": bot_customer.email}))
+    by_phone = browser.post(FORGOT_URL, headers=WEB_HEADERS, data=json.dumps({"identifier": bot_customer.phone}))
+
+    assert real.status_code == by_email.status_code == by_phone.status_code == 200
+    assert by_email.get_json() == real.get_json() == by_phone.get_json()
+    assert [user_id for user_id, _ in emailed_reset_links] == [sample_user.id]
+    assert not hasattr(notification_tasks, "send_password_reset_sms_task")
+    assert not hasattr(AuthService, "_send_phone_password_reset")  # no reset code is stored or texted
+
+
+def test_the_forgot_password_page_points_a_bot_customer_to_open_on_website(app, db):
+    """The seeded copy (imported, not retyped) is what the page prints, and it names the bot's button."""
+    from markupsafe import escape
+
+    from business_app.models.translation import Translation
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    key = "web.forgot_password.telegram_hint"
+    hint = BACKEND_TRANSLATIONS[key]["en"]
+    db.session.add(Translation(key=key, language="en", value=hint, category="web"))
+    db.session.commit()
+
+    page = app.test_client().get("/forgot-password?lang=en")
+
+    assert page.status_code == 200
+    assert str(escape(hint)) in page.get_data(as_text=True)
+    assert "Open on website" in hint
+
+
+@pytest.mark.parametrize("task", [send_password_reset_email_task, send_verification_email_task])
+def test_the_reset_email_greets_a_customer_with_no_last_name_without_none(app, db, monkeypatch, sample_user, task):
+    """Both account emails go out through the real send path; the greeting is `User.full_name`'s
+    None-safe name, never "Ali None"."""
+    sample_user.first_name = "Ali"
+    sample_user.last_name = None
+    db.session.commit()
+
+    with live_send_path(app, monkeypatch, bot_url="https://t.me/test_bot") as post:
+        result = task.run(sample_user.id, "tok-123")
+
+    assert result["email"]["success"] is True, result
+    sent = json.dumps(post.call_args.kwargs["json"])
+    assert "Ali" in sent
+    assert "None" not in sent

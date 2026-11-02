@@ -47,13 +47,18 @@
 <p>Kompaniya hisobingizdan yechiladi.</p>
 {% elif payment == "online_unpaid" %}
 <p>Iltimos, {{ deadline }} gacha to'lang. Shu vaqtgacha to'lanmagan buyurtma bekor qilinadi.</p>
-{% if pay_url %}
-<p style="text-align: center;">
-    <a href="{{ pay_url }}" class="btn-primary">Hozir to'lash</a>
-</p>
-{% endif %}
 {% elif payment == "online_paid" %}
 <p>To'langan.</p>
+{% endif %}
+
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Hozir to'lash</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">Buyurtmani ko'rish</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Obunani ochish</a></p>
 {% endif %}
 
 <hr class="divider">

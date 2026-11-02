@@ -236,6 +236,19 @@ class RedisKeyspace:
     def tokens_valid_after(user_id: int | str) -> str:
         return f"tokens_valid_after:{user_id}"
 
+    # Tier: SECURITY. "Open on website" (Telegram login button, spec 2026-10-27 §9): a signed hash is good once
+    # (`SET NX EX`, kept for as long as the tap could still be fresh); fail closed, Redis down signs nobody in. Keyed
+    # on the hash's SHA-256 hex digest, never the hash, so Redis commands and their traces never carry it.
+    @staticmethod
+    def telegram_login_hash(hash_digest: str) -> str:
+        return f"bs:telegram_login_hash:{hash_digest}"
+
+    # Tier: SECURITY. "Open on website": the sign-ins of one Telegram account this hour (`INCR`, expiring an hour
+    # after the first); fail closed.
+    @staticmethod
+    def telegram_login_attempts(telegram_id: int | str) -> str:
+        return f"bs:telegram_login_rate:{telegram_id}"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -286,6 +299,8 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'customer_telegram_link':            RedisUsageTier.TIER_SECURITY,
     'customer_telegram_link_pointer':    RedisUsageTier.TIER_SECURITY,
     'tokens_valid_after':                RedisUsageTier.TIER_SECURITY,
+    'telegram_login_hash':               RedisUsageTier.TIER_SECURITY,
+    'telegram_login_attempts':           RedisUsageTier.TIER_SECURITY,
 }
 
 

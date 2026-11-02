@@ -3,7 +3,6 @@ Comprehensive audit logging system for the BlueStream platform.
 This module provides centralized audit logging for all sensitive operations.
 """
 
-import json
 import time
 import uuid
 from datetime import datetime, UTC
@@ -15,6 +14,7 @@ from flask_jwt_extended import get_jwt_identity, get_jwt
 
 from business_app import db
 from business_app.models.audit import AuditLog, AuditEventType, AuditSeverity
+from shared.telegram_login import LOGIN_QUERY_REDACTED, loggable_json, loggable_request_url, redact_login_query
 
 
 class AuditLogger:
@@ -37,8 +37,9 @@ class AuditLogger:
                     "user_agent": request.headers.get("User-Agent"),
                     "endpoint": request.endpoint,
                     "method": request.method,
-                    "url": request.url,
-                    "referer": request.headers.get("Referer"),
+                    # never a sign-in link's hash or names (spec 2026-10-27 §9)
+                    "url": loggable_request_url(request),
+                    "referer": redact_login_query(request.headers.get("Referer")),
                 }
             )
 
@@ -188,8 +189,13 @@ class AuditLogger:
         else:
             current_app.logger.info(log_message)
 
-        # Log additional details at debug level
-        current_app.logger.debug(f"AUDIT DETAILS [{audit_entry['event_id']}]: {json.dumps(audit_entry, default=str)}")
+        # Log additional details at debug level. Each value passes the sign-in redaction on its own before the JSON is
+        # written, and the record says so, so the log filter's pass over the whole line leaves the JSON whole
+        # (`loggable_json`; step-4 live drive D3).
+        current_app.logger.debug(
+            f"AUDIT DETAILS [{audit_entry['event_id']}]: {loggable_json(audit_entry)}",
+            extra={LOGIN_QUERY_REDACTED: True},
+        )
 
     def _log_to_database(self, audit_entry: Dict):
         """Log audit entry to database using a separate session.
@@ -236,13 +242,19 @@ class AuditLogger:
             # Don't re-raise to avoid breaking the main application flow
 
     def log_authentication_event(
-        self, event_type: AuditEventType, user_id: int = None, success: bool = True, error_message: str = None
+        self,
+        event_type: AuditEventType,
+        user_id: int = None,
+        success: bool = True,
+        error_message: str = None,
+        severity: AuditSeverity = None,
     ):
-        """Log authentication-related events."""
+        """Log authentication-related events. `severity` defaults to MEDIUM for a success and HIGH for a failure;
+        a failure's severity sets its log level (LOW info, MEDIUM warning, HIGH error)."""
         return self.log_event(
             event_type=event_type,
             action=event_type.value,
-            severity=AuditSeverity.MEDIUM if success else AuditSeverity.HIGH,
+            severity=severity or (AuditSeverity.MEDIUM if success else AuditSeverity.HIGH),
             resource_type="authentication",
             resource_id=str(user_id) if user_id else None,
             success=success,
@@ -471,10 +483,10 @@ def audit_login_success(user_id: int):
     return audit_logger.log_authentication_event(AuditEventType.LOGIN_SUCCESS, user_id=user_id, success=True)
 
 
-def audit_login_failure(user_id: int = None, error_message: str = None):
-    """Log failed login attempt."""
+def audit_login_failure(user_id: int = None, error_message: str = None, severity: AuditSeverity = None):
+    """Log failed login attempt. `severity` (default HIGH, logged at ERROR) lets a routine refusal log at INFO."""
     return audit_logger.log_authentication_event(
-        AuditEventType.LOGIN_FAILURE, user_id=user_id, success=False, error_message=error_message
+        AuditEventType.LOGIN_FAILURE, user_id=user_id, success=False, error_message=error_message, severity=severity
     )
 
 

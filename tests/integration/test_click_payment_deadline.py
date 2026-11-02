@@ -24,7 +24,6 @@ import inspect
 import os
 import re
 import threading
-import time as clock
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch
@@ -32,6 +31,7 @@ from unittest.mock import Mock, patch
 import pytest
 from flask import current_app
 from flask_jwt_extended import create_access_token
+from sqlalchemy import event
 
 from business_app.models.delivery import Delivery
 from business_app.models.order import Order
@@ -64,12 +64,11 @@ from tests.integration.fake_gateways import (
     apply_test_provider_secrets,
     make_click_webhook_form,
 )
+from tests.integration.reorder_reminder_builders import seed_translations
+from tests.conftest import celery_default_app_current
 from tests.integration.test_customer_cancel_races_pg import (  # plain helpers, safe to import
     DRIVER_STATUS_URL,
-    _await_a_lock_waiter,
     _finish,
-    _lock_waiters,
-    _thread,
     _world,
 )
 from tests.integration.tier_discount_factory import post_order, verify_phone
@@ -586,6 +585,149 @@ class TestTheSweep:
         assert bot.calls[0]["payload"]["deadline"] == local(TUESDAY, 2).isoformat()
 
 
+# --------------------------------------------------------------------------- a staff move restarts the window
+
+SCHEDULE_URL = "/api/v1/admin/orders/{}/schedule"
+UNASSIGN_URL = "/api/v1/admin/dispatch/stops/{}/unassign"
+# Where each staff move starts: the delivery a driver left FAILED (it awaits a new date) for the re-date, a stop the
+# driver has picked up for the return to the pool. Neither has a payment deadline (spec §4.4), so the order can sit
+# there for days.
+MOVES = {
+    "re-date": {"status": DeliveryStatus.FAILED, "failed_delivery_reason": "customer_unavailable", "delivery_attempts": 1},
+    "return-to-pool": {"status": DeliveryStatus.PICKED_UP},
+}
+PAY_COPY = ["api.orders.actions.pay.label", "api.orders.actions.pay.deadline", "web.display_labels.deadline.tomorrow"]
+
+
+@pytest.fixture
+def staff_moves_at_noon(local_noon, monkeypatch):
+    """Noon in Tashkent on every clock a staff move reads: the reschedule's (`local_noon`) and the payment window's
+    own, which the return to the pool reads."""
+    monkeypatch.setattr(
+        "business_app.services.payment_service.get_utc_now", lambda: local_noon.astimezone(timezone.utc)
+    )
+    return local_noon
+
+
+def _waiting_stop(db, user, address, driver, *, created, move, method=PaymentMethod.CLICK, start=AT_CREATION):
+    """An order out for delivery and still unpaid, created `created`, whose stop is where `move` starts."""
+    order = _click_order(
+        db,
+        user,
+        created=created,
+        online_payable_since=start,
+        status=OrderStatus.OUT_FOR_DELIVERY,
+        method=method,
+        delivery_date=created.date(),
+    )
+    order.delivery_address_id = address.id
+    delivery = Delivery(
+        order_id=order.id,
+        delivery_person_id=driver.id,
+        scheduled_date=created,
+        scheduled_time_slot="anytime",
+        **MOVES[move],
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return order, delivery
+
+
+def _staff_move(client, headers, order, delivery, move, *, to: date):
+    """The staff action as the admin pages send it: the Reschedule modal's PATCH (the date key always present), or the
+    dispatch map's "Return to pool". The route-updated push to the driver's bot is external I/O."""
+    with patch("business_app.services.route_edit_service.notify_route_updated", autospec=True):
+        if move == "re-date":
+            return client.patch(
+                SCHEDULE_URL.format(order.id),
+                headers=headers,
+                json={"delivery_date": to.isoformat(), "delivery_window_start": None, "delivery_window_end": None},
+            )
+        return client.post(UNASSIGN_URL.format(delivery.id), headers=headers, json={"reason": "driver ran out of time"})
+
+
+def _published_pay(app, user, order_id, *, at: datetime):
+    """`customer_actions.pay` as the customer's clients read it at `at` (the order detail the bot and the site load)."""
+    with patch.object(customer_order_actions, "get_utc_now", lambda: at.astimezone(timezone.utc)):
+        resp = app.test_client().get(f"{ORDERS}/{order_id}?lang=en", headers=_headers(app, user))
+    assert resp.status_code == 200, resp.get_json()
+    return resp.get_json()["data"]["order"]["customer_actions"]["pay"]
+
+
+class TestAStaffMoveOpensAFreshWindow:
+    """Owner ruling 2026-11-02: when staff give an unpaid online order back its place (a re-date, say after a failed
+    delivery, or a picked-up stop returned to the pool), it gets a new 24-hour payment window from that moment. Its Pay
+    shows again with a fresh "Pay by", and the sweep cancels it only if it is still unpaid 24 hours later. Before the
+    ruling, the deadline counted from when the order first became payable, so the move put it past its deadline at
+    once: Pay vanished and the next :15 sweep cancelled the order staff had just kept."""
+
+    @pytest.mark.parametrize("move", sorted(MOVES))
+    def test_an_unpaid_click_order_moved_back_by_staff_is_payable_for_24_hours_more(
+        self, app, client, db, sample_user, user_address, second_delivery_driver, admin_claim_headers,
+        staff_moves_at_noon, sweep, published, move,
+    ):
+        noon = staff_moves_at_noon
+        seed_translations(db, PAY_COPY)
+        order, delivery = _waiting_stop(
+            db, sample_user, user_address, second_delivery_driver, created=noon - timedelta(days=3), move=move
+        )
+        before = _published_pay(app, sample_user, order.id, at=noon)
+        assert (before["allowed"], before["deadline_label"]) == (True, None)  # no deadline while it waits
+
+        resp = _staff_move(client, admin_claim_headers, order, delivery, move, to=noon.date() + timedelta(days=1))
+
+        assert resp.status_code == 200, resp.get_json()
+        moved = _fresh(db, order.id)
+        assert moved.status is OrderStatus.CONFIRMED
+        assert ensure_utc(moved.online_payable_since) == noon.astimezone(timezone.utc)
+        assert OrderService.payment_deadline(moved) == (noon + timedelta(hours=24)).astimezone(timezone.utc)
+        pay = _published_pay(app, sample_user, order.id, at=noon)
+        assert (pay["allowed"], pay["refusal"], pay["deadline_label"]) == (True, None, "Pay by 12:00 tomorrow.")
+
+        sweep(noon + timedelta(hours=1))
+        assert _status(db, order.id) is OrderStatus.CONFIRMED
+        assert published == []
+
+        sweep(noon + timedelta(hours=24, minutes=1))
+        assert _status(db, order.id) is OrderStatus.CANCELLED
+        assert published == [order.id]
+
+    @pytest.mark.parametrize("move", sorted(MOVES))
+    @pytest.mark.parametrize("shape", ["cash", "paid_click"])
+    def test_a_paid_or_cash_order_keeps_its_window_when_staff_move_it(
+        self, app, client, db, sample_user, user_address, second_delivery_driver, admin_claim_headers,
+        staff_moves_at_noon, shape, move,
+    ):
+        """Only an order the one Pay rule would let the customer pay online gets a window. A cash order has none; a
+        paid Click order keeps the one it had."""
+        noon = staff_moves_at_noon
+        created = noon - timedelta(days=3)
+        cash = shape == "cash"
+        order, delivery = _waiting_stop(
+            db,
+            sample_user,
+            user_address,
+            second_delivery_driver,
+            created=created,
+            move=move,
+            method=PaymentMethod.CASH if cash else PaymentMethod.CLICK,
+            start=None if cash else AT_CREATION,
+        )
+        if not cash:
+            order.payment.status = PaymentStatus.COMPLETED
+            order.payment.paid_at = created
+            order.is_paid = True
+            db.session.commit()
+
+        resp = _staff_move(client, admin_claim_headers, order, delivery, move, to=noon.date() + timedelta(days=1))
+
+        assert resp.status_code == 200, resp.get_json()
+        moved = _fresh(db, order.id)
+        assert moved.status is OrderStatus.CONFIRMED
+        expected = None if cash else created.astimezone(timezone.utc)
+        assert (ensure_utc(moved.online_payable_since) if moved.online_payable_since else None) == expected
+
+
 # --------------------------------------------------------------------------- the deadline-cancel notice
 
 
@@ -621,6 +763,8 @@ class TestTheCancellationNotice:
                 "order_id": order.id,
                 "order_number": order.order_number,
                 "deadline": "2027-01-05T12:00:00+05:00",
+                "subscription_id": None,
+                "actions": customer_order_actions.customer_actions(order, language="en"),
             },
         }
         assert bot.calls == [expected]
@@ -699,30 +843,92 @@ def _click_complete_form(pg_db, world):
     )
 
 
-def _on_its_own_thread(name, pg_app, call, answers, errors):
-    """`call()` on its own thread, app context, session and connection, as the webhook's gunicorn worker or the
-    Celery worker runs it. Its return value lands in `answers[name]`; anything it raises lands in `errors`."""
+def _on_its_own_thread(name, pg_app, call, answers, errors, finally_set=None):
+    """`call()` on its own thread, app context, session and connection, as the webhook's gunicorn worker, the driver's
+    request or the Celery worker runs it. Celery's default app is pinned as the thread's current app, the one the main
+    thread runs on (tests/conftest.py `celery_default_app_is_current`), so a task the writer calls or publishes
+    resolves the same way on every thread, whatever ran earlier in this worker. Its return value lands in
+    `answers[name]`; anything it raises lands in `errors`. `finally_set` is set however it ends, so the other side is
+    never left waiting."""
 
     def run():
-        with pg_app.app_context():
+        with celery_default_app_current(), pg_app.app_context():
             try:
                 answers[name] = call()
             except Exception as exc:  # noqa: BLE001 -- named by the assertion that reads `errors`
                 errors.append(f"{name}: {exc!r}")
+            finally:
+                if finally_set is not None:
+                    finally_set.set()
 
     return threading.Thread(target=run, name=name)
 
 
-def _committed_or_queued(thread, pg_db) -> str:
-    """What a writer just started on `thread` did: finished ("committed"), or queued on a row lock ("queued")."""
-    deadline = clock.monotonic() + 10
-    while clock.monotonic() < deadline:
-        if not thread.is_alive():
-            return "committed"
-        if _lock_waiters(pg_db):
-            return "queued"
-        clock.sleep(0.05)
-    return "neither"
+def _answered(response) -> tuple:
+    """A route's answer as a writer thread records it."""
+    return response.status_code, response.get_json()
+
+
+class _LockPoint:
+    """The first row lock a named writer thread takes on `table`, signalled by the writer itself: `reached` is set just
+    before its `SELECT ... FOR UPDATE` on that table goes to Postgres, `taken` once Postgres has answered it (the lock
+    is held). Read through SQLAlchemy's cursor events on `pg_app`'s engine, so no test polls `pg_stat_activity`."""
+
+    def __init__(self, engine, thread_name: str, table: str):
+        self.engine, self.thread_name, self.table = engine, thread_name, table
+        self.reached, self.taken = threading.Event(), threading.Event()
+        event.listen(engine, "before_cursor_execute", self._before)
+        event.listen(engine, "after_cursor_execute", self._after)
+
+    def _is_the_lock(self, statement: str) -> bool:
+        return (
+            threading.current_thread().name == self.thread_name
+            and "FOR UPDATE" in statement
+            and f"FROM {self.table}" in statement
+        )
+
+    def _before(self, conn, cursor, statement, parameters, context, executemany):
+        if not self.reached.is_set() and self._is_the_lock(statement):
+            self.reached.set()
+
+    def _after(self, conn, cursor, statement, parameters, context, executemany):
+        if self.reached.is_set() and not self.taken.is_set() and self._is_the_lock(statement):
+            self.taken.set()
+
+    def close(self):
+        event.remove(self.engine, "before_cursor_execute", self._before)
+        event.remove(self.engine, "after_cursor_execute", self._after)
+
+
+@pytest.fixture
+def lock_point(pg_db):
+    """`lock_point(thread_name, table)`: a `_LockPoint` on `pg_app`'s engine, removed after the test."""
+    made = []
+
+    def make(thread_name: str, table: str) -> _LockPoint:
+        made.append(_LockPoint(pg_db.engine, thread_name, table))
+        return made[-1]
+
+    yield make
+    for point in made:
+        point.close()
+
+
+# How long a writer that has sent its `SELECT ... FOR UPDATE` may go unanswered before it counts as queued on the lock.
+# A row lock held elsewhere never answers within it; a free row answers in milliseconds, far inside it even under the
+# full suite's load.
+_QUEUE_GRACE_SECONDS = 5
+
+
+def _committed_or_queued(thread, lock: _LockPoint) -> str:
+    """What a writer just started on `thread` did, read from its own signals at `lock`: took the lock and ran to its
+    end ("committed"), or reached the lock and was not given it ("queued"). Every wait is bounded."""
+    if not lock.reached.wait(timeout=30):
+        return "neither"
+    if not lock.taken.wait(timeout=_QUEUE_GRACE_SECONDS):
+        return "queued"
+    thread.join(timeout=30)
+    return "neither" if thread.is_alive() else "committed"
 
 
 def _prepaid_balance(world) -> Decimal:
@@ -750,10 +956,11 @@ class TestTheSweepDecidesOnLockedRows:
 
     The interleavings are forced: the other writer is started at a named point inside the sweep (or the sweep is
     started while the pickup holds its row), and every wait is bounded, so a missing lock fails the test instead of
-    hanging it."""
+    hanging it. Whether a writer queued on a row is read from the writer's own signal at its `SELECT ... FOR UPDATE`
+    (`_LockPoint`), never by polling `pg_stat_activity`, and each writer thread runs on Celery's default app, pinned."""
 
     def test_a_click_payment_that_lands_while_the_sweep_cancels_waits_and_is_refused(
-        self, pg_app, pg_db, pg_world, monkeypatch, notices_published
+        self, pg_app, pg_db, pg_world, monkeypatch, notices_published, lock_point
     ):
         """COMPLETE queues on the payment row the sweep holds. Once the cancel commits it reads the cancelled
         payment, whose amount the cancel set to what was collected (0), and answers Click with an error. Nothing is
@@ -764,12 +971,13 @@ class TestTheSweepDecidesOnLockedRows:
         complete = _on_its_own_thread(
             "click-complete", pg_app, lambda: PaymentService().handle_click_webhook(dict(form)), answers, errors
         )
+        payment_lock = lock_point("click-complete", "payments")
         claim = OrderService._claim_status_transition
 
         def the_payment_lands_now(self, order, old_status, new_status):
             if new_status is OrderStatus.CANCELLED and not complete.ident:
                 complete.start()
-                seen["complete"] = _committed_or_queued(complete, pg_db)
+                seen["complete"] = _committed_or_queued(complete, payment_lock)
             return claim(self, order, old_status, new_status)
 
         monkeypatch.setattr(OrderService, "_claim_status_transition", the_payment_lands_now)
@@ -791,7 +999,7 @@ class TestTheSweepDecidesOnLockedRows:
         assert notices_published == [world.order_id]
 
     def test_a_click_payment_that_completed_before_the_sweep_locked_the_order_keeps_it(
-        self, pg_app, pg_db, pg_world, monkeypatch, notices_published
+        self, pg_app, pg_db, pg_world, monkeypatch, notices_published, lock_point
     ):
         """COMPLETE commits after the sweep picked the order and before it locks it, while the sweep's session still
         holds the order and its payment as they were: the locked re-read sees the payment and the order stays."""
@@ -801,6 +1009,7 @@ class TestTheSweepDecidesOnLockedRows:
         complete = _on_its_own_thread(
             "click-complete", pg_app, lambda: PaymentService().handle_click_webhook(dict(form)), answers, errors
         )
+        payment_lock = lock_point("click-complete", "payments")
         lock_delivery = OrderScheduleService._lock_delivery
 
         def the_payment_lands_first(order_id):
@@ -808,7 +1017,7 @@ class TestTheSweepDecidesOnLockedRows:
                 # What a session that read the order before the payment completed holds.
                 held.extend([pg_db.session.get(Order, order_id), Payment.query.filter_by(order_id=order_id).one()])
                 complete.start()
-                seen["complete"] = _committed_or_queued(complete, pg_db)
+                seen["complete"] = _committed_or_queued(complete, payment_lock)
             return lock_delivery(order_id)
 
         monkeypatch.setattr(OrderScheduleService, "_lock_delivery", staticmethod(the_payment_lands_first))
@@ -831,7 +1040,7 @@ class TestTheSweepDecidesOnLockedRows:
         assert notices_published == []
 
     def test_an_admin_cancel_never_overwrites_a_click_payment_that_completed_behind_it(
-        self, pg_app, pg_db, pg_world, monkeypatch
+        self, pg_app, pg_db, pg_world, monkeypatch, lock_point
     ):
         """The admin's Cancel (`PUT /admin/orders/<id>/status`, as `adminService.updateOrderStatus` sends it) holds
         only the Order. A COMPLETE that commits after it read the payment keeps its COMPLETED row, and the cancelled
@@ -842,12 +1051,13 @@ class TestTheSweepDecidesOnLockedRows:
         complete = _on_its_own_thread(
             "click-complete", pg_app, lambda: PaymentService().handle_click_webhook(dict(form)), answers, errors
         )
+        payment_lock = lock_point("click-complete", "payments")
         claim = OrderService._claim_status_transition
 
         def the_payment_lands_now(self, order, old_status, new_status):
             if new_status is OrderStatus.CANCELLED and not complete.ident:
                 complete.start()
-                seen["complete"] = _committed_or_queued(complete, pg_db)
+                seen["complete"] = _committed_or_queued(complete, payment_lock)
             return claim(self, order, old_status, new_status)
 
         monkeypatch.setattr(OrderService, "_claim_status_transition", the_payment_lands_now)
@@ -872,7 +1082,7 @@ class TestTheSweepDecidesOnLockedRows:
         assert _prepaid_balance(world) == Decimal("15000.00")
 
     def test_the_sweep_waits_for_a_pickup_that_holds_the_stop_and_then_leaves_the_order(
-        self, pg_app, pg_db, pg_world, monkeypatch, notices_published
+        self, pg_app, pg_db, pg_world, monkeypatch, notices_published, lock_point
     ):
         """The driver's Picked up (`PUT /staff/delivery/<id>/status`, as staff_bot sends it) holds the Delivery when
         the sweep reaches the order. The sweep waits for it, re-reads the order the driver now has, and leaves it."""
@@ -907,26 +1117,31 @@ class TestTheSweepDecidesOnLockedRows:
             order_tasks.logger, "exception", lambda message, *args, **_kwargs: sweep_failures.append(message % args)
         )
         answers, errors = {}, []
-        pickup = _thread(
+        pickup = _on_its_own_thread(
             "pickup",
             pg_app,
-            lambda client: client.put(
-                DRIVER_STATUS_URL.format(delivery_id=world.delivery_id),
-                json={"status": "picked_up"},
-                headers=world.driver_headers,
+            lambda: _answered(
+                pg_app.test_client().put(
+                    DRIVER_STATUS_URL.format(delivery_id=world.delivery_id),
+                    json={"status": "picked_up"},
+                    headers=world.driver_headers,
+                )
             ),
             answers,
             errors,
             finally_set=pickup_holds_the_row,
         )
         sweep = _on_its_own_thread("sweep", pg_app, _sweep, answers, errors)
+        delivery_lock = lock_point("sweep", "deliveries")
 
         pickup.start()
         try:
             assert pickup_holds_the_row.wait(timeout=30), "the pickup never reached its locked read"
             assert errors == [], errors
             sweep.start()
-            assert _await_a_lock_waiter(pg_db), "the sweep did not wait: it decided without the Delivery lock"
+            assert (
+                _committed_or_queued(sweep, delivery_lock) == "queued"
+            ), "the sweep did not wait: it decided without the Delivery lock"
             assert sweep.is_alive(), "the sweep finished while the pickup held the row"
         finally:
             release_the_pickup.set()

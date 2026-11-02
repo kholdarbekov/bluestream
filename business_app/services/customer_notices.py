@@ -15,16 +15,22 @@ customer_notice_builders.py::CONTRACT_KEYS and tests/telegram_bot/test_webhook_c
     envelope                      notice_id, kind, telegram_id, language
     subscription_order_created    order_id, order_number, delivery_date, window_start, window_end, time_kind,
                                   items [{name, qty}], not_included [name], total, payment, amount_due,
-                                  prepaid_applied, deadline
-    subscription_delivery_skipped subscription_name, skipped_dates, reason, next_delivery_date
-    subscription_paid_order_kept  order_id, order_number, delivery_date, trigger, next_delivery_date
-    order_payment_expired         order_id, order_number, deadline
+                                  prepaid_applied, deadline, subscription_id, actions
+    subscription_delivery_skipped subscription_id, subscription_name, skipped_dates, reason, next_delivery_date
+    subscription_paid_order_kept  order_id, order_number, delivery_date, trigger, next_delivery_date,
+                                  subscription_id, actions
+    order_payment_expired         order_id, order_number, deadline, subscription_id, actions
     subscription_schedule_changed subscription_id, subscription_name, changes, old_window, new_window, old_weekday,
-                                  new_weekday, added_weekdays, next_delivery_date, time_kind
+                                  new_weekday, added_weekdays, removed_weekdays, next_delivery_date,
+                                  kept_order_note, time_kind
+`subscription_id` is None for an ordinary order. `actions` is `customer_actions(order)`, the backend's published
+answers (pay, cancel, confirm): the bot draws Pay from `actions["pay"]` and the email links the website page, and
+neither re-derives the rule.
 Dates are ISO, money a float, a deadline an ISO instant in local time: each channel formats them by its own
 rule (the bot's `utils.format_date`, the email's `helpers.format_datetime`). `payment` is the backend's one
-answer to "how is this order paid": cash, company_account, online_unpaid (Pay now, the deadline) or
-online_paid. `language` is decided here once (`shared.i18n_rendering.reminder_language`); the bot renders in
+answer to "how is this order paid": cash, company_account, online_unpaid (the published Pay is allowed; `deadline`
+is when it closes) or online_paid, and None (no payment line) for an unpaid online order whose Pay is refused or has
+no deadline. `language` is decided here once (`shared.i18n_rendering.reminder_language`); the bot renders in
 it and never reads the customer's stored language. `notice_id` is stable across retries: the bot sends one
 message per id.
 """
@@ -40,6 +46,8 @@ from business_app.models.product import Product
 from business_app.models.user import User
 from business_app.services.notification_service import NotificationService
 from business_app.services import subscription_display
+from business_app.services.customer_links import order_page_url_for, subscription_page_url, tracking_url
+from business_app.services.customer_order_actions import customer_actions, pay_answer
 from business_app.services.order_service import OrderService
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.bot_webhook import trigger_bot_webhook
@@ -64,7 +72,8 @@ SUBSCRIPTION_DELIVERY_SKIPPED = NotificationType.SUBSCRIPTION_DELIVERY_SKIPPED.v
 SUBSCRIPTION_PAID_ORDER_KEPT = NotificationType.SUBSCRIPTION_PAID_ORDER_KEPT.value
 ORDER_PAYMENT_EXPIRED = NotificationType.ORDER_PAYMENT_EXPIRED.value
 SUBSCRIPTION_SCHEDULE_CHANGED = NotificationType.SUBSCRIPTION_SCHEDULE_CHANGED.value
-# The facts a schedule change carries, as `SubscriptionService.reconcile_with_slots` records them.
+# The facts a schedule change carries, as `SubscriptionService.reconcile_with_slots` records them. The next delivery
+# and its kept-order note are read when the notice is sent (`send_schedule_changed`).
 _SCHEDULE_CHANGED_FACTS = (
     "subscription_id",
     "subscription_name",
@@ -74,8 +83,17 @@ _SCHEDULE_CHANGED_FACTS = (
     "old_weekday",
     "new_weekday",
     "added_weekdays",
-    "next_delivery_date",
     "time_kind",
+)
+
+NOTICE_KINDS = frozenset(
+    {
+        SUBSCRIPTION_ORDER_CREATED,
+        SUBSCRIPTION_DELIVERY_SKIPPED,
+        SUBSCRIPTION_PAID_ORDER_KEPT,
+        ORDER_PAYMENT_EXPIRED,
+        SUBSCRIPTION_SCHEDULE_CHANGED,
+    }
 )
 
 PAY_CASH = "cash"
@@ -101,7 +119,6 @@ def send_order_created(order: Order, *, notice_id: str, not_included_product_ids
         SUBSCRIPTION_ORDER_CREATED,
         _order_created_facts(order, not_included_product_ids),
         notice_id=notice_id,
-        order=order,
     )
 
 
@@ -113,6 +130,7 @@ def send_delivery_skipped(subscription, facts: Dict[str, Any], *, notice_id: str
         user,
         SUBSCRIPTION_DELIVERY_SKIPPED,
         {
+            "subscription_id": subscription.id,
             "subscription_name": subscription.name,
             "skipped_dates": list(facts.get("skipped_dates") or []),
             "reason": get_translation(f"api.subscriptions.skip_reason.{reason_code}", _language(user)),
@@ -133,6 +151,7 @@ def send_paid_order_kept(order: Order, facts: Dict[str, Any], *, notice_id: str)
             "delivery_date": order.delivery_date.isoformat() if order.delivery_date else facts.get("delivery_date"),
             "trigger": facts.get("trigger"),
             "next_delivery_date": facts.get("next_delivery_date"),
+            **_order_facts(order, _language(order.user)),
         },
         notice_id=notice_id,
     )
@@ -140,11 +159,18 @@ def send_paid_order_kept(order: Order, facts: Dict[str, Any], *, notice_id: str)
 
 def send_schedule_changed(subscription, facts: Dict[str, Any], *, notice_id: str) -> str:
     """A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5): the facts recorded with
-    the change, each a line of the message."""
+    the change, each a line of the message, and the next delivery as the card shows it now, with the note that an
+    order already placed stays as it is (`SubscriptionService.notice_next_delivery`, in the notice's language)."""
+    from business_app.services.subscription_service import SubscriptionService
+
     return _send(
         subscription.user,
         SUBSCRIPTION_SCHEDULE_CHANGED,
-        {key: facts.get(key) for key in _SCHEDULE_CHANGED_FACTS},
+        {
+            **{key: facts.get(key) for key in _SCHEDULE_CHANGED_FACTS},
+            "removed_weekdays": facts.get("removed_weekdays") or [],  # a row recorded before lost days were told
+            **SubscriptionService.notice_next_delivery(subscription, language=_language(subscription.user)),
+        },
         notice_id=notice_id,
     )
 
@@ -163,6 +189,7 @@ def send_payment_expired(order_id: int) -> str:
             "order_id": order.id,
             "order_number": order.order_number,
             "deadline": _local_iso(OrderService.payment_deadline(order)),
+            **_order_facts(order, _language(order.user)),
         },
         notice_id=f"order-payment-expired:{order.id}",
     )
@@ -173,7 +200,14 @@ def send_payment_expired(order_id: int) -> str:
 
 def payment_facts(order: Order) -> Dict[str, Any]:
     """How the order is paid, as the notice says it (§4.4): the rail, what the driver collects and the prepaid
-    credit already applied (cash), or the deadline an unpaid online order must be paid by (§4.5)."""
+    credit already applied (cash), or the deadline an unpaid online order must be paid by (§4.5).
+
+    "Pay by" is the published Pay's own answer (`customer_order_actions.pay_answer`, which `customer_actions.pay` and
+    the notice's `actions` read): the line is there only when that Pay is allowed and closes at a deadline, and its
+    deadline is that instant, the one `customer_actions.pay`'s `deadline_label` is worded from. An online order whose
+    Pay is refused (partly paid, nothing owed, its payment row on an offline rail, past its deadline) gets no payment
+    line, so a notice never says "please pay by" beside a Pay that is not there; nor does one whose Pay has no
+    deadline (the driver has it), which no notice could truthfully date."""
     facts = {"payment": None, "amount_due": None, "prepaid_applied": None, "deadline": None}
     payment = order.payment
     if order.payment_method == PaymentMethod.CASH:
@@ -184,7 +218,10 @@ def payment_facts(order: Order) -> Dict[str, Any]:
         return {**facts, "payment": PAY_COMPANY_ACCOUNT}
     if order.is_paid or (payment is not None and payment.status == PaymentStatus.COMPLETED):
         return {**facts, "payment": PAY_ONLINE_PAID}
-    return {**facts, "payment": PAY_ONLINE_UNPAID, "deadline": _local_iso(OrderService.payment_deadline(order))}
+    refusal, closes_at = pay_answer(order)
+    if refusal is not None or closes_at is None:
+        return facts
+    return {**facts, "payment": PAY_ONLINE_UNPAID, "deadline": _local_iso(closes_at)}
 
 
 def _order_created_facts(order: Order, not_included_product_ids: Sequence[int] = ()) -> Dict[str, Any]:
@@ -208,7 +245,14 @@ def _order_created_facts(order: Order, not_included_product_ids: Sequence[int] =
         ],
         "total": float(order.total_amount or 0),
         **payment_facts(order),
+        **_order_facts(order, language),
     }
+
+
+def _order_facts(order: Order, language: str) -> Dict[str, Any]:
+    """What every order notice carries about the order's place on the customer's surfaces: the subscription it
+    belongs to (None for an ordinary order) and the answers the backend publishes for it (Pay above all)."""
+    return {"subscription_id": order.subscription_id, "actions": customer_actions(order, language=language)}
 
 
 def _product_name(product: Optional[Product], product_id: int, language: str) -> str:
@@ -228,12 +272,11 @@ def _local_iso(instant: datetime) -> str:
 # --------------------------------------------------------------------------- the email's words
 
 
-def email_template_data(
-    kind: str, facts: Dict[str, Any], language: str, *, pay_url: Optional[str] = None
-) -> Dict[str, Any]:
+def email_template_data(kind: str, facts: Dict[str, Any], language: str) -> Dict[str, Any]:
     """The facts as the email template prints them, in `language`: dates and the deadline by the email's own
-    date rule, money with thousands separators, the window as one span, weekdays by name, and the Click link
-    (`pay_url`).
+    date rule, money with thousands separators, the window as one span, weekdays by name, and the website links
+    (never a payment link: a Pay opens the order's page, where the customer taps it). `pay_url` is there only
+    when the published Pay is allowed.
     `order_id` stays in, so the email's `Notification` row is linked to its order."""
     data: Dict[str, Any] = dict(facts)
     for key in ("delivery_date", "next_delivery_date"):
@@ -247,11 +290,16 @@ def email_template_data(
     data["time_label"] = _email_time_label(facts, language)
     for key in ("old_weekday", "new_weekday"):
         data[f"{key}_label"] = _email_weekday(facts.get(key), language)
-    data["added_weekdays_label"] = ", ".join(_email_weekday(day, language) for day in facts.get("added_weekdays") or [])
+    for key in ("added_weekdays", "removed_weekdays"):
+        data[f"{key}_label"] = ", ".join(_email_weekday(day, language) for day in facts.get(key) or [])
     # Nothing due (a prepaid balance covers it) and no prepaid credit both print as absent.
     for key in ("total", "amount_due", "prepaid_applied"):
         data[key] = NotificationService._format_money(facts[key]) if facts.get(key) else None
-    data["pay_url"] = pay_url
+    order_id, subscription_id = facts.get("order_id"), facts.get("subscription_id")
+    pay_allowed = (facts.get("actions") or {}).get("pay", {}).get("allowed")
+    data["order_url"] = tracking_url(order_id) if order_id else None
+    data["subscription_url"] = subscription_page_url(subscription_id) if subscription_id else None
+    data["pay_url"] = order_page_url_for(order_id, subscription_id) if order_id and pay_allowed else None
     return data
 
 
@@ -278,7 +326,7 @@ def _email_date(value: Optional[str], language: str) -> Optional[str]:
 # --------------------------------------------------------------------------- one channel
 
 
-def _send(user: User, kind: str, facts: Dict[str, Any], *, notice_id: str, order: Optional[Order] = None) -> str:
+def _send(user: User, kind: str, facts: Dict[str, Any], *, notice_id: str) -> str:
     """Telegram when the bot is connected, else email, else nothing. A bot the customer blocked marks the
     account blocked and falls through to email in the same attempt."""
     language = _language(user)
@@ -289,7 +337,7 @@ def _send(user: User, kind: str, facts: Dict[str, Any], *, notice_id: str, order
             return outcome
         channels = NotificationService._resolve_telegram_else_email(user)
     if NotificationChannel.EMAIL in channels:
-        return _send_email(user, kind, facts, language, order)
+        return _send_email(user, kind, facts, language)
     logger.info("Customer notice %s not sent: user %s has no deliverable channel", notice_id, user.id)
     return "no_channel"
 
@@ -319,14 +367,13 @@ def _send_telegram(user: User, kind: str, facts: Dict[str, Any], language: str, 
     raise RetryableNoticeError(f"customer notice {notice_id}: bot answered {status or result.get('message')}")
 
 
-def _send_email(user: User, kind: str, facts: Dict[str, Any], language: str, order: Optional[Order]) -> str:
+def _send_email(user: User, kind: str, facts: Dict[str, Any], language: str) -> str:
     """One attempt through the shared Brevo path, never retried (a retry could mail the customer twice)."""
-    pay_url = _pay_url(order) if facts.get("payment") == PAY_ONLINE_UNPAID else None
     results = NotificationService().send_notification(
         user.id,
         NotificationType(kind),
         channels=[NotificationChannel.EMAIL],
-        template_data=email_template_data(kind, facts, language, pay_url=pay_url),
+        template_data=email_template_data(kind, facts, language),
         language=language,
     )
     outcome = (results or {}).get(NotificationChannel.EMAIL.value) or {}
@@ -334,20 +381,3 @@ def _send_email(user: User, kind: str, facts: Dict[str, Any], language: str, ord
         return "email"
     logger.warning("Customer notice email (%s) to user %s failed: %s", kind, user.id, outcome)
     return "email_failed"
-
-
-def _pay_url(order: Optional[Order]) -> Optional[str]:
-    """The Click link the email carries (§4.4). `create_payment_link` only flushes the link onto the payment, so
-    it is committed here. No link (Click not configured, a gateway fault) still sends the email without one."""
-    from business_app.services.payment_service import PaymentService
-
-    if order is None or order.payment is None:
-        return None
-    try:
-        url = PaymentService().create_payment_link(order.payment.id)["payment_url"]
-        db.session.commit()
-        return url
-    except Exception:  # noqa: BLE001 - the notice still goes out
-        db.session.rollback()
-        logger.exception("No payment link for the notice of order %s", order.id)
-        return None

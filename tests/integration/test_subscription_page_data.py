@@ -8,8 +8,8 @@ paid order), plus:
 - the history merge (a customer skip of an unpaid order is ONE "Skipped" row; system skips; paging);
 - the preview: it writes nothing, and it equals what the save then gives;
 - the atomic replace-all items save (a refused line leaves every row as it was);
-- `can_pay` is the retry-payment route's rule, also after a failed attempt (Review Focus 3), and the
-  customer comes back to that subscription after paying;
+- `upcoming_delivery.can_pay` and Pay are the retry-payment route's rule, also after a failed attempt (Review
+  Focus 3), and the customer comes back to that subscription after paying;
 - the labels in en, uz and ru; the small fixes (`?page`, translated 400s, float money, MAX items, the shell).
 
 Driven through the endpoints the website calls, with the bodies it sends: base.js `apiRequest`'s cookie JWT and
@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from business_app.models.delivery import DeliveryTimeSlot
 from business_app.models.order import Order
 from business_app.models.product import Product
 from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
@@ -400,6 +401,54 @@ def test_a_skipped_date_the_clock_comes_back_to_is_planned_and_delivered(db, web
     ]
 
 
+def _delivered(db, order_id):
+    """What the driver's Delivered tap leaves on the order: it is delivered, so no longer coming."""
+    order = db.session.get(Order, order_id)
+    order.status = OrderStatus.DELIVERED
+    db.session.commit()
+
+
+@pytest.mark.parametrize("put_back", [_put_back_by_resume, _put_back_by_admin], ids=["resume", "admin_date"])
+def test_a_skipped_date_whose_order_was_delivered_shows_no_skip_on_the_waterline(
+    db, web, client, admin_headers, clock, no_order_yet, monday, put_back
+):
+    """Live drive D2: skip Thursday, then the clock comes back onto it (a resume, M1; or the admin's date), Wednesday's
+    run places Thursday's order and the driver delivers it. A delivered order is no longer coming, so the waterline
+    brought Thursday's old skip back ("Thu · Skipped") beside the delivered order in the Orders list. A date an order
+    covers is that order, never a skip."""
+    thursday = monday + timedelta(days=3)
+    resp = web.post(f"{BASE}/{no_order_yet}/skip-next-delivery", {"expected_date": thursday.isoformat()})
+    assert resp.status_code == 200, resp.get_json()
+    put_back(web, client, admin_headers, no_order_yet, thursday)
+    clock.at(monday + timedelta(days=2))  # Wednesday: the daily job places Thursday's order
+    process_daily_subscription_billing()
+    [order] = _orders(db, no_order_yet)
+    assert _detail(web, no_order_yet)["upcoming_dates"][0] == bottle(thursday, "placed")
+
+    clock.at(thursday)
+    _delivered(db, order.id)
+
+    for published in (_detail(web, no_order_yet), _listed(web, no_order_yet)):
+        assert published["upcoming_dates"] == [bottle(thursday + WEEK * n, "planned") for n in (1, 2, 3, 4)]
+        assert (published["upcoming_delivery"]["date"], published["upcoming_delivery"]["state"]) == (
+            (thursday + WEEK).isoformat(), "planned"
+        )
+
+
+def test_a_skipped_date_whose_order_was_cancelled_still_shows_skipped(db, web, build, monday):
+    """The other side of the rule: the skipped order itself is cancelled, which covers nothing."""
+    sub_id = build()
+    thursday = monday + timedelta(days=3)
+    skip = _detail(web, sub_id)["allowed_actions"]["skip"]
+    assert web.post(f"{BASE}/{sub_id}/skip-next-delivery", {"expected_date": skip["date"]}).status_code == 200
+    [order] = _orders(db, sub_id)
+    assert (order.delivery_date, order.status) == (thursday, OrderStatus.CANCELLED)
+
+    assert _detail(web, sub_id)["upcoming_dates"] == [bottle(thursday, "skipped")] + [
+        bottle(thursday + WEEK * n, "planned") for n in (1, 2, 3)
+    ]
+
+
 def test_a_skip_after_a_paid_order_skips_the_one_after_it(db, web, build, monday):
     sub_id = build(order="paid")
     thursday = monday + timedelta(days=3)
@@ -612,7 +661,6 @@ def test_the_history_merges_orders_and_skipped_deliveries(db, web, clock, build,
             "order_number": None,
             "status": {"code": "skipped", "label": "Skipped", "tone": "neutral"},
             "amount_label": None,
-            "can_pay": False,
             "customer_actions": None,
             "reason_label": BACKEND_TRANSLATIONS["api.subscriptions.skip_reason.date_passed"]["en"],
         },
@@ -624,7 +672,6 @@ def test_the_history_merges_orders_and_skipped_deliveries(db, web, clock, build,
             "order_number": second.order_number,
             "status": {"code": "delivered", "label": "Delivered", "tone": "success"},
             "amount_label": money_en(35000),
-            "can_pay": False,
             "customer_actions": delivered_actions,
             "reason_label": None,
         },
@@ -636,7 +683,6 @@ def test_the_history_merges_orders_and_skipped_deliveries(db, web, clock, build,
             "order_number": first.order_number,
             "status": {"code": "skipped", "label": "Skipped", "tone": "neutral"},
             "amount_label": None,
-            "can_pay": False,
             "customer_actions": None,
             "reason_label": "I'll be away",
         },
@@ -654,7 +700,7 @@ def test_an_unpaid_order_row_offers_pay(db, web, build):
     [row], meta = _history(web, sub_id)
 
     assert meta["total"] == 1
-    assert (row["kind"], row["order_id"], row["can_pay"]) == ("order", order.id, True)
+    assert (row["kind"], row["order_id"], row["customer_actions"]["pay"]["allowed"]) == ("order", order.id, True)
     assert row["status"] == {"code": "awaiting_payment", "label": "Waiting for payment", "tone": "warning"}
 
 
@@ -860,21 +906,18 @@ def test_a_discontinued_product_already_in_the_subscription_may_stay(db, web, bu
     assert {row[1]: row[2] for row in _items(db, sub_id)} == {sample_product.id: 4, cups.id: 1}
 
 
-def test_the_items_save_and_add_keep_max_subscription_items(app, db, web, build, sample_product, discounted,
-                                                             monkeypatch):
+def test_the_items_save_keeps_max_subscription_items(app, db, web, build, sample_product, discounted, monkeypatch):
     sub_id = build()  # two items
     monkeypatch.setitem(app.config, "MAX_SUBSCRIPTION_ITEMS", 2)
-    expected = "A subscription can hold up to 2 products."
 
     replaced = web.put(_lang(f"{BASE}/{sub_id}/items"), {"items": [
         {"product_id": sample_product.id, "quantity": 1},
         {"product_id": discounted.id, "quantity": 2},
         {"product_id": 999, "quantity": 1},
     ], "expected_state": _state(web, sub_id)})
-    added = web.post(_lang(f"{BASE}/{sub_id}/items"), {"product_id": discounted.id, "quantity": 2})
 
-    assert (replaced.status_code, added.status_code) == (400, 400)
-    assert replaced.get_json()["message"] == added.get_json()["message"] == expected
+    assert replaced.status_code == 400
+    assert replaced.get_json()["message"] == "A subscription can hold up to 2 products."
     assert len(_items(db, sub_id)) == 2
 
 
@@ -888,21 +931,10 @@ def test_a_cancelled_subscriptions_items_cannot_be_replaced(db, web, build, samp
     assert resp.get_json()["message"] == BACKEND_TRANSLATIONS["api.subscriptions.action.edit.closed"]["en"]
 
 
-@pytest.mark.parametrize("path, method", [
-    ("items", "post"), ("items/{item}", "put"), ("items/{item}", "delete"), ("items", "put"),
-])
-def test_every_item_path_takes_the_row_lock(db, web, build, sample_product, discounted, path, method):
+def test_the_items_save_takes_the_row_lock(db, web, build, sample_product):
+    """The one customer item write (the website's and the bot's Items save)."""
     sub_id = build()
-    item_id = [row[0] for row in _items(db, sub_id) if row[1] != sample_product.id][0]
-    body = {
-        ("items", "post"): {"product_id": discounted.id, "quantity": 2},
-        ("items/{item}", "put"): {"quantity": 3},
-        ("items/{item}", "delete"): None,
-        ("items", "put"): {
-            "items": [{"product_id": sample_product.id, "quantity": 1}],
-            "expected_state": _state(web, sub_id),
-        },
-    }[(path, method)]
+    body = {"items": [{"product_id": sample_product.id, "quantity": 1}], "expected_state": _state(web, sub_id)}
     locks = []
     real_fetch = SubscriptionService._fetch
 
@@ -911,17 +943,16 @@ def test_every_item_path_takes_the_row_lock(db, web, build, sample_product, disc
         return real_fetch(query, lock=lock)
 
     with patch.object(SubscriptionService, "_fetch", staticmethod(spy)):
-        url = f"{BASE}/{sub_id}/{path.format(item=item_id)}"
-        resp = web.delete(url) if method == "delete" else getattr(web, method)(url, body)
+        resp = web.put(f"{BASE}/{sub_id}/items", body)
 
-    assert resp.status_code in (200, 201), resp.get_json()
+    assert resp.status_code == 200, resp.get_json()
     assert locks and all(locks), locks
 
 
 # --------------------------------------------------------------------------- one unit price rule (B10)
 
 
-def test_create_add_and_the_builder_preview_price_items_at_the_current_customer_price(
+def test_create_the_items_save_and_the_builder_preview_price_items_at_the_current_customer_price(
     db, web, user_address, sample_product, discounted, every_day_slot
 ):
     sub_id = _create(web, user_address.id, [{"product_id": discounted.id, "quantity": 2}],
@@ -937,11 +968,13 @@ def test_create_add_and_the_builder_preview_price_items_at_the_current_customer_
 
     assert web.put(f"{BASE}/{sub_id}/items", {"items": [{"product_id": sample_product.id, "quantity": 1}],
                                               "expected_state": _state(web, sub_id)}).status_code == 200
-    added = web.post(f"{BASE}/{sub_id}/items", {"product_id": discounted.id, "quantity": 2})
-    assert added.status_code == 201, added.get_json()
-    assert added.get_json()["data"]["item"]["unit_price"] == 6000.0
+    added = web.put(f"{BASE}/{sub_id}/items", {"items": [
+        {"product_id": sample_product.id, "quantity": 1}, {"product_id": discounted.id, "quantity": 2},
+    ], "expected_state": _state(web, sub_id)})
+    assert added.status_code == 200, added.get_json()
+    assert [row[3] for row in _items(db, sub_id) if row[1] == discounted.id] == [Decimal("6000.00")]
     # 1 x 15 000 + 2 x 6 000: the total counts the item just added.
-    assert added.get_json()["data"]["new_billing_amount"] == 27000.0
+    assert added.get_json()["data"]["subscription"]["billing_amount"] == 27000.0
     assert _row(db, sub_id).billing_amount == Decimal("27000.00")
 
 
@@ -1084,6 +1117,44 @@ def test_a_switched_off_slot_reads_time_to_be_confirmed(db, web, user_address, s
     assert published["schedule_sentence"] == "Every Thursday, time to be confirmed"
 
 
+@pytest.mark.parametrize("language, all_week, six_days, any_time_all_week, any_time_six_days", [
+    ("en", "Every day, 10:00–12:00", "Every day (Mon–Sat), 10:00–12:00", "Every day, any time",
+     "Every day (Mon–Sat), any time"),
+    ("uz", "Har kuni, 10:00–12:00", "Har kuni (Du–Sh), 10:00–12:00", "Har kuni, istalgan vaqtda",
+     "Har kuni (Du–Sh), istalgan vaqtda"),
+    ("ru", "Каждый день, 10:00–12:00", "Каждый день (пн–сб), 10:00–12:00", "Каждый день, в любое время",
+     "Каждый день (пн–сб), в любое время"),
+])
+def test_a_daily_schedule_names_its_days_when_it_does_not_deliver_all_week(
+    db, web, user_address, sample_product, every_day_slot, monday, language, all_week, six_days, any_time_all_week,
+    any_time_six_days,
+):
+    """"Every day" only when the daily deliveries come all seven days. On a Monday-to-Saturday slot, or on Any time
+    while the delivery days are Monday to Saturday, the days are named. One sentence feeds the cabinet card and the
+    bot card (both read `GET /subscriptions/<id>`) and the edit preview."""
+    mon_to_sat = DeliveryTimeSlot(name="Mon-Sat", start_time="10:00", end_time="12:00", is_active=True,
+                                  available_days=[0, 1, 2, 3, 4, 5])
+    db.session.add(mon_to_sat)
+    db.session.commit()
+    items = [{"product_id": sample_product.id, "quantity": 2}]
+    daily = {"frequency": "daily", "delivery_day_of_week": None}
+    on_all_week = _create(web, user_address.id, items, delivery_time_slot_id=every_day_slot.id, **daily)
+    on_six_days = _create(web, user_address.id, items, delivery_time_slot_id=mon_to_sat.id, **daily)
+    any_time = _create(web, user_address.id, items, **daily)
+
+    assert _detail(web, on_all_week, language)["schedule_sentence"] == all_week
+    assert _detail(web, on_six_days, language)["schedule_sentence"] == six_days
+    assert _detail(web, any_time, language)["schedule_sentence"] == any_time_all_week
+    preview = web.post(_lang(f"{BASE}/{on_all_week}/preview", language),
+                       {"frequency": "daily", "delivery_time_slot_id": mon_to_sat.id})
+    assert preview.status_code == 200, preview.get_json()
+    assert preview.get_json()["data"]["preview"]["schedule_sentence"] == six_days
+
+    every_day_slot.is_active = False  # the label rule only: Monday to Saturday are now the delivery days
+    db.session.commit()
+    assert _detail(web, any_time, language)["schedule_sentence"] == any_time_six_days
+
+
 @pytest.mark.parametrize("language, any_time, tbc", [
     ("uz", "Istalgan vaqtda", "Vaqti tasdiqlanadi"),
     ("ru", "В любое время", "Время уточняется"),
@@ -1121,18 +1192,21 @@ def test_the_page_labels_are_in_the_request_language(db, web, build, monday):
         "money": f"36{NBSP}000{NBSP}so'm", "in_2": "in 2 days", "in_5": "in 5 days", "in_21": "in 21 days",
         "today": "today", "tomorrow": "tomorrow", "bank": "Bank transfer",
         "by_weekday": "13:00 on Saturday", "by_date": "13:00 on 7 November",
+        "spans": ["Mon–Sat", "Mon, Wed, Fri", "Sat, Sun", "Mon–Wed, Fri, Sat"],
     }),
     ("ru", {
         "long": "четверг, 29 октября", "short": "чт, 29 окт.", "day_month": "29 октября",
         "money": f"36{NBSP}000{NBSP}сум", "in_2": "через 2 дня", "in_5": "через 5 дней", "in_21": "через 21 день",
         "today": "сегодня", "tomorrow": "завтра", "bank": "Банковский перевод",
         "by_weekday": "суббота, 13:00", "by_date": "7 ноября, 13:00",
+        "spans": ["пн–сб", "пн, ср, пт", "сб, вс", "пн–ср, пт, сб"],
     }),
     ("uz", {
         "long": "29-oktabr, payshanba", "short": "29-okt, Pa", "day_month": "29-oktabr",
         "money": f"36{NBSP}000{NBSP}so'm", "in_2": "2 kundan keyin", "in_5": "5 kundan keyin",
         "in_21": "21 kundan keyin", "today": "bugun", "tomorrow": "ertaga", "bank": "Bank o'tkazmasi",
         "by_weekday": "shanba, soat 13:00", "by_date": "7-noyabr, soat 13:00",
+        "spans": ["Du–Sh", "Du, Ch, Ju", "Sh, Ya", "Du–Ch, Ju, Sh"],
     }),
 ])
 def test_the_display_labels_in_each_language(app, db, language, expected):
@@ -1159,12 +1233,15 @@ def test_the_display_labels_in_each_language(app, db, language, expected):
             "by_date"
         ]
         assert display_labels.window(None, None) is None
+        # Some weekdays, Monday first: three or more in a row as one span, the rest one by one.
+        day_sets = [{5, 4, 3, 2, 1, 0}, {0, 2, 4}, {6, 5}, {0, 1, 2, 4, 5}]
+        assert [display_labels.weekday_span(days, language) for days in day_sets] == expected["spans"]
 
 
 # --------------------------------------------------------------------------- the small fixes (B12)
 
 
-@pytest.mark.parametrize("path", ["", "/{sub}/history", "/{sub}/logs"])
+@pytest.mark.parametrize("path", ["", "/{sub}/history"])
 @pytest.mark.parametrize("page", ["abc", "0", "-1"])
 def test_a_page_that_is_not_a_positive_whole_number_is_a_400(db, web, build, path, page):
     sub_id = build()
@@ -1187,13 +1264,18 @@ def test_a_refused_body_carries_a_translated_message(db, web, build, method, pat
     assert resp.get_json()["error"] == "Validation failed"
 
 
+def _without(db, sub_id, product_id):
+    """The Items save's body after the customer removes `product_id`: every other line, as is."""
+    return [{"product_id": row[1], "quantity": row[2]} for row in _items(db, sub_id) if row[1] != product_id]
+
+
 def test_removing_an_item_answers_its_money_as_a_number(db, web, build, cups):
     sub_id = build()
-    item_id = [row[0] for row in _items(db, sub_id) if row[1] == cups.id][0]
-    resp = web.delete(f"{BASE}/{sub_id}/items/{item_id}")
+    resp = web.put(f"{BASE}/{sub_id}/items", {"items": _without(db, sub_id, cups.id),
+                                              "expected_state": _state(web, sub_id)})
     assert resp.status_code == 200, resp.get_json()
-    assert resp.get_json()["data"]["new_billing_amount"] == 30000.0
-    assert isinstance(resp.get_json()["data"]["new_billing_amount"], float)
+    assert resp.get_json()["data"]["subscription"]["billing_amount"] == 30000.0
+    assert isinstance(resp.get_json()["data"]["subscription"]["billing_amount"], float)
 
 
 @pytest.mark.parametrize("actor", ["customer", "admin"])
@@ -1203,7 +1285,8 @@ def test_removing_an_item_no_longer_counts_it_in_the_billing_amount(client, db, 
     sub_id = build()
     item_id = [row[0] for row in _items(db, sub_id) if row[1] == cups.id][0]
     if actor == "customer":
-        resp = web.delete(f"{BASE}/{sub_id}/items/{item_id}")
+        resp = web.put(f"{BASE}/{sub_id}/items", {"items": _without(db, sub_id, cups.id),
+                                                  "expected_state": _state(web, sub_id)})
     else:
         resp = client.delete(f"/api/v1/admin/subscriptions/{sub_id}/items/{item_id}", headers=admin_headers)
     assert resp.status_code == 200, resp.get_json()

@@ -84,3 +84,11 @@ def _restore_log_propagation():
     for name in _BOT_LOGGERS:
         logging.getLogger(name).propagate = True
     yield
+
+
+@pytest.fixture(autouse=True)
+def _bot_tests_do_not_depend_on_the_environments_website(monkeypatch):
+    """`COMPANY_WEBSITE` decides whether the bot offers "Open on website" (a public https site only), and it differs
+    between the dev .env, CI and prod. Pin it to a site that offers nothing; a test that needs the login row sets
+    an https public value itself."""
+    monkeypatch.setenv("COMPANY_WEBSITE", "http://localhost:5000")

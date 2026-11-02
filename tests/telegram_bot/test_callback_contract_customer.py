@@ -608,6 +608,7 @@ _AVAILABLE_METHODS = [
 # `customer_actions.pay` / `.cancel` as `serialize_order` publishes them (tests/fixtures/customer_order_actions/): the
 # Pay every order screen draws, and the removal it confirms, one per `via`.
 _PUBLISHED_PAY = {"allowed": True, "label": "Pay 30 000 so'm", "expected_amount": "30000.00"}
+_PUBLISHED_REORDER = {"allowed": True, "label": "Reorder"}
 _PUBLISHED_REMOVALS = {
     "skip": {
         "allowed": True,
@@ -772,15 +773,20 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     for status in ("pending", "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"):
         add(
             f"OrderKeyboards.order_details({status})",
-            OrderKeyboards.order_details(51, status, lang, pay=None, cancel=None),
+            OrderKeyboards.order_details(51, status, lang, pay=None, cancel=None, reorder=None),
         )
     # The published Pay and each published removal, drawn and confirmed (spec 2026-10-27 §5.3).
     for via, cancel in _PUBLISHED_REMOVALS.items():
         add(
             f"OrderKeyboards.order_details(pay, {via})",
-            OrderKeyboards.order_details(51, "pending", lang, pay=_PUBLISHED_PAY, cancel=cancel),
+            OrderKeyboards.order_details(51, "pending", lang, pay=_PUBLISHED_PAY, cancel=cancel, reorder=None),
         )
         add(f"OrderKeyboards.remove_confirmation({via})", OrderKeyboards.remove_confirmation(51, cancel, lang))
+    # The published Reorder (the one reorder rule) on a delivered order.
+    add(
+        "OrderKeyboards.order_details(reorder)",
+        OrderKeyboards.order_details(51, "delivered", lang, pay=None, cancel=None, reorder=_PUBLISHED_REORDER),
+    )
     add("OrderKeyboards.order_tracking", OrderKeyboards.order_tracking(51, lang))
     add("OrderKeyboards.asl_belgisi_error", OrderKeyboards.asl_belgisi_error(lang))
 
@@ -949,13 +955,14 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
         add(f"DeliverySummaryKeyboards.summary(reorder={reorder_order_id})", DeliverySummaryKeyboards.summary(lang, 51, reorder_order_id))
 
     # -- customer notices (plan 2026-10-24 Task 3) -----------------------------
-    # Pay now + View order (an unpaid Click order), View order alone; a notice without an order has no buttons.
-    for pay_now in (True, False):
+    # Pay + View order + Open subscription (an unpaid Click subscription order), each alone, and nothing at all.
+    pay = {'label': 'Pay 30 000 so\'m', 'expected_amount': '30000.00'}
+    for order_id, subscription_id, published_pay in ((51, 7, pay), (51, None, None), (None, 7, None), (51, None, {'label': 'Pay now', 'expected_amount': None})):
         add(
-            f"CustomerNoticeKeyboards.notice(pay_now={pay_now})",
-            CustomerNoticeKeyboards.notice(lang, order_id=51, pay_now=pay_now),
+            f"CustomerNoticeKeyboards.notice(order={order_id}, subscription={subscription_id}, pay={bool(published_pay)})",
+            CustomerNoticeKeyboards.notice(lang, order_id=order_id, subscription_id=subscription_id, pay=published_pay),
         )
-    assert CustomerNoticeKeyboards.notice(lang, order_id=None, pay_now=False) is None
+    assert CustomerNoticeKeyboards.notice(lang, order_id=None, subscription_id=None, pay=None) is None
 
     return out
 

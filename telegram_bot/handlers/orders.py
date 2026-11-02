@@ -15,7 +15,7 @@ from address_text import address_block_markdown_v2, address_lines
 from i18n import i18n
 from keyboards import (
     OrderKeyboards, ProfileKeyboards, ORDERS_PAGE_PATTERN,
-    parse_order_remove_callback, published_cancel, published_pay,
+    parse_order_remove_callback, published_cancel, published_pay, published_reorder,
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
@@ -87,6 +87,16 @@ _CANCEL_REFUSED_KEYS = {
     'PAID': 'telegram.orders.cancel_refused.paid',
     'WITH_DRIVER': 'telegram.orders.cancel_refused.with_driver',
 }
+
+
+def _refusal_copy_key(refusal_copy: str | None, reason_code: str | None) -> str | None:
+    """This chat's copy for a refused removal. The backend chooses the words once and publishes their id as
+    `refusal_copy` (`customer_order_actions.cancel_refusal_copy`: a stale Skip "can no longer be skipped"), and the
+    bot shows `telegram.orders.<id>`, the same words as the website in this chat's tone. A payload from before the
+    field falls back to the copy by `reason_code`; None when neither names one."""
+    if isinstance(refusal_copy, str) and refusal_copy:
+        return f'telegram.orders.{refusal_copy}'
+    return _CANCEL_REFUSED_KEYS.get(reason_code)
 
 
 def _cancelling_order_id(query_data) -> int | None:
@@ -635,7 +645,7 @@ class OrderHandlers(BaseHandler):
                     name = next((i.get('product_name', unknown_text) for i in items if i.get('product_id') == pid), unknown_text)
                     details_text += f"• 🎁 {name} x{qty} — {free_suffix}\n"
 
-            # Pay and the removal are the backend's published answers; the bot checks no status itself.
+            # Pay, the removal and Reorder are the backend's published answers; the bot checks no status itself.
             pay = published_pay(order)
             cancel = published_cancel(order)
             if pay and pay.get('deadline_label'):
@@ -654,7 +664,7 @@ class OrderHandlers(BaseHandler):
                 )
 
             keyboard = OrderKeyboards.order_details(
-                order_id, order.get('status', ''), language, pay=pay, cancel=cancel,
+                order_id, order.get('status', ''), language, pay=pay, cancel=cancel, reorder=published_reorder(order),
             )
 
             logger.info(f"order_details handler: details_text after escaping: {details_text}")
@@ -722,8 +732,11 @@ class OrderHandlers(BaseHandler):
             cancel = published_cancel(order)
             if cancel is None:
                 # The order moved on since its Cancel was drawn: say why, in this chat's words.
-                refusal = ((order.get('customer_actions') or {}).get('cancel') or {}).get('refusal')
-                refused_key = _CANCEL_REFUSED_KEYS.get(refusal, _CANCEL_REFUSED_KEYS['NOT_CANCELLABLE'])
+                closed = (order.get('customer_actions') or {}).get('cancel') or {}
+                refused_key = (
+                    _refusal_copy_key(closed.get('refusal_copy'), closed.get('refusal'))
+                    or _CANCEL_REFUSED_KEYS['NOT_CANCELLABLE']
+                )
                 await self._edit_or_replace_callback_message(
                     query, i18n.get(refused_key, language),
                     reply_markup=OrderKeyboards.order_tracking(order_id, language),
@@ -750,7 +763,8 @@ class OrderHandlers(BaseHandler):
         200: the backend's sentence ("Skipped. Your next delivery is …"), then the
         subscription the order belongs to, or the orders list. 409 (the screen went
         stale): the backend's "This changed", then the order as it stands now. A
-        coded refusal replaces the confirmation with this chat's copy for it, so
+        coded refusal replaces the confirmation with this chat's copy for the
+        `refusal_copy` it carries (by `reason_code` for an older backend), so
         nothing stale is left to tap.
         """
         try:
@@ -801,7 +815,7 @@ class OrderHandlers(BaseHandler):
             # backend's `message` the same way, never as a toast: Telegram
             # refuses a callback answer over 200 characters, and the web
             # wording with the bot link runs past it.
-            refused_key = _CANCEL_REFUSED_KEYS.get(reason)
+            refused_key = _refusal_copy_key(self._response_detail(response, 'refusal_copy'), reason)
             text = i18n.get(refused_key, language) if refused_key else response.error
             await self._edit_or_replace_callback_message(
                 query, text, reply_markup=OrderKeyboards.order_tracking(order_id, language),

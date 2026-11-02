@@ -340,12 +340,12 @@ describe('the checkout wait and the cash rescue', () => {
     expect(page.$1('[data-order-action="switch-to-cash"]').getAttribute('aria-disabled')).toBeNull();
   });
 
-  it('a stale rescue (409) shows its message inline, as a 400 does', async () => {
-    const refused = loadCase('rescue_cod_limit').exchange;
-    const message = 'This order is not eligible for cash retry';
-    const { page } = await rescue('rescue_asl_down', { [`POST ${refused.path}`]: { status: 409, body: { success: false, message } } });
+  it('a second rescue of the same order (409) shows the backend sentence inline, as a 400 does, and opens nothing', async () => {
+    const refused = loadCase('rescue_already_placed').exchange;
+    expect(refused.status).toBe(409);
+    const { page } = await rescue('rescue_asl_down', { [`POST ${refused.path}`]: { status: refused.status, body: refused.response } });
     await press(page, page.$1('[data-order-action="switch-to-cash"]'));
-    expect(squash(page.$1('.order-actions__error', statusEl(page)).textContent)).toBe(message);
+    expect(squash(page.$1('.order-actions__error', statusEl(page)).textContent)).toBe(refused.response.message);
     expect(page.navigate).not.toHaveBeenCalled();
   });
 });

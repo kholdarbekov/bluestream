@@ -281,7 +281,7 @@ async def test_a_tap_whose_message_telegram_did_not_include_is_left_as_it_is():
 OPEN_ORDER_DETAIL = {
     "id": OPEN_ORDER_ID, "order_number": "TG_000501_26", "status": "out_for_delivery",
     "created_at": "2026-10-21T08:00:00+00:00", "total_amount": 45000, "order_items": [],
-    "can_customer_cancel": False, "payment_info": {"is_payable": False},
+    "payment_info": {},
 }
 
 

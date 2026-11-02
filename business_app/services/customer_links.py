@@ -12,11 +12,12 @@ context. `website_url` is the one spelling of the website base and `bot_start_li
 Telegram connect link), so a change to a base or its slash rule cannot fork.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 from flask import current_app
 
 from shared.constants import ORDER_START_PREFIX, SUBSCRIPTION_START_PREFIX
+from shared.telegram_login import subscription_target
 
 PAY_CHANNEL_BOT = "bot"
 PAY_CHANNEL_WEB = "web"
@@ -40,16 +41,44 @@ def bot_start_link(payload: str) -> str:
     return f"{current_app.config['COMPANY_TELEGRAM_BOT_URL']}?start={payload}"
 
 
+def _subscription_path(subscription_id: int) -> str:
+    return subscription_target(subscription_id)  # the one spelling, shared with the sign-in allowlist
+
+
+def _tracking_path(order_id: int) -> str:
+    return f"/order-tracking?order_id={order_id}"
+
+
+def _order_page_path(order_id: int, subscription_id: Optional[int]) -> str:
+    """The one rule that picks an order's website page: its subscription on /my-subscriptions for a subscription
+    order, otherwise its tracking page."""
+    if subscription_id:
+        return _subscription_path(subscription_id)
+    return _tracking_path(order_id)
+
+
 def order_page_path(order) -> str:
-    """The website page that shows an order: its subscription on /my-subscriptions for a subscription order,
-    otherwise its tracking page."""
-    if order.subscription_id:
-        return f"/my-subscriptions?sub={order.subscription_id}"
-    return f"/order-tracking?order_id={order.id}"
+    """The website page that shows an order (see `_order_page_path`)."""
+    return _order_page_path(order.id, order.subscription_id)
 
 
 def order_page_url(order) -> str:
     return website_url(order_page_path(order))
+
+
+def order_page_url_for(order_id: int, subscription_id: Optional[int]) -> str:
+    """`order_page_url` for a notice, which carries the order's ids and not the row."""
+    return website_url(_order_page_path(order_id, subscription_id))
+
+
+def tracking_url(order_id: int) -> str:
+    """The order's tracking page, whatever kind of order it is."""
+    return website_url(_tracking_path(order_id))
+
+
+def subscription_page_url(subscription_id: int) -> str:
+    """A subscription's page on the website."""
+    return website_url(_subscription_path(subscription_id))
 
 
 def bot_order_link(order) -> str:

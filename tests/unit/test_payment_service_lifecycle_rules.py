@@ -170,6 +170,8 @@ class TestPaymentLifecycleRules:
             "business_app.tasks.notification_tasks.send_payment_confirmation_task.delay"
         ) as notify_delay:
             payment_service._handle_successful_payment(sample_payment)
+            notify_delay.assert_not_called()  # parked: published by the caller's commit (Task Hfix)
+            db.session.commit()
 
         # The generic "confirmed" notice goes out unless a caller sends its own (spec 2026-10-23 §9).
         order_service_cls.return_value.update_order_status.assert_called_once_with(
@@ -185,6 +187,8 @@ class TestPaymentLifecycleRules:
             "business_app.tasks.notification_tasks.send_payment_confirmation_task.delay"
         ) as notify_delay:
             payment_service._handle_successful_payment(sample_payment)
+            notify_delay.assert_not_called()  # parked: published by the caller's commit (Task Hfix)
+            db.session.commit()
 
         order_service_cls.return_value.update_order_status.assert_not_called()
         notify_delay.assert_called_once_with(sample_payment.id)

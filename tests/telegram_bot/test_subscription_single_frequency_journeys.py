@@ -59,7 +59,6 @@ TRANSLATIONS = {
     "telegram.subscription.next_delivery": "Next delivery",
     "telegram.subscription.delivery_day": "Delivery day",
     "telegram.subscription.delivery_time": "Delivery time",
-    "telegram.subscription.time_to_be_confirmed": "time to be confirmed",
     "telegram.subscription.items": "Items",
     "telegram.subscription.total": "Total",
     "telegram.subscription.id": "ID",

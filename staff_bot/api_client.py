@@ -15,63 +15,20 @@ import os
 from staff_bot.config import config
 from shared.bot_token_recovery import sign_in_again
 
+# Retry policy: the failure-phase rule (RFC 9110 section 9.2.2) lives in
+# shared/http_retry_safety.py, one rule for both bots. Re-exported here, so the staff bot's
+# handlers and tests keep importing these names from this module.
+from shared.http_retry_safety import (  # noqa: F401  (the two phase tuples are re-exported)
+    AMBIGUOUS_PHASE_ERRORS,
+    NEVER_DELIVERED_ERRORS,
+    IDEMPOTENT_METHODS,
+    may_retry_automatically,
+)
+
 logger = logging.getLogger('api_client')
 
-
-# --- Retry policy: classify by FAILURE PHASE, not by exception name ---------
-#
-# RFC 9110 §9.2.2: a non-idempotent request MUST NOT be retried automatically
-# once it may have reached the server. That binds the AUTOMATIC retrier — the
-# loop in `_make_request` — not the driver who deliberately taps again. nginx
-# removed transparent POST retry in 1.9.13 for exactly this reason; traefik
-# #8990, dotnet/aspire #4631 and varnish-cache #4413 all landed the same rule.
-#
-# httpx 0.28.1 hierarchy, MEASURED (see
-# .superpowers/sdd/2026-08-03-retry-safety/VERIFIED-FACTS.md §1) — there is NO
-# base class meaning "the request never left us", so the safe set is enumerated
-# by LEAF class and MUST be caught FIRST: `ConnectTimeout` and `PoolTimeout` are
-# `TimeoutException` subclasses, so an `except httpx.TimeoutException` above
-# this tuple would swallow the safe cases together with the unsafe ones.
-# `ConnectError` is a `NetworkError` — disjoint from `TimeoutException` — which
-# is why it needs naming here explicitly.
-NEVER_DELIVERED_ERRORS = (
-    httpx.ConnectTimeout,   # TCP/TLS handshake never completed
-    httpx.PoolTimeout,      # never even got a connection out of the pool
-    httpx.ConnectError,     # DNS failure / refused / unreachable
-    httpx.ProxyError,       # CONNECT tunnel never established
-)
-
-# Read/write phase. `ReadTimeout` means the request WAS delivered and the
-# response was lost. `WriteTimeout`/`WriteError` mean bytes may be partially on
-# the wire. `RemoteProtocolError` means the server closed mid-exchange. All are
-# ambiguous or worse, and re-sending a POST here is how one driver tap becomes
-# two ledger rows. Listed AFTER the tuple above; the bases here would otherwise
-# capture its leaves.
-AMBIGUOUS_PHASE_ERRORS = (
-    httpx.TimeoutException,      # what is LEFT: ReadTimeout, WriteTimeout
-    httpx.NetworkError,          # ReadError, WriteError, CloseError
-    httpx.RemoteProtocolError,
-)
-
-# `error_code` stamped on the terminal APIResponse when the loop gave up
-# BECAUSE the failure was ambiguous (as opposed to a deterministic client-side
-# error). It is deliberately absent from `BaseHandler.API_ERROR_CODE_KEY_MAP`,
-# so today every handler renders it exactly as it renders any other transport
-# failure. Note the resolution path: `_resolve_api_error_message`
-# (`staff_bot/handlers/base.py:276-287`) falls THROUGH an unmapped `error_code`
-# to `API_ERROR_MESSAGE_KEY_MAP`, which keys on the `error` STRING — and every
-# terminal give-up carries "Request failed after retries" (:475), mapped at
-# `base.py:102` to `staff.error.api.service_unavailable`. The "unexpected"
-# default at `base.py:306` is unreachable on this path. That matters: the
-# un-warned driver is told "service unavailable, please try later", which is
-# actively WRONG advice when the write may already have landed. Its jobs are to
-# make the "the request
-# MAY already be applied" case greppable in the staff_bot logs, and to give the
-# driver-facing "check the bottle statement before repeating" warning something
-# to key on.
-TRANSPORT_AMBIGUOUS_ERROR_CODE = "TRANSPORT_AMBIGUOUS"
-
-# The only verbs this client may re-send after an ambiguous failure.
+# The only verbs this client may re-send after an ambiguous failure: the shared idempotent set
+# plus PUT (the customer bot does NOT add PUT: its saves carry expected_state).
 #
 # PUT IS INCLUDED, and that is a verified claim, not an RFC assumption. Two of
 # the three PUTs this client issues are guarded state-machine transitions whose
@@ -120,7 +77,27 @@ TRANSPORT_AMBIGUOUS_ERROR_CODE = "TRANSPORT_AMBIGUOUS"
 # surfaces as a generic error. That is the intended behaviour — an auto-retried
 # money POST is the bug — but it is the sharp edge of this ruling, not a
 # footnote.
-RETRY_SAFE_METHODS = frozenset({"GET", "HEAD", "PUT"})
+RETRY_SAFE_METHODS = IDEMPOTENT_METHODS | {"PUT"}
+
+
+# `error_code` stamped on the terminal APIResponse when the loop gave up
+# BECAUSE the failure was ambiguous (as opposed to a deterministic client-side
+# error). It is deliberately absent from `BaseHandler.API_ERROR_CODE_KEY_MAP`,
+# so today every handler renders it exactly as it renders any other transport
+# failure. Note the resolution path: `_resolve_api_error_message`
+# (`staff_bot/handlers/base.py:276-287`) falls THROUGH an unmapped `error_code`
+# to `API_ERROR_MESSAGE_KEY_MAP`, which keys on the `error` STRING — and every
+# terminal give-up carries "Request failed after retries" (:475), mapped at
+# `base.py:102` to `staff.error.api.service_unavailable`. The "unexpected"
+# default at `base.py:306` is unreachable on this path. That matters: the
+# un-warned driver is told "service unavailable, please try later", which is
+# actively WRONG advice when the write may already have landed. Its jobs are to
+# make the "the request
+# MAY already be applied" case greppable in the staff_bot logs, and to give the
+# driver-facing "check the bottle statement before repeating" warning something
+# to key on.
+TRANSPORT_AMBIGUOUS_ERROR_CODE = "TRANSPORT_AMBIGUOUS"
+
 
 
 class CircuitBreaker:
@@ -292,18 +269,6 @@ class StaffAPIClient:
         # a concurrent handler that entered `async with` after us, and
         # (b) force the next caller to pay the TLS handshake cost again.
         return None
-
-    @staticmethod
-    def _may_retry_after_ambiguous_failure(method: str) -> bool:
-        """True only for verbs that are idempotent by HTTP semantics AND
-        verified idempotent server-side (see RETRY_SAFE_METHODS).
-
-        `.upper()` is defensive, not cosmetic: httpx normalises the verb inside
-        `httpx.Request.__init__`, but that happens AFTER this loop has already
-        made its retry decision, so a future lowercase caller would otherwise
-        fall silently into the "unknown verb" bucket.
-        """
-        return str(method).upper() in RETRY_SAFE_METHODS
 
     @staticmethod
     def _records_circuit_failure(exc: BaseException) -> bool:
@@ -531,7 +496,7 @@ class StaffAPIClient:
                     )
                     if self._records_circuit_failure(exc):
                         self._circuit_breaker.record_failure()
-                    if not self._may_retry_after_ambiguous_failure(method):
+                    if not may_retry_automatically(exc, method, RETRY_SAFE_METHODS):
                         logger.warning(
                             "Not retrying non-idempotent %s %s after an ambiguous "
                             "transport failure; the request may already be applied.",

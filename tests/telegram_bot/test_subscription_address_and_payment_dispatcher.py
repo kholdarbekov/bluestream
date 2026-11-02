@@ -147,13 +147,16 @@ class TestChoosingAMethodShowsItsConsequenceBeforeWriting:
 
 class TestChangeAddress:
     async def test_change_address_lists_saved_addresses_only(self, monkeypatch):
+        """The current address is named, not offered: a same-address "change" cannot be saved from the bot, as the
+        website cannot send one (M2). The other saved addresses are the choices; no add-address button."""
         bot = await _bot(monkeypatch, "write_address_move")
 
         await tap(bot, "change_address_1")
 
-        assert _text(bot) == _copy("telegram.subscription.select_new_address")
-        assert callbacks(bot) == ["subaddr_1_1", "subaddr_2_1", "edit_sub_1"]
-        assert labels(bot) == ["✓ 1 Test St, Tashkent", "Office", BACK]  # the current one ticked, no add-address button
+        current = _copy("telegram.subscription.current_address").format(address="1 Test St, Tashkent")
+        assert _text(bot) == f"{current}\n\n{_copy('telegram.subscription.select_new_address')}"
+        assert callbacks(bot) == ["subaddr_2_1", "edit_sub_1"]
+        assert labels(bot) == ["Office", BACK]
         assert not calls(bot, "POST", PREVIEW) and not calls(bot, "PUT", SUBSCRIPTION_PATH)
 
     async def test_the_address_preview_names_both_consequences_and_saves_once(self, monkeypatch):

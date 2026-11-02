@@ -44,6 +44,13 @@ _REORDER_REMINDER_ENDPOINT = 'reorder-reminder'
 # The customer notices (plan 2026-10-24 Task 3; spec 2026-10-23 §9). Same one-token rule: the route path,
 # the claim and its release.
 _CUSTOMER_NOTICE_ENDPOINT = 'customer-notice'
+
+# The payment confirmation (one stable request id per payment, `payment-confirm:<payment_id>`). Same one-token rule:
+# the route path, the claim and its release (step-4 live drive D1).
+_PAYMENT_SUCCESS_ENDPOINT = 'payment-success'
+# Remembers, for a day, a payment confirmation whose send failed: the backend's sweep re-sends it on every run, so only
+# the first failure is logged as an error with its traceback, and each repeat as a one-line warning.
+_PAYMENT_SUCCESS_FAILED_ENDPOINT = 'payment-success-failed'
 _NOTICE_ORDER_CREATED = 'subscription_order_created'
 _NOTICE_DELIVERY_SKIPPED = 'subscription_delivery_skipped'
 _NOTICE_PAID_ORDER_KEPT = 'subscription_paid_order_kept'
@@ -72,6 +79,7 @@ _SCHEDULE_CHANGE_KEYS = {
     'day_moved': 'telegram.customer_notice.schedule_change.day_moved',
     'date_moved': 'telegram.customer_notice.schedule_change.date_moved',
     'days_added': 'telegram.customer_notice.schedule_change.days_added',
+    'days_removed': 'telegram.customer_notice.schedule_change.days_removed',
 }
 
 # Answered with HTTP 410 when Telegram refuses the send because this account blocked the bot
@@ -79,6 +87,15 @@ _SCHEDULE_CHANGE_KEYS = {
 # non-200 bodies, keeping only their `message`), marks the account blocked and does not retry
 # (spec §7.2 c).
 _BOT_BLOCKED_CODE = 'BOT_BLOCKED'
+
+
+def _bot_blocked_response():
+    """The answer every route gives when Telegram refused its send with `Forbidden` (the customer blocked the bot, or
+    deleted their account): 410 BOT_BLOCKED, whose status the backend reads to mark the account blocked."""
+    return web.json_response(
+        {'success': False, 'error_code': _BOT_BLOCKED_CODE, 'message': 'Bot was blocked by the user'},
+        status=410,
+    )
 
 
 # BOT-007: IP allow-list for /internal/* webhook endpoints.
@@ -186,6 +203,10 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         added = data.get('added_weekdays')
         if not isinstance(added, list) or not all(_is_weekday(day) for day in added):
             return f"added_weekdays must be a list of weekdays 0-6, not {added!r}"
+        # remove the default after the step-4 release: a backend from before lost days were told sends none.
+        removed = data.get('removed_weekdays', [])
+        if not isinstance(removed, list) or not all(_is_weekday(day) for day in removed):
+            return f"removed_weekdays must be a list of weekdays 0-6, not {removed!r}"
     return None
 
 
@@ -211,8 +232,9 @@ def _schedule_change_line(language: str, code: str, data: dict) -> str:
         values = {'old_day': old_day, 'new_day': _notice_weekday(language, data.get('new_weekday'))}
     elif code == 'date_moved':
         values = {'old_day': old_day}
-    else:  # days_added
-        values = {'days': ', '.join(_notice_weekday(language, day) for day in data['added_weekdays']) or '—'}
+    else:  # days_added, days_removed
+        days = data.get('added_weekdays' if code == 'days_added' else 'removed_weekdays') or []
+        values = {'days': ', '.join(_notice_weekday(language, day) for day in days) or '—'}
     return i18n.get(_SCHEDULE_CHANGE_KEYS[code], language, **values)
 
 
@@ -224,6 +246,18 @@ def _notice_deadline(language: str, value) -> str:
         return format_datetime(datetime.fromisoformat(str(value)), language) if value else '—'
     except ValueError:
         return '—'
+
+
+def _notice_pay(language: str, data: dict) -> Optional[dict]:
+    """The Pay a notice offers: the backend's published `actions["pay"]` when it is allowed (its label and
+    `expected_amount`), else None. The bot decides nothing."""
+    if 'actions' in data:
+        pay = (data.get('actions') or {}).get('pay') or {}
+        return pay if pay.get('allowed') and pay.get('label') else None
+    # remove after the step-4 release: a notice queued by the old backend has no `actions`, only `payment`.
+    if data.get('kind') == _NOTICE_ORDER_CREATED and data.get('payment') == 'online_unpaid':
+        return {'label': i18n.get('telegram.payment.pay_now', language), 'expected_amount': None}
+    return None
 
 
 def _notice_payment_line(language: str, data: dict) -> str:
@@ -319,8 +353,11 @@ def _customer_notice_text(language: str, data: dict) -> str:
     if kind == _NOTICE_SCHEDULE_CHANGED:
         lines = [_schedule_change_line(language, code, data) for code in data['changes']]
         next_date = format_date(data.get('next_delivery_date'))
-        if next_date:  # a paused subscription has no next delivery
-            lines.append(i18n.get('telegram.customer_notice.schedule_changed_next', language, date=next_date))
+        if next_date:  # nothing coming (a paused subscription with no order kept) has no next delivery
+            next_line = i18n.get('telegram.customer_notice.schedule_changed_next', language, date=next_date)
+            # The backend's sentence for an order already placed, which keeps its day and window.
+            kept = _html_escaped(data.get('kept_order_note'))
+            lines.append(f"{next_line}\n{kept}" if kept else next_line)
         return i18n.get(
             'telegram.customer_notice.schedule_changed', language,
             subscription_name=_html_escaped(data.get('subscription_name')) or '—',
@@ -679,7 +716,7 @@ class WebhookServer:
 
         # Add routes
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
-        self.app.router.add_post('/internal/payment-success', self.payment_success_handler)
+        self.app.router.add_post(f'/internal/{_PAYMENT_SUCCESS_ENDPOINT}', self.payment_success_handler)
         self.app.router.add_post(f'/internal/{_DELIVERY_ENDPOINT}', self.delivery_completed_handler)
         self.app.router.add_post(f'/internal/{_AGENT_ORDER_ENDPOINT}',
                                  self.agent_order_proposed_handler)
@@ -705,7 +742,15 @@ class WebhookServer:
             "amount": 15000,
             "currency": "UZS"
         }
+
+        The X-Request-ID (`payment-confirm:<payment_id>`, one per payment) is claimed before the send and kept only
+        for a confirmation that was delivered. A send that fails releases it and answers 500; one Telegram refuses
+        because the customer blocked the bot releases it and answers 410 BOT_BLOCKED (the backend marks the account
+        and takes the email channel next). Either way the backend's re-dispatch is never answered "already processed"
+        for a message nobody received. The backend re-sends a failed one on every sweep run: within a day, only the
+        first failure of a request id is logged as an error with its traceback, each repeat as a warning.
         """
+        repeated_failure = False
         try:
             # Verify signature
             if not await verify_webhook_signature(request):
@@ -759,7 +804,7 @@ class WebhookServer:
             # genuine notification for the same order arrives later (e.g.
             # refund-then-success), it gets through under a different request_id.
             request_id = request.headers.get('X-Request-ID') or f"order:{order_id}"
-            if await self._is_duplicate_webhook('payment-success', request_id):
+            if await self._is_duplicate_webhook(_PAYMENT_SUCCESS_ENDPOINT, request_id):
                 logger.info(
                     "Duplicate payment webhook (endpoint=payment-success request_id=%s order=%s), skipping",
                     request_id, order_id,
@@ -769,82 +814,94 @@ class WebhookServer:
                     'message': 'Already processed (deduplicated)'
                 })
 
-            logger.info(f"Sending payment success notification to telegram_id {telegram_id} (user {user_id}) for order {order_number}")
+            # The claim is held from here on: every failure releases it, or the backend's re-dispatch of this
+            # request id (its side-effect sweep, after it un-marks the payment) would be answered "already
+            # processed" and the confirmation lost for good (step-4 live drive D1). The customer notice route's rule.
+            try:
+                logger.info(f"Sending payment success notification to telegram_id {telegram_id} (user {user_id}) for order {order_number}")
 
-            # Get user language
-            language = await i18n.get_user_language(telegram_id)
+                # Get user language
+                language = await i18n.get_user_language(telegram_id)
 
-            # Construct message with localized formatting
-            message_text = i18n.get(
-                'telegram.payment.success_message',
-                language,
-                order_number=order_number or str(order_id),
-                amount=f"{amount:,.0f}",
-                currency=currency
-            )
+                # Construct message with localized formatting
+                message_text = i18n.get(
+                    'telegram.payment.success_message',
+                    language,
+                    order_number=order_number or str(order_id),
+                    amount=f"{amount:,.0f}",
+                    currency=currency
+                )
 
-            # Try to edit the existing payment message, fall back to sending new.
-            # RED-005: the Redis lookup is TIER_CACHE (speedup only — fresh
-            # message is sent either way), but the Telegram edit is a business
-            # operation. Separate them so Redis failures become observable
-            # without masking Telegram-API edge cases (stale message id, etc).
-            import redis as redis_lib  # sync module, for exception types
-            message_edited = False
-            stored_message_id = None
+                # Try to edit the existing payment message, fall back to sending new.
+                # RED-005: the Redis lookup is TIER_CACHE (speedup only — fresh
+                # message is sent either way), but the Telegram edit is a business
+                # operation. Separate them so Redis failures become observable
+                # without masking Telegram-API edge cases (stale message id, etc).
+                import redis as redis_lib  # sync module, for exception types
+                message_edited = False
+                stored_message_id = None
 
-            # Resolve TokenManager via bot_data — `from token_manager import
-            # token_manager` was a broken import (no module-level singleton),
-            # so before this fix payment_success_handler raised ImportError
-            # *before* hitting the Telegram edit/send path, and the customer
-            # silently received nothing.
-            token_manager = (
-                self.bot_app.bot_data.get('token_manager')
-                if self.bot_app else None
-            )
-            if token_manager and token_manager.redis:
-                redis_key = RedisKeyspace.bot_payment_message(order_id)
-                try:
-                    stored_message_id = await token_manager.redis.get(redis_key)
-                except redis_lib.RedisError as redis_err:
-                    report_redis_failure(
-                        "webhook_server.payment_message_lookup", str(redis_err), tier="cache"
-                    )
-                    stored_message_id = None
+                # Resolve TokenManager via bot_data — `from token_manager import
+                # token_manager` was a broken import (no module-level singleton),
+                # so before this fix payment_success_handler raised ImportError
+                # *before* hitting the Telegram edit/send path, and the customer
+                # silently received nothing.
+                token_manager = (
+                    self.bot_app.bot_data.get('token_manager')
+                    if self.bot_app else None
+                )
+                if token_manager and token_manager.redis:
+                    redis_key = RedisKeyspace.bot_payment_message(order_id)
+                    try:
+                        stored_message_id = await token_manager.redis.get(redis_key)
+                    except redis_lib.RedisError as redis_err:
+                        report_redis_failure(
+                            "webhook_server.payment_message_lookup", str(redis_err), tier="cache"
+                        )
+                        stored_message_id = None
 
-            from keyboards import PaymentKeyboards
-            keyboard = PaymentKeyboards.payment_success(order_id, language)
+                from keyboards import PaymentKeyboards
+                keyboard = PaymentKeyboards.payment_success(order_id, language)
 
-            if stored_message_id:
-                try:
-                    await self.bot_app.bot.edit_message_text(
+                if stored_message_id:
+                    try:
+                        await self.bot_app.bot.edit_message_text(
+                            chat_id=telegram_id,
+                            message_id=int(stored_message_id),
+                            text=message_text,
+                            reply_markup=keyboard,
+                        )
+                        message_edited = True
+                        logger.info(f"Edited payment message {stored_message_id} for order {order_id}")
+                        # Best-effort cleanup; a delete failure here just leaves a
+                        # stale key that will expire naturally.
+                        try:
+                            await token_manager.redis.delete(redis_key)
+                        except redis_lib.RedisError as del_err:
+                            report_redis_failure(
+                                "webhook_server.payment_message_cleanup",
+                                str(del_err),
+                                tier="cache",
+                            )
+                    except Exception as edit_err:
+                        logger.warning(
+                            f"Failed to edit payment message, falling back to send_message: {edit_err}"
+                        )
+
+                if not message_edited:
+                    await self.bot_app.bot.send_message(
                         chat_id=telegram_id,
-                        message_id=int(stored_message_id),
                         text=message_text,
                         reply_markup=keyboard,
                     )
-                    message_edited = True
-                    logger.info(f"Edited payment message {stored_message_id} for order {order_id}")
-                    # Best-effort cleanup; a delete failure here just leaves a
-                    # stale key that will expire naturally.
-                    try:
-                        await token_manager.redis.delete(redis_key)
-                    except redis_lib.RedisError as del_err:
-                        report_redis_failure(
-                            "webhook_server.payment_message_cleanup",
-                            str(del_err),
-                            tier="cache",
-                        )
-                except Exception as edit_err:
-                    logger.warning(
-                        f"Failed to edit payment message, falling back to send_message: {edit_err}"
-                    )
-
-            if not message_edited:
-                await self.bot_app.bot.send_message(
-                    chat_id=telegram_id,
-                    text=message_text,
-                    reply_markup=keyboard,
-                )
+            except Forbidden as exc:
+                await self._release_webhook_dedup(_PAYMENT_SUCCESS_ENDPOINT, request_id)
+                logger.info("Payment confirmation %s not delivered, bot blocked: %s", request_id, exc)
+                return _bot_blocked_response()
+            except Exception:
+                await self._release_webhook_dedup(_PAYMENT_SUCCESS_ENDPOINT, request_id)
+                repeated_failure = await self._is_duplicate_webhook(_PAYMENT_SUCCESS_FAILED_ENDPOINT, request_id)
+                raise
 
             return web.json_response({
                 'success': True,
@@ -852,7 +909,10 @@ class WebhookServer:
             })
 
         except Exception as e:
-            logger.error(f"Error processing payment success: {e}", exc_info=True)
+            if repeated_failure:
+                logger.warning("Payment confirmation %s not delivered again: %s", request_id, e)
+            else:
+                logger.error(f"Error processing payment success: {e}", exc_info=True)
             return web.json_response({
                 'success': False,
                 'message': 'Internal server error'
@@ -1342,10 +1402,7 @@ class WebhookServer:
             except Forbidden as exc:
                 await release_claims()
                 logger.info("Reorder reminder %s not delivered, bot blocked: %s", episode_key, exc)
-                return web.json_response(
-                    {'success': False, 'error_code': _BOT_BLOCKED_CODE, 'message': 'Bot was blocked by the user'},
-                    status=410,
-                )
+                return _bot_blocked_response()
             except Exception:
                 await release_claims()
                 raise
@@ -1376,8 +1433,8 @@ class WebhookServer:
         guard, JSON parse, the payload checked BEFORE the claim (a broken one is 400 and claims nothing), one
         Redis claim on `notice_id`, render, send. Every failure after the claim releases it; a send Telegram
         refuses because the customer blocked the bot answers 410 BOT_BLOCKED (the backend marks the account
-        and emails instead). Buttons: Pay now for an unpaid Click order (`retry_payment`'s callback) and View
-        order, from `keyboards.CustomerNoticeKeyboards`.
+        and emails instead). Buttons, one per row, from `keyboards.CustomerNoticeKeyboards`: the
+        backend's published Pay (`actions["pay"]`, `retry_payment`'s callback), View order, Open subscription.
         """
         try:
             if not await verify_webhook_signature(request):
@@ -1411,7 +1468,8 @@ class WebhookServer:
                 keyboard = CustomerNoticeKeyboards.notice(
                     language,
                     order_id=_order_id_or_none(data.get('order_id')),
-                    pay_now=data['kind'] == _NOTICE_ORDER_CREATED and data.get('payment') == 'online_unpaid',
+                    subscription_id=_order_id_or_none(data.get('subscription_id')),
+                    pay=_notice_pay(language, data),
                 )
                 await self.bot_app.bot.send_message(
                     chat_id=data['telegram_id'],
@@ -1422,10 +1480,7 @@ class WebhookServer:
             except Forbidden as exc:
                 await self._release_webhook_dedup(_CUSTOMER_NOTICE_ENDPOINT, notice_id)
                 logger.info("Customer notice %s not delivered, bot blocked: %s", notice_id, exc)
-                return web.json_response(
-                    {'success': False, 'error_code': _BOT_BLOCKED_CODE, 'message': 'Bot was blocked by the user'},
-                    status=410,
-                )
+                return _bot_blocked_response()
             except Exception:
                 await self._release_webhook_dedup(_CUSTOMER_NOTICE_ENDPOINT, notice_id)
                 raise

@@ -116,7 +116,7 @@ class TokenService:
                 "status": user.status.value if hasattr(user.status, "value") else user.status,
                 "verified": user.is_verified,
                 "platform": getattr(request, "platform", "web"),
-                "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+                "ip": request.remote_addr,  # the customer (ProxyFix); X-Forwarded-For's leading entries are typed
                 "user_agent": request.headers.get("User-Agent", ""),
                 "issued_at": datetime.now(timezone.utc).isoformat(),
                 "session_id": self._generate_session_id(user.id),
@@ -267,7 +267,7 @@ class TokenService:
                 "status": user.status.value if hasattr(user.status, "value") else user.status,
                 "verified": user.is_verified,
                 "platform": claims.get("platform", "web"),
-                "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+                "ip": request.remote_addr,
                 "user_agent": request.headers.get("User-Agent", ""),
                 "issued_at": datetime.now(timezone.utc).isoformat(),
                 "session_id": session_id,

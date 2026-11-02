@@ -1,5 +1,5 @@
 {% extends "emails/base.html" %}
-{# NATIVE-READ (plan 2026-10-27 Task 7): the title, every sentence and the row label below. #}
+{# NATIVE-READ (plan 2026-10-27 Task 7; the days_removed paragraph: final fix wave 2026-11-02): the title, every sentence and the row label below. #}
 
 {% block title %}Расписание доставки изменилось - {{ company_name }}{% endblock %}
 
@@ -25,6 +25,8 @@
 <p>В этот день недели ({{ old_weekday_label }}) мы больше не доставляем, поэтому следующая доставка переносится на ближайший день доставки.</p>
 {% elif change == "days_added" %}
 <p>Новые дни доставки: {{ added_weekdays_label }}. Ежедневные доставки теперь приходят и в эти дни.</p>
+{% elif change == "days_removed" %}
+<p>Дни, когда доставки больше не будет: {{ removed_weekdays_label }}. Ежедневные доставки продолжатся в остальные дни.</p>
 {% endif %}
 {% endfor %}
 
@@ -36,8 +38,21 @@
     </tr>
 </table>
 {% endif %}
+{% if kept_order_note %}
+<p>{{ kept_order_note }}</p>
+{% endif %}
 
 <p>День и время доставки можно изменить в подписке.</p>
+
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Оплатить</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">Посмотреть заказ</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Открыть подписку</a></p>
+{% endif %}
 
 <hr class="divider">
 

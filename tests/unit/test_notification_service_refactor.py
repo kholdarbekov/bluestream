@@ -1236,6 +1236,7 @@ def _send_and_capture_telegram_text(monkeypatch, service, payment_id):
 def test_payment_confirmation_case_a_exact_payment_states_amount_only(app, db, sample_user, monkeypatch):
     """Case A: collected == order total. Say what was paid, no extra lines."""
     sample_user.telegram_id = '810000001'
+    sample_user.is_bot_active = True
     sample_user.preferred_language = 'en'
     db.session.commit()
     _seed_cash_payment_method_label(db, 'en')
@@ -1305,6 +1306,7 @@ def test_payment_confirmation_case_b_surplus_reserved_regression(app, db, sample
     total, and the reservation — with neither defect surviving.
     """
     sample_user.telegram_id = '810000002'
+    sample_user.is_bot_active = True
     sample_user.preferred_language = 'uz'
     db.session.commit()
     _seed_cash_payment_method_label(db, 'uz')
@@ -1379,6 +1381,7 @@ def test_payment_confirmation_case_c_surplus_settles_named_debt(app, db, sample_
     """Case C: the surplus settled an outstanding debt on an ALREADY
     DELIVERED order — must name that order's number and delivery date."""
     sample_user.telegram_id = '810000003'
+    sample_user.is_bot_active = True
     sample_user.preferred_language = 'en'
     db.session.commit()
     _seed_cash_payment_method_label(db, 'en')
@@ -1447,6 +1450,7 @@ def test_payment_confirmation_case_c_surplus_settles_debt_with_remainder_reserve
     """Case C variant: after clearing the named debt, money is STILL left
     over — both facts must be stated (debt covered AND remainder reserved)."""
     sample_user.telegram_id = '810000004'
+    sample_user.is_bot_active = True
     sample_user.preferred_language = 'en'
     db.session.commit()
     _seed_cash_payment_method_label(db, 'en')
@@ -1528,6 +1532,7 @@ def test_payment_confirmation_case_d_shortfall_states_received_and_next_delivery
     remainder is collected on the next delivery — the debt is disclosed NOW,
     not silently deferred to the customer's next checkout."""
     sample_user.telegram_id = '810000005'
+    sample_user.is_bot_active = True
     sample_user.preferred_language = 'en'
     db.session.commit()
     _seed_cash_payment_method_label(db, 'en')

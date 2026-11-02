@@ -220,7 +220,7 @@ def get_current_language() -> str:
 
     The language is already detected and set in g.language by the @app.before_request hook,
     which follows this priority order:
-    1. URL parameter (?lang=uz)
+    1. URL parameter (?lang=uz); the default language's 301 saves it to the session first
     2. JWT user preferred_language
     3. Session language
     4. Accept-Language header

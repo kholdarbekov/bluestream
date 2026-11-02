@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 REPO = Path(__file__).resolve().parents[2]
 
 # The shared/ modules the customer bot imports.
-BOT_SHARED_MODULES = ["shared.safe_paths"]
+BOT_SHARED_MODULES = ["shared.safe_paths", "shared.http_retry_safety", "shared.telegram_login"]
 
 _LOAD_WITHOUT_THE_BACKEND = """
 import importlib.abc

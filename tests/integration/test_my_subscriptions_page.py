@@ -85,6 +85,8 @@ SEEDED_PREFIXES = (
     "web.display_labels.",
     "api.payments.",
     "web.order_actions.",
+    "web.order_modal.",
+    "cabinet.orders.",
     COPY,
 )
 HELP_URL = "__TELEGRAM_BOT_URL__"  # the configured bot link differs per environment
@@ -323,6 +325,12 @@ def _paused_unpaid_leftover(w: _World):
         f"{API}/admin/orders/{order.id}/schedule", json={"delivery_date": "2026-10-30"}, headers=w.admin_headers()
     )
     assert resp.status_code == 200, resp.get_json()
+    # The re-date opened a fresh payment window (owner ruling 2026-11-02) on the wall clock; the world counts from its
+    # own frozen instant, as `daily_run` does for the stamps the engine writes.
+    rescheduled = w.order(1)
+    assert rescheduled.online_payable_since.replace(tzinfo=UTC) > w.now.astimezone(UTC)
+    rescheduled.online_payable_since = w.now.astimezone(UTC)
+    w.db.session.commit()
 
 
 def _cancelled_on_the_way(w: _World):
@@ -495,8 +503,8 @@ CASES = [
 
 
 def _speaks(db, user, language: str) -> None:
-    """The customer's own language: a Uzbek customer's `?lang=uz` (the default) is dropped from the URL, so the
-    page then answers in their stored preference, as it does for them."""
+    """The customer's own language: a Uzbek customer's `?lang=uz` (the default) is dropped from the URL with a
+    301 that saves uz to the session; the stored preference is what a visit with no session answers in."""
     user.preferred_language = language
     db.session.commit()
 

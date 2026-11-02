@@ -117,9 +117,7 @@ class TestOtpAllowlist:
         eskiz.send_sms.assert_not_called()
 
     def test_allowlist_contains_only_otp_keys(self):
-        assert OTP_SMS_TEMPLATE_KEYS == frozenset(
-            {"sms.verification.otp", "sms.password_reset.otp"}
-        )
+        assert OTP_SMS_TEMPLATE_KEYS == frozenset({"sms.verification.otp"})
 
 
 @pytest.mark.unit

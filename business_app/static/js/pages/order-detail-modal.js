@@ -89,7 +89,10 @@
         var modalContent = document.getElementById('orderDetailContent');
         var reorderBtn = document.getElementById('reorderBtn');
 
-        reorderBtn.style.display = order.status === 'delivered' ? 'inline-block' : 'none';
+        // Reorder is the backend's `customer_actions.reorder` (the one reorder rule), with its label.
+        var reorder = (order.customer_actions && order.customer_actions.reorder) || {};
+        reorderBtn.style.display = reorder.allowed ? 'inline-block' : 'none';
+        reorderBtn.querySelector('[data-reorder-label]').textContent = reorder.allowed ? reorder.label : '';
         reorderBtn.onclick = function () { reorderItems(order.id); };
 
         // Pay, Skip/Cancel/Decline and Confirm: the backend's `customer_actions` for this order, drawn by the one
@@ -198,20 +201,8 @@
         }
     }
 
-    async function reorderItems(orderId) {
-        try {
-            showNotification(PAGE_DATA.i18n.adding_to_cart, 'info');
-            var response = await apiRequest('/orders/' + orderId + '/reorder', { method: 'POST' });
-            if (response.ok) {
-                showNotification(PAGE_DATA.i18n.items_added, 'success');
-                setTimeout(function () { window.location.href = PAGE_DATA.cart_url; }, 1000);
-            } else {
-                var result = await response.json();
-                showNotification(result.message || PAGE_DATA.i18n.add_failed, 'error');
-            }
-        } catch (error) {
-            showNotification(PAGE_DATA.i18n.add_failed, 'error');
-        }
+    function reorderItems(orderId) {
+        return window.OrderActions.reorder(orderId, { cartUrl: PAGE_DATA.cart_url, words: PAGE_DATA.order_actions });
     }
 
     function trackOrderPackage(trackingNumber) {

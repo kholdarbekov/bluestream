@@ -262,17 +262,20 @@ class AuthService:
         # Reset failed login attempts
         self._reset_failed_attempts(identifier)
 
-        # Update last login
+        return user, self.issue_web_login(user)
+
+    def issue_web_login(self, user: User) -> Dict[str, str]:
+        """A website login for `user`, once a door has proven who they are: the password (`login_user`) or a
+        Telegram login button (`telegram_login_service.verify_login`, spec 2026-10-27 §9).
+
+        Stamps the last login, mints the token pair and records the login row. The caller writes the cookies
+        through the one cookie writer (`business_app.utils.auth_cookies.set_login_cookies`)."""
         user.last_login = datetime.now(timezone.utc)
         db.session.commit()
 
-        # Generate tokens
         tokens = self._generate_tokens(user)
-
-        # Log user session
         self._create_user_session(user.id, tokens["access_token"])
-
-        return user, tokens
+        return tokens
 
     def refresh_token(self, refresh_token: str) -> Dict[str, str]:
         """
@@ -505,35 +508,15 @@ class AuthService:
         """
         Request password reset.
 
-        For telegram users with placeholder emails, sends SMS if phone is verified.
-        Returns True even if user not found (prevents enumeration).
+        Emails a reset link. An account with no deliverable email (a bot customer's placeholder address) gets
+        nothing sent: it has no password to reset and signs in with "Open on website" in the bot (spec 2026-10-27 §9).
+        Returns True in every case (prevents enumeration).
         """
         user = User.query.filter((User.email == identifier.lower()) | (User.phone == identifier)).first()
 
-        if not user:
-            # Return True to prevent email enumeration
+        if not user or not is_deliverable_email(user.email):
             return True
 
-        # Check if user is a telegram-only user with placeholder email
-        is_telegram_placeholder = self._is_telegram_only_user(user)
-
-        if is_telegram_placeholder:
-            # Telegram users with placeholder emails can't receive email resets
-            if user.phone and user.phone_verified_at:
-                # Send OTP via SMS for phone-based password reset
-                try:
-                    self._send_phone_password_reset(user)
-                    logger.info(f"Password reset OTP sent via SMS for telegram user {user.id}")
-                    return True
-                except Exception:
-                    logger.exception("Failed to send SMS password reset")
-                    return True  # Still return True to prevent enumeration
-            else:
-                # Telegram user without verified phone - they need to verify phone first
-                logger.warning(f"Telegram user {user.id} requested password reset but has no verified phone")
-                return True  # Still return True to prevent enumeration
-
-        # Standard email-based password reset
         token = self._generate_verification_token(user.id, "password_reset")
 
         from ..tasks.notification_tasks import send_password_reset_email_task
@@ -541,26 +524,6 @@ class AuthService:
         send_password_reset_email_task.delay(user.id, token)
 
         return True
-
-    def _send_phone_password_reset(self, user: User):
-        """Send password reset OTP via SMS for phone-verified users"""
-        import hashlib
-
-        phone_hash = hashlib.sha256(user.phone.encode()).hexdigest()[:16]
-
-        # Generate 6-digit OTP
-        otp_code = generate_otp(length=6)
-
-        # Store OTP with 10 minute expiry
-        otp_key = f"password_reset_otp:{phone_hash}"
-        user_key = f"password_reset_user:{phone_hash}"
-        self.redis_client.setex(otp_key, 600, otp_code)
-        self.redis_client.setex(user_key, 600, user.id)
-
-        # Send SMS
-        from ..tasks.notification_tasks import send_password_reset_sms_task
-
-        send_password_reset_sms_task.delay(user.id, otp_code)
 
     def reset_password(self, token: str, new_password: str) -> bool:
         """Reset password with token and notify user via Telegram if connected"""
@@ -1624,6 +1587,8 @@ class AuthService:
             "phone": user.phone,
             "first_name": user.first_name,
             "last_name": user.last_name,
+            "full_name": user.full_name,
+            "contact_email": user.contact_email,
             "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
             "gender": user.gender.value if hasattr(user.gender, "value") else user.gender,
             "role": user.role.value if hasattr(user.role, "value") else user.role,

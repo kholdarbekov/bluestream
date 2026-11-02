@@ -24,6 +24,8 @@
 <p>We no longer deliver on this day of the week ({{ old_weekday_label }}), so your next delivery moves to the next delivery day.</p>
 {% elif change == "days_added" %}
 <p>New delivery days: {{ added_weekdays_label }}. Your daily deliveries now come on these days too.</p>
+{% elif change == "days_removed" %}
+<p>Days without delivery from now on: {{ removed_weekdays_label }}. Your daily deliveries continue on the other days.</p>
 {% endif %}
 {% endfor %}
 
@@ -35,8 +37,21 @@
     </tr>
 </table>
 {% endif %}
+{% if kept_order_note %}
+<p>{{ kept_order_note }}</p>
+{% endif %}
 
 <p>You can change your delivery day and time in your subscription.</p>
+
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Pay now</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">View order</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Open the subscription</a></p>
+{% endif %}
 
 <hr class="divider">
 

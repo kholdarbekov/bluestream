@@ -6,9 +6,11 @@ the write touches in the same transaction and tells each customer once, after th
 - new times: the subscription keeps the slot and is told the new window;
 - a weekly or biweekly day that is no longer a delivery day: it moves to the next delivery day;
 - a next delivery on a lost day: it moves on to the next delivery day;
-- a delivery day added: a daily subscription now delivers on it too and is told (owner, 2026-10-27).
-Orders already created keep their date and window. Deleting a slot a live subscription still uses is refused in
-words. `flask subscriptions reconcile-delivery-days` applies the day rules once at deploy.
+- a delivery day added: a daily subscription now delivers on it too and is told (owner, 2026-10-27);
+- a delivery day lost: a daily subscription stops delivering on it and is told (controller ruling, 2026-11-02).
+Orders already created keep their date and window, and the notice's next delivery is the one the card shows: an order
+already placed, which it says stays as it is. Deleting a slot a live subscription still uses is refused in words.
+`flask subscriptions reconcile-delivery-days` applies the day rules once at deploy and never reports days.
 
 Driven through the endpoints the admin UI calls (`TimeSlots.js` `handleCreateSubmit` / `handleEditSubmit` bodies,
 the role-claim bearer token) and the storefront's cookie JWT. Only external I/O is replaced: the Celery publish
@@ -130,6 +132,11 @@ def _translated(key, **values):
     return {value.format(**values) for value in BACKEND_TRANSLATIONS[key].values()}
 
 
+def _kept_note(day):
+    """The card's kept-order sentence in English, as the owner reads it ("Your order for 3 November stays as it is.")."""
+    return f"Your order for {day.day} {day:%B} stays as it is."
+
+
 def _sent_payloads(bot, log_ids):
     """Each committed notice, sent by the real task through the bot recorder."""
     for log_id in log_ids:
@@ -182,8 +189,10 @@ def test_switching_off_a_slot_moves_its_subscriptions_to_any_time_and_tells_each
     for payload in payloads:
         assert payload["kind"] == KIND
         assert set(payload) == CONTRACT_KEYS[KIND]
-    assert [payload["next_delivery_date"] for payload in payloads] == [
-        _row(db, active).next_delivery_date.isoformat(), None,  # a paused subscription has no next delivery
+    # The active one's next delivery is the order already placed, as its card shows; a paused one has none coming.
+    assert _row(db, active).next_delivery_date > kept.delivery_date
+    assert [(payload["next_delivery_date"], payload["kept_order_note"]) for payload in payloads] == [
+        (kept.delivery_date.isoformat(), _kept_note(kept.delivery_date)), (None, None),
     ]
 
 
@@ -277,11 +286,13 @@ def test_new_times_keep_the_slot_and_tell_the_new_time(
 
 
 def test_a_weekday_that_stops_being_a_delivery_day_moves_the_subscription_to_the_next_one(
-    db, client, web, monday, admin_headers, user_address, sample_product, every_day_slot,
+    db, client, web, monday, admin_headers, on_telegram, bot, published, user_address, sample_product,
+    every_day_slot,
 ):
     sub_id = _create(web, user_address.id, _items(sample_product), delivery_day_of_week=SUNDAY)
     sunday = _row(db, sub_id).next_delivery_date
     assert sunday.weekday() == SUNDAY
+    published.clear()
 
     resp = client.put(f"{SLOTS}/{every_day_slot.id}", headers=admin_headers,
                       json=_edit_body(every_day_slot, available_days=MON_TO_SAT))
@@ -293,15 +304,19 @@ def test_a_weekday_that_stops_being_a_delivery_day_moves_the_subscription_to_the
     [log] = _changed_logs(db, sub_id)
     assert log.extra_data["changes"] == ["day_moved"]
     assert (log.extra_data["old_weekday"], log.extra_data["new_weekday"]) == (SUNDAY, 0)
-    assert log.extra_data["next_delivery_date"] == (sunday + timedelta(days=1)).isoformat()
+    [payload] = _sent_payloads(bot, [log.id])
+    assert payload["next_delivery_date"] == (sunday + timedelta(days=1)).isoformat()  # no order placed yet
 
 
 def test_a_daily_any_time_next_date_on_a_lost_day_moves_on(
-    db, client, web, monday, admin_headers, user_address, sample_product, every_day_slot,
+    db, client, web, monday, admin_headers, on_telegram, bot, published, user_address, sample_product,
+    every_day_slot,
 ):
+    """The lost day is named once, as a lost delivery day; the moved date is the notice's next delivery."""
     sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None)
     old_next = _row(db, sub_id).next_delivery_date
     lost = old_next.weekday()
+    published.clear()
 
     resp = client.put(f"{SLOTS}/{every_day_slot.id}", headers=admin_headers,
                       json=_edit_body(every_day_slot, available_days=[day for day in EVERY_DAY if day != lost]))
@@ -309,8 +324,11 @@ def test_a_daily_any_time_next_date_on_a_lost_day_moves_on(
     assert resp.status_code == 200, resp.get_json()
     assert _row(db, sub_id).next_delivery_date == old_next + timedelta(days=1)
     [log] = _changed_logs(db, sub_id)
-    assert log.extra_data["changes"] == ["date_moved"]
-    assert log.extra_data["old_weekday"] == lost
+    assert log.extra_data["changes"] == ["days_removed"]
+    assert log.extra_data["removed_weekdays"] == [lost]
+    [payload] = _sent_payloads(bot, [log.id])
+    assert (payload["next_delivery_date"], payload["kept_order_note"]) == ((old_next + timedelta(days=1)).isoformat(),
+                                                                          None)
 
 
 def test_a_change_that_touches_nobody_writes_nothing(
@@ -413,11 +431,131 @@ def test_widening_a_slot_tells_the_daily_subscribers_on_it(
     assert len(published) == 2
 
 
-def test_the_deploy_reconcile_never_reports_added_days(
-    db, web, runner, monday, published, user_address, sample_product, weekday_slot,
+# --------------------------------------------------------------------------- delivery days lost (controller ruling)
+
+
+def test_removing_saturday_from_the_only_saturday_slot_tells_each_daily_any_time_subscriber_once(
+    db, client, web, monday, admin_headers, on_telegram, bot, published, user_address, sample_product,
 ):
+    saturdays = _slot(db, MON_TO_SAT)
+    daily = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None)
+    paused = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None)
+    weekly = _create(web, user_address.id, _items(sample_product))
+    _pause(web, paused)
+    next_daily = _row(db, daily).next_delivery_date
+    assert next_daily.weekday() != SATURDAY
+    published.clear()
+
+    resp = client.put(f"{SLOTS}/{saturdays.id}", headers=admin_headers,
+                      json=_edit_body(saturdays, available_days=[0, 1, 2, 3, 4]))
+
+    assert resp.status_code == 200, resp.get_json()
+    logs = _changed_logs(db)
+    assert [log.subscription_id for log in logs] == [daily, paused]  # once each
+    for log in logs:
+        assert log.extra_data["changes"] == ["days_removed"]
+        assert (log.extra_data["removed_weekdays"], log.extra_data["added_weekdays"]) == ([SATURDAY], [])
+    assert _changed_logs(db, weekly) == []
+    assert _row(db, daily).next_delivery_date == next_daily
+    assert published == [log.id for log in logs]
+    for payload in _sent_payloads(bot, published):
+        assert set(payload) == CONTRACT_KEYS[KIND]
+        assert (payload["changes"], payload["removed_weekdays"]) == (["days_removed"], [SATURDAY])
+
+
+def test_a_daily_subscriber_on_a_narrowed_slot_is_told_the_days_it_loses(
+    db, client, web, monday, admin_headers, on_telegram, bot, published, user_address, sample_product,
+    every_day_slot,
+):
+    """The only slot stops offering Sunday. The daily subscriber on it becomes Any time (§6.5), and since Sunday is no
+    longer a delivery day it is told that too, in the same notice."""
+    sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None,
+                     delivery_time_slot_id=every_day_slot.id)
+    published.clear()
+
+    resp = client.put(f"{SLOTS}/{every_day_slot.id}", headers=admin_headers,
+                      json=_edit_body(every_day_slot, available_days=MON_TO_SAT))
+
+    assert resp.status_code == 200, resp.get_json()
+    assert _row(db, sub_id).delivery_time_slot_id is None
+    [log] = _changed_logs(db, sub_id)
+    assert log.extra_data["changes"] == ["time_cleared", "days_removed"]
+    assert (log.extra_data["removed_weekdays"], log.extra_data["added_weekdays"]) == ([SUNDAY], [])
+    [payload] = _sent_payloads(bot, [log.id])
+    assert (payload["changes"], payload["removed_weekdays"]) == (["time_cleared", "days_removed"], [SUNDAY])
+
+
+@pytest.mark.parametrize(
+    "days, change, told",
+    [
+        (EVERY_DAY, "days_added", {"added_weekdays": [SUNDAY], "removed_weekdays": []}),
+        ([0, 1, 2, 3, 4], "days_removed", {"added_weekdays": [], "removed_weekdays": [SATURDAY]}),
+    ],
+    ids=["gains-sunday", "loses-saturday"],
+)
+def test_a_daily_row_left_on_a_switched_off_slot_is_told_when_the_delivery_days_change(
+    db, client, web, monday, admin_headers, published, user_address, sample_product, days, change, told,
+):
+    """A slot switched off before this release left its daily rows on it (runbook 1(d)). Such a row delivers on the
+    delivery days, so a write to another slot that changes them changes its days too, and it is told."""
+    retired = _slot(db, EVERY_DAY, name="Retired")
+    open_slot = _slot(db, MON_TO_SAT)
+    sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None,
+                     delivery_time_slot_id=retired.id)
+    retired.is_active = False  # switched off with no cascade, as before this release
+    db.session.commit()
+    published.clear()
+
+    resp = client.put(f"{SLOTS}/{open_slot.id}", headers=admin_headers, json=_edit_body(open_slot, available_days=days))
+
+    assert resp.status_code == 200, resp.get_json()
+    assert _row(db, sub_id).delivery_time_slot_id == retired.id  # its own slot was not written
+    [log] = _changed_logs(db, sub_id)
+    assert log.extra_data["changes"] == [change]
+    assert {key: log.extra_data[key] for key in told} == told
+    assert published == [log.id]
+
+
+# --------------------------------------------------------------------------- the notice's next delivery
+
+
+@pytest.mark.parametrize("placed", [True, False], ids=["order-placed", "no-order-yet"])
+def test_the_notice_names_the_next_delivery_the_card_shows(
+    db, client, web, monday, admin_headers, on_telegram, bot, published, user_address, sample_product,
+    every_day_slot, placed,
+):
+    """A daily subscriber nearly always has tomorrow's order placed, and the clock has already moved past it. The
+    notice names the delivery the card shows: that order, which keeps its day and window (the kept-order note). With
+    no order placed yet, it names the next scheduled date."""
+    tomorrow = monday + timedelta(days=1)
+    sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None,
+                     delivery_time_slot_id=every_day_slot.id)
+    if placed:
+        process_daily_subscription_billing()
+        [order] = _orders(db, sub_id)
+        assert (order.delivery_date, _row(db, sub_id).next_delivery_date) == (tomorrow, tomorrow + timedelta(days=1))
+    published.clear()
+
+    resp = client.put(f"{SLOTS}/{every_day_slot.id}", headers=admin_headers,
+                      json=_edit_body(every_day_slot, start_time="11:00", end_time="13:00"))
+
+    assert resp.status_code == 200, resp.get_json()
+    [log] = _changed_logs(db, sub_id)
+    [payload] = _sent_payloads(bot, [log.id])
+    assert payload["changes"] == ["time_changed"]
+    assert payload["next_delivery_date"] == _published(web, sub_id)["upcoming_delivery"]["date"] == tomorrow.isoformat()
+    assert payload["kept_order_note"] == (_kept_note(tomorrow) if placed else None)
+
+
+@pytest.mark.parametrize("days", [[0, 1, 2, 3, 4, 5], [0, 1, 2, 3]], ids=["saturday-added", "friday-removed"])
+def test_the_deploy_reconcile_never_reports_added_or_removed_days(
+    db, web, runner, monday, published, user_address, sample_product, weekday_slot, days,
+):
+    """Widened or narrowed before the deploy, with no cascade: the daily subscriber's next delivery (a Tuesday) still
+    falls on a delivery day, so the reconcile has nothing to move and tells no one of the days."""
     sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None)
-    weekday_slot.available_days = [0, 1, 2, 3, 4, 5]  # widened before the deploy, with no cascade
+    assert _row(db, sub_id).next_delivery_date == monday + timedelta(days=1)
+    weekday_slot.available_days = days  # changed before the deploy, with no cascade
     db.session.commit()
     published.clear()
 
@@ -793,3 +931,30 @@ def test_the_schedule_notice_goes_by_email_without_telegram(
     html = body["htmlContent"]
     assert "10:00–12:00" in html and "any time of the day" in html
     assert "Home water" in html
+
+
+def test_the_emailed_notice_names_the_lost_day_and_the_order_already_placed(
+    app, monkeypatch, db, client, web, monday, admin_headers, on_email, bot, published, user_address,
+    sample_product, every_day_slot,
+):
+    tomorrow = monday + timedelta(days=1)
+    sub_id = _create(web, user_address.id, _items(sample_product), frequency="daily", delivery_day_of_week=None,
+                     delivery_time_slot_id=every_day_slot.id)
+    process_daily_subscription_billing()
+    assert [order.delivery_date for order in _orders(db, sub_id)] == [tomorrow]
+    published.clear()
+    resp = client.put(f"{SLOTS}/{every_day_slot.id}", headers=admin_headers,
+                      json=_edit_body(every_day_slot, available_days=MON_TO_SAT))
+    assert resp.status_code == 200, resp.get_json()
+    [log] = _changed_logs(db, sub_id)
+
+    with live_send_path(app, monkeypatch, bot_url=BOT_URL) as post:
+        assert send_subscription_notice_task(log.id) == "email"
+
+    assert bot.calls == []
+    [call] = post.call_args_list
+    html = call.kwargs["json"]["htmlContent"]
+    assert "any time of the day" in html
+    assert "Days without delivery from now on: Sunday. Your daily deliveries continue on the other days." in html
+    assert f"{tomorrow:%m/%d/%Y}" in html or f"{tomorrow:%d.%m.%Y}" in html  # the next delivery: the placed order
+    assert _kept_note(tomorrow) in html

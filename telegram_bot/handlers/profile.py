@@ -247,7 +247,7 @@ class ProfileHandlers(BaseHandler):
                 profile = response.data['data']
 
             not_set_label = i18n.get('telegram.common.not_set', language)
-            full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or not_set_label).strip()
+            full_name = profile.get('full_name') or not_set_label
 
             dob_raw = profile.get('date_of_birth')
             if isinstance(dob_raw, str) and dob_raw:
@@ -262,8 +262,8 @@ class ProfileHandlers(BaseHandler):
             # Format profile information
             profile_text = f"{i18n.get('telegram.profile_title', language)}\n\n"
             profile_text += f"{i18n.get('telegram.profile_name', language)}: {full_name}\n"
-            profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', not_set_label)}\n"
-            profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', not_set_label)}\n"
+            profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone') or not_set_label}\n"
+            profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('contact_email') or not_set_label}\n"
             profile_text += f"{i18n.get('telegram.profile_birthday', language)}: {dob_display}\n"
             profile_text += f"{i18n.get('telegram.profile_language', language)}: {language}"
 
@@ -1098,8 +1098,9 @@ class ProfileHandlers(BaseHandler):
 
             # `/start order_<id>` / `/start sub_<id>` (Click's return to this chat, spec 2026-10-27
             # §4.5, §16 M5): a signed-up customer lands on that screen. Without an account, or still
-            # without a phone, the link is a plain /start.
-            target = self._deep_link_target(context)
+            # without a phone, the link is a plain /start. So is one that arrives in a group
+            # (`?startgroup=`): the order or subscription card must never be posted to a group.
+            target = self._deep_link_target(context) if self._in_private_chat(update) else None
             if target is not None and existing_user and is_menu_customer(existing_user):
                 await self._open_deep_link_target(update, context, *target)
                 return ConversationHandler.END
@@ -1124,6 +1125,11 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
+
+    @staticmethod
+    def _in_private_chat(update: Update) -> bool:
+        chat = update.effective_chat
+        return chat is not None and chat.type == "private"
 
     _DEEP_LINK_TARGET = re.compile(
         rf"^({re.escape(ORDER_START_PREFIX)}|{re.escape(SUBSCRIPTION_START_PREFIX)})(\d+)$"

@@ -159,7 +159,7 @@ async def test_back_from_an_order_returns_to_the_page_it_was_opened_from(bot, us
     bot.backend.route("GET", f"/api/v1/orders/{opened}", lambda _call: {"data": {"order": {
         "id": opened, "order_number": f"TG_{opened:06d}_26", "status": "delivered",
         "display_status": "delivered", "created_at": "2026-10-01T09:00:00+00:00", "total_amount": 36000,
-        "order_items": [], "can_customer_cancel": False, "payment_info": {"is_payable": False},
+        "order_items": [], "payment_info": {},
     }, "delivery": None}})
 
     await bot.send(user.tap("menu_orders"))

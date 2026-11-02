@@ -179,17 +179,14 @@
    ]
   },
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> Reorder Items\n                </button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "add_failed": "Failed to add items to cart",
-     "adding_to_cart": "Adding items to cart...",
      "delivery_address": "Delivery Address",
      "delivery_fee": "Delivery Fee",
      "delivery_location": "Delivery Location",
      "details_failed": "Failed to load order details",
-     "items_added": "Items added to cart!",
      "no_address": "No delivery address provided",
      "order": "Order",
      "order_items": "Order Items",
@@ -219,6 +216,7 @@
      "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
      "reason_prompt": "Want to tell us why? (optional)",
      "reason_text": "In a few words (optional)",
+     "reorder_dropped": "Some items from this order are no longer available and were left out.",
      "switch_to_cash": "Pay with cash",
      "try_again": "Try again",
      "working": "One moment…"
@@ -407,35 +405,32 @@
    ]
   },
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> Reorder Items\n                </button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Закрыть</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "add_failed": "Failed to add items to cart",
-     "adding_to_cart": "Adding items to cart...",
      "delivery_address": "Delivery Address",
-     "delivery_fee": "Delivery Fee",
+     "delivery_fee": "Плата за доставку",
      "delivery_location": "Delivery Location",
      "details_failed": "Failed to load order details",
-     "items_added": "Items added to cart!",
      "no_address": "No delivery address provided",
-     "order": "Order",
+     "order": "Заказ",
      "order_items": "Order Items",
      "order_summary": "Order Summary",
      "order_tracking": "Order Tracking",
      "placed_on": "Placed on",
-     "price": "Price",
-     "quantity": "Quantity",
+     "price": "Цена",
+     "quantity": "Количество",
      "reward_discount": "Reward discount",
      "sku": "SKU",
      "status_labels": {
       "awaiting_new_date": "Awaiting a new delivery date"
      },
      "subscription_discount": "Subscription discount",
-     "subtotal": "Subtotal",
+     "subtotal": "Промежуточный итог",
      "tax": "Tax",
      "tier_discount": "Tier discount (bot & website perk)",
-     "total": "Total",
+     "total": "Итого",
      "track_package": "Track Package",
      "tracking_number": "Tracking Number"
     },
@@ -447,6 +442,7 @@
      "preparing_payment": "Готовим оплату. Регистрируем товары в налоговой системе («Asl belgisi»); Click откроется через мгновение.",
      "reason_prompt": "Расскажете почему? (необязательно)",
      "reason_text": "Пару слов (необязательно)",
+     "reorder_dropped": "Некоторых товаров из этого заказа больше нет, они не добавлены.",
      "switch_to_cash": "Оплатить наличными",
      "try_again": "Попробовать снова",
      "working": "Секунду…"
@@ -635,35 +631,32 @@
    ]
   },
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> Reorder Items\n                </button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Yopish</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "add_failed": "Failed to add items to cart",
-     "adding_to_cart": "Adding items to cart...",
      "delivery_address": "Delivery Address",
-     "delivery_fee": "Delivery Fee",
+     "delivery_fee": "Yetkazib berish narxi",
      "delivery_location": "Delivery Location",
      "details_failed": "Failed to load order details",
-     "items_added": "Items added to cart!",
      "no_address": "No delivery address provided",
-     "order": "Order",
+     "order": "Buyurtma",
      "order_items": "Order Items",
      "order_summary": "Order Summary",
      "order_tracking": "Order Tracking",
      "placed_on": "Placed on",
-     "price": "Price",
-     "quantity": "Quantity",
+     "price": "Narx",
+     "quantity": "Miqdor",
      "reward_discount": "Reward discount",
      "sku": "SKU",
      "status_labels": {
       "awaiting_new_date": "Awaiting a new delivery date"
      },
      "subscription_discount": "Subscription discount",
-     "subtotal": "Subtotal",
+     "subtotal": "Oraliq summa",
      "tax": "Tax",
      "tier_discount": "Tier discount (bot & website perk)",
-     "total": "Total",
+     "total": "Jami",
      "track_package": "Track Package",
      "tracking_number": "Tracking Number"
     },
@@ -675,6 +668,7 @@
      "preparing_payment": "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",
      "reason_prompt": "Sababini aytasizmi? (ixtiyoriy)",
      "reason_text": "Bir necha so'z bilan (ixtiyoriy)",
+     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",
      "switch_to_cash": "Naqd pul bilan to'lash",
      "try_again": "Qayta urinish",
      "working": "Bir lahza…"

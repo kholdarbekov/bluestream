@@ -361,7 +361,7 @@ def test_a_customer_cancel_arriving_while_a_pickup_holds_the_row_waits_and_is_re
     assert cancel_body["data"] == {
         "error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE",
         "reason_code": "WITH_DRIVER",
-        "can_customer_cancel": False,
+        "refusal_copy": "cancel_refused.with_driver",
     }
     pg_db.session.expire_all()
     assert pg_db.session.get(Delivery, world.delivery_id).status is DeliveryStatus.PICKED_UP
@@ -499,7 +499,7 @@ def test_a_skip_arriving_while_a_pause_holds_the_subscription_row_waits_and_is_r
     assert skip_body["data"] == {
         "error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE",
         "reason_code": "NOT_CANCELLABLE",
-        "can_customer_cancel": False,
+        "refusal_copy": "skip_refused.not_skippable",  # the button pressed was a Skip (live drive D7)
     }
     pg_db.session.expire_all()
     assert pg_db.session.get(Subscription, world.subscription_id).status is SubscriptionStatus.PAUSED

@@ -346,16 +346,21 @@ class BaseHandler:
 
     @staticmethod
     def _response_reason_code(response) -> str | None:
-        """The `reason_code` a refused write carries, or None when it has none.
+        """The `reason_code` a refused write carries, or None when it has none."""
+        return BaseHandler._response_detail(response, 'reason_code')
+
+    @staticmethod
+    def _response_detail(response, field: str) -> str | None:
+        """A text field a refused write carries (`reason_code`, `refusal_copy`), or None when it has none.
 
         DEPTH MATTERS: the order routes answer through `error_response(..., data={...})`,
-        so the code sits at `data.reason_code` of the body, and `_make_request` hands
+        so the field sits at `data.<field>` of the body, and `_make_request` hands
         the whole error body back as `APIResponse.data`.
         """
         body = getattr(response, 'data', None)
         detail = body.get('data') if isinstance(body, dict) else None
-        reason_code = detail.get('reason_code') if isinstance(detail, dict) else None
-        return reason_code if isinstance(reason_code, str) and reason_code else None
+        value = detail.get(field) if isinstance(detail, dict) else None
+        return value if isinstance(value, str) and value else None
 
     async def _settle_callback_message(self, query, note: str) -> None:
         """Retire an answered message: drop its buttons, append the answer.

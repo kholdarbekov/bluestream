@@ -327,7 +327,7 @@ def test_my_account_shows_the_frequency_of_an_active_subscription(
     for language in ("en", "uz", "ru"):
         db.session.add(Translation(key=key, language=language, value=BACKEND_TRANSLATIONS[key][language],
                                    category="cabinet"))
-    sample_user.preferred_language = lang  # a uz reader's `?lang=uz` (the default) is dropped from the URL
+    sample_user.preferred_language = lang  # a uz reader's `?lang=uz` (the default) is dropped from the URL (301, saved to the session)
     db.session.commit()
     client.application.jinja_env.cache.clear()
 

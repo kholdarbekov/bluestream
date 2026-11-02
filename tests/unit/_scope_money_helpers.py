@@ -1,5 +1,5 @@
 """Shared builders for Phase-2b scope-aware money-engine tests (not collected)."""
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from business_app.models.customer_link import AddressGroup, CanonicalCustomer
@@ -18,10 +18,28 @@ from shared.enums import (
 
 _seq = {"n": 0}
 
+# The last `created_at` `delivered_cod_order` stamped by default (`_strictly_later_now`).
+_last_default_stamp = None
+
 
 def _next() -> int:
     _seq["n"] += 1
     return _seq["n"]
+
+
+def _strictly_later_now() -> datetime:
+    """`datetime.now(UTC)`, but never at or before the last stamp this handed out (that one plus 1 µs then).
+
+    The Docker Desktop VM steps CLOCK_REALTIME back by about 0.5-2 ms every 30 s or so. Two orders built back to back
+    could then be stamped newest-first, and every oldest-first reader (the place allocator ranks by
+    `Order.created_at`) would pay the second one first. Real orders come seconds apart, so production is not affected.
+    Pinned by tests/unit/test_scope_money_helpers_clock.py."""
+    global _last_default_stamp
+    stamp = datetime.now(UTC)
+    if _last_default_stamp is not None and stamp <= _last_default_stamp:
+        stamp = _last_default_stamp + timedelta(microseconds=1)
+    _last_default_stamp = stamp
+    return stamp
 
 
 def make_user(db, *, exempt=False, grocery=False):
@@ -99,7 +117,7 @@ def delivered_cod_order(
     the payment row, because the receivable queries join the two.
     """
     n = _next()
-    ts = created_at or datetime.now(UTC)
+    ts = created_at or _strictly_later_now()
     order = Order(
         user_id=user.id,
         order_number=f"ORD-2B-{n}",

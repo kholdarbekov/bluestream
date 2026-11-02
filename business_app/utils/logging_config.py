@@ -17,6 +17,8 @@ import sys
 
 from flask import g, request, has_request_context
 
+from shared.telegram_login import LOGIN_QUERY_REDACTED, loggable_request_url, redact_login_query
+
 
 class StructuredFormatter(logging.Formatter):
     """JSON formatter for structured logging"""
@@ -42,7 +44,7 @@ class StructuredFormatter(logging.Formatter):
                         "user_id": getattr(g, "current_user_id", None),
                         "ip_address": request.remote_addr,
                         "method": request.method,
-                        "url": request.url,
+                        "url": loggable_request_url(request),  # never a sign-in link's hash or names
                         "user_agent": request.headers.get("User-Agent"),
                     }
                 )
@@ -119,7 +121,7 @@ class SecuritySensitiveFilter(logging.Filter):
             full_message = record.getMessage()
         except (TypeError, ValueError):
             full_message = str(record.msg)
-        record.msg = self._sanitize_message(full_message)
+        record.msg = self._sanitize_message(full_message, login_redacted=getattr(record, LOGIN_QUERY_REDACTED, False))
         record.args = None
 
         return True
@@ -139,8 +141,12 @@ class SecuritySensitiveFilter(logging.Filter):
             return self._sanitize_message(value)
         return value
 
-    def _sanitize_message(self, message):
-        """Sanitize log message content"""
+    def _sanitize_message(self, message, *, login_redacted=False):
+        """Sanitize log message content. `login_redacted`: every string in the line already passed `redact_login_query`
+        on its own (a `loggable_json` line), so the pattern pass over the whole line, which would break its JSON, is
+        skipped."""
+        if not login_redacted:
+            message = redact_login_query(message)  # a sign-in link's query: its hash and the customer's names
         message_lower = message.lower()
         for sensitive_key in self.SENSITIVE_KEYS:
             if sensitive_key in message_lower:

@@ -144,6 +144,7 @@ def test_a_store_cancel_of_an_awaiting_agent_order_is_a_decline_and_tells_the_ag
     assert cancel == {
         "allowed": True,
         "refusal": None,
+        "refusal_copy": None,
         "via": "decline",
         "label": "Decline order",
         "confirm_text": "Decline this order? We'll let your sales agent know.",

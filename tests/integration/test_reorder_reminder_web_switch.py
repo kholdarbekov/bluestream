@@ -59,7 +59,7 @@ def web_copy(app, db):
 
 def _page(client, app, user, language):
     """The page in `language`. Uzbek is the site default: `?lang=uz` is redirected (301) to the
-    clean URL, so it is asked for the way a browser lands on it, without the parameter."""
+    clean URL (saving uz to the session), so it is asked for the way a browser lands on it, without the parameter."""
     url = "/profile-settings" if language == "uz" else f"/profile-settings?lang={language}"
     response = client.get(url, headers=customer_headers(app, user))
     assert response.status_code == 200, response.get_data(as_text=True)[:400]

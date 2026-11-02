@@ -120,3 +120,31 @@ def test_the_labels_are_seeded_trilingual():
 
     for key in ("Tier discount (bot & website perk)", "Subscription discount", "Reward discount"):
         assert set(BACKEND_TRANSLATIONS[key]) >= {"en", "uz", "ru"}, key
+
+
+# --------------------------------------------------------------------------- the payment method, as published
+
+
+@pytest.mark.parametrize("path", ["/order-tracking?order_id={id}&lang=en", "/order-confirmation?order_id={id}&lang=en"])
+def test_the_order_pages_print_the_published_payment_method(app, db, customer, sample_product, user_address, path):
+    from business_app.utils import display_labels
+    from shared.enums import PaymentMethod
+
+    admin = make_staff(db, UserRole.ADMIN, "+998901119943")
+    order = _admin_order(app, admin, customer, user_address, sample_product, "click")
+    assert order.payment_method == PaymentMethod.CLICK
+
+    resp = app.test_client().get(path.format(id=order.id), headers=customer_headers(app, customer))
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+
+    assert "Paymentmethod" not in html
+    assert display_labels.payment_method(PaymentMethod.CLICK, "en") in html
+
+
+def test_the_dead_order_page_is_gone(app, db, customer, sample_product, user_address):
+    admin = make_staff(db, UserRole.ADMIN, "+998901119944")
+    order = _admin_order(app, admin, customer, user_address, sample_product, "cash")
+
+    resp = app.test_client().get(f"/order/{order.id}", headers=customer_headers(app, customer))
+    assert resp.status_code == 404

@@ -30,13 +30,9 @@ def test_subscriptions_api_delegates_user_scoped_operations_to_service():
         "resume_subscription_for_user(",
         "cancel_subscription_for_user(",
         "get_subscription_items_for_user(",
-        "add_subscription_item_for_user(",
-        "update_subscription_item_for_user(",
-        "remove_subscription_item_for_user(",
         "subscription_history_for_user(",
         "replace_items_for_user(",
         "preview_changes_for_user(",
-        "get_subscription_logs_paginated_for_user(",
         "get_subscription_statistics_for_user(",
         "skip_next_delivery_for_user(",
         "change_payment_method_for_user(",
@@ -57,3 +53,9 @@ def test_subscription_service_contains_user_scoped_entrypoints():
     # always-empty billing history (spec 2026-10-26 §5 B6): the subscription's orders are its history.
     assert "def validate_retry_billing_for_user(" not in text
     assert "def get_subscription_billing_history_for_user(" not in text
+    # The activity log page and the per-item customer writes are gone (step 4, spec 2026-10-27 §14): both clients
+    # save the whole item list with `replace_items_for_user`.
+    assert "def get_subscription_logs_paginated_for_user(" not in text
+    for retired in ("add_subscription_item_for_user", "update_subscription_item_for_user",
+                    "remove_subscription_item_for_user"):
+        assert f"def {retired}(" not in text, retired

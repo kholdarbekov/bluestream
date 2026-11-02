@@ -14,6 +14,8 @@
     var document = window.document;
     // One write at a time on a page: a double click, or a second button, never sends a second request.
     var inFlight = false;
+    // How long a "some items were left out" toast stays up before the cart opens.
+    var REORDER_TOAST_MS = 2000;
 
     function el(tag, className, text) {
         var node = document.createElement(tag);
@@ -99,6 +101,40 @@
         });
         if (result.ok) result.message = null;
         return outcome(result);
+    }
+
+    // Reorder: the bot's "Order again" route, behind the button the card and the modal draw from the published
+    // `customer_actions.reorder`. The server replaces the cart with the order's lines and names the ones it left out;
+    // the cart page then shows what the customer will check out. `options`: {cartUrl, words}. A failure is always
+    // said (the server's sentence, such as a stale button's refusal, else `words.failed`); with nothing added the
+    // cart stays shut.
+    async function reorder(orderId, options) {
+        if (inFlight) return;
+        inFlight = true;
+        var words = options.words;
+        try {
+            var result = await answer(function () {
+                return window.apiRequest('/cart/fill-from-order/' + orderId, { method: 'POST' });
+            });
+            var data = result.payload && result.payload.data;
+            var added = result.ok && data && Array.isArray(data.added) ? data.added : null;
+            if (!added) {
+                notify(result.message || words.failed, 'error');
+                return;
+            }
+            try {
+                window.localStorage.setItem('cart', JSON.stringify(added));
+            } catch (err) {
+                notify(words.failed, 'error');
+                return;
+            }
+            var dropped = Array.isArray(data.dropped) && data.dropped.length > 0;
+            if (dropped) notify(words.reorder_dropped, 'warning');
+            if (!added.length) return;
+            setTimeout(function () { window.OrderActions.navigate(options.cartUrl); }, dropped ? REORDER_TOAST_MS : 0);
+        } finally {
+            inFlight = false;
+        }
     }
 
     function navigate(url) {
@@ -358,6 +394,7 @@
         render: render,
         isBusy: isBusy,
         pay: pay,
+        reorder: reorder,
         remove: remove,
         confirm: confirmOrder,
         navigate: navigate,

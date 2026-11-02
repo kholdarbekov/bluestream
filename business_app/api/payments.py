@@ -8,7 +8,6 @@ import business_app.models.payment as payment_models
 import business_app.models.user as user_models
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 
 try:
@@ -28,8 +27,7 @@ from business_app.serializers.payment_serializers import (
 )
 from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
-from shared.enums import PaymentStatus, PaymentMethod, OrderStatus
-from shared.payment_methods import canonical_rail, normalize_payment_method
+from shared.enums import PaymentStatus, OrderStatus
 from business_app.services.order_service import OrderService
 from business_app.utils.validation_helpers import (
     validate_list_request_params,
@@ -58,7 +56,6 @@ from business_app.utils.api_responses import (
     validation_error_response,
     internal_error_response,
 )
-from business_app import db
 
 payments_bp = Blueprint("payments", __name__)
 
@@ -84,13 +81,6 @@ def _get_webhook_idempotency_guard(payment_service):
     # would ignore it and always use the module default).
     return build_default_guard(client)
 
-
-# Rails a customer may point their own order at from this route.
-_SELF_SERVICE_PAYMENT_METHODS = {
-    PaymentMethod.CASH,
-    PaymentMethod.CLICK,
-    PaymentMethod.PAYME,
-}
 
 # PAY-006: per-provider global cap. 600/min lets Click/Payme retry aggressively
 # during a reconnect storm without swamping the app; crosses into 503 only on
@@ -258,154 +248,6 @@ def get_order_payment_timeline(order_id):
     return success_response(data=timeline)
 
 
-@payments_bp.route("/create", methods=["POST"])
-@jwt_required()
-@validate_json(["order_id", "payment_method"])
-def create_payment():
-    """Create a new payment for an order"""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
-
-        order_id = data.get("order_id")
-        payment_method = data.get("payment_method")
-
-        # Validate order
-        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
-
-        if not order:
-            return not_found_response(message=get_translation("api.orders.not_found"))
-
-        if order.is_paid:
-            return error_response(message=get_translation("api.payments.error.already_paid"))
-
-        # Check for existing pending payment for this order with same payment method
-        # This prevents duplicate payments when user retries payment
-        # This route re-points the order's rail as well as the payment's, so it
-        # may only offer the self-service rails; business_account is eligibility-
-        # gated and belongs to OrderPaymentMethodEditService. Normalizing first
-        # folds the legacy `card` alias into click rather than writing it back.
-        requested_payment_method = normalize_payment_method(payment_method)
-        if requested_payment_method not in _SELF_SERVICE_PAYMENT_METHODS:
-            return validation_error_response("Payment method is not available for this order")
-
-        # A cash order may have been accepted while the marking-code pool was
-        # empty, because cash draws no code. Moving it to an online rail makes
-        # it need one. Refuse here with a clear message rather than letting
-        # Click's PREPARE raise into the webhook's generic 503 + Retry-After,
-        # which retries forever and shows the customer nothing.
-        #
-        # This is a FLIP guard: only run it when the rail is actually
-        # changing. An order already on the requested method (e.g. Retry on an
-        # order already sitting on CLICK) must stay payable even though the
-        # shared pool may now read short for that product -- PREPARE would
-        # succeed there because it draws on codes this exact order already
-        # holds, which is exactly what pool_covers_order credits.
-        # CANONICAL rails on both sides -- the THIRD copy of "is this a rail
-        # move", and it was the last one still comparing raw enum members.
-        # `requested_payment_method` is already normalized above, but
-        # `order.payment_method` is not: on a legacy CARD order `CLICK != CARD`
-        # read as a flip, so this guard ran `pool_covers_order` on exactly the
-        # population the rail-lock fix exempted -- and could refuse with
-        # MARKING_CODES_POOL_SHORT for a rail that is not moving at all. That is
-        # the case the comment directly above already declares exempt.
-        if canonical_rail(order.payment_method) != requested_payment_method:
-            from business_app.services.product_fiscal_service import ProductFiscalService
-
-            pool_ok, short_product = ProductFiscalService().pool_covers_order(order, requested_payment_method)
-            if not pool_ok:
-                # get_translation applies **kwargs itself and swallows a bad
-                # placeholder (KeyError/ValueError) by returning the raw
-                # string; a bare `.format(...)` on its result does not, and a
-                # stray "{" in translator-supplied copy would 500 this route.
-                return validation_error_response(
-                    get_translation("api.payments.marking_codes_unavailable", product=short_product),
-                    error_code="MARKING_CODES_POOL_SHORT",
-                )
-        existing_payment = Payment.query.filter(
-            Payment.order_id == order_id,
-            Payment.user_id == current_user_id,
-            Payment.status == PaymentStatus.PENDING,
-            Payment.payment_method == requested_payment_method,
-        ).first()
-
-        if existing_payment:
-            current_app.logger.info(f"Reusing existing pending payment {existing_payment.id} for order {order_id}")
-            # For cash payments, just return the existing payment
-            if payment_method == "cash":
-                return created_response(
-                    data={
-                        "payment": serialize_payment(existing_payment),
-                        "message": get_translation("api.payments.cash_payment_created"),
-                    }
-                )
-            # For card payments, generate a fresh payment link for the existing payment
-            payment_link = get_payment_service().create_payment_link(existing_payment.id)
-            return created_response(data={"payment": serialize_payment(existing_payment), "payment_link": payment_link})
-
-        # Create new payment
-        payment_data = {
-            "order_id": order_id,
-            "user_id": current_user_id,
-            "amount": order.total_amount,
-            "currency": "UZS",
-            "payment_method": requested_payment_method,
-            "description": f"Payment for order #{order.order_number}",
-            "return_url": data.get("return_url"),
-            "cancel_url": data.get("cancel_url"),
-            "metadata": {"order_number": order.order_number, "customer_phone": order.user.phone},
-        }
-
-        # Use saved card if specified
-        saved_card_id = data.get("saved_card_id")
-        if saved_card_id:
-            card = CreditCard.query.filter_by(id=saved_card_id, user_id=current_user_id, is_active=True).first()
-            if card:
-                payment_data["saved_card_id"] = saved_card_id
-
-        try:
-            payment = get_payment_service().create_payment(**payment_data)
-        except IntegrityError:
-            # Concurrent create for the same order: uq_payments_order_id made the
-            # other request the winner. Retry once — the service's order_id reuse
-            # branch (PaymentService.create_payment) finds the winner row and
-            # UPDATE-reuses it with the REQUESTED method/amount/PENDING status and
-            # a refreshed idempotency key (the winner may hold a different
-            # payment_method, so re-selecting the row as-is would be wrong).
-            # A second IntegrityError propagates; do not loop.
-            db.session.rollback()
-            current_app.logger.info(
-                f"Create-payment race for order {order_id}: retrying create_payment against winner row"
-            )
-            payment = get_payment_service().create_payment(**payment_data)
-
-        # For cash payments, mark as pending
-        if payment_method == "cash":
-            payment.status = PaymentStatus.PENDING
-            db.session.commit()
-
-            return created_response(
-                data={
-                    "payment": serialize_payment(payment),
-                    "message": get_translation("api.payments.cash_payment_created"),
-                }
-            )
-
-        # For card payments, get payment link
-        payment_link = get_payment_service().create_payment_link(payment.id)
-
-        return created_response(data={"payment": serialize_payment(payment), "payment_link": payment_link})
-
-    except ValidationError as e:
-        # `create_payment`'s rail rule (RAIL_MOVE_NOT_ALLOWED, MARKING_CODES_POOL_SHORT) answers in its own words.
-        return validation_error_response(e.message, error_code=e.error_code)
-    except ValueError as e:
-        return error_response(message=str(e))
-    except Exception as e:
-        current_app.logger.error(f"Create payment error: {e}")
-        return internal_error_response(message=get_translation("api.payments.error.create_failed"))
-
-
 @payments_bp.route("/<int:payment_id>/status", methods=["GET"])
 @jwt_required()
 def get_payment_status(payment_id):
@@ -554,8 +396,8 @@ def _order_cancel_advice_key(order):
 
     # NOT a second copy of the cancellability rule: this asks
     # ``OrderService.customer_cancel_block_code``, the predicate the customer
-    # cancel route enforces and ``serialize_order`` publishes as
-    # ``can_customer_cancel`` (F5). So ``order_cancellable`` equals that field,
+    # cancel route enforces and ``serialize_order`` publishes in
+    # ``customer_actions.cancel`` (F5). So ``order_cancellable`` equals that answer,
     # and the advice cannot drift from what the cancel will accept. A paid order
     # is no longer the customer's to cancel, so, like any other refusal, it gets
     # one of the status sentences below.

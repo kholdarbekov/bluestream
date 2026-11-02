@@ -199,8 +199,8 @@ def test_discount_footnote_renders_in_every_language(client, db, program, tiers)
         # active language.
         client.application.jinja_env.cache.clear()
         # follow_redirects: ?lang=uz matches DEFAULT_LANGUAGE, which
-        # before_request 301-redirects to the bare path (SEO canonicalization,
-        # see test_loyalty_guide_page.py's identical convention) — the
+        # before_request 301-redirects to the bare path (SEO canonicalization, saving uz
+        # to the session; see test_loyalty_guide_page.py's identical convention) — the
         # footnote still renders once the redirect is followed.
         html = client.application.test_client().get(
             f"/loyalty-guide?lang={lang}", follow_redirects=True

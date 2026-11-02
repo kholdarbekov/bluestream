@@ -8,9 +8,12 @@ before first deploy.
 
 ```
                                  Cloudflare TLS
+                                       │  Cloudflare Tunnel
+                                       ▼
+                         cloudflared (on the host) → http://localhost:81
                                        │
                                        ▼
-                                 nginx :81  (origin)
+                          nginx 127.0.0.1:81  (origin, loopback only)
                                        │
         ┌──────────────┬───────────────┼───────────────┬──────────────┐
         ▼              ▼               ▼               ▼              ▼
@@ -33,12 +36,23 @@ element.uz         aqua-element.  aqua-element.   aqua-        aqua-element.
 | `alertmanager.aqua-element.uz`  | basic auth — `MONITORING_BASIC_AUTH` | none                  |
 | `grafana.aqua-element.uz`       | passthrough                     | Grafana admin login + RBAC |
 
+The front door is a Cloudflare Tunnel (owner, 2026-10-29). nginx publishes port 81
+on `127.0.0.1` only (`docker-compose.yml`), so cloudflared on the host is the only
+client that can reach it. nginx takes the client address from `CF-Connecting-IP`,
+trusted only from the Docker bridge (`172.16.0.0/12`) and loopback (`nginx/nginx.conf`).
+Every log line, every `limit_req` zone, and Flask's per-IP limits (through ProxyFix)
+therefore see the customer instead of the Docker gateway `172.18.0.1`. The
+nginx exporter sends no such header, so it keeps its own bridge address and stays
+allowed on `/nginx_status`.
+
 ## First-time setup
 
 ### 1. DNS records (Cloudflare)
 
-Add these as CNAMEs to the existing `aqua-element.uz` origin (or A records to
-the origin IP), all **proxied** (orange cloud) so TLS terminates at Cloudflare:
+Add these as CNAMEs to the existing `aqua-element.uz` origin, all **proxied**
+(orange cloud) so TLS terminates at Cloudflare. Each host must also reach the
+Cloudflare Tunnel, whose cloudflared ingress points at `http://localhost:81`.
+An A record to the host's IP reaches nothing, because port 81 is bound to loopback:
 
 ```
 flower         CNAME  aqua-element.uz   ☁ Proxied

@@ -108,21 +108,6 @@ class CancelSubscriptionRequest(BaseModel):
     expected_state: Optional[str] = Field(None, max_length=64)
 
 
-class AddSubscriptionItemRequest(BaseModel):
-    """Add subscription item request schema"""
-
-    product_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0)
-    special_instructions: Optional[str] = Field(None, max_length=200)
-
-
-class UpdateSubscriptionItemRequest(BaseModel):
-    """Update subscription item request schema"""
-
-    quantity: int = Field(..., gt=0)
-    special_instructions: Optional[str] = Field(None, max_length=200)
-
-
 class SubscriptionPreviewRequest(_OneFrequency):
     """Subscription preview request schema: one `frequency`, and the chosen slot, whose days a daily delivery is
     counted on (spec 2026-10-27 §6.4)."""
@@ -174,20 +159,6 @@ class SubscriptionStatistics(BaseModel):
 
     # Trend data
     monthly_spending_trend: Dict[str, MoneyFloat]
-
-
-class SubscriptionLogSchema(BaseModel):
-    """Subscription log schema"""
-
-    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
-
-    id: int
-    subscription_id: int
-    action: str
-    details: str
-    created_at: datetime
-    user_name: Optional[str] = None
-    extra_data: Optional[Dict[str, Any]] = None
 
 
 class SubscriptionItemLine(BaseModel):
@@ -262,12 +233,9 @@ __all__ = [
     "UpdateSubscriptionRequest",
     "PauseSubscriptionRequest",
     "CancelSubscriptionRequest",
-    "AddSubscriptionItemRequest",
-    "UpdateSubscriptionItemRequest",
     "SubscriptionPreviewRequest",
     "SubscriptionPreviewResponse",
     "SubscriptionStatistics",
-    "SubscriptionLogSchema",
     "ChangePaymentMethodRequest",
     "SkipDeliveryRequest",
     "SubscriptionItemLine",
@@ -427,22 +395,6 @@ def serialize_subscription_preview(preview_data: Dict[str, Any]) -> Dict[str, An
         "savings_percentage": preview_data.get("savings_percentage", 0.0),
         "items_breakdown": preview_data.get("items_breakdown", []),
     }
-
-
-def serialize_subscription_log(log) -> Dict[str, Any]:
-    """Serialize subscription log entry"""
-    try:
-        return {
-            "id": log.id,
-            "subscription_id": log.subscription_id,
-            "action": log.action,
-            "details": log.details,
-            "created_at": log.created_at.isoformat(),
-            "user_name": getattr(log.user, "full_name", None) if hasattr(log, "user") and log.user else None,
-            "extra_data": getattr(log, "extra_data", None),
-        }
-    except Exception:
-        return {"id": log.id, "action": log.action, "details": log.details, "created_at": log.created_at.isoformat()}
 
 
 # ---------------------------------------------------------------------------

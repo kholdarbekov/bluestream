@@ -5,9 +5,10 @@ Every customer order payload (`serialize_order`: the list, the detail and POST /
 language: the button's label, the amount the Click link will charge, and the "Pay by" sentence. Its `cancel` is the
 ONE Cancel rule (`OrderService.customer_cancel_block_code` and `customer_cancel_via`): skip, cancel or decline, with
 the button's label and the confirm's sentence. Its `confirm` is the store's Confirm of an order its sales agent placed.
+Its `reorder` is the ONE reorder rule (`OrderService.can_reorder`, R8) on a delivered order.
 The bot, the website and the subscription page render these and never work them out again, and
-`POST /orders/<id>/retry-payment` and `POST /orders/<id>/cancel` enforce the same functions, so the button a customer
-is shown and the write it sends cannot disagree.
+`POST /orders/<id>/retry-payment`, `POST /orders/<id>/cancel` and `POST /cart/fill-from-order/<id>` enforce the same
+functions, so the button a customer is shown and the write it sends cannot disagree.
 """
 
 import copy
@@ -21,11 +22,15 @@ from business_app.utils.local_windows import local_date
 from business_app.utils.payment_projection import PAY_REFUSAL_ALREADY_PAID, PAY_REFUSAL_ORDER_CLOSED, pay_refusal
 from business_app.utils.timezone_utils import get_utc_now
 from business_app.utils.translations import get_translation
+from shared.enums import OrderStatus
 
 logger = logging.getLogger(__name__)
 
 ACTIONS = "api.orders.actions"
 PAY = f"{ACTIONS}.pay"
+REORDER_LABEL = f"{ACTIONS}.reorder.label"
+# The sentence POST /cart/fill-from-order/<id> answers an order the reorder rule refuses with.
+REORDER_REFUSAL = f"{ACTIONS}.reorder.refusal"
 
 # A Pay the customer may not use: nothing to show, nothing to send.
 _CLOSED_PAY: Dict[str, Any] = {
@@ -37,10 +42,11 @@ _CLOSED_PAY: Dict[str, Any] = {
     "deadline_label": None,
 }
 
-# A removal the customer may not use. `cancel_action` fills in the refusal and the subscription it publishes.
+# A removal the customer may not use. `cancel_action` fills in the refusal, its words and the subscription it publishes.
 _CLOSED_CANCEL: Dict[str, Any] = {
     "allowed": False,
     "refusal": None,
+    "refusal_copy": None,
     "via": None,
     "label": None,
     "confirm_text": None,
@@ -50,9 +56,23 @@ _CLOSED_CANCEL: Dict[str, Any] = {
 
 _CLOSED_CONFIRM: Dict[str, Any] = {"allowed": False, "label": None}
 
+_CLOSED_REORDER: Dict[str, Any] = {"allowed": False, "label": None}
+
 # What a payload publishes when it cannot work the real answer out (`serialize_order`'s fallback): every action
 # closed. Callers publish a copy, never this dict itself.
-CLOSED_CUSTOMER_ACTIONS: Dict[str, Dict] = {"pay": _CLOSED_PAY, "cancel": _CLOSED_CANCEL, "confirm": _CLOSED_CONFIRM}
+CLOSED_CUSTOMER_ACTIONS: Dict[str, Dict] = {
+    "pay": _CLOSED_PAY,
+    "cancel": _CLOSED_CANCEL,
+    "confirm": _CLOSED_CONFIRM,
+    "reorder": _CLOSED_REORDER,
+}
+
+# The words a refused removal is told in, as a copy id each client prefixes with its own family: `api.orders.<id>` (the
+# website's sentence, which sends the customer to the bot link) and `telegram.orders.<id>` (the bot's, which points to
+# its chat). A Skip on an order that can no longer be removed says so in skip words (step-4 live drive D7).
+ORDERS = "api.orders"
+CANCEL_REFUSED = "cancel_refused"
+SKIP_REFUSED_NOT_SKIPPABLE = "skip_refused.not_skippable"
 
 # The refusals the retry-payment route has always answered in these words.
 _REFUSAL_KEYS = {
@@ -105,22 +125,27 @@ def pay_action(order, *, language: Optional[str] = None, now: Optional[datetime]
 
 
 def cancel_action(order, *, language: Optional[str] = None) -> Dict[str, Any]:
-    """`customer_actions.cancel`: `{allowed, refusal, via, label, confirm_text, subscription_id, reasons}`.
+    """`customer_actions.cancel`: `{allowed, refusal, refusal_copy, via, label, confirm_text, subscription_id,
+    reasons}`.
 
     `via` is `OrderService.customer_cancel_via` ("skip", "cancel" or "decline"), which POST /orders/<id>/cancel
     expects back as `expected_via`; `refusal` is `customer_cancel_block_code` when the customer may not remove the
-    order. `label` and `confirm_text` are None unless allowed. A skip's sentence names the delivery it skips and the
-    next one (`SubscriptionService.next_delivery_after_skip`), and only a skip carries its `reasons` chips.
-    `subscription_id` is the order's subscription whether or not the removal is allowed."""
+    order, and `refusal_copy` the words it is told in (`cancel_refusal_copy`, by the removal the order's kind gives:
+    the bot shows them when a Cancel drawn earlier is tapped). `label` and `confirm_text` are None unless allowed. A
+    skip's sentence names the delivery it skips and the next one (`SubscriptionService.next_delivery_after_skip`), and
+    only a skip carries its `reasons` chips. `subscription_id` is the order's subscription whether or not the removal is
+    allowed."""
     from business_app.services.order_service import CUSTOMER_CANCEL_VIA_SKIP, OrderService
     from business_app.services.subscription_display import skip_reasons
     from business_app.services.subscription_service import SubscriptionService
 
     via = OrderService.customer_cancel_via(order)
     if via is None:
+        refusal = OrderService.customer_cancel_block_code(order)
         return {
             **_CLOSED_CANCEL,
-            "refusal": OrderService.customer_cancel_block_code(order),
+            "refusal": refusal,
+            "refusal_copy": cancel_refusal_copy(refusal, via=OrderService.customer_removal_kind(order)),
             "subscription_id": order.subscription_id,
             "reasons": [],
         }
@@ -142,6 +167,7 @@ def cancel_action(order, *, language: Optional[str] = None) -> Dict[str, Any]:
     return {
         "allowed": True,
         "refusal": None,
+        "refusal_copy": None,
         "via": via,
         "label": get_translation(f"{key}.label", language),
         "confirm_text": confirm_text,
@@ -162,6 +188,17 @@ def confirm_action(order, *, language: Optional[str] = None) -> Dict[str, Any]:
     return {"allowed": True, "label": get_translation(f"{ACTIONS}.confirm.label", language)}
 
 
+def reorder_action(order, *, language: Optional[str] = None) -> Dict[str, Any]:
+    """`customer_actions.reorder`: `{allowed, label}`, the order screens' Reorder (the bot's "Order again"), offered
+    on a delivered order that `OrderService.can_reorder` (R8: never a subscription's delivery, and a line to copy).
+    Its route, POST /cart/fill-from-order/<id>, refuses what `can_reorder` refuses."""
+    from business_app.services.order_service import OrderService
+
+    if order.status != OrderStatus.DELIVERED or not OrderService.can_reorder(order):
+        return dict(_CLOSED_REORDER)
+    return {"allowed": True, "label": get_translation(REORDER_LABEL, language)}
+
+
 def customer_actions(
     order, *, language: Optional[str] = None, now: Optional[datetime] = None
 ) -> Dict[str, Dict[str, Any]]:
@@ -174,6 +211,7 @@ def customer_actions(
         "pay": _answer("pay", pay_action, order, language=language, now=now),
         "cancel": _answer("cancel", cancel_action, order, language=language),
         "confirm": _answer("confirm", confirm_action, order, language=language),
+        "reorder": _answer("reorder", reorder_action, order, language=language),
     }
 
 
@@ -189,3 +227,21 @@ def _answer(name: str, action: Callable[..., Dict[str, Any]], order, **kwargs) -
 def pay_refusal_message(refusal: str, *, language: Optional[str] = None) -> str:
     """The sentence a refused Pay answers with, in the customer's language."""
     return get_translation(_REFUSAL_KEYS.get(refusal, f"{PAY}.refusal.{refusal}"), language)
+
+
+def cancel_refusal_copy(reason_code: str, *, via: Optional[str]) -> str:
+    """The ONE choice of the words a refused removal is told in: its copy id, published as `refusal_copy` on the
+    cancel route's 400 and on a closed `customer_actions.cancel`. `reason_code` is the refusal
+    (`customer_cancel_block_code`); `via` is the removal the button offered (the route's `expected_via`, or the
+    order's `customer_removal_kind`): an order that can no longer be removed, refused to a Skip, "can no longer be
+    skipped", not "cancelled"."""
+    from business_app.services.order_service import CUSTOMER_CANCEL_NOT_CANCELLABLE, CUSTOMER_CANCEL_VIA_SKIP
+
+    if via == CUSTOMER_CANCEL_VIA_SKIP and reason_code == CUSTOMER_CANCEL_NOT_CANCELLABLE:
+        return SKIP_REFUSED_NOT_SKIPPABLE
+    return f"{CANCEL_REFUSED}.{reason_code.lower()}"
+
+
+def cancel_refusal_message(refusal_copy: str, *, bot_url: str, language: Optional[str] = None) -> str:
+    """The website's sentence for a refused removal (`cancel_refusal_copy`'s id), in the customer's language."""
+    return get_translation(f"{ORDERS}.{refusal_copy}", language, bot_url=bot_url)

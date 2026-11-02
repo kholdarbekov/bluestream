@@ -12,6 +12,8 @@ import pytest
 from business_app.models.loyalty import LoyaltyReward
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.order_service import OrderService
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+from shared.enums import SubscriptionStatus
 from tests.integration.reorder_reminder_builders import (
     add_order_lines,
     at,
@@ -20,6 +22,9 @@ from tests.integration.reorder_reminder_builders import (
     delivered_order,
     make_customer,
     make_product,
+    seed_translations,
+    subscription,
+    subscription_delivery,
 )
 # The real-redemption fixtures and order payload of the reward-redemption suite.
 from tests.integration.test_order_reward_redemption import (  # noqa: F401
@@ -124,6 +129,41 @@ def test_another_customers_order_is_a_404_and_her_cart_is_untouched(app, client,
     resp = _fill(app, client, o.alice, bobs.id)
 
     assert (resp.status_code, resp.get_json()["error"]) == (404, "NOT_FOUND")
+    assert _cart(app, client, o.alice) == [(o.cups.id, 3)]
+
+
+REFUSAL = "api.orders.actions.reorder.refusal"
+
+
+def _subscription_delivery(db, o):
+    plan = subscription(db, o.alice, status=SubscriptionStatus.ACTIVE)
+    return add_order_lines(db, subscription_delivery(db, o.alice, plan, at(-2)), [(o.water, 3)])
+
+
+def _reward_only_delivery(db, o):
+    return add_order_lines(db, delivered_order(db, o.alice, at(-2)), [], reward_lines=[(o.water, 1)])
+
+
+@pytest.mark.parametrize(
+    "build", [_subscription_delivery, _reward_only_delivery], ids=["subscription-delivery", "free-reward-only"]
+)
+def test_an_order_the_reorder_rule_refuses_is_refused_in_her_words_and_her_cart_is_untouched(
+    app, client, db, last_order, build
+):
+    """R8, `OrderService.can_reorder`: a subscription's delivery is never repeated by a reorder, and an order with no
+    paid line has nothing to copy. No screen offers Reorder on either (`customer_actions.reorder`); a stale button's
+    POST is answered 409 with the published sentence, in the customer's language, before the cart is emptied."""
+    o = last_order
+    seed_translations(db, [REFUSAL])
+    o.alice.preferred_language = "ru"
+    db.session.commit()
+    _cups_already_in_cart(app, client, o)
+    refused = build(db, o)
+
+    resp = _fill(app, client, o.alice, refused.id)
+
+    assert resp.status_code == 409, resp.get_data(as_text=True)
+    assert resp.get_json()["message"] == BACKEND_TRANSLATIONS[REFUSAL]["ru"]
     assert _cart(app, client, o.alice) == [(o.cups.id, 3)]
 
 

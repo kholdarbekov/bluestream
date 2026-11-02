@@ -378,10 +378,8 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
     # importable before the service layer is wired up.
     from business_app.services.customer_order_actions import CLOSED_CUSTOMER_ACTIONS, customer_actions
     from business_app.services.order_schedule_service import OrderScheduleService
-    from business_app.services.order_service import LEGACY_CUSTOMER_CANCEL_VIA, OrderService
 
     try:
-        cancel_via = OrderService.customer_cancel_via(order)
         order_data = {
             "id": order.id,
             "order_number": order.order_number,
@@ -411,12 +409,6 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "updated_at": order.updated_at.isoformat() if order.updated_at else None,
             "confirmed_at": order.confirmed_at.isoformat() if getattr(order, "confirmed_at", None) else None,
             "delivered_at": order.delivered_at.isoformat() if getattr(order, "delivered_at", None) else None,
-            # F5: the one answer to "may the customer cancel this themselves", which
-            # POST /orders/<id>/cancel enforces.
-            "can_customer_cancel": cancel_via is not None,
-            # Retired by `customer_actions.cancel` (spec 2026-10-27 §5.1), kept in its old values until the
-            # clients stop reading it: "subscription" for a skip, "order" for a cancel or a decline, or None.
-            "customer_cancel_via": LEGACY_CUSTOMER_CANCEL_VIA.get(cancel_via),
             # What the customer may do with the order, by its one rule, with the finished words (spec
             # 2026-10-27 §4.2, §5.1): `pay`, which POST /orders/<id>/retry-payment enforces, and `cancel`
             # and `confirm`, which POST /orders/<id>/cancel and /agent-confirmation enforce. Clients render it.
@@ -431,7 +423,7 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             order_data["delivery_info"] = serialize_order_delivery(order.delivery)
 
         if include_payment and hasattr(order, "payment") and order.payment:
-            order_data["payment_info"] = serialize_order_payment(order.payment, order)
+            order_data["payment_info"] = serialize_order_payment(order.payment)
 
         # Always include delivery address if available
         if hasattr(order, "delivery_address") and order.delivery_address:
@@ -452,10 +444,8 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             "display_status": order.status.value if order.status is not None else None,
             "total_amount": float(order.total_amount),
             "created_at": order.created_at.isoformat(),
-            # Fail closed. Never re-run the predicate here: it reads relationships, and a
+            # Fail closed. Never re-run the rules here: they read relationships, and a
             # second raise would turn this degraded answer into a 500.
-            "can_customer_cancel": False,
-            "customer_cancel_via": None,
             "customer_actions": copy.deepcopy(CLOSED_CUSTOMER_ACTIONS),
             "error": f"Partial serialization due to: {str(e)}",
         }
@@ -625,37 +615,33 @@ def serialize_order_delivery(delivery) -> Dict[str, Any]:
 
 
 def payability_fields(order, payment) -> Dict[str, Any]:
-    """THE published answer to "may money still be taken for this order online".
+    """THE admin answer to "may money still be taken for this order online", for the admin Orders payloads only.
 
     `order_is_payable_online` (payment_projection.py) is the single authority —
     the same function the Click PREPARE guard refuses on, derived from
-    `order_is_resolved`, so reconcile, PREPARE and every client agree by
-    construction. Until B3 nothing published it, and five client surfaces each
-    re-derived payability from whatever they could see: the admin Orders page
-    from "we stored a payment_link once", the customer bot from
-    `order_status == 'pending'`. Both copies are wrong for policy case B
-    (DELIVERED, unpaid, Click rail, payment PENDING), which is payable BY
-    DESIGN — the money can still arrive and the receipt still has to be issued.
+    `order_is_resolved`, so reconcile, PREPARE and the admin drawer agree by
+    construction. Before B3 the admin Orders page re-derived it from "we stored
+    a payment_link once", which is wrong for policy case B (DELIVERED, unpaid,
+    Click rail, payment PENDING): payable BY DESIGN — the money can still
+    arrive and the receipt still has to be issued.
 
-    TWO fields, because the clients take two different ACTIONS on the answer and
-    neither value can serve the other:
+    The customer payloads do not carry these fields: the customer's Pay is the
+    published `customer_actions.pay` (spec 2026-10-27 §4.2), which
+    `retry-payment` enforces.
 
-    * ``is_payable`` is a PERMISSION. The customer bot's Pay / Retry buttons are
-      callbacks that mint a FRESH link server-side (POST /payments/create), so
-      there is no URL to hand them — only a yes/no.
     * ``payable_payment_link`` is the STORED link, non-null ONLY when following
       it would work. The admin's two buttons open THAT link, so they need a
-      URL. Publishing the boolean and the raw URL separately would leave every
+      URL. Publishing a boolean and the raw URL separately would leave every
       call site to pair them by hand (`payment_link && is_payable`, href from
       the other one) — which is exactly the two-values-out-of-step shape that
       let `Orders.js` ship the same wrong test twice. Collapsed into one value,
       the truthiness test and the href are the same expression and a button
       aimed at a dead link is not writable.
+    * ``is_payable`` is the authority's answer verbatim.
 
     ``payment_link`` stays published RAW alongside this. The admin audit row has
     to distinguish "a link was issued and is now dead" from "no link was ever
-    issued", and that needs both values — which is also the reason one boolean
-    could never have served both questions.
+    issued", and that needs both values.
     """
     payable = order_is_payable_online(order, payment)
     return {
@@ -664,17 +650,11 @@ def payability_fields(order, payment) -> Dict[str, Any]:
     }
 
 
-def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
-    """Serialize payment information.
-
-    ``order`` is the payability half's other operand. It defaults to the
-    payment's own ``order`` relationship so the handful of call sites that hold
-    only a payment keep working; ``serialize_order`` passes the instance it
-    already has rather than re-loading it.
-    """
+def serialize_order_payment(payment) -> Dict[str, Any]:
+    """Serialize payment information for the customer payloads. Whether the customer may pay is the order's
+    published `customer_actions.pay`, not a field here."""
     projection = get_payment_projection(payment)
     fiscalization = getattr(payment, "fiscalization", None)
-    payability = payability_fields(order if order is not None else getattr(payment, "order", None), payment)
 
     try:
         return {
@@ -695,7 +675,6 @@ def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
             "provider_transaction_id": getattr(payment, "provider_transaction_id", None),
             "payment_provider": getattr(payment, "payment_provider", None),
             "payment_link": getattr(payment, "payment_link", None),
-            **payability,
             "paid_at": payment.paid_at.isoformat() if getattr(payment, "paid_at", None) else None,
             "last_collected_at": (
                 payment.last_collected_at.isoformat() if getattr(payment, "last_collected_at", None) else None
@@ -717,7 +696,6 @@ def serialize_order_payment(payment, order=None) -> Dict[str, Any]:
             "net_outstanding_amount": float(net_open_receivable_amount(payment)),
             "amount_paid": float(paid_amount(payment)),
             "payment_link": getattr(payment, "payment_link", None),
-            **payability,
         }
 
 

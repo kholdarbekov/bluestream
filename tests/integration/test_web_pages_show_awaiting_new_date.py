@@ -8,12 +8,12 @@ A failed delivery never changes the order's status (F1). So every page that read
 that had failed. The server-rendered pages now label `display_status`, which their routes
 take from `OrderScheduleService.customer_display_status`.
 
-The tracking page draws Cancel from `can_customer_cancel`, taken from
+The tracking page draws Cancel from the published `customer_actions.cancel`, taken from
 `OrderService.customer_cancel_block_code`. Until now it drew Cancel for any pending or
 confirmed order. It held its own copy of the rule, the same kind of copy the bot used
 when order 1277 (TG_000508_26) was cancelled while it waited for a new date.
 
-`orders.js` and `order-detail-modal.js` read the same two fields from `GET /orders` and
+`orders.js` and `order-detail-modal.js` read the same answers from `GET /orders` and
 `GET /orders/<id>`. The storefront has no JS runner, so their half of the contract is
 pinned in two places:
 - here, through the PAGE_DATA they label from;
@@ -267,7 +267,7 @@ CANCEL_CASES = [
 def test_the_tracking_page_draws_cancel_only_when_the_backend_allows_it(
     client, db, auth_headers, sample_user, user_address, delivery_driver, case
 ):
-    """The page's Cancel and the API's `can_customer_cancel` are one answer. The full F5
+    """The page's Cancel and the API's `customer_actions.cancel` are one answer. The full F5
     matrix, and the endpoint enforcing it, is in tests/integration/test_customer_cancel_order.py."""
     order = _seed_order(
         db, sample_user, user_address, delivery_driver, case.name, case.order_status, case.delivery_status,
@@ -278,7 +278,8 @@ def test_the_tracking_page_draws_cancel_only_when_the_backend_allows_it(
     soup = _page(client, TRACKING_URL.format(order_id=order.id), auth_headers)
     drawn = _cancel_drawn(soup)
 
-    assert (drawn, published["can_customer_cancel"]) == (case.customer_may_cancel, case.customer_may_cancel)
+    allowed = published["customer_actions"]["cancel"]["allowed"]
+    assert (drawn, allowed) == (case.customer_may_cancel, case.customer_may_cancel)
     # The page's island is the API's answer, not a second one. A one-off order is cancelled on its own
     # (via "cancel"); a subscription's order is covered in tests/integration/test_order_skip_cancel_decline.py.
     assert _island(soup)["order"] == {"id": order.id, "customer_actions": published["customer_actions"]}
@@ -350,7 +351,7 @@ def test_a_web_cancel_while_the_order_awaits_a_new_date_is_refused_with_the_bot_
     assert body["data"] == {
         "error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE",
         "reason_code": "AWAITING_NEW_DATE",
-        "can_customer_cancel": False,
+        "refusal_copy": "cancel_refused.awaiting_new_date",
     }
     bot_url = app.config["COMPANY_TELEGRAM_BOT_URL"]
     assert body["message"] in {text.format(bot_url=bot_url) for text in awaiting_refusal_copy.values()}
@@ -481,7 +482,7 @@ def test_the_js_pages_carry_a_label_for_the_display_status_the_api_publishes(
     waiting = _seed_order(db, sample_user, user_address, delivery_driver, "js-awaiting", OS.CONFIRMED, DS.FAILED)
     listed = client.get(ORDERS_API_URL, headers=auth_headers).get_json()["data"]["orders"]
     (row,) = [row for row in listed if row["id"] == waiting.id]
-    assert (row["display_status"], row["can_customer_cancel"]) == (AWAITING, False)
+    assert (row["display_status"], row["customer_actions"]["cancel"]["allowed"]) == (AWAITING, False)
 
     orders_page = _page(client, ORDERS_PAGE_URL, auth_headers)
     account_page = _page(client, ACCOUNT_URL, auth_headers)

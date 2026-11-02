@@ -200,7 +200,8 @@ def _assert_subscription_reads_the_rule(db, customer, order_id, expected):
         assert detail["allowed_actions"]["pay"]["expected_amount"] == "30000.00"
     history_row = customer.history_row(order.subscription_id, order_id)
     assert history_row["customer_actions"]["pay"] == customer.order_pay(order_id)
-    assert history_row["can_pay"] is history_row["customer_actions"]["pay"]["allowed"] is expected
+    assert history_row["customer_actions"]["pay"]["allowed"] is expected
+    assert "can_pay" not in history_row  # retired: the row's Pay is its published `customer_actions.pay`
 
 
 def test_the_subscription_pay_fields_read_the_same_rule(app, db, sample_user, customer):

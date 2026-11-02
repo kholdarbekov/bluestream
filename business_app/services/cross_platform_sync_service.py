@@ -11,7 +11,7 @@ from business_app import db
 from business_app.models.user import User
 from shared.enums import UserStatus
 from shared.user_names import GENERATED_TELEGRAM_NAME
-from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL, is_deliverable_email
+from shared.validators import is_deliverable_email, merge_tombstone_email
 from business_app.services.auth_service import TELEGRAM_SELF_LINK_SOURCES, has_website_password, mask_account_email
 from business_app.services.session_revocation_service import REVOKED_BY_ACCOUNT_MERGE, SessionRevocationService
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
@@ -223,7 +223,7 @@ class CrossPlatformSyncService:
         # a constraint violation
         telegram_user.telegram_id = None
         if brings_web_login:
-            telegram_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
+            telegram_user.email = merge_tombstone_email(secondary_id)
         db.session.flush()
 
         # Step 4: Transfer telegram-specific data to web user
@@ -561,7 +561,7 @@ class CrossPlatformSyncService:
         self._transfer_user_references(primary_id, secondary_id)
 
         # Step 3: Clear email from secondary to avoid constraint violation (email is unique)
-        web_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
+        web_user.email = merge_tombstone_email(secondary_id)
         web_user.phone = None
         db.session.flush()
 
@@ -643,7 +643,7 @@ class CrossPlatformSyncService:
 
         # Step 4: Clear unique constraints on secondary before delete
         if secondary_user.email:
-            secondary_user.email = f"deleted_{secondary_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
+            secondary_user.email = merge_tombstone_email(secondary_id)
         if secondary_user.phone:
             secondary_user.phone = None
         db.session.flush()

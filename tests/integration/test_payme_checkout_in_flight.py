@@ -7,12 +7,12 @@ rails could capture, the customer would pay twice and nothing would record a cre
 
 - the Pay tap (`POST /orders/<id>/retry-payment`) does not move a Payme payment whose Payme charge is still open
   (pending and inside `PAYME_TIMEOUT_MS`): 409 `STATE_CHANGED`, and nothing is written;
-- PerformTransaction never captures a payment that is no longer open on Payme (the bot's `/payments/create` moved
-  it to Click, or something other than this charge settled it): it cancels the charge, so Payme releases the payer's
-  hold. A payment this very charge settled is a retried Perform, and it completes (fix round 2).
+- PerformTransaction never captures a payment that is no longer open on Payme (the retired `/payments/create` moved
+  it to Click before the deploy, or something other than this charge settled it): it cancels the charge, so Payme
+  releases the payer's hold. A payment this very charge settled is a retried Perform, and it completes (fix round 2).
 
-Driven through the real endpoints: the Payme JSON-RPC webhook, the Click webhook, `retry-payment` and the bot's
-`/payments/create`. Only external I/O is mocked: the Payme Basic-auth check (as in `test_payment_matrix.py`) and
+Driven through the real endpoints: the Payme JSON-RPC webhook, the Click webhook and `retry-payment`. Only external
+I/O is mocked: the Payme Basic-auth check (as in `test_payment_matrix.py`) and
 fiscalization. The last two tests run on PostgreSQL: the tap locks the payment row before the order, the order the
 webhooks lock them in, so a tap racing a webhook waits instead of deadlocking; and a duplicate Perform waiting on the
 payment row answers what the first one committed.
@@ -233,19 +233,15 @@ def test_a_payme_charge_past_payme_s_window_no_longer_holds_the_pay(app, db, sam
 def test_payme_never_captures_a_payment_that_moved_to_click(
     app, db, sample_user, gateways, no_fiscalization, click_settled
 ):
-    """The bot's Pay today (`POST /payments/create`, telegram_bot/handlers/payments.py) moves the order onto Click
-    while its Payme checkout is open; Click may settle it before Payme's PerformTransaction arrives. Perform cancels
-    the Payme charge instead of capturing a second payment, and Payme's later CancelTransaction refunds nothing and
-    cancels nothing."""
+    """Before the deploy, the bot's old Pay (the retired `POST /payments/create`) moved a Payme order onto Click while
+    its Payme checkout was open, so such rows can exist at the deploy; Click may settle one before Payme's
+    PerformTransaction arrives. Perform cancels the Payme charge instead of capturing a second payment, and Payme's
+    later CancelTransaction refunds nothing and cancels nothing. The move is made the way that route made it, through
+    `PaymentService.create_payment`."""
     order = seed(db, sample_user, LIVE_PAYME, now=get_utc_now())
     order_id, order_number = order.id, order.order_number
     trans_id = _open_payme_charge(db, order_id)
-    moved = app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": order_id, "payment_method": "click"},
-        headers=_headers(app, sample_user),
-    )
-    assert moved.status_code == 201, moved.get_json()
+    PaymentService().create_payment(order_id, PaymentMethod.CLICK, user_id=sample_user.id, currency="UZS")
     db.session.expire_all()
     payment = db.session.get(Order, order_id).payment
     assert payment.payment_method == PaymentMethod.CLICK

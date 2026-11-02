@@ -380,7 +380,6 @@ class BaseConfig:
         get_secret("click_shop_secret_key", "CLICK_SHOP_SECRET_KEY", required=False) or CLICK_SECRET_KEY
     )
     CLICK_CHECKOUT_URL = os.environ.get("CLICK_CHECKOUT_URL", "https://my.click.uz/services/pay")
-    CLICK_SHOP_CALLBACK_URL = os.environ.get("CLICK_SHOP_CALLBACK_URL")
     CLICK_MERCHANT_API_URL = os.environ.get(
         "CLICK_MERCHANT_API_URL", os.environ.get("CLICK_ENDPOINT_URL", "https://api.click.uz/v2/merchant")
     )

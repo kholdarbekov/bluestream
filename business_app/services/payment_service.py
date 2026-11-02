@@ -23,6 +23,7 @@ from business_app.utils.exceptions import (
     ValidationError,
 )
 from business_app.utils.constants import (
+    NotificationChannel,
     PaymeErrors,
     PaymentMethodType,
 )
@@ -42,6 +43,7 @@ from business_app.utils.helpers import generate_random_string
 from business_app.utils.timezone_utils import ensure_utc, get_utc_now
 from business_app.utils.payment_projection import (
     FISCALIZED_RAILS,
+    PAY_REFUSAL_DEADLINE_PASSED,
     get_payment_projection,
     is_online_rail,
     is_settled_prepayment,
@@ -63,15 +65,16 @@ from business_app import db
 def _refuse_customer_rail_move(order: Order, payment: Optional[Payment], requested_rail, current_rails) -> None:
     """Raise `ValidationError` unless moving `order` onto `requested_rail` is the one rail move a customer write may
     make: an online order (Click or legacy Payme on both columns) onto Click, with nothing collected, delivered or
-    not, but not dead (spec 2026-10-27 §4.3, D2, D4, D5). Every `create_payment` caller is a customer route or
-    Payme CreateTransaction; staff move rails with their own tools (`OrderPaymentMethodEditService`, and the
-    door's `CashCollectionService.convert_electronic_order_to_cash`). The first check that matches refuses:
+    not, but not dead (spec 2026-10-27 §4.3, D2, D4, D5). `create_payment`'s only caller is the customer's Pay
+    (`pay_order_as_customer`, behind `POST /orders/<id>/retry-payment`); staff move rails with their own tools
+    (`OrderPaymentMethodEditService`, and the door's `CashCollectionService.convert_electronic_order_to_cash`). The
+    first check that matches refuses:
 
     1. any other move, cash -> Click and online -> cash among them: RAIL_MOVE_NOT_ALLOWED. The online rails are
        `payment_projection.is_online_rail`'s, the same ones `pay_refusal` publishes Pay for;
     2. money already collected on the row;
-    3. a dead order (cancelled, returned). `retry-payment` never gets here (`pay_refusal` refuses it first), but
-       `POST /payments/create` checks only `is_paid`, so this is that route's only lifecycle guard;
+    3. a dead order (cancelled, returned). `retry-payment` never gets here (`pay_refusal` refuses it first); this is
+       the service's own backstop for any other caller;
     4. a marking-code pool too short for the order on Click: MARKING_CODES_POOL_SHORT. Payme draws no code,
        so the move makes the order need them; refused here rather than at Click's PREPARE, which answers the
        webhook's generic 503 and shows the customer nothing. Its sentence names no other way to pay: the
@@ -269,9 +272,28 @@ class PaymentService:
         hours from here (`OrderService.payment_deadline`, spec 2026-10-27 §4.4, §17 Q3). The caller commits.
 
         The ONLY writer of `orders.online_payable_since`. Called when an order is placed on an online rail
-        (`initialize_order_payment`, once), when a customer's Pay moves it onto Click (`create_payment`) and when
-        staff move it there (`OrderPaymentMethodEditService._unwind_to_click`)."""
+        (`initialize_order_payment`, once), when a customer's Pay moves it onto Click (`create_payment`), when
+        staff move it there (`OrderPaymentMethodEditService._unwind_to_click`), and when staff give an unpaid online
+        order back its place (`reopen_click_payment_window`)."""
         order.online_payable_since = now or get_utc_now()
+
+    @classmethod
+    def reopen_click_payment_window(cls, order: Order, *, now: Optional[datetime] = None) -> bool:
+        """Staff re-dated the order, or returned its stop to the pool: an unpaid online order gets a fresh payment
+        window from `now` (owner ruling 2026-11-02), so its Pay shows again with a new "Pay by" and the sweep cancels
+        it only if it is still unpaid 24 hours later. Without it, an order that waited with the driver, or for a new
+        date after a failed delivery (no deadline binds either, spec 2026-10-27 §4.4), came back already past a
+        deadline counted from when it first became payable, and the next sweep cancelled the order staff had kept.
+
+        An unpaid online order is one the one Pay rule refuses for nothing but its deadline (`pay_refusal` is None or
+        `deadline_passed`). A paid, partly paid, zero-total, closed or offline-rail order is left as it is.
+
+        Called by `OrderScheduleService.reschedule` (every staff re-date) and `StaffService.return_delivery_to_pool`,
+        under the locks they hold. True when it opened a window; the caller commits."""
+        if pay_refusal(order, now=now) not in (None, PAY_REFUSAL_DEADLINE_PASSED):
+            return False
+        cls.open_click_payment_window(order, now=now)
+        return True
 
     def create_payment(self, order_id: int, payment_method: PaymentMethod, amount: int = None, **kwargs) -> Payment:
         """
@@ -701,17 +723,9 @@ class PaymentService:
         """Delegate to CardTokenService.detect_card_brand."""
         return self.card_token_service.detect_card_brand(masked_number)
 
-    def _save_or_update_verified_card(self, user_id: int, token: str, card_metadata: Dict[str, Any]) -> CreditCard:
-        """Delegate to CardTokenService.save_or_update_verified_card."""
-        return self.card_token_service.save_or_update_verified_card(user_id, token, card_metadata)
-
     # ============================================================================
     # END OF PAYME SUBSCRIBE API METHODS
     # ============================================================================
-
-    def _process_click_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
-        """Delegate to ClickPaymentProviderService.process_card_payment."""
-        return self._get_click_provider_service().process_card_payment(payment, card)
 
     def handle_payme_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -863,6 +877,22 @@ class PaymentService:
             current_app.logger.exception("Failed to enqueue Click fiscalization for payment %s", payment.id)
         return fiscalization
 
+    @staticmethod
+    def _still_pending_under_lock(payment: Payment) -> bool:
+        """Re-read `payment` FOR UPDATE before the reconcile writes its answer (step-4 Task Hfix).
+
+        The reconcile reads the payment unlocked and then asks the gateway, so a Click COMPLETE can finish it in
+        between. This takes the row lock the webhook takes first (Payment, then the Order its completion locks), so
+        a COMPLETE in flight is waited for and then seen, and one that arrives later waits for this decision. Never
+        two completions for one payment. False when another writer already decided it: the transaction is rolled
+        back, so nothing the caller flushed before the lock persists, and the lock is released.
+        """
+        Payment.query.filter_by(id=payment.id).with_for_update().populate_existing().one()
+        if payment.status == PaymentStatus.PENDING:
+            return True
+        db.session.rollback()
+        return False
+
     def update_payment_status(self, payment: Payment) -> Payment:
         if not payment:
             raise NotFoundError(get_translation("error.not_found"))
@@ -902,6 +932,8 @@ class PaymentService:
                         },
                     )
                     db.session.rollback()
+                    return payment
+                if not self._still_pending_under_lock(payment):
                     return payment
                 payment.status = PaymentStatus.COMPLETED
                 payment.paid_at = payment.paid_at or datetime.now(timezone.utc)
@@ -970,6 +1002,8 @@ class PaymentService:
                     # reconcile path, whose trailing commit persists it; on the
                     # customer-facing GET nothing commits and teardown discards
                     # it either way, so there the choice is simply harmless.
+                    return payment
+                if not self._still_pending_under_lock(payment):
                     return payment
                 payment.status = (
                     PaymentStatus.CANCELLED
@@ -1400,32 +1434,76 @@ class PaymentService:
 
         self.dispatch_payment_confirmation(payment)
 
-    def dispatch_payment_confirmation(self, payment: Payment) -> bool:
-        """Best-effort dispatch of the customer payment confirmation.
+    @staticmethod
+    def payment_confirmation_dispatched(payment: Payment) -> bool:
+        """Has this payment's one customer confirmation already been dispatched (or settled as having no channel)?
+        Read by every re-driver (the confirmation task, the side-effect sweep) so none sends it twice."""
+        post_payment = (payment.provider_data or {}).get("post_payment") or {}
+        return bool(post_payment.get("confirmation_enqueued_at"))
 
-        Email/SMS via Celery for non-Telegram orders; bot push for Telegram
-        users (stable request_id keyed on payment.id, so re-dispatch is safe).
-        On success stamps provider_data.post_payment.confirmation_enqueued_at —
-        the side-effect sweep re-fires unmarked COMPLETED payments. NEVER raises:
-        this runs after the money commit and must not abort the webhook chain.
+    @staticmethod
+    def unmark_payment_confirmation(payment: Payment, mark: Optional[str] = None) -> bool:
+        """Clear the payment's confirmation mark, so a re-driver sends its confirmation. For a confirmation that never
+        left (its publish failed after the commit; `mark` is the value that transaction wrote, and a mark another
+        dispatch wrote since is left alone), and for a payment reset to wait for new money (no `mark`: any). True
+        when a mark was cleared; the caller commits. A confirmation that never left is also stamped
+        `confirmation_unsent_at`, so its re-send is known as one (`dispatch_payment_confirmation`); a reset owes a new
+        confirmation, so it clears that stamp."""
+        provider_data = dict(payment.provider_data or {})
+        post_payment = dict(provider_data.get("post_payment") or {})
+        current = post_payment.get("confirmation_enqueued_at")
+        if current is None or (mark is not None and current != mark):
+            return False
+        post_payment.pop("confirmation_enqueued_at")
+        if mark is not None:
+            post_payment["confirmation_unsent_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            post_payment.pop("confirmation_unsent_at", None)
+        provider_data["post_payment"] = post_payment
+        payment.provider_data = provider_data
+        return True
+
+    def dispatch_payment_confirmation(self, payment: Payment) -> bool:
+        """Decide the customer's ONE payment confirmation and park it to be sent after the commit (spec 2026-10-27
+        §10, D21; step-4 Task Hfix).
+
+        The customer's channel decides, whatever the order's source
+        (`NotificationService._resolve_telegram_else_email`): a connected bot gets the bot push only (stable request_id
+        keyed on payment.id, so a re-dispatch collapses to one message); otherwise a deliverable email gets the email
+        task; otherwise nothing is sent.
+        `send_payment_notification` resolves the same way, so the email task never adds a Telegram message beside the
+        push. Nothing leaves here: the message is parked in `payment_confirmation_dispatch` and published by its
+        after-commit hook, so the worker and the bot read only committed money, and a rollback sends nothing
+        (incident TG_000092_26).
+
+        Stamps provider_data.post_payment.confirmation_enqueued_at whenever it decided (a send, or no channel), in the
+        same transaction as the parked message; the caller's commit writes both and publishes. A publish that fails
+        after the commit (a broker error, a bot push the bot did not take) unmarks the payment again. The side-effect
+        sweep re-fires unmarked COMPLETED payments on Click and card only (`FISCALIZED_RAILS`); a failed Payme or
+        business-account publish is logged at ERROR instead. NEVER raises: it runs inside the payment-completion chain
+        and must not abort it. A dispatch that raises parks nothing and leaves the payment unmarked.
         """
         order = payment.order
+        marked_at = datetime.now(timezone.utc).isoformat()
         try:
-            order_source = getattr(order, "order_source", None) if order is not None else None
-            if order_source != "telegram":
-                from ..tasks.notification_tasks import send_payment_confirmation_task
+            from business_app.utils.payment_confirmation_dispatch import queue_online_payment_confirmation
 
-                send_payment_confirmation_task.delay(payment.id)
+            from .notification_service import NotificationService
 
+            method = payment.payment_method
+            rail = method.value if hasattr(method, "value") else str(method)
+            # A confirmation an earlier dispatch could not send (`unmark_payment_confirmation`): this is its re-send.
+            resend = bool(((payment.provider_data or {}).get("post_payment") or {}).get("confirmation_unsent_at"))
             user = payment.user
-            if user and user.telegram_id:
-                from business_app.utils.bot_webhook import trigger_bot_webhook
-
-                # BOT-008: stable request_id keyed on payment.id so Celery
-                # retries or re-dispatches collapse to one bot notification.
-                trigger_bot_webhook(
-                    "/internal/payment-success",
-                    {
+            channels = NotificationService._resolve_telegram_else_email(user) if user is not None else []
+            if NotificationChannel.TELEGRAM in channels:
+                queue_online_payment_confirmation(
+                    db.session,
+                    payment.id,
+                    mark=marked_at,
+                    rail=rail,
+                    resend=resend,
+                    bot_payload={
                         "user_id": user.id,
                         "telegram_id": user.telegram_id,
                         "order_id": order.id if order else None,
@@ -1433,15 +1511,16 @@ class PaymentService:
                         "amount": float(order.total_amount) if order else float(payment.amount),
                         "currency": "UZS",
                     },
-                    request_id=f"payment-confirm:{payment.id}",
                 )
+            elif NotificationChannel.EMAIL in channels:
+                queue_online_payment_confirmation(db.session, payment.id, mark=marked_at, rail=rail, resend=resend)
         except Exception:  # noqa: BLE001
             current_app.logger.exception("Failed to dispatch payment confirmation for payment %s", payment.id)
             return False
 
         provider_data = dict(payment.provider_data or {})
         post_payment = dict(provider_data.get("post_payment") or {})
-        post_payment["confirmation_enqueued_at"] = datetime.now(timezone.utc).isoformat()
+        post_payment["confirmation_enqueued_at"] = marked_at
         provider_data["post_payment"] = post_payment
         payment.provider_data = provider_data
         return True

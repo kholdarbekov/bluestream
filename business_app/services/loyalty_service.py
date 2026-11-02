@@ -77,9 +77,11 @@ def clamp_tier_discount(
     never go negative and ``ck_orders_tier_discount_nonneg`` can never be
     violated.
 
-    ONE expression, three call sites: order creation, reward redemption (which
-    learns ``loyalty_discount`` only after the order was priced) and the rail
-    move in ``PaymentService.create_payment``. Import it; never re-type it.
+    ONE expression for every tier discount that is stored or quoted: order
+    creation (``OrderService.create_order``), the checkout estimate
+    (``CartService``), the staff phone-order estimate (``StaffService``) and
+    every payment-method change (``tier_discount_for_rail``, through
+    ``rail_pricing``). Import it; never re-type it.
     """
     headroom = max(
         Decimal("0.00"),

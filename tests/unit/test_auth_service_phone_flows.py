@@ -219,54 +219,31 @@ class TestAuthServicePhoneFlows:
         assert stateful_redis.get(f"phone_reg_lang:{phone_hash}") is None
         assert stateful_redis.get(f"phone_otp_cooldown:{phone_hash}") is None
 
-    def test_request_password_reset_for_telegram_user_with_verified_phone_uses_sms(
-        self, app, db, auth_service_with_stateful_redis
+    @pytest.mark.parametrize("phone_verified", [True, False])
+    def test_request_password_reset_for_telegram_user_sends_nothing(
+        self, app, db, auth_service_with_stateful_redis, stateful_redis, phone_verified
     ):
+        """A bot customer has a placeholder email and no password to reset: no mail, no SMS code, nothing stored."""
         user = User(
             email="telegram_777@bot.internal",
             phone="+998901118899",
             password_hash=hash_password("StrongPass123!"),
             first_name="Telegram",
             registration_source="telegram",
-            phone_verified_at=datetime.now(timezone.utc),
+            phone_verified_at=datetime.now(timezone.utc) if phone_verified else None,
         )
         db.session.add(user)
         db.session.commit()
 
         with (
             app.app_context(),
-            patch.object(auth_service_with_stateful_redis, "_send_phone_password_reset") as mock_sms_reset,
-        ):
-            result = auth_service_with_stateful_redis.request_password_reset(user.email)
-
-        assert result is True
-        mock_sms_reset.assert_called_once()
-        assert mock_sms_reset.call_args[0][0].id == user.id
-
-    def test_request_password_reset_for_telegram_user_without_verified_phone_noop(
-        self, app, db, auth_service_with_stateful_redis
-    ):
-        user = User(
-            email="telegram_888@bot.internal",
-            phone="+998901119900",
-            password_hash=hash_password("StrongPass123!"),
-            first_name="Telegram",
-            registration_source="telegram",
-            phone_verified_at=None,
-        )
-        db.session.add(user)
-        db.session.commit()
-
-        with (
-            app.app_context(),
-            patch.object(auth_service_with_stateful_redis, "_send_phone_password_reset") as mock_sms_reset,
             patch.object(auth_service_with_stateful_redis, "_generate_verification_token") as mock_token,
         ):
             result = auth_service_with_stateful_redis.request_password_reset(user.email)
 
         assert result is True
-        mock_sms_reset.assert_not_called()
         mock_token.assert_not_called()
+        assert stateful_redis._store == {}
 
     def test_send_verification_sms_to_a_new_number_never_writes_it(
         self, app, db, auth_service_with_stateful_redis, sample_user, stateful_redis

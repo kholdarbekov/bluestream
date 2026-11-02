@@ -640,13 +640,11 @@ def audit_log_action(action_type):
             finally:
                 # Log the action
                 try:
-                    from datetime import datetime
-
                     audit_data = {
                         "user_id": user_id,
                         "action_type": action_type,
                         "status": status,
-                        "ip_address": request.headers.get("X-Forwarded-For", request.remote_addr),
+                        "ip_address": request.remote_addr,
                         "user_agent": request.headers.get("User-Agent", ""),
                         "platform": getattr(request, "platform", "unknown"),
                         "timestamp": start_time.isoformat(),

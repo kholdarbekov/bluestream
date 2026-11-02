@@ -34,9 +34,6 @@ STATE = "0123456789abcdef"  # an `allowed_actions.expected_state`: 16 hex charac
 
 TRANSLATIONS = {
     "telegram.subscription.details_title": "DETAILS",
-    "telegram.subscription.pause": "PAUSE",
-    "telegram.subscription.resume": "RESUME",
-    "telegram.subscription.skip_next": "SKIP",
     "telegram.subscription.edit": "EDIT",
     "telegram.subscription.manage_items": "ITEMS",
     "telegram.subscription.orders": "ORDERS",

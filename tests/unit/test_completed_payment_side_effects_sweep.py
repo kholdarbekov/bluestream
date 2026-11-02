@@ -86,6 +86,24 @@ def test_sweep_skips_fully_processed_payment(db, sample_order, monkeypatch):
     assert counts["confirmation_redispatched"] == 0
 
 
+def test_sweep_leaves_a_just_completed_payments_confirmation_to_its_completion(db, sample_order, monkeypatch):
+    """Completed under CONFIRMATION_REDISPATCH_FLOOR ago and not marked yet: its completion may still be between the
+    commit that wrote COMPLETED and the one that writes the mark, so only its fiscalization is re-driven."""
+    from business_app.services.payment_service import PaymentService
+    from business_app.tasks.payment_tasks import CONFIRMATION_REDISPATCH_FLOOR, reconcile_completed_payment_side_effects
+
+    payment = _completed_payment(db, sample_order, paid_minutes_ago=1)
+    assert CONFIRMATION_REDISPATCH_FLOOR > timedelta(minutes=1)
+    queued, dispatched = [], []
+    monkeypatch.setattr(PaymentService, "queue_click_fiscalization", lambda self, pid: queued.append(pid))
+    monkeypatch.setattr(PaymentService, "dispatch_payment_confirmation", lambda self, p: dispatched.append(p.id) or True)
+
+    counts = reconcile_completed_payment_side_effects.run()
+
+    assert (queued, dispatched) == ([payment.id], [])
+    assert (counts["fiscalization_requeued"], counts["confirmation_redispatched"]) == (1, 0)
+
+
 def test_sweep_ignores_old_payments(db, sample_order, monkeypatch):
     payment = _completed_payment(db, sample_order, paid_minutes_ago=60 * 24 * 8)  # 8 days
     from business_app.services.payment_service import PaymentService

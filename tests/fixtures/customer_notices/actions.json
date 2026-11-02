@@ -1,0 +1,112 @@
+{
+ "cash": {
+  "cancel": {
+   "allowed": true,
+   "confirm_text": "Your Thursday, 7 January delivery will be skipped. Next delivery: Thursday, 14 January.",
+   "label": "Skip this delivery",
+   "reasons": [
+    {
+     "code": "still_have_water",
+     "label": "I still have water"
+    },
+    {
+     "code": "away",
+     "label": "I'll be away"
+    },
+    {
+     "code": "other",
+     "label": "Other"
+    }
+   ],
+   "refusal": null,
+   "refusal_copy": null,
+   "subscription_id": 2,
+   "via": "skip"
+  },
+  "confirm": {
+   "allowed": false,
+   "label": null
+  },
+  "pay": {
+   "allowed": false,
+   "amount_label": null,
+   "deadline_label": null,
+   "expected_amount": null,
+   "label": null,
+   "refusal": "not_online"
+  },
+  "reorder": {
+   "allowed": false,
+   "label": null
+  }
+ },
+ "click_unpaid": {
+  "cancel": {
+   "allowed": true,
+   "confirm_text": "Your Thursday, 7 January delivery will be skipped. Next delivery: Thursday, 14 January.",
+   "label": "Skip this delivery",
+   "reasons": [
+    {
+     "code": "still_have_water",
+     "label": "I still have water"
+    },
+    {
+     "code": "away",
+     "label": "I'll be away"
+    },
+    {
+     "code": "other",
+     "label": "Other"
+    }
+   ],
+   "refusal": null,
+   "refusal_copy": null,
+   "subscription_id": 1,
+   "via": "skip"
+  },
+  "confirm": {
+   "allowed": false,
+   "label": null
+  },
+  "pay": {
+   "allowed": true,
+   "amount_label": "30 000 so'm",
+   "deadline_label": "Pay by 12:00 tomorrow.",
+   "expected_amount": "30000.00",
+   "label": "Pay 30 000 so'm",
+   "refusal": null
+  },
+  "reorder": {
+   "allowed": false,
+   "label": null
+  }
+ },
+ "closed": {
+  "cancel": {
+   "allowed": false,
+   "confirm_text": null,
+   "label": null,
+   "reasons": [],
+   "refusal": "NOT_CANCELLABLE",
+   "refusal_copy": "cancel_refused.not_cancellable",
+   "subscription_id": null,
+   "via": null
+  },
+  "confirm": {
+   "allowed": false,
+   "label": null
+  },
+  "pay": {
+   "allowed": false,
+   "amount_label": null,
+   "deadline_label": null,
+   "expected_amount": null,
+   "label": null,
+   "refusal": "order_closed"
+  },
+  "reorder": {
+   "allowed": false,
+   "label": null
+  }
+ }
+}

@@ -1,6 +1,25 @@
 {
  "case": "paid_delivered",
- "exchanges": {},
+ "exchanges": {
+  "reorder": {
+   "body": null,
+   "method": "POST",
+   "path": "/api/v1/cart/fill-from-order/1",
+   "response": {
+    "data": {
+     "added": [
+      {
+       "product_id": 1,
+       "quantity": 2
+      }
+     ],
+     "dropped": []
+    },
+    "success": true
+   },
+   "status": 200
+  }
+ },
  "language": "en",
  "order_id": 1,
  "requests": {
@@ -10,7 +29,9 @@
      "delivery": null,
      "labels": {
       "delivery_fee": "0 so'm",
-      "items": {},
+      "items": {
+       "1": "30 000 so'm"
+      },
       "placed_on": "Monday, 26 October",
       "reward_discount": null,
       "subscription_discount": null,
@@ -20,7 +41,6 @@
       "total": "30 000 so'm"
      },
      "order": {
-      "can_customer_cancel": false,
       "confirmed_at": null,
       "created_at": "<wall-clock>",
       "customer_actions": {
@@ -30,6 +50,7 @@
         "label": null,
         "reasons": [],
         "refusal": "NOT_CANCELLABLE",
+        "refusal_copy": "cancel_refused.not_cancellable",
         "subscription_id": null,
         "via": null
        },
@@ -44,9 +65,12 @@
         "expected_amount": null,
         "label": null,
         "refusal": "already_paid"
+       },
+       "reorder": {
+        "allowed": true,
+        "label": "Reorder"
        }
       },
-      "customer_cancel_via": null,
       "delivered_at": null,
       "delivery_address": {
        "apartment_number": null,
@@ -82,7 +106,18 @@
       "is_urgent": false,
       "loyalty_discount": 0.0,
       "loyalty_points_used": 0,
-      "order_items": [],
+      "order_items": [
+       {
+        "id": 1,
+        "is_reward": false,
+        "product_id": 1,
+        "product_name": "Pure Water 19L",
+        "product_sku": null,
+        "quantity": 2,
+        "total_price": 30000.0,
+        "unit_price": 15000.0
+       }
+      ],
       "order_number": "TG_000001_26",
       "order_source": "web",
       "paid_at": null,
@@ -95,12 +130,10 @@
        "fiscalization": null,
        "fiscalization_status": null,
        "id": 1,
-       "is_payable": false,
        "last_collected_at": null,
        "net_outstanding_amount": 0.0,
        "outstanding_amount": 0.0,
        "paid_at": null,
-       "payable_payment_link": null,
        "payment_link": null,
        "payment_method": "click",
        "payment_provider": "click",
@@ -160,7 +193,6 @@
     "data": {
      "orders": [
       {
-       "can_customer_cancel": false,
        "confirmed_at": null,
        "created_at": "<wall-clock>",
        "customer_actions": {
@@ -170,6 +202,7 @@
          "label": null,
          "reasons": [],
          "refusal": "NOT_CANCELLABLE",
+         "refusal_copy": "cancel_refused.not_cancellable",
          "subscription_id": null,
          "via": null
         },
@@ -184,9 +217,12 @@
          "expected_amount": null,
          "label": null,
          "refusal": "already_paid"
+        },
+        "reorder": {
+         "allowed": true,
+         "label": "Reorder"
         }
        },
-       "customer_cancel_via": null,
        "delivered_at": null,
        "delivery_address": {
         "apartment_number": null,
@@ -222,7 +258,18 @@
        "is_urgent": false,
        "loyalty_discount": 0.0,
        "loyalty_points_used": 0,
-       "order_items": [],
+       "order_items": [
+        {
+         "id": 1,
+         "is_reward": false,
+         "product_id": 1,
+         "product_name": "Pure Water 19L",
+         "product_sku": null,
+         "quantity": 2,
+         "total_price": 30000.0,
+         "unit_price": 15000.0
+        }
+       ],
        "order_number": "TG_000001_26",
        "order_source": "web",
        "paid_at": null,
@@ -235,12 +282,10 @@
         "fiscalization": null,
         "fiscalization_status": null,
         "id": 1,
-        "is_payable": false,
         "last_collected_at": null,
         "net_outstanding_amount": 0.0,
         "outstanding_amount": 0.0,
         "paid_at": null,
-        "payable_payment_link": null,
         "payment_link": null,
         "payment_method": "click",
         "payment_provider": "click",
@@ -279,7 +324,6 @@
     "data": {
      "orders": [
       {
-       "can_customer_cancel": false,
        "confirmed_at": null,
        "created_at": "<wall-clock>",
        "customer_actions": {
@@ -289,6 +333,7 @@
          "label": null,
          "reasons": [],
          "refusal": "NOT_CANCELLABLE",
+         "refusal_copy": "cancel_refused.not_cancellable",
          "subscription_id": null,
          "via": null
         },
@@ -303,9 +348,12 @@
          "expected_amount": null,
          "label": null,
          "refusal": "already_paid"
+        },
+        "reorder": {
+         "allowed": true,
+         "label": "Reorder"
         }
        },
-       "customer_cancel_via": null,
        "delivered_at": null,
        "delivery_address": {
         "apartment_number": null,
@@ -341,7 +389,18 @@
        "is_urgent": false,
        "loyalty_discount": 0.0,
        "loyalty_points_used": 0,
-       "order_items": [],
+       "order_items": [
+        {
+         "id": 1,
+         "is_reward": false,
+         "product_id": 1,
+         "product_name": "Pure Water 19L",
+         "product_sku": null,
+         "quantity": 2,
+         "total_price": 30000.0,
+         "unit_price": 15000.0
+        }
+       ],
        "order_number": "TG_000001_26",
        "order_source": "web",
        "paid_at": null,
@@ -354,12 +413,10 @@
         "fiscalization": null,
         "fiscalization_status": null,
         "id": 1,
-        "is_payable": false,
         "last_collected_at": null,
         "net_outstanding_amount": 0.0,
         "outstanding_amount": 0.0,
         "paid_at": null,
-        "payable_payment_link": null,
         "payment_link": null,
         "payment_method": "click",
         "payment_provider": "click",
@@ -401,6 +458,7 @@
      "label": null,
      "reasons": [],
      "refusal": "NOT_CANCELLABLE",
+     "refusal_copy": "cancel_refused.not_cancellable",
      "subscription_id": null,
      "via": null
     },
@@ -415,6 +473,10 @@
      "expected_amount": null,
      "label": null,
      "refusal": "already_paid"
+    },
+    "reorder": {
+     "allowed": true,
+     "label": "Reorder"
     }
    },
    "id": 1

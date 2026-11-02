@@ -603,7 +603,11 @@ services:
   nginx:
     image: nginx:1.29-alpine
     ports:
-      - "81:80"
+      # Loopback only (owner, 2026-10-29): production's front door is a Cloudflare Tunnel, whose cloudflared on the
+      # host connects to localhost:81, and nginx trusts CF-Connecting-IP from that hop (nginx/nginx.conf), so nothing
+      # else may reach this port. Production inherits this binding: compose appends an overlay's ports, so
+      # docker-compose.production.yml must not list another.
+      - "127.0.0.1:81:80"
     environment:
       # MON-SUB: credential for prometheus/loki/alertmanager subdomains.
       # Format: user:password (same shape as FLOWER_BASIC_AUTH). Consumed

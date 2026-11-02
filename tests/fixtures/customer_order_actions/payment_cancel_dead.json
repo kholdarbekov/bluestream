@@ -14,6 +14,7 @@
       "label": null,
       "reasons": [],
       "refusal": "NOT_CANCELLABLE",
+      "refusal_copy": "cancel_refused.not_cancellable",
       "subscription_id": null,
       "via": null
      },
@@ -28,6 +29,10 @@
       "expected_amount": null,
       "label": null,
       "refusal": "order_closed"
+     },
+     "reorder": {
+      "allowed": false,
+      "label": null
      }
     },
     "display_status": "cancelled",
@@ -42,6 +47,7 @@
     "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
     "reason_prompt": "Want to tell us why? (optional)",
     "reason_text": "In a few words (optional)",
+    "reorder_dropped": "Some items from this order are no longer available and were left out.",
     "switch_to_cash": "Pay with cash",
     "try_again": "Try again",
     "working": "One moment…"

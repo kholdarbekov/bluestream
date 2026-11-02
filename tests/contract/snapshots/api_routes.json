@@ -3606,13 +3606,6 @@
     "rule": "/api/v1/payments/cod/statement"
   },
   {
-    "endpoint": "payments.create_payment",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/payments/create"
-  },
-  {
     "endpoint": "payments.get_exchange_rates",
     "methods": [
       "GET"
@@ -4481,13 +4474,6 @@
     "rule": "/api/v1/subscriptions/<int:subscription_id>/history"
   },
   {
-    "endpoint": "subscriptions.add_subscription_item",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
-  },
-  {
     "endpoint": "subscriptions.get_subscription_items",
     "methods": [
       "GET"
@@ -4500,27 +4486,6 @@
       "PUT"
     ],
     "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
-  },
-  {
-    "endpoint": "subscriptions.remove_subscription_item",
-    "methods": [
-      "DELETE"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/items/<int:item_id>"
-  },
-  {
-    "endpoint": "subscriptions.update_subscription_item",
-    "methods": [
-      "PUT"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/items/<int:item_id>"
-  },
-  {
-    "endpoint": "subscriptions.get_subscription_logs",
-    "methods": [
-      "GET"
-    ],
-    "rule": "/api/v1/subscriptions/<int:subscription_id>/logs"
   },
   {
     "endpoint": "subscriptions.pause_subscription",

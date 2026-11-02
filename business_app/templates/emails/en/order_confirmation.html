@@ -64,9 +64,11 @@
 
 <hr class="divider">
 
+{% if order_tracking_url %}
 <p style="text-align: center;">
     <a href="{{ order_tracking_url }}" class="btn-primary">Track Your Order</a>
 </p>
+{% endif %}
 
 <div class="info-box">
     <p>If you have any questions about your order, please contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or reply to this email.</p>

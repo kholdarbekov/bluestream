@@ -10,7 +10,9 @@ that was only waiting for a new date. Now:
 * the bot draws Cancel from the backend's published `customer_actions.cancel` and holds no
   copy of the rule, so a payload without the field offers no Cancel;
 * when the backend refuses a stale tap, the bot says why in the customer's language,
-  picked by the refusal's `reason_code`, pointing to this chat and never to a phone;
+  picked by the words the backend chose (`refusal_copy`; by the refusal's `reason_code`
+  for a payload from before it, as the bodies here are), pointing to this chat and never
+  to a phone;
 * an order awaiting a new date says so in the list, on its detail screen and on the
   Track screen, with no ETA.
 
@@ -71,12 +73,15 @@ REFUSALS = (
     ),
 )
 BOT_REFUSAL_KEYS = tuple(bot_key for _code, _web_key, bot_key in REFUSALS)
-NEW_BOT_COPY_KEYS = BOT_REFUSAL_KEYS + (AWAITING_LABEL_KEY, STATUS_HEADING_KEY)
+# A Skip refused because the order can no longer be removed (live drive D7): the backend publishes the words it chose as
+# `refusal_copy`, and the bot shows `telegram.orders.<refusal_copy>`.
+SKIP_REFUSAL_KEY = "telegram.orders.skip_refused.not_skippable"
+NEW_BOT_COPY_KEYS = BOT_REFUSAL_KEYS + (SKIP_REFUSAL_KEY, AWAITING_LABEL_KEY, STATUS_HEADING_KEY)
 
 # Every bot refusal asks the customer to write to us in this chat (spec §3.3 copy table, F16;
-# `not_cancellable` since 2026-10-22, owner), so the guard below runs over all of them, and
-# the word each language uses for "this chat".
-CHAT_POINTING_KEYS = BOT_REFUSAL_KEYS
+# `not_cancellable` since 2026-10-22, owner; the skip refusal since 2026-11-02), so the guard below runs over all of
+# them, and the word each language uses for "this chat".
+CHAT_POINTING_KEYS = BOT_REFUSAL_KEYS + (SKIP_REFUSAL_KEY,)
 CHAT_WORDS = {"en": "chat", "uz": "chatda", "ru": "чате"}
 
 # The screens here are served the real seeded copy, so every assertion reads what a
@@ -131,7 +136,7 @@ def _order(*, status, cancel=_UNPUBLISHED, display_status=None, payment_status="
         "display_status": display_status or status,
         "is_paid": False,
         "order_items": [],
-        "payment_info": {"payment_method": "cash", "payment_status": payment_status, "is_payable": False},
+        "payment_info": {"payment_method": "cash", "payment_status": payment_status},
     }
     if cancel is not _UNPUBLISHED:
         order["customer_actions"] = {"pay": PAY_NOT_ONLINE, "cancel": cancel}
@@ -191,7 +196,6 @@ def _refusal_body(reason_code: str, web_key: str) -> dict:
         "data": {
             "error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE",
             "reason_code": reason_code,
-            "can_customer_cancel": False,
         },
     }
 
@@ -273,7 +277,6 @@ class TestCancelIsTheBackendsAnswer:
         assert published_cancel({}) is None
         # The fields the deleted local rules read decide nothing any more.
         assert published_cancel({"id": ORDER_ID, "status": "pending", "is_paid": False}) is None
-        assert published_cancel({"id": ORDER_ID, "can_customer_cancel": True}) is None
 
 
 # What the refusal leaves on the card: back to the order, whose fresh read offers no Cancel, or to
@@ -530,6 +533,26 @@ class TestTheNewCopyIsRealCopy:
             CUSTOMER_CANCEL_WITH_DRIVER,
         }
         assert set(_CANCEL_REFUSED_KEYS.values()) == set(BOT_REFUSAL_KEYS)
+
+    def test_every_refusal_copy_the_backend_can_publish_is_seeded_for_both_clients(self):
+        """`refusal_copy` is the backend's one choice of words (`cancel_refusal_copy`, by the refusal and the removal
+        the button offered): whatever it publishes, the website has `api.orders.<id>` and this chat has
+        `telegram.orders.<id>`, a key the guards above check."""
+        from business_app.services.customer_order_actions import cancel_refusal_copy
+        from business_app.services.order_service import (
+            CUSTOMER_CANCEL_VIA_CANCEL,
+            CUSTOMER_CANCEL_VIA_DECLINE,
+            CUSTOMER_CANCEL_VIA_SKIP,
+        )
+
+        chosen = {
+            cancel_refusal_copy(code, via=via)
+            for code, _web_key, _bot_key in REFUSALS
+            for via in (CUSTOMER_CANCEL_VIA_SKIP, CUSTOMER_CANCEL_VIA_CANCEL, CUSTOMER_CANCEL_VIA_DECLINE, None)
+        }
+        assert {f"telegram.orders.{copy_id}" for copy_id in chosen} == set(CHAT_POINTING_KEYS)
+        for copy_id in chosen:
+            assert all(BACKEND_TRANSLATIONS[f"api.orders.{copy_id}"].get(language) for language in LANGUAGES), copy_id
 
     def test_the_recovery_keyboard_makes_every_caller_decide(self):
         """Every caller holds the order, so every caller decides. A forgotten decision

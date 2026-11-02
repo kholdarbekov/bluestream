@@ -570,7 +570,6 @@ celery.conf.task_annotations = {
     # Individual notification sends
     "business_app.tasks.notification_tasks.send_verification_sms_task": {"rate_limit": "30/m"},
     "business_app.tasks.notification_tasks.send_verification_email_task": {"rate_limit": "30/m"},
-    "business_app.tasks.notification_tasks.send_password_reset_sms_task": {"rate_limit": "20/m"},
     "business_app.tasks.notification_tasks.send_password_reset_email_task": {"rate_limit": "20/m"},
     "business_app.tasks.notification_tasks.send_registration_otp_task": {"rate_limit": "30/m"},
     # Transactional notifications — higher throughput

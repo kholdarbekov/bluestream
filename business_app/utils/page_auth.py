@@ -34,6 +34,9 @@ _PAGE_METHODS = ("GET", "HEAD")
 # A top-level navigation that may have arrived without our cookies: from another site, or from a browser
 # that sends no fetch metadata.
 _MAY_HAVE_DROPPED_COOKIES = (None, "cross-site")
+# A page whose URL may hold a secret (the hop; the "Open on website" sign-in's pages, spec §9): never stored, and never
+# rewritten on the way (no-transform stops an edge such as Cloudflare injecting a script that would report the URL).
+SECRET_PAGE_CACHE_CONTROL = "no-store, no-transform"
 
 
 def page_user_id() -> Optional[int]:
@@ -44,9 +47,9 @@ def page_user_id() -> Optional[int]:
 
 def render_same_site_hop(target: str) -> Response:
     """The tiny public page that reloads `target` as a same-site navigation. `target` must already have
-    passed `safe_next_path`. It is never cached, sends no Referer, and is kept out of search engines."""
+    passed `safe_next_path`. It is never cached or rewritten, sends no Referer, and is kept out of search engines."""
     response = make_response(render_template("frontend/same_site_hop.html", target=target))
-    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cache-Control"] = SECRET_PAGE_CACHE_CONTROL
     return response
 
 

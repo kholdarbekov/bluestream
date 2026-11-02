@@ -1,12 +1,15 @@
 """Frontend routes for Blue Stream Water Business Platform."""
 
 import json
+import logging
+from functools import wraps
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from xml.sax.saxutils import escape
 
-from flask import render_template, request, session, current_app, redirect, url_for, flash, g, Response
+from flask import render_template, request, session, current_app, redirect, url_for, flash, g, Response, make_response
 from flask_jwt_extended import get_jwt_identity, unset_jwt_cookies, verify_jwt_in_request
+from flask_limiter.errors import RateLimitExceeded
 from sqlalchemy import desc, or_, func
 
 from . import frontend_bp
@@ -16,9 +19,23 @@ from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.models.loyalty import LoyaltyReward
 from business_app.models.blog import BlogPost, BlogStatus
+from business_app.models.audit import AuditSeverity
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.token_service import TokenService
+from business_app.services.telegram_login_service import (
+    REFUSED_BAD_HASH,
+    REFUSED_DECLINED,
+    REFUSED_NO_ACCOUNT,
+    REFUSED_NOT_CUSTOMER,
+    REFUSED_RATE_LIMITED,
+    REFUSED_REPLAYED,
+    REFUSED_REVOKED,
+    REFUSED_STALE,
+    REFUSED_UNAVAILABLE,
+    TelegramLoginRefused,
+    verify_login,
+)
 from business_app.services.reorder_reminders.tokens import (
     resubscribe_by_token,
     token_user_id,
@@ -32,14 +49,26 @@ from business_app.utils.markdown_negotiation import (
     html_to_markdown,
     wants_markdown,
 )
+from business_app.utils.audit_logger import audit_login_failure, audit_login_success
+from business_app.utils.auth_cookies import set_login_cookies
 from business_app.utils.csrf_protection import csrf_protection
-from business_app.utils.page_auth import customer_page_required, page_user_id
+from business_app.utils.page_auth import (
+    SECRET_PAGE_CACHE_CONTROL,
+    customer_page_required,
+    page_user_id,
+    render_same_site_hop,
+)
+from business_app.utils.service_factory import get_auth_service
+from business_app.utils import display_labels
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from business_app import limiter
 from shared.constants import get_delivery_coverage, get_geoshape_polygon
 from shared.safe_paths import safe_next_path
+from shared.telegram_login import TELEGRAM_LOGIN_PATH, is_allowed_login_target
 from datetime import datetime, UTC
+
+logger = logging.getLogger(__name__)
 
 
 def _absolute_public_url(path):
@@ -429,7 +458,7 @@ def index():
         if current_user_id:
             user = User.query.get(current_user_id)
             if user:
-                user_data = {"id": user.id, "name": f"{user.first_name} {user.last_name}", "email": user.email}
+                user_data = {"id": user.id, "name": user.greeting_name, "email": user.contact_email}
 
                 # Get loyalty info
                 loyalty_service = LoyaltyService()
@@ -593,6 +622,7 @@ def order_confirmation():
         "frontend/order_confirmation.html",
         order=order,
         delivery=delivery,
+        payment_method_label=display_labels.payment_method(order.payment_method, get_current_language()),
         # F15: the wait for a new date, or the status itself. The page labels it and
         # never works the wait out from the order and its delivery.
         display_status=OrderScheduleService.customer_display_status(order),
@@ -623,6 +653,7 @@ def payment_success():
             "frontend/payment_pending.html",
             order=order,
             payment=payment,
+            payment_method_label=display_labels.payment_method(order.payment_method, get_current_language()),
             order_page_url=customer_links.order_page_path(order),
             cancel_url=url_for("frontend.payment_cancel", order_id=order.id),
         )
@@ -696,6 +727,7 @@ def order_tracking():
         delivery=delivery,
         map_provider=map_provider,
         maps_api_key=maps_api_key,
+        payment_method_label=display_labels.payment_method(order.payment_method, get_current_language()),
         # The backend's answers, published as the API publishes them (F15, spec 2026-10-27 §5.3). The page
         # labels the one and hands the other to order-actions.js through its island, and works out neither.
         display_status=OrderScheduleService.customer_display_status(order),
@@ -823,16 +855,6 @@ def my_orders():
     ]
 
     return render_template("frontend/orders.html", user=user, orders=orders, order_statuses=order_statuses)
-
-
-@frontend_bp.route("/order/<int:order_id>")
-@customer_page_required
-def order_detail(order_id):
-    """Order detail page"""
-    current_user_id = get_jwt_identity()
-    order = Order.query.filter_by(id=order_id, user_id=current_user_id).first_or_404()
-
-    return render_template("frontend/order_detail.html", order=order)
 
 
 @frontend_bp.route("/about")
@@ -1232,6 +1254,97 @@ def reset_password(token=None):
     return render_template("frontend/reset_password.html", token=token, **SECRET_URL_PAGE)
 
 
+# "Open on website" (spec 2026-10-27 §9, §17 Q5; step 4 Task 16a). The customer bot's button is a Telegram login
+# button: at the tap Telegram opens this page with the customer's identity and a signed hash appended, so the URL is
+# a live secret for five minutes. Per IP here; per Telegram account in the service (`verify_login`). nginx logs the
+# path without its query, and the log, audit and Sentry surfaces keep only the Telegram id (`redact_login_query`).
+TELEGRAM_LOGIN_IP_RATE_LIMIT = "20/hour"
+
+# A refusal's status and sentence. A replayed hash and a declined prompt are not here: each hops to `next` and grants
+# nothing (`TELEGRAM_LOGIN_HOPS`).
+TELEGRAM_LOGIN_REFUSALS = {
+    REFUSED_BAD_HASH: (403, "web.telegram_login.expired"),
+    REFUSED_STALE: (403, "web.telegram_login.expired"),
+    REFUSED_REVOKED: (403, "web.telegram_login.expired"),
+    REFUSED_NO_ACCOUNT: (403, "web.telegram_login.no_account"),
+    REFUSED_NOT_CUSTOMER: (403, "web.telegram_login.staff"),
+    REFUSED_RATE_LIMITED: (429, "web.telegram_login.busy"),
+    REFUSED_UNAVAILABLE: (503, "web.telegram_login.unavailable"),
+}
+
+# How loud each refusal's audit line is (tests/unit/test_jwt_error_log_levels.py's rule): a routine outcome at INFO
+# (LOW), an altered or forged link at WARNING (MEDIUM), and only our own outage at ERROR (HIGH).
+TELEGRAM_LOGIN_AUDIT_SEVERITY = {
+    REFUSED_DECLINED: AuditSeverity.LOW,
+    REFUSED_STALE: AuditSeverity.LOW,
+    REFUSED_REPLAYED: AuditSeverity.LOW,
+    REFUSED_NO_ACCOUNT: AuditSeverity.LOW,
+    REFUSED_NOT_CUSTOMER: AuditSeverity.LOW,
+    REFUSED_REVOKED: AuditSeverity.LOW,
+    REFUSED_RATE_LIMITED: AuditSeverity.LOW,
+    REFUSED_BAD_HASH: AuditSeverity.MEDIUM,
+    REFUSED_UNAVAILABLE: AuditSeverity.HIGH,
+}
+
+
+# The outcomes that hop to `next` with no cookies (a signed-in browser lands, any other is sent to log in): a reopened
+# or shared link (replayed), and Telegram's prompt declined (no auth fields at all).
+TELEGRAM_LOGIN_HOPS = frozenset({REFUSED_REPLAYED, REFUSED_DECLINED})
+
+
+def _telegram_login_refused(status, message_key):
+    """The standalone refused page: no analytics, no Referer, never indexed, cached or rewritten; its way on is the
+    bot."""
+    response = make_response(render_template("frontend/telegram_login_refused.html", message_key=message_key), status)
+    response.headers["Cache-Control"] = SECRET_PAGE_CACHE_CONTROL
+    return response
+
+
+def _busy_page_when_rate_limited(view):
+    """A breach of the route's per-IP limit answers the refused page with the busy sentence, not the API's JSON 429.
+    The limiter checks a decorated limit inside the view it wraps, so its breach surfaces here."""
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        try:
+            return view(*args, **kwargs)
+        except RateLimitExceeded:
+            return _telegram_login_refused(*TELEGRAM_LOGIN_REFUSALS[REFUSED_RATE_LIMITED])
+
+    return wrapper
+
+
+@frontend_bp.route(TELEGRAM_LOGIN_PATH)
+@_busy_page_when_rate_limited
+@limiter.limit(TELEGRAM_LOGIN_IP_RATE_LIMIT)
+def telegram_login_page():
+    """Signs a bot customer in and lands them on `next` through the same-site hop, so production's SameSite=Strict
+    login cookies are sent when the page loads (§4.6). The cookies are a password login's (`set_login_cookies`).
+
+    A `next` outside the sign-in allowlist is refused before the hash is spent. A replayed hash (a double tap, the
+    same link opened again) hops to `next` with no cookies: a browser the first tap signed in lands signed in, any
+    other one is sent to log in. So does a declined Telegram prompt (the URL with no auth fields at all)."""
+    target = request.args.get("next")
+    if not is_allowed_login_target(target):
+        return _telegram_login_refused(400, "web.telegram_login.expired")
+    try:
+        user = verify_login(request.args)
+    except TelegramLoginRefused as refused:
+        audit_login_failure(
+            error_message=f"telegram_login:{refused.code}", severity=TELEGRAM_LOGIN_AUDIT_SEVERITY[refused.code]
+        )
+        if refused.code in TELEGRAM_LOGIN_HOPS:  # a reopened or shared link, or a declined prompt; grants nothing
+            return render_same_site_hop(target)
+        return _telegram_login_refused(*TELEGRAM_LOGIN_REFUSALS[refused.code])
+
+    tokens = get_auth_service().issue_web_login(user)
+    response = render_same_site_hop(target)
+    set_login_cookies(response, tokens)
+    audit_login_success(user.id)
+    logger.info("telegram web sign-in for user %s", user.id)
+    return response
+
+
 # Reorder-reminder email unsubscribe (spec 2026-10-09 §7.4). The signed token in the path is the
 # only authority (no session, no cookie), so a mailbox's cookie-less one-click POST
 # (List-Unsubscribe-Post) works. No CSRF token is asked for: each view carries
@@ -1411,6 +1524,7 @@ ORDER_ACTIONS_WORDS = (
     "preparing_payment",
     "switch_to_cash",
     "try_again",
+    "reorder_dropped",
 )
 
 
@@ -1458,7 +1572,7 @@ def inject_global_vars():
         if current_user_id:
             user = User.query.get(current_user_id)
             if user:
-                user_info = {"id": user.id, "name": f"{user.first_name} {user.last_name}", "email": user.email}
+                user_info = {"id": user.id, "name": user.greeting_name, "email": user.contact_email}
     except Exception:
         pass
 
@@ -1498,7 +1612,6 @@ def inject_global_vars():
         "frontend.payment_success",
         "frontend.payment_cancel",
         "frontend.order_tracking",
-        "frontend.order_detail",
         "frontend.my_account",
         "frontend.my_orders",
         "frontend.my_subscriptions",

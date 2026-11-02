@@ -621,10 +621,11 @@ def test_new_preview_surfaces_must_declare_their_write_half():
         # `_PREVIEW_SURFACES` cannot express this one: `write_method` must be an
         # attribute of the SAME class (`getattr(cls, write_method)`), and none
         # of quote_tier_discount's write halves are LoyaltyService methods.
-        # OrderService.create_order calls it directly; PaymentService's rail
-        # move and ClickPaymentProviderService's Click-rail restoration call it
-        # through rail_pricing.reprice_order_for_rail -> loyalty_service.tier_discount_for_rail. All three call
-        # quote_tier_discount themselves and persist the result inside the same
+        # OrderService.create_order calls it directly; the staff and system rail
+        # moves (OrderPaymentMethodEditService, CashCollectionService's move onto
+        # cash) and ClickPaymentProviderService's Click-rail restoration call it
+        # through rail_pricing.reprice_order_for_rail -> loyalty_service.tier_discount_for_rail. Each of them calls
+        # quote_tier_discount itself and persists the result inside the same
         # transaction -- SHOW and SETTLE are the same invocation, ONE-DECISION
         # (re-run) at its strongest, not the split this file exists to catch.
         # Residual seam, named rather than hidden: a later phase (Task 20)

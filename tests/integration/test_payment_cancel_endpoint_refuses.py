@@ -58,6 +58,8 @@ R_SETTLED = "api.payments.error.lifecycle.reason_already_settled"
 R_IN_PROGRESS = "api.payments.error.lifecycle.reason_in_progress"
 R_ENDED = "api.payments.error.lifecycle.reason_already_ended"
 A_CANCEL_ORDER = "api.payments.error.lifecycle.advice_cancel_order"
+# The words only the cancel advice says (en): it names the order's own Cancel or Skip.
+CANCEL_ADVICE = "open it to cancel or skip it"
 A_DELIVERED = "api.payments.error.lifecycle.advice_order_delivered"
 A_ALREADY_CANCELLED = "api.payments.error.lifecycle.advice_order_already_cancelled"
 A_NOT_CANCELLABLE = "api.payments.error.lifecycle.advice_order_not_cancellable"
@@ -125,7 +127,7 @@ class TestCancelPaymentEndpointRefuses:
         assert body["data"]["error_code"] == CODE
         assert body["data"]["order_cancellable"] is True
         assert body["data"]["order_id"] == sample_order.id
-        assert "cancel the order" in _english(body["message"])
+        assert CANCEL_ADVICE in _english(body["message"])
 
         db.session.refresh(payment)
         assert payment.status == PaymentStatus.PENDING, "the refusal must not touch the payment"
@@ -150,7 +152,7 @@ class TestCancelPaymentEndpointRefuses:
 
         english = _english(body["message"])
         assert "fiscal receipt" in english
-        assert "cancel the order" not in english
+        assert CANCEL_ADVICE not in english
 
         db.session.refresh(payment)
         assert payment.status == PaymentStatus.COMPLETED, "a paid payment must never be cancelled"
@@ -221,7 +223,7 @@ class TestRefusalCopyIsRailAndStatusAccurate:
             assert wrong_rail_word not in english, (
                 f"a CASH payment must never be told about {wrong_rail_word!r}: {english}"
             )
-        assert "cancel the order" not in english, (
+        assert CANCEL_ADVICE not in english, (
             "a DELIVERED order cannot be cancelled; this advice would dead-end in a 400"
         )
         assert "delivered" in english, "say something true instead"
@@ -241,7 +243,7 @@ class TestRefusalCopyIsRailAndStatusAccurate:
         assert response.status_code == 400
         assert body["message"] == f"{R_PENDING} {A_DELIVERED}"
         assert body["data"]["order_cancellable"] is False
-        assert "cancel the order" not in _english(body["message"])
+        assert CANCEL_ADVICE not in _english(body["message"])
 
     def test_payment_on_an_already_cancelled_order_says_where_the_money_is(
         self, app, client, db, sample_order, sample_user
@@ -255,7 +257,7 @@ class TestRefusalCopyIsRailAndStatusAccurate:
 
         assert body["message"] == f"{R_FISCALIZED} {A_ALREADY_CANCELLED}"
         assert body["data"]["order_cancellable"] is False
-        assert "cancel the order" not in english
+        assert CANCEL_ADVICE not in english
         assert "prepaid balance" in english, "the customer must be told the money is not lost"
 
     @pytest.mark.parametrize(
@@ -323,7 +325,7 @@ class TestOrderCancellabilityAgreesWithTheRealCancelPath:
 
     `_order_cancel_advice_key` asks `OrderService.customer_cancel_block_code`, the
     predicate `POST /orders/<id>/cancel` enforces and `serialize_order` publishes
-    as `can_customer_cancel` (F5), rather than working the rule out again. This
+    in `customer_actions.cancel` (F5), rather than working the rule out again. This
     drives BOTH customer routes for every OrderStatus, crossed with the money and
     delivery states that predicate reads, and fails the moment the answers diverge.
 
@@ -408,7 +410,7 @@ class TestOrderCancellabilityAgreesWithTheRealCancelPath:
 
         assert body["message"] == f"{R_PENDING} {A_NOT_CANCELLABLE}"
         assert body["data"]["order_cancellable"] is False
-        assert "cancel the order" not in _english(body["message"])
+        assert CANCEL_ADVICE not in _english(body["message"])
 
 
 class TestNoCancelPaymentMethodWasAdded:
@@ -481,21 +483,14 @@ class TestRefusalCopyIsSeededByTheCanonicalSeeder:
         for key in self.RETIRED_KEYS:
             assert key not in BACKEND_TRANSLATIONS, f"{key} is dead but still re-asserted on every reseed"
 
-    # Both halves of the marking-code pool-short refusal. They set the precedent
-    # this whole finding is about: seeded from a one-off script, therefore
-    # reported as unseeded references by audit_translation_keys.py, which maps
-    # BOTH the `api` and `telegram` prefixes to the canonical seeder.
-    MARKING_CODE_KEYS = (
-        "api.payments.marking_codes_unavailable",
-        "telegram.payment.marking_codes_unavailable",
-    )
+    # The marking-code pool-short refusal set the precedent this whole finding is
+    # about: seeded from a one-off script, therefore reported as an unseeded
+    # reference by audit_translation_keys.py, which maps the `api` prefix to the
+    # canonical seeder. Its bot half went with its last reader (step 4).
+    MARKING_CODE_KEYS = ("api.payments.marking_codes_unavailable",)
 
     def test_the_marking_codes_keys_ship_with_the_canonical_seeder(self):
-        """One key, one home — and the one-off script that owned them is gone.
-
-        Its API key moved in fix round 1; its bot key moved in round 2, which was
-        the last reason the file existed.
-        """
+        """One key, one home — and the one-off script that owned it is gone."""
         import importlib
 
         from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
@@ -510,15 +505,12 @@ class TestRefusalCopyIsSeededByTheCanonicalSeeder:
     def test_bot_keys_are_seeded_under_the_category_the_bot_actually_READS(self):
         """The assertion whose absence let a customer-facing key ship unreachable.
 
-        `telegram.payment.marking_codes_unavailable` was seeded under
-        `category="telegram_bot"`, but `telegram_bot/i18n.py::load_translations`
-        selects ONLY `category = 'telegram'` (and the staff bot takes
-        `'staff_bot' OR key LIKE 'staff.%'`), so the row was invisible to both.
-        `telegram_bot/handlers/payments.py:372` then fell into i18n's missing-key
-        path and rendered the humanised English "Marking codes unavailable" to
-        every customer in every language — on the screen whose entire job is to
-        explain that their order stays on Cash on Delivery. "The key exists" was
-        true the whole time; it was never the question.
+        A bot key was once seeded under `category="telegram_bot"`, but
+        `telegram_bot/i18n.py::load_translations` selects ONLY
+        `category = 'telegram'` (and the staff bot takes
+        `'staff_bot' OR key LIKE 'staff.%'`), so the row was invisible to both
+        and every customer saw the humanised English fallback. "The key exists"
+        was true the whole time; it was never the question.
 
         The expected category is READ OUT OF THE BOT'S OWN QUERY rather than
         written here, so this cannot quietly stop matching if the bot's filter
@@ -534,16 +526,7 @@ class TestRefusalCopyIsSeededByTheCanonicalSeeder:
         assert categories, "could not find the bot's category filter in telegram_bot/i18n.py"
         bot_category = categories[0]
 
-        # The key this finding is about, named explicitly so a regression points
-        # straight at it rather than at "some telegram.* key".
-        offender = "telegram.payment.marking_codes_unavailable"
-        assert offender in BACKEND_TRANSLATIONS, (
-            "seeding it anywhere else means picking the category by hand, which "
-            "is how it ended up under 'telegram_bot' and unreachable"
-        )
-        assert _category_for(offender) == bot_category
-
-        # And the invariant, for every bot-namespace key the canonical seeder owns.
+        # The invariant, for every bot-namespace key the canonical seeder owns.
         for key in BACKEND_TRANSLATIONS:
             if not key.startswith("telegram."):
                 continue
@@ -551,17 +534,6 @@ class TestRefusalCopyIsSeededByTheCanonicalSeeder:
                 f"{key} would be seeded under {_category_for(key)!r}, which "
                 f"telegram_bot/i18n.py never loads (it reads {bot_category!r})"
             )
-
-    def test_the_bot_copy_survived_the_move_verbatim(self):
-        """A move that silently rewrote the copy would be a different bug."""
-        from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
-
-        copy = BACKEND_TRANSLATIONS["telegram.payment.marking_codes_unavailable"]
-        for language in ("en", "uz", "ru"):
-            assert "\n\n" in copy[language], f"{language} lost its paragraph break"
-        assert "Cash on Delivery" in copy["en"]
-        assert "Cash on Delivery" in copy["uz"]
-        assert "наличными" in copy["ru"]
 
     def test_uzbek_copy_uses_straight_apostrophes_only(self):
         """This repo keeps copy ASCII-safe; a curly apostrophe elsewhere doubled

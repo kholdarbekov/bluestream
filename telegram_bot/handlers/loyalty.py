@@ -1,10 +1,8 @@
 """
 Loyalty program handlers
 """
-import os
 import re
 from typing import Optional
-from urllib.parse import urlparse
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -14,6 +12,7 @@ from keyboards import MenuKeyboards
 from api_client import api_client
 from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
+from website_links import public_website_base
 
 # Tier medal shown beside the level name. Tier names come from the database
 # (admin-editable) and are not guaranteed to be one of these four, so an
@@ -23,9 +22,6 @@ _TIER_EMOJI = {"Bronze": "🥉", "Silver": "🥈", "Gold": "🥇", "Platinum": "
 
 class LoyaltyHandlers(BaseHandler):
     """Loyalty program handlers"""
-
-    # Hosts Telegram rejects for inline-keyboard URL buttons ("wrong http url").
-    _NON_PUBLIC_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
     # AquaCoins history page size. Kept modest so a page fits comfortably in one
     # Telegram message; users page through the rest with the nav buttons.
@@ -44,32 +40,13 @@ class LoyaltyHandlers(BaseHandler):
         URL buttons that point at localhost/private hosts, and a single invalid
         button fails the whole menu render — so callers omit the button instead.
         """
-        base = os.environ.get("COMPANY_WEBSITE", "https://aqua-element.uz").rstrip("/")
+        base = public_website_base()
+        if base is None:
+            return None
         path = "/loyalty-guide"
         if language and language != "uz":
             path = f"{path}?lang={language}"
-        url = f"{base}{path}"
-        return url if cls._is_public_http_url(url) else None
-
-    @classmethod
-    def _is_public_http_url(cls, url: str) -> bool:
-        """True only for URLs Telegram accepts as inline-button targets.
-
-        Requires an http/https scheme and a public-looking host: not
-        localhost/loopback and containing a dot (rejects bare hostnames and
-        docker service names like ``business_app``).
-        """
-        try:
-            parsed = urlparse(url)
-        except ValueError:
-            return False
-        host = (parsed.hostname or "").lower()
-        return (
-            parsed.scheme in ("http", "https")
-            and bool(host)
-            and host not in cls._NON_PUBLIC_HOSTS
-            and "." in host
-        )
+        return f"{base}{path}"
 
     @staticmethod
     def _referral_deep_link(context: ContextTypes.DEFAULT_TYPE, code: str) -> Optional[str]:

@@ -49,7 +49,8 @@ def test_each_request_renders_its_own_language_without_clearing_the_template_cac
 
     for language in ("ru", "en", "uz"):
         # A fresh client per request: the session-scoped `client` can carry another test's `?lang=`
-        # session. `?lang=uz` is the default language, which redirects to the bare path; follow it.
+        # session. `?lang=uz` is the default language, which redirects to the bare path (saving uz
+        # to the session); follow it.
         response = app.test_client().get(f"/privacy?lang={language}", follow_redirects=True)
 
         assert response.status_code == 200

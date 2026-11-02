@@ -1,5 +1,5 @@
 {% extends "emails/base.html" %}
-{# NATIVE-READ (plan 2026-10-27 Task 7): the title, every sentence and the row label below. #}
+{# NATIVE-READ (plan 2026-10-27 Task 7; the days_removed paragraph: final fix wave 2026-11-02): the title, every sentence and the row label below. #}
 
 {% block title %}Yetkazib berish jadvalingiz o'zgardi - {{ company_name }}{% endblock %}
 
@@ -25,6 +25,8 @@
 <p>Haftaning bu kunida ({{ old_weekday_label }}) endi yetkazib bermaymiz, shuning uchun keyingi yetkazib berish navbatdagi yetkazib berish kuniga o'tadi.</p>
 {% elif change == "days_added" %}
 <p>Yangi yetkazib berish kunlari: {{ added_weekdays_label }}. Kundalik yetkazib berishlaringiz endi shu kunlarda ham keladi.</p>
+{% elif change == "days_removed" %}
+<p>Endi yetkazib berilmaydigan kunlar: {{ removed_weekdays_label }}. Kundalik yetkazib berishlaringiz qolgan kunlarda davom etadi.</p>
 {% endif %}
 {% endfor %}
 
@@ -36,8 +38,21 @@
     </tr>
 </table>
 {% endif %}
+{% if kept_order_note %}
+<p>{{ kept_order_note }}</p>
+{% endif %}
 
 <p>Yetkazib berish kuni va vaqtini obunangizda o'zgartirishingiz mumkin.</p>
+
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Hozir to'lash</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">Buyurtmani ko'rish</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Obunani ochish</a></p>
+{% endif %}
 
 <hr class="divider">
 

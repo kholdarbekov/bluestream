@@ -43,6 +43,8 @@ R_FISCALIZED = "api.payments.error.lifecycle.reason_online_fiscalized"
 R_SETTLED = "api.payments.error.lifecycle.reason_already_settled"
 R_ENDED = "api.payments.error.lifecycle.reason_already_ended"
 A_CANCEL_ORDER = "api.payments.error.lifecycle.advice_cancel_order"
+# The words only the cancel advice says (en): it names the order's own Cancel or Skip.
+CANCEL_ADVICE = "open it to cancel or skip it"
 A_DELIVERED = "api.payments.error.lifecycle.advice_order_delivered"
 A_NOT_CANCELLABLE = "api.payments.error.lifecycle.advice_order_not_cancellable"
 
@@ -106,7 +108,7 @@ class TestRefundEndpointRefuses:
 
         english = _english(body["message"])
         assert "fiscal receipt" in english
-        assert "cancel the order" not in english
+        assert CANCEL_ADVICE not in english
 
         db.session.refresh(payment)
         assert payment.status is PaymentStatus.COMPLETED, "the refusal must not touch the payment"
@@ -149,7 +151,7 @@ class TestRefundEndpointRefuses:
             assert wrong_rail_word not in english, (
                 f"a CASH payment must never be told about {wrong_rail_word!r}: {english}"
             )
-        assert "cancel the order" not in english
+        assert CANCEL_ADVICE not in english
 
     def test_a_pending_payment_is_refused_too(self, app, client, db, sample_order, sample_user):
         payment = _seed_payment(db, sample_order, sample_user, PaymentStatus.PENDING)

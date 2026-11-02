@@ -13,6 +13,16 @@
     <p>Заказ <strong>#{{ order_number }}</strong> не был оплачен до {{ deadline }}, поэтому мы его отменили.</p>
 </div>
 
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Оплатить</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">Посмотреть заказ</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Открыть подписку</a></p>
+{% endif %}
+
 <hr class="divider">
 
 <div class="info-box">

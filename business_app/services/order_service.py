@@ -85,14 +85,6 @@ CUSTOMER_CANCEL_WITH_DRIVER = "WITH_DRIVER"
 CUSTOMER_CANCEL_VIA_SKIP = "skip"
 CUSTOMER_CANCEL_VIA_CANCEL = "cancel"
 CUSTOMER_CANCEL_VIA_DECLINE = "decline"
-# The retired `customer_cancel_via` field's values (spec 2026-10-26 §12: "subscription" pointed to "Skip this
-# delivery" on the subscription, "order" to the order's own Cancel), published from the new answer until the clients
-# read `customer_actions.cancel` (plan 2026-10-27 Task 21 removes it).
-LEGACY_CUSTOMER_CANCEL_VIA = {
-    CUSTOMER_CANCEL_VIA_SKIP: "subscription",
-    CUSTOMER_CANCEL_VIA_CANCEL: "order",
-    CUSTOMER_CANCEL_VIA_DECLINE: "order",
-}
 
 
 class CustomerRemoval(NamedTuple):
@@ -108,6 +100,10 @@ class CustomerRemoval(NamedTuple):
 # The order statuses in which an unpaid online order has a payment deadline (spec 2026-10-27 §4.4): before the
 # driver has it. `OrderService.payment_deadline_applies` is the whole rule.
 PAYMENT_DEADLINE_STATUSES = frozenset({OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PREPARING})
+
+# The `provider_data` key on an Asl belgisi-cancelled order's payment row that says its cash rescue was placed
+# (`OrderService.rescue_order_after_psp_failure`): one rescue per cancelled order.
+CASH_RESCUE_MARK = "cash_rescue"
 
 # F6: an admin cancel or return names its reason. It is stored on the order's
 # history row and, for a Delivery-page return, on the delivery's too. Both
@@ -1534,7 +1530,7 @@ class OrderService:
     def customer_cancel_block_code(order: Order) -> Optional[str]:
         """Why the customer may not cancel this order themselves, or None when they may (F5).
 
-        The ONE answer. `serialize_order` publishes it as `can_customer_cancel`, the
+        The ONE answer. `serialize_order` publishes it in `customer_actions.cancel`, the
         payment refusal routes' advice asks it, and `cancel_order_as_customer` enforces it
         on locked rows, so the Cancel a customer is shown and the write it sends cannot
         disagree. The checks run in this order and the first match wins:
@@ -1604,10 +1600,17 @@ class OrderService:
         The ONE answer to "which removal does this order offer". `customer_actions.cancel` publishes it and
         POST /orders/<id>/cancel (`remove_order_as_customer`) enforces it on locked rows, against the
         `expected_via` the screen showed. Who may remove the order is still `customer_cancel_block_code`."""
-        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
-
         if OrderService.customer_cancel_block_code(order) is not None:
             return None
+        return OrderService.customer_removal_kind(order)
+
+    @staticmethod
+    def customer_removal_kind(order: Order) -> str:
+        """Steps 2-4 of `customer_cancel_via`: the removal this order's kind gives, whether or not the customer may
+        still take it. A refused removal is worded by it (`customer_order_actions.cancel_refusal_copy`): a delivery
+        of an ACTIVE subscription that can no longer be removed was a Skip, so it "can no longer be skipped"."""
+        from business_app.services.sales.agent_order_confirmation_service import AgentOrderConfirmationService
+
         if AgentOrderConfirmationService.pending_request(order) is not None:
             return CUSTOMER_CANCEL_VIA_DECLINE
         subscription = order.subscription if order.subscription_id else None
@@ -1817,11 +1820,27 @@ class OrderService:
         Security: only orders cancelled with reason="tax_committee_unavailable"
         qualify. User- or admin-cancelled orders cannot use this path.
 
+        Once per cancelled order: the website and the bot both offer the
+        rescue, so a second tap, a second tab, a back/forward return to the
+        checkout or the other surface would each place a cash order the driver
+        then delivers and collects. The rescue marks the cancelled order's
+        payment row (`CASH_RESCUE_MARK`; every Asl belgisi cancellation has
+        one, written by the checkout before the pre-utilisation that failed),
+        reads and writes the mark under that row's lock and the order's, and
+        the new order's commit writes the mark with it. A second rescue is a
+        `ConflictError` (409) with the translated
+        `api.orders.cash_rescue.already_placed`, which the website shows under
+        the rescue and the bot as its alert, as they show every refusal here.
+
         Returns the newly created order. Caller is responsible for creating
         the delivery row + dispatching auto-assign (mirroring the main
         create_order endpoint).
         """
         cancelled = self.get_order(cancelled_order_id, user_id=user_id)
+        # The payment row, then the order, locked and re-read, in the order the payment webhooks take them: a second
+        # rescue of the same order waits here until the first one's commit, and then reads its mark.
+        payment = Payment.query.filter_by(order_id=cancelled.id).with_for_update().populate_existing().first()
+        cancelled = Order.query.filter_by(id=cancelled.id).with_for_update().populate_existing().one()
 
         current_status = cancelled.status
         if isinstance(current_status, str):
@@ -1845,8 +1864,10 @@ class OrderService:
             .first()
         )
         cancel_notes = ((last_cancel_history.notes if last_cancel_history else "") or "").strip().lower()
-        if "tax_committee_unavailable" not in cancel_notes:
+        if "tax_committee_unavailable" not in cancel_notes or payment is None:
             raise ConflictError("This order is not eligible for cash retry")
+        if CASH_RESCUE_MARK in (payment.provider_data or {}):
+            raise ConflictError(get_translation("api.orders.cash_rescue.already_placed"))
 
         lines = self.reorderable_lines(cancelled)
         if not lines:
@@ -1871,6 +1892,9 @@ class OrderService:
             "order_source": cancelled.order_source or "telegram",
         }
 
+        # Written under the locks; `create_order`'s commit writes it with the new order, and a refusal there (the
+        # cash-debt limit, stock) rolls both back, so the customer may rescue again later.
+        payment.provider_data = {**(payment.provider_data or {}), CASH_RESCUE_MARK: {"at": get_utc_now().isoformat()}}
         new_order = self.create_order(user_id, order_data, bypass_cod_check=False)
 
         audit_logger.log_event(

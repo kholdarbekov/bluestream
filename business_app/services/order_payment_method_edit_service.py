@@ -326,8 +326,9 @@ class OrderPaymentMethodEditService:
             #     undiscounted amount a fiscalized rail would be. This is a
             #     revenue-correctness point rather than a fiscal one
             #     (business_account is never fiscalized) -- same rule as the
-            #     other rail moves (PaymentService.create_payment and Case C in
-            #     click_payment_provider_service.py). The tier-discount half is a
+            #     other rail moves through `rail_pricing.reprice_order_for_rail`
+            #     (Case C in click_payment_provider_service.py, the door's move
+            #     onto cash). The tier-discount half is a
             #     no-op for the click/payme -> business_account transitions, whose
             #     orders never carried a tier discount to begin with; their
             #     contract lines still move from the catalogue to the bank-transfer price.
@@ -618,6 +619,9 @@ class OrderPaymentMethodEditService:
                 payment.outstanding_amount = order.total_amount
                 payment.consume_marking_codes = True
                 payment.paid_at = None
+                # The business-account payment's confirmation mark goes with it: the Click money this payment now
+                # waits for has not been confirmed, and a stale mark would hide it from the re-drivers (Task Hfix).
+                PaymentService.unmark_payment_confirmation(payment)
             order.is_paid = False
             db.session.flush()
 

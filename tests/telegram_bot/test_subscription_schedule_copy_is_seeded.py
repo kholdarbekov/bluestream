@@ -21,11 +21,10 @@ KEYS = (
     ["telegram.subscription.select_day_of_week", "telegram.subscription.select_day_of_month"]
     + ["telegram.subscription.select_time_slot", "telegram.subscription.any_time"]
     + ["telegram.subscription.delivery_day", "telegram.subscription.delivery_time"]
-    + ["telegram.subscription.time_to_be_confirmed"]
-    # The bot reading the backend's published answers (plan 2026-10-26 Task 5).
+    # The bot reading the backend's published answers (plan 2026-10-26 Task 5). Cancel's label and confirm words
+    # are the backend's published `allowed_actions.cancel` (step 4).
     + [f"telegram.subscription.{n}" for n in (
-        "cancel_button", "cancel_confirm", "cancel_confirm_yes", "cancel_confirm_no", "skip_stale",
-        "change_time_slot", "select_new_time_slot", "no_time_slots",
+        "skip_stale", "change_time_slot", "select_new_time_slot",
         "schedule_updated_successfully", "items_updated_successfully", "preview_title", "save_change",
     )]
     # The card's money line reads the backend's estimate (final fix wave F4).

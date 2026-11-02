@@ -30,6 +30,7 @@ from tests.telegram_bot.ptb_harness import (
     backend_failure,
     build_bot_harness,
     menu_already_installed,
+    UpdateFactory,
 )
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 from tests.telegram_bot.test_checkout_journey_dispatcher import (
@@ -131,7 +132,8 @@ class Replay:
     @staticmethod
     def _write(call, recorded: list):
         for candidate in recorded:
-            if candidate["body"] == (call.data or {}):
+            # A write that carries no body (Reorder's POST) was recorded as None and is sent as nothing.
+            if (candidate["body"] or {}) == (call.data or {}):
                 return answered(candidate)
         return backend_failure(f"the backend recorded no answer to {call.data!r}", 599)
 
@@ -272,8 +274,10 @@ class TestTheOrderScreenDrawsThePublishedAnswers:
         await tap(bot, "order_1")
 
         assert pay_cb(bot) == f"payment_retry_1_{a['pay']['expected_amount']}"
-        assert labels(bot) == [a["pay"]["label"], _copy("telegram.order.reorder"), _copy("telegram.back")]
-        assert not [data for data in callbacks(bot) if data.startswith("cancel_order_")]
+        # Delivered, but this order has no line to copy, so the backend publishes no Reorder (R8) and none is drawn.
+        assert a["reorder"] == {"allowed": False, "label": None}
+        assert labels(bot) == [a["pay"]["label"], _copy("telegram.back")]
+        assert not [data for data in callbacks(bot) if data.startswith(("cancel_order_", "reorder_"))]
 
     async def test_a_cancelled_order_offers_neither(self, monkeypatch):
         bot = await _bot(monkeypatch, "cancelled")
@@ -282,6 +286,54 @@ class TestTheOrderScreenDrawsThePublishedAnswers:
         await tap(bot, "order_1")
 
         assert callbacks(bot) == ["back_to_orders"]
+
+
+# --------------------------------------------------------------------------- Reorder
+
+
+class TestReorderIsThePublishedAnswer:
+    """Reorder is `customer_actions.reorder` (R8, `OrderService.can_reorder`): drawn with the backend's label when it
+    is allowed, never because of the order's status. Its route, POST /cart/fill-from-order/<id>, refuses the rest."""
+
+    async def test_a_delivered_order_shows_the_published_reorder(self, monkeypatch):
+        bot = await _bot(monkeypatch, "paid_delivered", strict_entities=True)
+        Replay(bot, "paid_delivered")
+        a = actions("paid_delivered")
+
+        await tap(bot, "order_1")
+
+        assert bot.telegram.last_shown().refused is None
+        assert labels(bot) == [a["reorder"]["label"], _copy("telegram.back")]
+        assert callbacks(bot) == ["reorder_1", "back_to_orders"]
+
+    async def test_a_subscription_delivery_shows_no_reorder(self, monkeypatch):
+        bot = await _bot(monkeypatch, "subscription_delivered")
+        Replay(bot, "subscription_delivered")
+
+        await tap(bot, "order_1")
+
+        assert actions("subscription_delivered")["reorder"] == {"allowed": False, "label": None}
+        assert callbacks(bot) == ["back_to_orders"]
+
+    async def test_a_stale_reorder_of_a_subscription_delivery_answers_the_backends_sentence(self, monkeypatch):
+        """A Reorder button on a message drawn before this release: the route refuses it, and the bot says the
+        backend's sentence instead of opening checkout."""
+        bot = await _bot(monkeypatch, "subscription_delivered")
+        Replay(bot, "subscription_delivered", only=("reorder_bot",))
+        # The reorder-info answer for this customer: a subscription's delivery is never the candidate, and nothing
+        # is open.
+        bot.backend.route(
+            "GET", "/api/v1/orders/reorder-info", lambda _call: {"success": True, "data": {"candidate": None}}
+        )
+
+        await tap(bot, "reorder_1")
+
+        assert not call(bot, "POST", "/api/v1/cart/fill-from-order/1").data
+        shown = bot.telegram.last_shown()
+        assert (shown.method, shown.text) == (
+            "sendMessage", exchange("subscription_delivered", "reorder_bot")["response"]["message"],
+        )
+        assert not calls(bot, "GET", "/api/v1/cart")  # checkout never opened
 
 
 # --------------------------------------------------------------------------- Pay
@@ -571,6 +623,52 @@ class TestTheRemovalIsThePublishedOne:
         assert fresh["customer_actions"]["cancel"]["label"] in labels(bot)
         assert not calls(bot, "GET", "/api/v1/subscriptions/1")
 
+    # Live drive D7: the order was removed in another tab or chat after this screen was drawn. The backend chooses the
+    # words once (`refusal_copy`, also behind the website's sentence) and the bot says them in this chat's tone.
+    STALE_REMOVALS = [
+        pytest.param("stale_skip", "cancel_order_1_skip_away", "telegram.orders.skip_refused.not_skippable", id="skip"),
+        pytest.param(
+            "stale_cancel", "cancel_order_1_confirm_yes_cancel", "telegram.orders.cancel_refused.not_cancellable",
+            id="cancel",
+        ),
+    ]
+
+    @pytest.mark.parametrize("case, yes, chat_copy", STALE_REMOVALS)
+    async def test_a_stale_yes_is_refused_in_the_words_of_the_button_pressed(self, monkeypatch, case, yes, chat_copy):
+        bot = await _bot(monkeypatch, case)
+        replay = Replay(bot, case)
+        await tap(bot, "cancel_order_1")
+        assert yes in callbacks(bot)
+        replay.go_stale()  # removed elsewhere after the confirmation was drawn
+        bot.telegram.reset()
+
+        await tap(bot, yes)
+
+        (ex,) = load(case)["exchanges"].values()
+        assert call(bot, "POST", "/api/v1/orders/1/cancel").data == ex["body"]
+        refusal = bot.telegram.last_shown()
+        assert (refusal.method, refusal.text) == ("editMessageText", _copy(chat_copy))
+        assert ex["response"]["data"]["refusal_copy"] == chat_copy.removeprefix("telegram.orders.")
+        assert callbacks(bot) == ["order_1", "menu_orders"], "nothing stale is left to tap"
+
+    @pytest.mark.parametrize("case, yes, chat_copy", STALE_REMOVALS)
+    async def test_a_removal_drawn_before_the_order_moved_on_is_refused_in_the_same_words(
+        self, monkeypatch, case, yes, chat_copy
+    ):
+        """The Skip or Cancel button on the order screen, tapped after the order was removed elsewhere: the order read
+        again publishes its removal closed, with the same `refusal_copy`, and nothing is written."""
+        bot = await _bot(monkeypatch, case)
+        replay = Replay(bot, case)
+        await tap(bot, "order_1")
+        assert "cancel_order_1" in callbacks(bot)
+        replay.go_stale()
+
+        await tap(bot, "cancel_order_1")
+
+        assert bot.telegram.last_shown().text == _copy(chat_copy)
+        assert callbacks(bot) == ["order_1", "menu_orders"]
+        assert not calls(bot, "POST", "/api/v1/orders/1/cancel")
+
     async def test_an_old_yes_button_without_a_via_cancels_nothing(self, monkeypatch):
         bot = await _bot(monkeypatch, "click_unpaid")
         Replay(bot, "click_unpaid")
@@ -595,6 +693,15 @@ class TestTheRemovalIsThePublishedOne:
 
 
 # --------------------------------------------------------------------------- /start order_<id>, sub_<id>
+
+
+class _GroupUpdateFactory(UpdateFactory):
+    """The same customer, writing in a group chat instead of the private one."""
+
+    def _message_envelope(self, **extra):
+        envelope = super()._message_envelope(**extra)
+        envelope["chat"] = {"id": -100123, "type": "group", "title": "Neighbours"}
+        return envelope
 
 
 class TestDeepLinks:
@@ -661,6 +768,19 @@ class TestDeepLinks:
         card = bot.telegram.last_shown()
         assert card.method == "sendMessage"
         assert any(data.startswith("set_language_") for data in card.callback_data()), card.callback_data()
+
+    async def test_a_deep_link_in_a_group_chat_is_a_plain_start_and_opens_nothing(self, monkeypatch):
+        """`?startgroup=` lets `/start order_<id>` arrive from a group: the order card would be posted to everyone."""
+        bot = await _bot(monkeypatch, "click_unpaid", strict_entities=True)
+        Replay(bot, "click_unpaid")
+        await menu_already_installed(bot)
+        in_a_group = _GroupUpdateFactory(bot=bot.application.bot)
+
+        await bot.send(in_a_group.command("start order_1"))
+        await bot.send(in_a_group.command("start sub_1"))
+
+        assert not [c for c in bot.backend.calls if c.endpoint.startswith(("/api/v1/orders", "/api/v1/subscriptions"))]
+        assert bot.telegram.last_shown().text == _copy("telegram.main_menu")
 
     async def test_a_malformed_deep_link_is_a_plain_start(self, monkeypatch):
         bot = await _bot(monkeypatch, "click_unpaid")

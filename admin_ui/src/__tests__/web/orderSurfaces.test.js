@@ -57,7 +57,7 @@ const escapeJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // The page the fixture's language renders, its fetch answering from the case, and the scripts loaded as the
 // page loads them. `writes` are the exchanges (by name) the script is allowed to send, in order.
-async function boot(kind, name, { writes = [], intervals = false, pending = false } = {}) {
+async function boot(kind, name, { writes = [], intervals = false, pending = false, holdReorderToast = false } = {}) {
   const fixture = loadCase(name);
   const shell = SHELL[fixture.language];
   const base = { api_base_url: '/api/v1', current_user: null, is_authenticated: false, login_url: '/login', i18n: {} };
@@ -115,6 +115,14 @@ async function boot(kind, name, { writes = [], intervals = false, pending = fals
   });
   const ticks = [];
   if (intervals) window.setInterval = (callback) => { ticks.push(callback); return ticks.length; };
+  // The reorder toast's 2 s wait before the cart opens: held for the test to release, so no test sleeps.
+  const held = [];
+  if (holdReorderToast) {
+    const realSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = (callback, delay, ...rest) => (
+      delay === 2000 ? held.push(callback) : realSetTimeout(callback, delay, ...rest)
+    );
+  }
   BASE_SCRIPTS.forEach((source) => window.eval(source));
   window.OrderActions.navigate = vi.fn();
   if (kind === 'tracking') {
@@ -129,7 +137,7 @@ async function boot(kind, name, { writes = [], intervals = false, pending = fals
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const $1 = (selector, root = document) => root.querySelector(selector);
   const order = fixture.requests[detailKey(fixture.order_id)].body.data.order;
-  return { window, document, requests, mismatches, fixture, order, actions: order.customer_actions, ticks, reloads, $$, $1, shell, words: shell.orders.island.order_actions };
+  return { window, document, requests, mismatches, fixture, order, actions: order.customer_actions, ticks, held, reloads, $$, $1, shell, words: shell.orders.island.order_actions };
 }
 
 async function press(page, el) {
@@ -473,11 +481,156 @@ describe('the other two surfaces draw the same answer', () => {
   });
 });
 
+// ------------------------------------------------------------------ Reorder fills the cart through the bot's route
+
+describe('Reorder fills the cart through POST /cart/fill-from-order/<id>, as the bot does', () => {
+  const storedCart = (page) => JSON.parse(page.window.localStorage.getItem('cart'));
+
+  it('Reorder on a delivered card fills the cart and opens it', async () => {
+    const page = await boot('orders', 'paid_delivered', { writes: ['reorder'] });
+    page.window.localStorage.setItem('cart', JSON.stringify([{ product_id: 99, quantity: 7 }]));
+    await press(page, page.$1('[data-action="reorder"]', card(page)));
+    const exchange = page.fixture.exchanges.reorder;
+    expect(page.mismatches).toEqual([]);
+    expect(posts(page).map((r) => [r.url, r.body])).toEqual([['/api/v1/cart/fill-from-order/1', null]]);
+    expect(exchange.path).toBe('/api/v1/cart/fill-from-order/1');
+    expect(storedCart(page)).toEqual(exchange.response.data.added);
+    expect(exchange.response.data.dropped).toEqual([]);
+    expect(page.window.OrderActions.navigate).toHaveBeenCalledTimes(1);
+    expect(page.window.OrderActions.navigate).toHaveBeenCalledWith(page.shell.orders.island.cart_url);
+    expect(toasts(page)).toEqual([]);
+  });
+
+  it('Reorder is drawn from customer_actions.reorder, with its label, on the card and in the modal', async () => {
+    const page = await boot('orders', 'paid_delivered');
+    const { reorder } = page.actions;
+    expect(reorder).toEqual({ allowed: true, label: expect.any(String) });
+    expect(squash(page.$1('[data-action="reorder"]', card(page)).textContent)).toBe(reorder.label);
+    await press(page, page.$1('[data-action="show-order-detail"][data-stop-propagation="1"]'));
+    const modalButton = page.$1('#reorderBtn');
+    expect(modalButton.style.display).toBe('inline-block');
+    expect(squash(modalButton.textContent)).toBe(reorder.label);
+  });
+
+  it('a subscription delivery offers Reorder neither on the card nor in the modal', async () => {
+    const page = await boot('orders', 'subscription_delivered');
+    expect(page.order.status).toBe('delivered');
+    expect(page.actions.reorder).toEqual({ allowed: false, label: null });
+    expect(page.$1('[data-action="reorder"]', card(page))).toBeNull();
+    await press(page, page.$1('[data-action="show-order-detail"][data-stop-propagation="1"]'));
+    expect(page.$1('#reorderBtn').style.display).toBe('none');
+    expect(posts(page)).toEqual([]);
+  });
+
+  it('Reorder in the order modal does the same', async () => {
+    const page = await boot('orders', 'paid_delivered', { writes: ['reorder'] });
+    await press(page, page.$1('[data-action="show-order-detail"][data-stop-propagation="1"]'));
+    await press(page, page.$1('#reorderBtn'));
+    expect(page.mismatches).toEqual([]);
+    expect(posts(page).map((r) => [r.url, r.body])).toEqual([['/api/v1/cart/fill-from-order/1', null]]);
+    expect(storedCart(page)).toEqual(page.fixture.exchanges.reorder.response.data.added);
+    expect(page.window.OrderActions.navigate).toHaveBeenCalledTimes(1);
+    expect(page.window.OrderActions.navigate).toHaveBeenCalledWith(page.shell.modal.island.cart_url);
+  });
+
+  const tapCard = async (page) => press(page, page.$1('[data-action="reorder"]', card(page)));
+  const tapModal = async (page) => {
+    await press(page, page.$1('[data-action="show-order-detail"][data-stop-propagation="1"]'));
+    await press(page, page.$1('#reorderBtn'));
+  };
+  const SURFACES = [
+    ['the card', tapCard, (page) => page.shell.orders.island.order_actions],
+    ['the modal', tapModal, (page) => page.shell.modal.island.order_actions],
+  ];
+
+  it.each(SURFACES)('a dropped line is named once, not as a failure (%s)', async (name, tap, words) => {
+    const page = await boot('orders', 'reorder_some_dropped', { writes: ['reorder'], holdReorderToast: true });
+    await tap(page);
+    const { added, dropped } = page.fixture.exchanges.reorder.response.data;
+    expect(dropped).toHaveLength(1);
+    expect(storedCart(page)).toEqual(added);
+    expect(toasts(page)).toEqual([words(page).reorder_dropped]);
+    expect(page.$$('.toast-notification.toast-error')).toHaveLength(0);
+    expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+    expect(page.held).toHaveLength(1);
+    page.held[0]();
+    expect(page.window.OrderActions.navigate).toHaveBeenCalledTimes(1);
+    expect(toasts(page)).toHaveLength(1);
+  });
+
+  // A failing answer is said, never swallowed, and the cart stays shut.
+  const failing = (page, answer) => {
+    const real = page.window.fetch;
+    page.window.fetch = (url, options = {}) => (
+      url === '/api/v1/cart/fill-from-order/1' ? answer() : real(url, options)
+    );
+  };
+  const reply = (status, body) => () => Promise.resolve({ ok: status < 400, status, json: async () => body });
+
+  it.each(SURFACES)('a failure with no message shows the failed word (%s)', async (name, tap, words) => {
+    const answers = [
+      reply(502, null),
+      reply(200, { success: false }),
+      () => Promise.reject(new Error('offline')),
+    ];
+    for (const answer of answers) {
+      const page = await boot('orders', 'paid_delivered');
+      failing(page, answer);
+      page.window.localStorage.setItem('cart', JSON.stringify([{ product_id: 99, quantity: 7 }]));
+      await tap(page);
+      expect(toasts(page)).toEqual([words(page).failed]);
+      expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+      expect(storedCart(page)).toEqual([{ product_id: 99, quantity: 7 }]);
+    }
+  });
+
+  it.each(SURFACES)("the route's 404 answer shows its own message (%s)", async (name, tap) => {
+    const page = await boot('orders', 'paid_delivered');
+    failing(page, reply(404, { success: false, message: 'Order not found.' }));
+    await tap(page);
+    expect(toasts(page)).toEqual(['Order not found.']);
+    expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(SURFACES)("a stale Reorder the route refuses (409) shows the backend's sentence and keeps the cart (%s)", async (name, tap) => {
+    const refused = loadCase('subscription_delivered').exchanges.reorder;
+    expect(refused.status).toBe(409);
+    const page = await boot('orders', 'paid_delivered');
+    failing(page, reply(refused.status, refused.response));
+    page.window.localStorage.setItem('cart', JSON.stringify([{ product_id: 99, quantity: 7 }]));
+    await tap(page);
+    expect(toasts(page)).toEqual([refused.response.message]);
+    expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+    expect(storedCart(page)).toEqual([{ product_id: 99, quantity: 7 }]);
+  });
+
+  it.each(SURFACES)('a storage exception shows the failed word and does not open the cart (%s)', async (name, tap, words) => {
+    const page = await boot('orders', 'paid_delivered', { writes: ['reorder'] });
+    page.window.Storage.prototype.setItem = () => { throw new Error('quota'); };
+    await tap(page);
+    expect(toasts(page)).toEqual([words(page).failed]);
+    expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(SURFACES)('nothing added: the message is shown and the empty cart is not opened (%s)', async (name, tap, words) => {
+    const page = await boot('orders', 'reorder_some_dropped', { holdReorderToast: true });
+    failing(page, reply(200, { success: true, data: { added: [], dropped: [{ product_id: 1, quantity: 2, reason: 'inactive' }] } }));
+    await tap(page);
+    expect(toasts(page)).toEqual([words(page).reorder_dropped]);
+    expect(storedCart(page)).toEqual([]);
+    expect(page.held).toHaveLength(0);
+    await settle(page.window, 5);
+    expect(page.window.OrderActions.navigate).not.toHaveBeenCalled();
+  });
+});
+
 describe('the scripts hold no rule of their own', () => {
   const code = (source) => source.split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
   it.each([['orders.js', ORDERS_SCRIPT], ['order-detail-modal.js', MODAL_SCRIPT], ['order-tracking.js', TRACKING_SCRIPT]])(
-    '%s reads no retired field and opens no native dialog', (name, source) => {
+    '%s reads no retired field, decides no Reorder and opens no native dialog', (name, source) => {
       expect(code(source)).not.toMatch(/customer_cancel_via|can_customer_cancel|is_payable|can_pay|\bconfirm\(|\bprompt\(|\balert\(/);
+      // Reorder is `customer_actions.reorder` (R8): no surface offers it by the order's status.
+      expect(code(source)).not.toMatch(/status\s*===?\s*'delivered'/);
     },
   );
 });

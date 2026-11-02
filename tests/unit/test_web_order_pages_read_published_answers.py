@@ -94,7 +94,8 @@ def test_the_label_survives_the_deploy_window(name):
 def test_the_tracking_page_writes_through_the_shared_request_helper():
     """The storefront's writes go through base.js `apiRequest` (cookie credentials, the CSRF header, X-Platform)."""
     for name in ("order-tracking.js", "order-actions.js"):
-        code = _code(name)
+        # The one storage write allowed is Reorder's cart (the cart page reads it); a token is never stored.
+        code = _code(name).replace("window.localStorage.setItem('cart', ", "")
         assert "localStorage" not in code and "fetch(" not in code, (
             f"{name}: the web keeps its token in an httpOnly cookie. A hand-built request carries no CSRF "
             "header, and a Bearer header read from localStorage is 'Bearer null'."

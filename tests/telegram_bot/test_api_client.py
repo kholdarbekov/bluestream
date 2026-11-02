@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from api_client import APIResponse, BusinessAPIClient, CircuitBreaker
@@ -306,3 +307,117 @@ class TestIdentityCallsAreSigned:
         assert secret, "test env must seed BOT_WEBHOOK_SECRET (see tests/conftest.py)"
         expected = hmac.new(secret.encode("utf-8"), sent, hashlib.sha256).hexdigest()
         assert fake_http.last_headers["X-Bot-Webhook-Signature"] == expected
+
+
+class _RaisingHTTPClient:
+    """The httpx transport: every call raises `exc`, or answers `response` once `fail_times` calls are spent."""
+
+    def __init__(self, exc, response=None, fail_times=None):
+        self.exc = exc
+        self.response = response
+        self.fail_times = fail_times
+        self.calls = []
+
+    async def _call(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
+        if self.fail_times is None or len(self.calls) <= self.fail_times:
+            raise self.exc
+        return self.response
+
+    async def get(self, url, **kwargs):
+        return await self._call("GET", url, **kwargs)
+
+    async def post(self, url, **kwargs):
+        return await self._call("POST", url, **kwargs)
+
+
+def _retrying_client(http):
+    client = BusinessAPIClient()
+    client.max_retries = 2
+    client.retry_delay = 0
+    client._client = http
+    return client
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+class TestRetrySafety:
+    """RFC 9110 section 9.2.2: a write that may have reached the server is never re-sent by the retrier."""
+
+    async def test_a_post_that_hits_a_read_timeout_is_sent_exactly_once(self):
+        http = _RaisingHTTPClient(httpx.ReadTimeout("response lost"))
+        client = _retrying_client(http)
+
+        response = await client._make_request("POST", "/api/v1/orders/1/retry-payment", data={})
+
+        assert [c[0] for c in http.calls] == ["POST"]
+        assert response.success is False
+
+    async def test_a_post_that_loses_its_connection_mid_exchange_is_sent_exactly_once(self):
+        http = _RaisingHTTPClient(httpx.RemoteProtocolError("server closed"))
+        client = _retrying_client(http)
+
+        response = await client._make_request("POST", "/api/v1/orders/1/cancel", data={})
+
+        assert len(http.calls) == 1
+        assert response.success is False
+
+    @pytest.mark.parametrize("exc", [
+        httpx.ConnectTimeout("no handshake"), httpx.ConnectError("refused"),
+        httpx.PoolTimeout("no connection free"), httpx.ProxyError("no tunnel"),
+    ])
+    async def test_a_post_that_never_left_the_bot_is_retried(self, exc):
+        ok = _FakeResponse(200, payload={"success": True})
+        http = _RaisingHTTPClient(exc, response=ok, fail_times=1)
+        client = _retrying_client(http)
+
+        response = await client._make_request("POST", "/api/v1/orders/1/retry-payment", data={})
+
+        assert [c[0] for c in http.calls] == ["POST", "POST"]
+        assert response.success is True
+
+    async def test_a_get_that_hits_a_read_timeout_is_still_retried(self):
+        ok = _FakeResponse(200, payload={"success": True})
+        http = _RaisingHTTPClient(httpx.ReadTimeout("slow"), response=ok, fail_times=1)
+        client = _retrying_client(http)
+
+        response = await client._make_request("GET", "/api/v1/orders/1")
+
+        assert [c[0] for c in http.calls] == ["GET", "GET"]
+        assert response.success is True
+
+    @pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+    async def test_a_write_verb_that_hits_a_read_timeout_is_sent_exactly_once(self, method):
+        """PUT included: the customer bot's saves carry expected_state, so a replay of a committed one is a 409."""
+        http = _RaisingHTTPClient(httpx.ReadTimeout("response lost"))
+        http.put = lambda url, **kw: http._call("PUT", url, **kw)
+        http.patch = lambda url, **kw: http._call("PATCH", url, **kw)
+        http.delete = lambda url, **kw: http._call("DELETE", url, **kw)
+        client = _retrying_client(http)
+
+        response = await client._make_request(method, "/api/v1/subscriptions/1", data={})
+
+        assert [c[0] for c in http.calls] == [method]
+        assert response.success is False
+
+    @pytest.mark.parametrize("exc", [
+        httpx.ReadTimeout("response lost"), httpx.RemoteProtocolError("server closed"),
+        httpx.DecodingError("bad body"),
+    ])
+    async def test_a_given_up_post_records_exactly_one_breaker_failure(self, exc):
+        http = _RaisingHTTPClient(exc)
+        client = _retrying_client(http)
+
+        await client._make_request("POST", "/api/v1/orders/1/cancel", data={})
+
+        assert client._circuit_breaker._failure_count == 1
+        assert len(http.calls) == 1
+
+    async def test_a_post_that_fails_in_some_other_way_is_not_resent(self):
+        http = _RaisingHTTPClient(httpx.TooManyRedirects("loop"))
+        client = _retrying_client(http)
+
+        response = await client._make_request("POST", "/api/v1/orders/1/cancel", data={})
+
+        assert len(http.calls) == 1
+        assert response.success is False

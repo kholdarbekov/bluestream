@@ -42,6 +42,7 @@ def dispatched(monkeypatch):
 def telegram_customer(app, db, sample_user, monkeypatch):
     def _make(language):
         sample_user.telegram_id = "820000001"
+        sample_user.is_bot_active = True
         sample_user.preferred_language = language
         for key, by_language in _PAYMENT_LABELS.items():
             for lang, value in by_language.items():

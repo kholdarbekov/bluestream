@@ -118,7 +118,7 @@
             var needed = loyalty.requalification.points_needed_to_keep || 0;
             var reqText = document.getElementById('tierRequalificationText');
             if (needed > 0) {
-                reqText.textContent = PAGE_DATA.i18n.earn + ' ' + needed + ' ' + PAGE_DATA.i18n.more_coins_to_keep;
+                reqText.textContent = PAGE_DATA.i18n.earn_more_to_keep.replace('{count}', needed);
             } else {
                 reqText.textContent = PAGE_DATA.i18n.status_secured;
                 reqText.className = 'text-success mt-1';

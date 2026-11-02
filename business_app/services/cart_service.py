@@ -15,7 +15,7 @@ from business_app.models.user import User
 from business_app.models.order import Order, OrderItem
 from business_app.models.cart import Cart, CartItem
 from business_app.models.analytics import PromotionalCampaign
-from business_app.utils.exceptions import ValidationError, NotFoundError
+from business_app.utils.exceptions import ConflictError, ValidationError, NotFoundError
 from business_app.utils.order_totals import compute_order_total
 from shared.enums import OrderStatus, PaymentMethod
 from shared.payment_methods import is_cod_rail
@@ -697,11 +697,18 @@ class CartService:
         The cart is always emptied first, so the result does not depend on what was in it (a
         double tap gives the same cart). Lines whose product is inactive or cannot be covered by
         stock are reported in `dropped` with a reason instead of failing the whole call.
-        Raises NotFoundError for an order that is not the user's.
+        Raises NotFoundError for an order that is not the user's, and ConflictError (409, the published
+        sentence) for one the reorder rule refuses (`OrderService.can_reorder`, R8: a subscription's
+        delivery, or nothing to copy), before the cart is touched. The order screens offer Reorder by the
+        same rule (`customer_actions.reorder`), so only a button drawn before this answer changed reaches it.
         """
+        from business_app.services.customer_order_actions import REORDER_REFUSAL
         from business_app.services.order_service import OrderService
+        from business_app.utils.translations import get_translation
 
         order = OrderService().get_order(order_id, user_id=int(user_id))
+        if not OrderService.can_reorder(order):
+            raise ConflictError(get_translation(REORDER_REFUSAL))
         wanted: Dict[int, int] = {}
         for line in OrderService.reorderable_lines(order):
             if line.quantity and line.quantity > 0:

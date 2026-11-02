@@ -837,13 +837,14 @@ class SubscriptionService:
             yield order, (ON_THE_WAY if OrderService.order_is_with_driver(order) else PLACED)
 
     @classmethod
-    def kept_order_note(cls, orders: Sequence[Order]) -> Optional[str]:
+    def kept_order_note(cls, orders: Sequence[Order], *, language: Optional[str] = None) -> Optional[str]:
         """The note "Your order for 30 October stays as it is.": a schedule, items or payment-method change
         leaves the order already placed (the first one the page shows coming) as it was placed. ONE answer for the
-        preview (`kept_order_note`, spec 2026-10-26 §5 B4) and the subscription payload, which the payment
-        editor shows before and after a save (UX brief "SCHEDULE AND PAYMENT SAVE")."""
+        preview (`kept_order_note`, spec 2026-10-26 §5 B4), the subscription payload, which the payment
+        editor shows before and after a save (UX brief "SCHEDULE AND PAYMENT SAVE"), and the slot-change notice
+        (`notice_next_delivery`, in the notice's `language`)."""
         shown = next(iter(cls._shown_orders(orders)), None)
-        return subscription_display.kept_order_note(shown[0]) if shown is not None else None
+        return subscription_display.kept_order_note(shown[0], language) if shown is not None else None
 
     @classmethod
     def _orders_of(cls, subscription, orders: Optional[Sequence[Order]]) -> Sequence[Order]:
@@ -882,6 +883,19 @@ class SubscriptionService:
         return subscription_display.upcoming_delivery(subscription, None, PLANNED, today)
 
     @classmethod
+    def notice_next_delivery(cls, subscription: Subscription, *, language: Optional[str] = None) -> Dict[str, Any]:
+        """The next delivery a slot-change notice names (`customer_notices.send_schedule_changed`), read when it is
+        sent: the card's own answer (`upcoming_delivery`), so the notice and the card never name two dates. An order
+        already placed is that date, kept on its own day and window (§15 call 9), and the notice says so with the
+        card's `kept_order_note` in `language`. None and None when nothing is coming (paused, nothing kept)."""
+        orders = cls._orders_of(subscription, None)
+        upcoming = cls.upcoming_delivery(subscription, orders=orders)
+        return {
+            "next_delivery_date": upcoming["date"] if upcoming is not None else None,
+            "kept_order_note": cls.kept_order_note(orders, language=language),
+        }
+
+    @classmethod
     def upcoming_dates(
         cls, subscription, *, orders: Optional[Sequence[Order]] = None, today: Optional[date] = None
     ) -> List[Dict[str, Any]]:
@@ -900,17 +914,19 @@ class SubscriptionService:
         # A skipped date still to come before the clock: the clock moved past it. One on the clock was put back (a
         # resume, or an admin's next delivery date): the clock delivers it, and the clock alone decides it. One the
         # customer skipped after the clock (staff had moved its order ahead): the clock steps over it when it gets
-        # there (`_advance_clock`, spec 2026-10-27 §16 M1).
+        # there (`_advance_clock`, spec 2026-10-27 §16 M1). A date an order of this subscription covers (one not
+        # cancelled, `_live_order_for`: coming or delivered) is that order and never a skip, also once the clock was
+        # put back onto it and its order delivered (live drive D2).
         known: Dict[date, str] = {}
         for log in cls._skip_logs(subscription.id):
             by_customer = cls._skipped_by_customer(log)
             for day in cls._skip_log_dates(log):
-                if today <= day < first or (by_customer and day > first):
+                if (today <= day < first or (by_customer and day > first)) and cls._live_order_for(
+                    subscription.id, day
+                ) is None:
                     known[day] = SKIPPED
         for order, state in cls._shown_orders(cls._orders_of(subscription, orders)):
-            # An order for the date is what is coming, also on a date once skipped (an admin re-dated it).
-            if known.get(order.delivery_date) in (None, SKIPPED):
-                known[order.delivery_date] = state
+            known.setdefault(order.delivery_date, state)  # what is coming on the date, also on one once skipped
         for day in subscription_schedule.next_deliveries(subscription, first, UPCOMING_DATES_SHOWN):
             known.setdefault(day, PLANNED)
         return [
@@ -1655,8 +1671,8 @@ class SubscriptionService:
 
         `changed` is the slot the write edited and `before` its state before the write; `before_delivery_days` the
         delivery days before it. With no `changed` (a new slot, a deleted one, the deploy) only the day rules run;
-        with no `before_delivery_days` (the deploy) no daily subscription is told of added days. Orders already
-        created keep their date and window (§15 call 9).
+        with no `before_delivery_days` (the deploy) no daily subscription is told of added or removed days. Orders
+        already created keep their date and window (§15 call 9).
 
         The delivery days are read once every live row is locked (`lock_live_subscriptions`), so a slot write
         that took the same locks first has committed and is seen whole."""
@@ -1714,10 +1730,14 @@ class SubscriptionService:
             "old_weekday": None,
             "new_weekday": None,
             "added_weekdays": [],
+            "removed_weekdays": [],
         }
         frequency = SubscriptionFrequency(getattr(subscription.frequency, "value", subscription.frequency))
         uses_changed = changed is not None and subscription.delivery_time_slot_id == changed.id
-        had_no_slot = subscription.delivery_time_slot_id is None
+        # Its slot gives no days of its own (none, switched off, or no day offered): a daily delivery then lands on
+        # the delivery days (`subscription_schedule.daily_weekdays`), so it follows any write that changes them.
+        own_slot = subscription.delivery_time_slot
+        follows_delivery_days = own_slot is None or subscription_schedule.SlotState.of(own_slot).weekdays is None
 
         # 1. Its own slot was written. Off after the write: it becomes Any time (§6.5), even when the slot was off
         # before ("Time to be confirmed" until now; a slot switched off before the cascade existed left its rows
@@ -1765,32 +1785,37 @@ class SubscriptionService:
                     changes.add(subscription_notices.DATE_MOVED)
                     facts["old_weekday"] = old_next.weekday()
 
-        # 3b. A daily subscription delivers on more days: it is told (owner, 2026-10-27). One on another slot keeps
-        # its slot's days; the deploy reconcile never tells.
+        # 3b. A daily subscription whose delivery weekdays changed is told: days gained (owner, 2026-10-27) and days
+        # lost (controller ruling, 2026-11-02). One on another slot with days of its own keeps them; the deploy
+        # reconcile never tells.
         if (
             before_delivery_days is not None
             and frequency == SubscriptionFrequency.DAILY
-            and (uses_changed or had_no_slot)
+            and (uses_changed or follows_delivery_days)
         ):
             old_days = (before.weekdays if uses_changed and before is not None else None) or before_delivery_days
-            slot = subscription.delivery_time_slot
-            slot_days = subscription_schedule.SlotState.of(slot).weekdays if slot is not None else None
-            added = sorted((slot_days or delivery_days) - old_days)
+            new_days = subscription_schedule.daily_weekdays(
+                subscription.delivery_time_slot, delivery_days=delivery_days
+            )
+            added, removed = sorted(new_days - old_days), sorted(old_days - new_days)
             if added:
                 changes.add(subscription_notices.DAYS_ADDED)
                 facts["added_weekdays"] = added
+            if removed:
+                changes.add(subscription_notices.DAYS_REMOVED)
+                facts["removed_weekdays"] = removed
 
         if not changes:
             return None
         if subscription_notices.TIME_CLEARED in changes:
             changes.discard(subscription_notices.TIME_CHANGED)  # the slot it changed is gone
-        active = subscription.status == SubscriptionStatus.ACTIVE
+        if subscription_notices.DAYS_REMOVED in changes:
+            changes.discard(subscription_notices.DATE_MOVED)  # the lost day is named; the next delivery says the date
         return {
             "subscription_id": subscription.id,
             "subscription_name": subscription.name,
             "changes": [code for code in subscription_notices.SCHEDULE_CHANGES if code in changes],
             **facts,
-            "next_delivery_date": _iso(subscription.next_delivery_date) if active else None,
             "time_kind": subscription_display.time_kind(subscription),
         }
 
@@ -2348,164 +2373,14 @@ class SubscriptionService:
         subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
         return subscription.subscription_items
 
-    def add_subscription_item_for_user(
-        self,
-        subscription_id: int,
-        user_id: int,
-        product_id: int,
-        quantity: int,
-        special_instructions: Optional[str] = None,
-        language: str = "en",
-    ) -> Dict[str, Any]:
-        """Add an item to a user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
-        self._require(subscription, "edit")
-
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            raise NotFoundError("api.subscriptions.error.product_not_found")
-        self._ensure_meets_min_order_quantity(product, quantity)
-        if len(subscription.subscription_items) >= self.max_items:
-            raise self._too_many_items()
-
-        existing_item = SubscriptionItem.query.filter_by(
-            subscription_id=subscription_id,
-            product_id=product_id,
-        ).first()
-        if existing_item:
-            raise ConflictError("api.subscriptions.error.product_already_exists")
-
-        item = SubscriptionItem(
-            subscription_id=subscription_id,
-            product_id=product_id,
-            quantity=quantity,
-            unit_price=self.customer_unit_price(product),
-            special_instructions=special_instructions,
-        )
-        item.calculate_total()
-        # Through the collection, so the total below counts the new row.
-        subscription.subscription_items.append(item)
-        db.session.flush()
-
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-
-        product_name = product.get_translated("name", language)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="item_added",
-                details=get_translation(
-                    "api.subscriptions.log.item_added",
-                    quantity=quantity,
-                    product=product_name,
-                ),
-                user_id=user_id,
-            )
-        )
-        db.session.commit()
-
-        return {
-            "item": item,
-            "billing_amount": subscription.billing_amount,
-        }
-
-    def update_subscription_item_for_user(
-        self,
-        subscription_id: int,
-        item_id: int,
-        user_id: int,
-        quantity: int,
-        special_instructions: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Update a subscription item for a user-owned subscription."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
-        self._require(subscription, "edit")
-
-        item = SubscriptionItem.query.filter_by(
-            id=item_id,
-            subscription_id=subscription_id,
-        ).first()
-        if not item:
-            raise NotFoundError("api.subscriptions.error.item_not_found")
-        if item.product is not None:
-            self._ensure_meets_min_order_quantity(item.product, quantity)
-
-        old_quantity = item.quantity
-        item.quantity = quantity
-        if special_instructions is not None:
-            item.special_instructions = special_instructions
-
-        item.calculate_total()
-        db.session.flush()
-
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-
-        product_name = item.product.name if item.product else get_translation("api.subscriptions.unknown_product")
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="item_updated",
-                details=get_translation(
-                    "api.subscriptions.log.item_updated",
-                    product=product_name,
-                    old_quantity=old_quantity,
-                    new_quantity=quantity,
-                ),
-                user_id=user_id,
-            )
-        )
-        db.session.commit()
-
-        return {
-            "item": item,
-            "billing_amount": subscription.billing_amount,
-        }
-
-    def remove_subscription_item_for_user(
-        self,
-        subscription_id: int,
-        item_id: int,
-        user_id: int,
-    ) -> Subscription:
-        """Remove an item from a user-owned subscription. The last item stays (the `remove_item` rule)."""
-        subscription = self._get_user_subscription_or_raise(subscription_id, user_id, lock=True)
-        self._require(subscription, "remove_item")
-
-        item = SubscriptionItem.query.filter_by(
-            id=item_id,
-            subscription_id=subscription_id,
-        ).first()
-        if not item:
-            raise NotFoundError("api.subscriptions.error.item_not_found")
-
-        product_name = item.product.name if item.product else get_translation("api.subscriptions.unknown_product")
-        # Through the collection (delete-orphan), so the total below no longer counts the removed row.
-        subscription.subscription_items.remove(item)
-        db.session.flush()
-
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-        db.session.add(
-            SubscriptionLog(
-                subscription_id=subscription_id,
-                action="item_removed",
-                details=get_translation("api.subscriptions.log.item_removed", product=product_name),
-                user_id=user_id,
-            )
-        )
-        db.session.commit()
-        return subscription
-
     def subscription_history_for_user(
         self, subscription_id: int, user_id: int, page: int, per_page: int
     ) -> Tuple[List[Dict[str, Any]], int]:
         """The Orders section (spec 2026-10-26 §5 B6, §12): ONE list, newest first, merged here.
 
         - Each order is a row with its chip (`subscription_display.history_chip`), amount and the order's
-          `customer_actions` (the one pay rule, which the retry-payment route enforces); its `can_pay` is that
-          published Pay's `allowed`. A skipped row has no order to act on: `customer_actions` is None.
+          `customer_actions` (the one pay rule, which the retry-payment route enforces). A skipped row has no order
+          to act on: `customer_actions` is None.
         - A customer skip is one row per skipped date with its reason; a skipped unpaid order is ONE
           "Skipped" row that carries the cancelled order's number, not a second "Cancelled" row.
         - A system skip (a date passed, out of stock, the cash-debt limit) is one row per date.
@@ -2535,7 +2410,6 @@ class SubscriptionService:
                             "order_number": order.order_number if order else None,
                             "status": subscription_display.chip("skipped"),
                             "amount_label": None,
-                            "can_pay": False,
                             "customer_actions": None,
                             "reason_label": reason,
                         },
@@ -2545,7 +2419,6 @@ class SubscriptionService:
             if order.id in skipped_order_ids:
                 continue
             day = order.delivery_date or local_date(order.created_at)
-            actions = customer_actions(order)
             rows.append(
                 (
                     day,
@@ -2559,8 +2432,7 @@ class SubscriptionService:
                         "order_number": order.order_number,
                         "status": subscription_display.history_chip(order),
                         "amount_label": display_labels.money(order.total_amount),
-                        "can_pay": actions["pay"]["allowed"],
-                        "customer_actions": actions,
+                        "customer_actions": customer_actions(order),
                         "reason_label": None,
                     },
                 )
@@ -2577,21 +2449,6 @@ class SubscriptionService:
             return extra["reason_text"]
         code = extra.get("reason_code")
         return get_translation(f"api.subscriptions.skip_reason.{code}") if code else None
-
-    def get_subscription_logs_paginated_for_user(
-        self,
-        subscription_id: int,
-        user_id: int,
-        page: int,
-        per_page: int,
-    ):
-        """Get paginated logs for a user-owned subscription."""
-        self._get_user_subscription_or_raise(subscription_id, user_id)
-        return (
-            SubscriptionLog.query.filter_by(subscription_id=subscription_id)
-            .order_by(SubscriptionLog.created_at.desc())
-            .paginate(page=page, per_page=per_page, error_out=False)
-        )
 
     def get_subscription_statistics_for_user(self, user_id: int, language: str = "en") -> Dict[str, Any]:
         """Calculate subscription statistics for a user."""

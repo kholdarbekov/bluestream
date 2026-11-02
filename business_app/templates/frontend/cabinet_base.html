@@ -43,8 +43,8 @@
                             <div class="profile-avatar">
                                 <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
                             </div>
-                            <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                            <p class="text-muted">{{ user.email }}</p>
+                            <h4>{{ user.full_name }}</h4>
+                            {% set contact = user.contact_email or user.phone %}{% if contact %}<p class="text-muted">{{ contact }}</p>{% endif %}
                         </div>
                     </div>
 
@@ -52,12 +52,12 @@
                         <ul class="list-unstyled">
                             <li{% if active_menu == 'dashboard' %} class="active"{% endif %}>
                                 <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
+                                    <i class="far fa-tachometer-alt"></i> {{ 'landing.account.dashboard'|t }}
                                 </a>
                             </li>
                             <li{% if active_menu == 'profile' %} class="active"{% endif %}>
                                 <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
+                                    <i class="far fa-user-edit"></i> {{ 'landing.account.profile'|t }}
                                 </a>
                             </li>
                             <li{% if active_menu == 'orders' %} class="active"{% endif %}>
@@ -67,7 +67,7 @@
                             </li>
                             <li{% if active_menu == 'addresses' %} class="active"{% endif %}>
                                 <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
+                                    <i class="far fa-map-marker-alt"></i> {{ 'landing.account.addresses'|t }}
                                 </a>
                             </li>
                             <li{% if active_menu == 'subscriptions' %} class="active"{% endif %}>
@@ -82,7 +82,7 @@
                             </li>
                             <li{% if active_menu == 'security' %} class="active"{% endif %}>
                                 <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
+                                    <i class="far fa-shield-alt"></i> {{ 'landing.account.security'|t }}
                                 </a>
                             </li>
                             <li>

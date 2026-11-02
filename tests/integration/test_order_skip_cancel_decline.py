@@ -169,6 +169,7 @@ def test_an_active_subscriptions_order_publishes_skip_with_its_sentence(db, web,
     assert published["customer_actions"]["cancel"] == {
         "allowed": True,
         "refusal": None,
+        "refusal_copy": None,
         "via": "skip",
         "label": "Skip this delivery",
         "confirm_text": sentence,
@@ -176,7 +177,7 @@ def test_an_active_subscriptions_order_publishes_skip_with_its_sentence(db, web,
         "reasons": EN_REASONS,
     }
     assert published["customer_actions"]["confirm"] == {"allowed": False, "label": None}
-    assert (published["can_customer_cancel"], published["customer_cancel_via"]) == (True, "subscription")  # legacy
+    assert not {"can_customer_cancel", "customer_cancel_via"} & set(published)  # retired (step 4, Task 21)
     assert _listed(web, order.id)["customer_actions"] == published["customer_actions"]
 
 
@@ -277,6 +278,7 @@ def test_a_leftover_on_a_paused_subscription_is_a_plain_cancel(db, web, client, 
     assert cancel == {
         "allowed": True,
         "refusal": None,
+        "refusal_copy": None,
         "via": "cancel",
         "label": "Cancel order",
         "confirm_text": "Cancel this order?",
@@ -318,6 +320,7 @@ def test_an_undated_order_of_an_active_subscription_is_a_plain_cancel_and_keeps_
     assert published["customer_actions"]["cancel"] == {
         "allowed": True,
         "refusal": None,
+        "refusal_copy": None,
         "via": "cancel",
         "label": "Cancel order",
         "confirm_text": "Cancel this order?",
@@ -356,6 +359,7 @@ def test_one_actions_fault_closes_only_that_action(db, web, build, monkeypatch):
     assert published["customer_actions"]["cancel"] == {
         "allowed": False,
         "refusal": None,
+        "refusal_copy": None,
         "via": None,
         "label": None,
         "confirm_text": None,
@@ -402,7 +406,7 @@ def test_a_paid_order_answers_the_paid_refusal_not_a_409(db, web, build):
     resp = _cancel(web, order.id, {"expected_via": "skip"})
 
     assert resp.status_code == 400, resp.get_json()
-    assert resp.get_json()["data"] == {"error_code": REFUSED, "reason_code": "PAID", "can_customer_cancel": False}
+    assert resp.get_json()["data"] == {"error_code": REFUSED, "reason_code": "PAID", "refusal_copy": "cancel_refused.paid"}
     assert _logs(db, sub_id, "delivery_skipped") == []
 
 
@@ -417,6 +421,57 @@ def test_a_second_tap_on_skip_is_refused_and_skips_once(db, web, build):
     assert second.status_code == 400, second.get_json()
     assert second.get_json()["data"]["reason_code"] == "NOT_CANCELLABLE"
     assert len(_logs(db, sub_id, "delivery_skipped")) == 1
+
+
+@pytest.mark.parametrize(
+    "via, refusal_copy, sentence",
+    [
+        ("skip", "skip_refused.not_skippable", "This delivery can no longer be skipped. If you have a question about "
+                                               "it, message us in our Telegram bot: {bot_url}"),
+        ("cancel", "cancel_refused.not_cancellable", "This order can no longer be cancelled. If you have a question "
+                                                     "about it, message us in our Telegram bot: {bot_url}"),
+    ],
+)
+def test_a_stale_tap_on_a_skipped_order_is_refused_in_the_words_of_the_button_pressed(
+    app, db, web, build, via, refusal_copy, sentence, notified
+):
+    """Live drive D7: a Skip pressed in a tab left open after the delivery was skipped was refused with the cancel
+    sentence. The refusal stays the one both clients already render (400, NOT_CANCELLABLE); the words follow the `via`
+    the screen sent, chosen once and published as `refusal_copy` (the bot shows `telegram.orders.<refusal_copy>`)."""
+    sub_id = build()
+    [order] = _orders(db, sub_id)
+    assert _cancel(web, order.id, {"expected_via": "skip", "reason_code": "away"}).status_code == 200
+
+    stale = _cancel(web, order.id, {"expected_via": via})
+
+    assert stale.status_code == 400, stale.get_json()
+    assert stale.get_json()["data"] == {
+        "error_code": REFUSED,
+        "reason_code": "NOT_CANCELLABLE",
+        "refusal_copy": refusal_copy,
+    }
+    assert stale.get_json()["message"] == sentence.format(bot_url=app.config["COMPANY_TELEGRAM_BOT_URL"])
+    assert len(_logs(db, sub_id, "delivery_skipped")) == 1
+    assert _sent(notified) == ["delivery_skipped"]  # the skip's own notice; the refusal tells nobody
+
+
+def test_a_skipped_order_read_again_publishes_its_refusal_in_skip_words(db, web, build):
+    """The bot's Cancel drawn before the skip re-reads the order and words the refusal from its `customer_actions`:
+    a delivery of an ACTIVE subscription that can no longer be removed was a Skip. Once the subscription is paused,
+    the same order is a plain cancel's, and is told so."""
+    sub_id = build()
+    [order] = _orders(db, sub_id)
+    assert _cancel(web, order.id, {"expected_via": "skip"}).status_code == 200
+
+    skipped = _detail(web, order.id)["customer_actions"]["cancel"]
+    assert web.post(_en(f"{BASE}/{sub_id}/pause"), {"expected_state": _state(web, sub_id)}).status_code == 200
+    paused = _detail(web, order.id)["customer_actions"]["cancel"]
+
+    assert (skipped["allowed"], skipped["refusal"], skipped["refusal_copy"], skipped["via"]) == (
+        False, "NOT_CANCELLABLE", "skip_refused.not_skippable", None,
+    )
+    assert (paused["refusal"], paused["refusal_copy"]) == ("NOT_CANCELLABLE", "cancel_refused.not_cancellable")
+    assert _listed(web, order.id)["customer_actions"]["cancel"] == paused
 
 
 @pytest.mark.parametrize(

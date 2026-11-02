@@ -434,6 +434,17 @@ def send_payment_confirmation_task(
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+def send_late_debit_credit_notice_task(self, user_id: int, order_number: str, amount: str):
+    """Tell the customer a late Click debit became their prepaid balance (published by
+    `payment_confirmation_dispatch` only after the commit that books the credit)."""
+    try:
+        return NotificationService().send_payment_late_debit_credited(user_id, order_number, amount)
+    except Exception as exc:
+        logger.error("Failed to send the late-debit credit notice for order %s: %s", order_number, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_verification_email_task(self, user_id: int, verification_token: str):
     """Send email verification notification"""
     try:
@@ -447,7 +458,6 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
         notification_service = NotificationService()
 
         template_data = {
-            "user_name": f"{user.first_name} {user.last_name}",
             "verification_token": verification_token,
             "verification_code": verification_token,  # Alias for template compatibility
             "verification_url": f"{current_app.config['COMPANY_WEBSITE']}/verify-email?token={verification_token}",
@@ -568,7 +578,6 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
         notification_service = NotificationService()
 
         template_data = {
-            "user_name": f"{user.first_name} {user.last_name}",
             "reset_token": reset_token,
             "reset_url": f"{current_app.config['COMPANY_WEBSITE']}/reset-password/{reset_token}",
             "company_name": current_app.config["COMPANY_NAME"],
@@ -584,56 +593,6 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
 
     except Exception as exc:
         logger.error(f"Failed to send password reset email: {exc}")
-        raise self.retry(exc=exc)
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
-def send_password_reset_sms_task(self, user_id: int, otp_code: str):
-    """
-    Send password reset OTP via SMS.
-
-    Used for telegram users with placeholder emails who have a verified phone number.
-    """
-    try:
-        logger.info(f"Sending password reset SMS for user {user_id}")
-
-        user = User.query.get(user_id)
-        if not user:
-            logger.error(f"User {user_id} not found")
-            return {"success": False, "error": "User not found"}
-
-        if not user.phone:
-            logger.error(f"User {user_id} has no phone number")
-            return {"success": False, "error": "No phone number"}
-
-        notification_service = NotificationService()
-
-        template_data = {
-            "user_name": user.first_name or "User",
-            "otp_code": otp_code,
-            "phone_number": user.phone,
-            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
-            "expiry_minutes": 10,
-        }
-
-        # Send password reset OTP via SMS
-        result = notification_service.send_sms_to_phone(
-            phone=user.phone,
-            notification_type=NotificationType.PASSWORD_RESET,
-            template_key="sms.password_reset.otp",
-            template_data=template_data,
-            language=user.preferred_language or "uz",
-        )
-
-        if result.get("success"):
-            logger.info(f"Password reset SMS sent successfully to user {user_id}")
-        else:
-            logger.warning(f"Password reset SMS send returned: {result}")
-
-        return result
-
-    except Exception as exc:
-        logger.error(f"Failed to send password reset SMS for user {user_id}: {exc}")
         raise self.retry(exc=exc)
 
 

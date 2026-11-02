@@ -279,6 +279,11 @@
         { key: 'evening',   start: '18:00', end: '21:00', label: PAGE_DATA.i18n.window_evening }
     ];
 
+    // The translated word, plus the bounds this table holds: `Morning (09:00–12:00)`. Anytime has none.
+    function windowLabel(preset) {
+        return preset.start ? preset.label + ' (' + preset.start + '–' + preset.end + ')' : preset.label;
+    }
+
     function renderDeliveryWindows() {
         deliveryDate = document.getElementById('delivery-date').value;
 
@@ -286,7 +291,7 @@
         container.innerHTML = WINDOW_PRESETS.map(function (preset, index) {
             return '<div class="time-slot ' + (index === 0 ? 'selected' : '') + '"' +
                 ' data-action="select-window" data-window-key="' + escapeHtml(preset.key) + '">' +
-                '<div class="time-slot-time">' + escapeHtml(preset.label) + '</div>' +
+                '<div class="time-slot-time">' + escapeHtml(windowLabel(preset)) + '</div>' +
                 '</div>';
         }).join('');
         selectWindow('anytime', container.firstChild);

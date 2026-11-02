@@ -10,7 +10,8 @@ jsdom), Task 13's bot tests and Task 20b's. Each file holds
     {"case", "language", "order_id",
      "requests":  {"GET /api/v1/orders/<id>", "GET /api/v1/orders?page=1&per_page=10",
                    "GET /api/v1/orders/?page=1&per_page=10" (the bot's spelling, same answer), "tracking_island"},
-     "requests_after": the order and list reads once the screen went stale (`click_unpaid_stale`, `stale_via` only),
+     "requests_after": the order and list reads once the screen went stale (`click_unpaid_stale`, `stale_via`,
+                       `stale_skip`, `stale_cancel` only),
      "exchanges": {<name>: {"method", "path", "body", "status", "response"}}}
 
 `requests` are the reads the pages send (answers as `{status, body}`; `tracking_island` is the `order` the tracking
@@ -43,11 +44,13 @@ from bs4 import BeautifulSoup
 from flask_jwt_extended import create_access_token
 
 from business_app.frontend.routes import ORDER_ACTIONS_WORDS, order_actions_words
+from business_app.models.cart import Cart, CartItem
 from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment
 from business_app.models.product import ProductFiscalProfile
 from business_app.models.sales_visits import OrderConfirmationRequest
 from business_app.models.subscription import Subscription, SubscriptionLog
+from business_app.services.order_service import OrderService
 from business_app.tasks import sales_agent_tasks
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, SubscriptionStatus
@@ -116,13 +119,14 @@ class Built:
 
 @dataclass(frozen=True)
 class Exchange:
-    """One write: `path` is the route under /api/v1/orders/<id>/, `via` the client that sends it ("web": cookie JWT
+    """One write: `path` is the route under /api/v1/orders/<id>/ (or an absolute /api/v1/ path, used as is: the
+    Reorder button's POST /api/v1/cart/fill-from-order/<id>), `via` the client that sends it ("web": cookie JWT
     + CSRF; "bot": bearer token), `status` what it answers. `prepare` moves the world after the screen was read
     (what makes a screen stale); `effect` asserts what the write did to the database."""
 
     name: str
     path: str
-    body: dict
+    body: Optional[dict]
     status: int
     via: str = "web"
     prepare: Optional[Callable] = None
@@ -133,7 +137,7 @@ class Exchange:
 class Case:
     name: str
     build: Callable[[_World, object], Built]
-    expected: Tuple[bool, Optional[str], bool]  # (pay.allowed, cancel.via, confirm.allowed)
+    expected: Tuple[bool, Optional[str], bool, bool]  # (pay.allowed, cancel.via, confirm.allowed, reorder.allowed)
     exchanges: Tuple[Exchange, ...] = ()
     language: str = "en"
     after_read: Optional[Callable] = None
@@ -183,6 +187,68 @@ def _agent_order(w: _World, request) -> Built:
     return Built(order.id, outlet.user)
 
 
+PAID_DELIVERED = Row("paid_delivered", OrderStatus.DELIVERED, PaymentMethod.CLICK, PaymentStatus.COMPLETED, is_paid=True, pay_refusal="already_paid")
+# The same paid delivery, billed by an active weekly subscription yesterday: R8 never repeats it by a reorder.
+PAID_DELIVERED_SUBSCRIPTION = Row(
+    "paid_delivered_subscription",
+    OrderStatus.DELIVERED,
+    PaymentMethod.CLICK,
+    PaymentStatus.COMPLETED,
+    is_paid=True,
+    pay_refusal="already_paid",
+    subscription=SubscriptionStatus.ACTIVE,
+    delivery_date=-1,
+)
+
+
+def _delivered_with_lines(*, inactive_cups: bool = False, row: Row = PAID_DELIVERED):
+    """A paid, delivered order (one-off unless `row` says otherwise) with water (2) and, optionally, cups (1) -- the
+    order Reorder copies. With `inactive_cups` the cups product has since been retired, so the cart cannot take that
+    line."""
+
+    def build(w: _World, request) -> Built:
+        order = seed(w.db, w.user, row, now=w.now.astimezone(UTC))
+        w.db.session.add(
+            OrderItem(order_id=order.id, product_id=w.water.id, quantity=2, unit_price=15000, total_price=30000)
+        )
+        if inactive_cups:
+            w.db.session.add(
+                OrderItem(order_id=order.id, product_id=w.cups.id, quantity=1, unit_price=5000, total_price=5000)
+            )
+            w.cups.is_active = False
+            order.subtotal = order.total_amount = 35000  # the lines' sum
+        else:
+            order.subtotal = order.total_amount = 30000
+        w.db.session.commit()
+        return Built(order.id, w.user)
+
+    return build
+
+
+def _cart_equals_added(w: _World, order_id: int, response: dict) -> None:
+    """Reorder replaced the cart with exactly the lines the answer names as added."""
+    assert order_id == 1, "the exchange's absolute path names order 1"
+    added = response["data"]["added"]
+    cart = Cart.query.filter_by(user_id=w.user.id).one()
+    rows = [{"product_id": i.product_id, "quantity": i.quantity} for i in CartItem.query.filter_by(cart_id=cart.id)]
+    assert sorted(rows, key=lambda r: r["product_id"]) == sorted(added, key=lambda r: r["product_id"])
+    assert added, "the case reorders at least one line"
+
+
+def _reordered_with_a_drop(w: _World, order_id: int, response: dict) -> None:
+    _cart_equals_added(w, order_id, response)
+    assert [d["reason"] for d in response["data"]["dropped"]] == ["inactive"]
+
+
+def _cart_holds_cups(w: _World, order_id: int) -> None:
+    """The customer's cart already holds 3 cups when a stale Reorder arrives: a refusal must leave them there."""
+    cart = Cart(user_id=w.user.id)
+    w.db.session.add(cart)
+    w.db.session.flush()
+    w.db.session.add(CartItem(cart_id=cart.id, product_id=w.cups.id, quantity=3))
+    w.db.session.commit()
+
+
 def _total_moves(w: _World, order_id: int) -> None:
     order = w.db.session.get(Order, order_id)
     order.total_amount = STALE_PRICE
@@ -193,6 +259,16 @@ def _subscription_pauses(w: _World, order_id: int) -> None:
     """The subscription row is paused directly, after the screen was read."""
     w.db.session.get(Subscription, 1).status = SubscriptionStatus.PAUSED
     w.db.session.commit()
+
+
+def _removed_elsewhere(via: str):
+    """The customer removed the order in another tab or chat after this screen was read: the route's own write."""
+
+    def after_read(w: _World, order_id: int) -> None:
+        OrderService().remove_order_as_customer(order_id, w.user.id, expected_via=via)
+        assert _status(w, order_id) is OrderStatus.CANCELLED
+
+    return after_read
 
 
 def _pool_runs_short(w: _World, order_id: int) -> None:
@@ -262,7 +338,7 @@ CASES = [
     Case(
         "click_unpaid",
         _row_case(ROW["click_pending"]),
-        (True, "cancel", False),
+        (True, "cancel", False, False),
         (
             _pay("pay_web", "web", 200, effect=_pay_effect),
             _pay("pay_bot", "bot", 200, via="bot", effect=_pay_effect),
@@ -272,7 +348,7 @@ CASES = [
     Case(
         "click_unpaid_stale",
         _row_case(ROW["click_pending"]),
-        (True, "cancel", False),
+        (True, "cancel", False, False),
         (_pay("pay_web", "web", 409), _pay("pay_bot", "bot", 409, via="bot")),
         after_read=_total_moves,
         reads_after=True,
@@ -280,29 +356,30 @@ CASES = [
     Case(
         "click_past_deadline",
         _row_case(ROW["click_past_deadline"]),
-        (False, "cancel", False),
+        (False, "cancel", False, False),
         (_pay("pay_web", "web", 409), _pay("pay_bot", "bot", 409, via="bot")),
     ),
     Case(
         "cash_pending",
         _row_case(ROW["cash_pending"]),
-        (False, "cancel", False),
+        (False, "cancel", False, False),
         (
             _pay("pay_bot", "bot", 409, via="bot"),
             Exchange("cancel", "cancel", {"expected_via": "cancel"}, 200, effect=_cancel_effect),
         ),
     ),
-    Case("partly_paid", _row_case(ROW["click_partly_paid"]), (False, None, False)),
+    Case("partly_paid", _row_case(ROW["click_partly_paid"]), (False, None, False, False)),
     Case(
         "delivered_unpaid_click",
         _row_case(Row("delivered_unpaid_click", _S.DELIVERED, _M.CLICK, _P.PENDING, has_deadline=False)),
-        (True, None, False),
+        # Delivered, but built with no line to copy: R8 publishes no Reorder.
+        (True, None, False, False),
         (_pay("pay_web", "web", 200, effect=_pay_effect),),
     ),
     Case(
         "payme_unpaid",
         _row_case(Row("payme_unpaid", _S.PENDING, _M.PAYME, _P.PENDING, cancel_via="cancel")),
-        (True, "cancel", False),
+        (True, "cancel", False, False),
         (
             _pay("pay_bot", "bot", 200, via="bot", effect=_moved_to_click),
             Exchange(
@@ -324,14 +401,32 @@ CASES = [
     ),
     Case(
         "paid_delivered",
-        _row_case(Row("paid_delivered", _S.DELIVERED, _M.CLICK, _P.COMPLETED, is_paid=True, pay_refusal="already_paid")),
-        (False, None, False),
+        _delivered_with_lines(),
+        (False, None, False, True),
+        (Exchange("reorder", f"{API}/cart/fill-from-order/1", None, 200, effect=_cart_equals_added),),
     ),
-    Case("cancelled", _row_case(ROW["click_cancelled"]), (False, None, False)),
+    Case(
+        "reorder_some_dropped",
+        _delivered_with_lines(inactive_cups=True),
+        (False, None, False, True),
+        (Exchange("reorder", f"{API}/cart/fill-from-order/1", None, 200, effect=_reordered_with_a_drop),),
+    ),
+    # A subscription's delivery publishes no Reorder anywhere, and a stale button's POST (from either door) is refused
+    # in words before the cart is touched.
+    Case(
+        "subscription_delivered",
+        _delivered_with_lines(row=PAID_DELIVERED_SUBSCRIPTION),
+        (False, None, False, False),
+        (
+            Exchange("reorder", f"{API}/cart/fill-from-order/1", None, 409, prepare=_cart_holds_cups),
+            Exchange("reorder_bot", f"{API}/cart/fill-from-order/1", None, 409, via="bot", prepare=_cart_holds_cups),
+        ),
+    ),
+    Case("cancelled", _row_case(ROW["click_cancelled"]), (False, None, False, False)),
     Case(
         "subscription_later_order",
         _daily_later_order,
-        (True, "skip", False),
+        (True, "skip", False, False),
         (
             Exchange(
                 "skip_reason",
@@ -361,23 +456,41 @@ CASES = [
     Case(
         "subscription_leftover_paused",
         _leftover_order,
-        (True, "cancel", False),
+        (True, "cancel", False, False),
         (Exchange("cancel", "cancel", {"expected_via": "cancel"}, 200, effect=_cancel_effect),),
         sub_after="cancel",
     ),
     Case(
         "stale_via",
         _needs_payment_order,
-        (True, "skip", False),
+        (True, "skip", False, False),
         (Exchange("skip", "cancel", {"expected_via": "skip"}, 409),),
         after_read=_subscription_pauses,
         reads_after=True,
         sub_after="skip",
     ),
+    # Live drive D7: a Skip (or a Cancel) left on screen after the order was removed elsewhere is refused in the words
+    # of the button pressed, `refusal_copy`, on the write's 400 and on the order read again.
+    Case(
+        "stale_skip",
+        _needs_payment_order,
+        (True, "skip", False, False),
+        (Exchange("skip", "cancel", {"expected_via": "skip", "reason_code": "away"}, 400),),
+        after_read=_removed_elsewhere("skip"),
+        reads_after=True,
+    ),
+    Case(
+        "stale_cancel",
+        _row_case(ROW["cash_pending"]),
+        (False, "cancel", False, False),
+        (Exchange("cancel", "cancel", {"expected_via": "cancel"}, 400),),
+        after_read=_removed_elsewhere("cancel"),
+        reads_after=True,
+    ),
     Case(
         "agent_pending",
         _agent_order,
-        (False, "decline", True),
+        (False, "decline", True, False),
         (
             Exchange("decline", "cancel", {"expected_via": "decline"}, 200, effect=_declined),
             Exchange(
@@ -389,7 +502,7 @@ CASES = [
             ),
         ),
     ),
-    Case("click_unpaid_ru", _row_case(ROW["click_pending"]), (True, "cancel", False), language="ru"),
+    Case("click_unpaid_ru", _row_case(ROW["click_pending"]), (True, "cancel", False, False), language="ru"),
 ]
 CASE = {case.name: case for case in CASES}
 assert len(CASE) == len(CASES), "case names must be unique"
@@ -431,6 +544,7 @@ def _snapshot(w: _World) -> dict:
         "subscriptions": [(s.id, str(s.status), s.next_delivery_date) for s in Subscription.query.order_by(Subscription.id)],
         "logs": [(log.id, log.action) for log in SubscriptionLog.query.order_by(SubscriptionLog.id)],
         "questions": [(q.id, q.status) for q in OrderConfirmationRequest.query.order_by(OrderConfirmationRequest.id)],
+        "cart": [(i.cart_id, i.product_id, i.quantity) for i in CartItem.query.order_by(CartItem.id)],
     }
 
 
@@ -469,7 +583,10 @@ def _tidy(w: _World, value):
     names = {order.order_number: f"TG_{order.id:06d}_26" for order in Order.query.all()}
     tidy = _rename(_blank_timestamps(_blank_stamps(value)), names)
     # A delivery's tracking number carries the wall clock and a random suffix.
-    return json.loads(re.sub(r"TRK\d{12}[0-9A-F]{6}", "TRK<stamp>", json.dumps(tidy)))
+    text = re.sub(r"TRK\d{12}[0-9A-F]{6}", "TRK<stamp>", json.dumps(tidy))
+    # The `@handle_api_exception` error envelope (the cart route's 409) names the request it answered: random.
+    text = re.sub(r'"(request_id|trace_id)": "[0-9a-f-]+"', r'"\1": "<request>"', text)
+    return json.loads(text)
 
 
 def _answer(w: _World, resp) -> dict:
@@ -557,7 +674,15 @@ def test_the_case_fixture_is_what_the_endpoints_answer(world, request, monkeypat
 
     requests = _read(world, clients, built.order_id, case.language)
     published = requests[detail_key(built.order_id)]["body"]["data"]["order"]["customer_actions"]
-    assert (published["pay"]["allowed"], published["cancel"]["via"], published["confirm"]["allowed"]) == case.expected
+    assert (
+        published["pay"]["allowed"],
+        published["cancel"]["via"],
+        published["confirm"]["allowed"],
+        published["reorder"]["allowed"],
+    ) == case.expected
+    # Reorder's label is the one word every surface draws, and only when Reorder is offered.
+    reorder_label = BACKEND_TRANSLATIONS["api.orders.actions.reorder.label"][case.language] if case.expected[3] else None
+    assert published["reorder"] == {"allowed": case.expected[3], "label": reorder_label}
 
     exchanges = {}
     requests_after = None
@@ -569,7 +694,7 @@ def test_the_case_fixture_is_what_the_endpoints_answer(world, request, monkeypat
         if exchange.prepare is not None:
             exchange.prepare(world, built.order_id)
         before = _snapshot(world)
-        path = f"{API}/orders/{built.order_id}/{exchange.path}"
+        path = exchange.path if exchange.path.startswith(f"{API}/") else f"{API}/orders/{built.order_id}/{exchange.path}"
         resp = clients.write(exchange.via, path, exchange.body)
         assert resp.status_code == exchange.status, resp.get_json()
         if exchange.status == 200:
@@ -619,6 +744,36 @@ def test_a_stale_pay_and_a_late_pay_are_refused_in_their_own_shapes():
         {"reason_code": "PAY_REFUSED", "refusal": "deadline_passed"},
     )
     assert late["response"]["message"] == "The time to pay for this order online has ended."
+
+
+def test_a_stale_reorder_of_a_subscription_delivery_is_refused_in_words_from_either_door():
+    """R8 (`OrderService.can_reorder`): the route refuses what the screens never offer, in the customer's words."""
+    saved = _saved("subscription_delivered")["exchanges"]
+    for name in ("reorder", "reorder_bot"):
+        assert saved[name]["status"] == 409
+        assert saved[name]["response"]["message"] == BACKEND_TRANSLATIONS["api.orders.actions.reorder.refusal"]["en"]
+
+
+@pytest.mark.parametrize(
+    "case, refusal_copy", [("stale_skip", "skip_refused.not_skippable"), ("stale_cancel", "cancel_refused.not_cancellable")]
+)
+def test_a_stale_removal_is_refused_in_the_words_of_the_button_pressed(app, case, refusal_copy):
+    """Live drive D7: the words are chosen once and published as `refusal_copy`, on the write's 400 (whose `message`
+    the website shows) and on the order read again (which the bot words a Cancel drawn earlier from)."""
+    saved = _saved(case)
+    (write,) = saved["exchanges"].values()
+    assert (write["status"], write["response"]["data"]) == (
+        400,
+        {"error_code": "ORDER_NOT_CUSTOMER_CANCELLABLE", "reason_code": "NOT_CANCELLABLE", "refusal_copy": refusal_copy},
+    )
+    sentence = BACKEND_TRANSLATIONS[f"api.orders.{refusal_copy}"]["en"]
+    assert write["response"]["message"] == sentence.format(bot_url=app.config["COMPANY_TELEGRAM_BOT_URL"])
+    fresh = saved["requests_after"][detail_key(saved["order_id"])]["body"]["data"]["order"]["customer_actions"]
+    assert (fresh["cancel"]["allowed"], fresh["cancel"]["refusal"], fresh["cancel"]["refusal_copy"]) == (
+        False,
+        "NOT_CANCELLABLE",
+        refusal_copy,
+    )
 
 
 def test_the_pool_short_refusal_is_a_400_with_its_sentence():

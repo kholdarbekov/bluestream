@@ -3,13 +3,15 @@ Telegram keyboard layouts and UI components
 """
 import re
 from typing import Callable, List, Dict, Literal, NamedTuple, Optional, Any, Sequence, Tuple
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, LoginUrl, ReplyKeyboardMarkup
 
 from i18n import i18n
 from config import config
 from utils import format_date
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
 from shared import reorder_reminder_copy
+from shared.telegram_login import subscription_target
+from website_links import open_on_website_url
 
 
 MAX_DISPLAYED_ADDRESSES = 5
@@ -178,6 +180,11 @@ def published_cancel(order: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]
     return _published_action(order, 'cancel')
 
 
+def published_reorder(order: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The order's published Reorder (the one reorder rule) when it is allowed, else None. Fails closed."""
+    return _published_action(order, 'reorder')
+
+
 def order_remove_callback(order_id: int, via: str, reason: Optional[str] = None) -> str:
     """The callback that writes a removal: the `via` the screen showed, and for a skip its reason (or none)."""
     if via == 'skip':
@@ -306,6 +313,16 @@ class KeyboardBuilder:
     """Helper class for building keyboards"""
 
     @staticmethod
+    def open_on_website_row(target: str, language: str = 'en') -> List[List[Dict[str, str]]]:
+        """The "Open on website" row: a Telegram login button that signs the customer in on `target`
+        (`shared.telegram_login.LOGIN_TARGETS`). Empty when the site is not a public https address, which Telegram
+        would refuse and which would fail the whole menu render."""
+        url = open_on_website_url(target)
+        if url is None:
+            return []
+        return [[{'text': i18n.get('telegram.common.open_on_website', language), 'login_url': url}]]
+
+    @staticmethod
     def build_inline_keyboard(buttons: List[List[Dict[str, str]]],
                              row_width: int = 2) -> InlineKeyboardMarkup:
         """Build inline keyboard from button definitions"""
@@ -319,6 +336,7 @@ class KeyboardBuilder:
                         text=button['text'],
                         callback_data=button.get('callback_data'),
                         url=button.get('url'),
+                        login_url=LoginUrl(url=button['login_url']) if button.get('login_url') else None,
                         switch_inline_query=button.get('switch_inline_query'),
                         switch_inline_query_current_chat=button.get('switch_inline_query_current_chat')
                     )
@@ -997,13 +1015,15 @@ class OrderKeyboards:
         *,
         pay: Optional[Dict[str, Any]],
         cancel: Optional[Dict[str, Any]],
+        reorder: Optional[Dict[str, Any]],
     ) -> InlineKeyboardMarkup:
         """Order details action buttons.
 
-        ``pay`` and ``cancel`` are the order's published answers (`published_pay` / `published_cancel`), passed
-        by the caller that fetched the order: each button is drawn only when the backend allows it, with the
-        label it published. Pay carries the amount the screen showed; the removal (skip, cancel or decline) opens
-        its confirmation, which names the consequence.
+        ``pay``, ``cancel`` and ``reorder`` are the order's published answers (`published_pay` /
+        `published_cancel` / `published_reorder`), passed by the caller that fetched the order: each button is
+        drawn only when the backend allows it, with the label it published. Pay carries the amount the screen
+        showed; the removal (skip, cancel or decline) opens its confirmation, which names the consequence; Reorder
+        is the Quick Order flow (`reorder_<id>`), whose route refuses what the backend did not offer.
         """
         buttons = []
 
@@ -1019,12 +1039,8 @@ class OrderKeyboards:
         if cancel:
             buttons.append([{'text': cancel['label'], 'callback_data': f'cancel_order_{order_id}'}])
 
-        # Add reorder button for delivered orders
-        if order_status == 'delivered':
-            buttons.append([{
-                'text': i18n.get('telegram.order.reorder', language),
-                'callback_data': f'reorder_{order_id}'
-            }])
+        if reorder:
+            buttons.append([{'text': reorder['label'], 'callback_data': f'reorder_{order_id}'}])
 
         buttons.append([{
             'text': i18n.get('telegram.back', language),
@@ -1204,9 +1220,16 @@ class SubscriptionKeyboards:
         buttons.append([{'text': i18n.get('telegram.subscription.orders', language), 'callback_data': f'subhist_{subscription_id}_1'}])
         if allow('cancel'):
             buttons.append([{'text': allowed_actions['cancel']['label'], 'callback_data': f'cancel_sub_{subscription_id}'}])
+        buttons.extend(SubscriptionKeyboards.open_on_website_row(subscription_id, language))
         buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def open_on_website_row(subscription_id: int, language: str = 'en') -> List[List[Dict[str, str]]]:
+        """The card's "Open on website" row: signs the customer in on this subscription's page. Empty without a
+        public https site."""
+        return KeyboardBuilder.open_on_website_row(subscription_target(subscription_id), language)
 
     @staticmethod
     def action_confirmation(subscription_id: int, action: str, allowed_actions: Dict, language: str = 'en') -> InlineKeyboardMarkup:
@@ -1488,6 +1511,7 @@ class ProfileKeyboards:
             [
                 {'text': i18n.get('telegram.profile.my_bottles', language), 'callback_data': 'my_bottles'}
             ],
+            *KeyboardBuilder.open_on_website_row('/my-account', language),
             [{'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}]
         ]
 
@@ -1937,23 +1961,33 @@ class CustomerNoticeKeyboards:
     """
 
     @staticmethod
-    def notice(language: str, *, order_id: Optional[int], pay_now: bool) -> Optional[InlineKeyboardMarkup]:
-        """Pay now (an unpaid Click order: `payment_retry_<id>`, which carries no amount, so `retry_payment`
-        opens the order with its published Pay and writes nothing) above View order. None for a notice without
-        an order (a skipped delivery)."""
-        if order_id is None:
-            return None
+    def notice(
+        language: str, *, order_id: Optional[int], subscription_id: Optional[int], pay: Optional[dict]
+    ) -> Optional[InlineKeyboardMarkup]:
+        """One button per row: Pay (the backend's published Pay: its label and `expected_amount`, in the same
+        `payment_retry_<id>_<amount>` callback as the order screen; an old-shape notice has no amount, so
+        `payment_retry_<id>`, which opens the order with its published Pay and writes nothing), View order, and
+        Open subscription. None when the notice names none of them (a skipped delivery of a deleted subscription)."""
         rows = []
-        if pay_now:
+        if order_id is not None and pay is not None:
+            expected_amount = pay.get('expected_amount')
             rows.append([{
-                'text': i18n.get('telegram.payment.pay_now', language),
-                'callback_data': f'payment_retry_{order_id}',
+                'text': pay['label'],
+                'callback_data': (
+                    pay_callback(order_id, expected_amount) if expected_amount else f'payment_retry_{order_id}'
+                ),
             }])
-        rows.append([{
-            'text': i18n.get('telegram.payment.view_order', language),
-            'callback_data': f'order_{order_id}',
-        }])
-        return KeyboardBuilder.build_inline_keyboard(rows)
+        if order_id is not None:
+            rows.append([{
+                'text': i18n.get('telegram.payment.view_order', language),
+                'callback_data': f'order_{order_id}',
+            }])
+        if subscription_id is not None:
+            rows.append([{
+                'text': i18n.get('telegram.subscription.view', language),
+                'callback_data': f'subscription_{subscription_id}',
+            }])
+        return KeyboardBuilder.build_inline_keyboard(rows) if rows else None
 
 
 class DeliverySummaryKeyboards:

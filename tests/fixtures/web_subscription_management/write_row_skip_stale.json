@@ -334,7 +334,6 @@
      "items": [
       {
        "amount_label": "30 000 so'm",
-       "can_pay": true,
        "customer_actions": {
         "cancel": {
          "allowed": true,
@@ -355,6 +354,7 @@
           }
          ],
          "refusal": null,
+         "refusal_copy": null,
          "subscription_id": 1,
          "via": "skip"
         },
@@ -369,6 +369,10 @@
          "expected_amount": "30000.00",
          "label": "Pay 30 000 so'm",
          "refusal": null
+        },
+        "reorder": {
+         "allowed": false,
+         "label": null
         }
        },
        "date": "2026-10-29",
@@ -730,7 +734,6 @@
      "items": [
       {
        "amount_label": "30 000 so'm",
-       "can_pay": true,
        "customer_actions": {
         "cancel": {
          "allowed": true,
@@ -738,6 +741,7 @@
          "label": "Cancel order",
          "reasons": [],
          "refusal": null,
+         "refusal_copy": null,
          "subscription_id": 1,
          "via": "cancel"
         },
@@ -752,6 +756,10 @@
          "expected_amount": "30000.00",
          "label": "Pay 30 000 so'm",
          "refusal": null
+        },
+        "reorder": {
+         "allowed": false,
+         "label": null
         }
        },
        "date": "2026-10-29",

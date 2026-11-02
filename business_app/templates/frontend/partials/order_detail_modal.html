@@ -296,9 +296,10 @@
                 {# Pay, Cancel/Skip/Decline and Confirm: drawn here by order-actions.js from the order's
                    `customer_actions` (spec 2026-10-27 §5.3), the same answer the cards and the tracking page draw. #}
                 <div class="w-100" id="orderDetailActions"></div>
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'web.order_modal.close'|t }}</button>
+                {# Reorder: shown, with its label, from the order's `customer_actions.reorder` (order-detail-modal.js). #}
                 <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
-                    <i class="far fa-redo"></i> {{ 'Reorder Items'|t }}
+                    <i class="far fa-redo"></i> <span data-reorder-label></span>
                 </button>
             </div>
         </div>
@@ -321,29 +322,26 @@
     'order_actions': order_actions_words(),
     'i18n': {
         'details_failed': 'Failed to load order details' | t,
-        'order': 'Order' | t,
+        'order': 'web.order_modal.order' | t,
         'placed_on': 'Placed on' | t,
         'order_items': 'Order Items' | t,
         'sku': 'SKU' | t,
-        'quantity': 'Quantity' | t,
-        'price': 'Price' | t,
+        'quantity': 'web.order_modal.quantity' | t,
+        'price': 'web.order_modal.price' | t,
         'delivery_address': 'Delivery Address' | t,
         'no_address': 'No delivery address provided' | t,
         'order_summary': 'Order Summary' | t,
-        'subtotal': 'Subtotal' | t,
-        'delivery_fee': 'Delivery Fee' | t,
+        'subtotal': 'web.order_modal.subtotal' | t,
+        'delivery_fee': 'web.order_modal.delivery_fee' | t,
         'tier_discount': 'Tier discount (bot & website perk)' | t,
         'subscription_discount': 'Subscription discount' | t,
         'reward_discount': 'Reward discount' | t,
         'tax': 'Tax' | t,
-        'total': 'Total' | t,
+        'total': 'web.order_modal.total' | t,
         'order_tracking': 'Order Tracking' | t,
         'tracking_number': 'Tracking Number' | t,
         'track_package': 'Track Package' | t,
         'delivery_location': 'Delivery Location' | t,
-        'adding_to_cart': 'Adding items to cart...' | t,
-        'items_added': 'Items added to cart!' | t,
-        'add_failed': 'Failed to add items to cart' | t,
         'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
     },
 }, element_id='order-detail-modal-data') }}

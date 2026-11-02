@@ -63,7 +63,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-02-18",
        "date_label": "Thu 18 Feb",
@@ -79,7 +78,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-02-11",
        "date_label": "Thu 11 Feb",
@@ -95,7 +93,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-02-04",
        "date_label": "Thu 4 Feb",
@@ -111,7 +108,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-01-28",
        "date_label": "Thu 28 Jan",
@@ -127,7 +123,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-01-21",
        "date_label": "Thu 21 Jan",
@@ -161,7 +156,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-01-14",
        "date_label": "Thu 14 Jan",
@@ -177,7 +171,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2027-01-07",
        "date_label": "Thu 7 Jan",
@@ -193,7 +186,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-12-31",
        "date_label": "Thu 31 Dec",
@@ -209,7 +201,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-12-24",
        "date_label": "Thu 24 Dec",
@@ -225,7 +216,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-12-17",
        "date_label": "Thu 17 Dec",
@@ -259,7 +249,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-12-10",
        "date_label": "Thu 10 Dec",
@@ -275,7 +264,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-12-03",
        "date_label": "Thu 3 Dec",
@@ -291,7 +279,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-11-26",
        "date_label": "Thu 26 Nov",
@@ -307,7 +294,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-11-19",
        "date_label": "Thu 19 Nov",
@@ -323,7 +309,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-11-12",
        "date_label": "Thu 12 Nov",
@@ -357,7 +342,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-11-05",
        "date_label": "Thu 5 Nov",
@@ -373,7 +357,6 @@
       },
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-10-29",
        "date_label": "Thu 29 Oct",

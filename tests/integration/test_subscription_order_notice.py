@@ -20,9 +20,12 @@ Only external I/O is replaced: the Celery publish, the HTTP hop to the customer 
 `trigger_bot_webhook`'s exact signature) and Brevo's HTTP POST.
 """
 
+import json
 import logging
+import os
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -37,6 +40,8 @@ from business_app.models.product import ProductFiscalProfile
 from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
 from business_app.models.user import User
 from business_app.services import customer_notices, subscription_notices
+from business_app.services import customer_order_actions
+from business_app.services.customer_order_actions import customer_actions
 from business_app.tasks import notification_tasks
 from business_app.tasks.subscription_tasks import (
     create_subscription_delivery_task,
@@ -63,10 +68,15 @@ from tests.integration.customer_notice_builders import (  # noqa: F401  (fixture
 from tests.integration.reorder_reminder_builders import captured_logs, seed_translations
 from tests.integration.sales_pay_builders import freeze_local_now
 from tests.integration.test_subscription_engine_switch import _redis_misconf
+from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 from tests.integration.tier_discount_factory import post_order, verify_phone
 from tests.notification_send_fakes import BREVO_URL, live_send_path
 
 pytestmark = pytest.mark.integration
+
+REPO = Path(__file__).resolve().parents[2]
+NOTICE_FIXTURES = REPO / "tests" / "fixtures" / "customer_notices"
+UPDATE = os.environ.get("UPDATE_CUSTOMER_NOTICE_FIXTURES") == "1"
 
 BASE = "/api/v1/subscriptions"
 ADMIN_BASE = "/api/v1/admin/subscriptions"
@@ -131,7 +141,10 @@ def generic(monkeypatch):
 @pytest.fixture
 def clock(monkeypatch):
     def at(day: date, hour: int = 9, minute: int = 0):
-        return freeze_local_now(monkeypatch, datetime.combine(day, time(hour, minute), tzinfo=TASHKENT))
+        when = datetime.combine(day, time(hour, minute), tzinfo=TASHKENT)
+        # Pay's answer and its "Pay by" label read this clock, not the business one `freeze_local_now` patches.
+        monkeypatch.setattr(customer_order_actions, "get_utc_now", lambda: when.astimezone(UTC))
+        return freeze_local_now(monkeypatch, when)
 
     return SimpleNamespace(at=at)
 
@@ -217,6 +230,20 @@ def _returning_customer(db, user, address):
     db.session.commit()
 
 
+def _refuse_pay(db, order, shape):
+    """Put a fresh unpaid Click order where the one Pay rule refuses it: some money collected (partly paid), nothing
+    owed (a total of 0), or its payment row on the cash rail (an offline row)."""
+    payment = order.payment
+    if shape == "partly_paid":
+        payment.amount_collected = Decimal("10000.00")
+        payment.outstanding_amount = order.total_amount - Decimal("10000.00")
+    elif shape == "zero_total":
+        order.total_amount = Decimal("0.00")
+    else:
+        payment.payment_method = PaymentMethod.CASH
+    db.session.commit()
+
+
 def _notice(log_id, kind, **facts):
     return {
         "endpoint": ROUTE,
@@ -242,6 +269,8 @@ def _order_created_facts(order, not_included=(), **payment):
         "items": [{"name": "Pure Water 19L", "qty": 2}],
         "not_included": list(not_included),
         "total": float(order.total_amount),
+        "subscription_id": order.subscription_id,
+        "actions": customer_actions(order, language="en"),
         **payment,
     }
 
@@ -428,7 +457,7 @@ class TestTheOrderNotice:
         order_id = resp.get_json()["data"]["order"]["id"]
         assert generic.status == [(order_id, "status_changed_confirmed")]
 
-    def test_without_telegram_the_notice_is_an_email_with_the_click_link(
+    def test_without_telegram_the_notice_is_an_email_with_website_links_only(
         self, app, monkeypatch, db, clock, on_email, user_address, sample_product, morning_slot, published, bot
     ):
         sub_id = _subscription(
@@ -437,24 +466,130 @@ class TestTheOrderNotice:
         clock.at(WEDNESDAY)
         process_daily_subscription_billing()
         [order] = _orders(db, sub_id)
+        link_before = order.payment.payment_link
 
         with live_send_path(app, monkeypatch, bot_url=BOT_URL, extra_config=CLICK_CONFIG) as post:
             assert send_subscription_notice_task(published[0]) == "email"
 
         assert bot.calls == []
         db.session.expire_all()
-        payment = db.session.get(Payment, order.payment.id)
-        assert payment.payment_link and payment.payment_link.startswith("https://my.click.uz/services/pay?")
+        assert db.session.get(Payment, order.payment.id).payment_link == link_before  # no Click link is minted
         [call] = post.call_args_list
         assert call.args[0] == BREVO_URL
         body = call.kwargs["json"]
         assert body["to"] == [{"email": "test@example.com", "name": on_email.full_name.strip()}]
         assert body["subject"] == f"Subscription order #{order.order_number} placed - Aqua Element"
         html = body["htmlContent"]
-        assert f'href="{payment.payment_link.replace("&", "&amp;")}"' in html
+        site = app.config["COMPANY_WEBSITE"].rstrip("/")
+        # Pay: the subscription order's page, on the primary button (the "Open the subscription" link has the same href)
+        assert f'<a href="{site}/my-subscriptions?sub={sub_id}" class="btn-primary">Pay now</a>' in html
+        assert f'href="{site}/order-tracking?order_id={order.id}"' in html  # View order
+        assert "my.click.uz" not in html
         assert "01/07/2027" in html and "10:00–12:00" in html  # the date and the window
         assert "Please pay by 01/07/2027 12:00" in html
         assert "Pure Water 19L" in html and "30,000" in html
+
+    def test_a_click_order_notice_carries_the_published_pay_answer(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        sub_id = _subscription(
+            db, on_telegram, user_address, sample_product, payment_method=PaymentMethod.CLICK, slot=morning_slot
+        )
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [order] = _orders(db, sub_id)
+
+        send_subscription_notice_task(published[0])
+
+        payload = bot.calls[0]["payload"]
+        assert payload["subscription_id"] == sub_id
+        assert payload["actions"] == customer_actions(order, language="en")
+        assert payload["actions"]["pay"]["allowed"] is True
+
+    def test_a_click_order_pay_line_quotes_the_deadline_its_published_pay_closes_at(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        """The "pay by" line and the Pay button read one answer: the line's deadline is the instant the published
+        Pay closes (`pay_answer`), the one its "Pay by" label is worded from."""
+        sub_id = _subscription(
+            db, on_telegram, user_address, sample_product, payment_method=PaymentMethod.CLICK, slot=morning_slot
+        )
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [order] = _orders(db, sub_id)
+
+        send_subscription_notice_task(published[0])
+
+        facts = bot.calls[0]["payload"]
+        refusal, closes_at = customer_order_actions.pay_answer(order)
+        assert (refusal, facts["actions"]["pay"]["allowed"]) == (None, True)
+        assert facts["actions"]["pay"]["deadline_label"]
+        assert (facts["payment"], facts["deadline"]) == ("online_unpaid", closes_at.astimezone(TASHKENT).isoformat())
+        assert facts["deadline"] == "2027-01-07T12:00:00+05:00"
+
+    @pytest.mark.parametrize("shape", ["partly_paid", "zero_total", "offline_row"])
+    def test_a_click_order_whose_pay_is_refused_carries_no_pay_line(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot, shape
+    ):
+        """Pay is not offered (money is already in, nothing is owed, or the payment row is on an offline rail), so the
+        notice names no way to pay and no deadline: no "please pay by" line beside a Pay that is not there."""
+        sub_id = _subscription(
+            db, on_telegram, user_address, sample_product, payment_method=PaymentMethod.CLICK, slot=morning_slot
+        )
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [order] = _orders(db, sub_id)
+        _refuse_pay(db, order, shape)
+
+        send_subscription_notice_task(published[0])
+
+        facts = bot.calls[0]["payload"]
+        assert facts["actions"]["pay"]["allowed"] is False
+        assert (facts["payment"], facts["deadline"]) == (None, None)
+
+    def test_the_email_of_a_partly_paid_click_order_has_no_pay_line(
+        self, app, monkeypatch, db, clock, on_email, user_address, sample_product, morning_slot, published, bot
+    ):
+        sub_id = _subscription(
+            db, on_email, user_address, sample_product, payment_method=PaymentMethod.CLICK, slot=morning_slot
+        )
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [order] = _orders(db, sub_id)
+        _refuse_pay(db, order, "partly_paid")
+
+        with live_send_path(app, monkeypatch, bot_url=BOT_URL, extra_config=CLICK_CONFIG) as post:
+            assert send_subscription_notice_task(published[0]) == "email"
+
+        html = post.call_args_list[0].kwargs["json"]["htmlContent"]
+        assert "Please pay by" not in html
+        assert "Pay now" not in html
+        assert f'/order-tracking?order_id={order.id}"' in html  # View order is still there
+
+    def test_a_cash_order_notice_publishes_pay_refused(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
+    ):
+        sub_id = _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+
+        send_subscription_notice_task(published[0])
+
+        pay = bot.calls[0]["payload"]["actions"]["pay"]
+        assert (pay["allowed"], pay["refusal"], pay["label"]) == (False, "not_online", None)
+
+    def test_a_skipped_delivery_names_its_subscription(
+        self, db, clock, on_telegram, user_address, sample_product, published, bot
+    ):
+        sub_id = _subscription(db, on_telegram, user_address, sample_product)
+        clock.at(date(2027, 1, 9))  # Saturday: Thursday passed during downtime
+        process_daily_subscription_billing()
+        [log] = _logs(db, sub_id, subscription_notices.DELIVERY_SKIPPED)
+
+        send_subscription_notice_task(log.id)
+
+        assert bot.calls[0]["payload"]["subscription_id"] == sub_id
+        assert "actions" not in bot.calls[0]["payload"]
 
     def test_a_blocked_bot_marks_the_account_and_falls_back_to_email(
         self, app, monkeypatch, db, clock, on_telegram, user_address, sample_product, morning_slot, published, bot
@@ -637,6 +772,7 @@ class TestASkippedDelivery:
         expected = _notice(
             log.id,
             "subscription_delivery_skipped",
+            subscription_id=sub_id,
             subscription_name="Office water",
             skipped_dates=["2027-01-07"],
             reason="the order was below the minimum order amount",
@@ -690,6 +826,7 @@ class TestASkippedDelivery:
             _notice(
                 log.id,
                 "subscription_delivery_skipped",
+                subscription_id=sub_id,
                 subscription_name="Water",
                 skipped_dates=["2027-01-07"],
                 reason="the delivery date had already passed",
@@ -730,6 +867,7 @@ class TestASkippedDelivery:
             _notice(
                 log.id,
                 "subscription_delivery_skipped",
+                subscription_id=sub_id,
                 subscription_name="Water",
                 skipped_dates=["2027-01-07"],
                 reason="the limit of unpaid cash orders was reached",
@@ -811,6 +949,7 @@ class TestASkippedDelivery:
             _notice(
                 log.id,
                 "subscription_delivery_skipped",
+                subscription_id=sub_id,
                 subscription_name="Water",
                 skipped_dates=["2027-01-07"],
                 reason=reason,
@@ -889,9 +1028,102 @@ class TestAPaidOrderStays:
             delivery_date=THURSDAY.isoformat(),
             trigger=trigger,
             next_delivery_date=next_day,
+            subscription_id=sub_id,
+            actions=customer_actions(order, language="en"),
         )
         assert bot.calls == [expected]
         assert set(expected["payload"]) == CONTRACT_KEYS["subscription_paid_order_kept"]
+
+
+def _cancelled_click_order(db, user, address, *, subscription_id=None):
+    """An unpaid Click order the payment-deadline sweep cancelled (the sweep itself is test_click_payment_deadline's)."""
+    order = Order(
+        user_id=user.id,
+        status=OrderStatus.CANCELLED,
+        subtotal=Decimal("30000.00"),
+        total_amount=Decimal("30000.00"),
+        delivery_address_id=address.id,
+        payment_method=PaymentMethod.CLICK,
+        subscription_id=subscription_id,
+    )
+    db.session.add(order)
+    db.session.commit()
+    return order
+
+
+class TestRefusalsAreCarriedToo:
+    def test_a_kept_paid_order_and_an_expired_order_publish_their_refusals(
+        self, client, db, auth_headers, on_telegram, user_address, paid_thursday_order, published, bot
+    ):
+        sub_id, paid = paid_thursday_order
+        shown = client.get(f"{BASE}/{sub_id}", headers=auth_headers)
+        state = shown.get_json()["data"]["subscription"]["allowed_actions"]["expected_state"]
+        assert client.post(f"{BASE}/{sub_id}/pause", headers=auth_headers, json={"expected_state": state}).status_code == 200
+        send_subscription_notice_task(published[0])
+        expired_in_subscription = _cancelled_click_order(db, on_telegram, user_address, subscription_id=sub_id)
+        ordinary = _cancelled_click_order(db, on_telegram, user_address)
+
+        assert customer_notices.send_payment_expired(expired_in_subscription.id) == "telegram"
+        assert customer_notices.send_payment_expired(ordinary.id) == "telegram"
+
+        kept, expired_sub, expired_plain = (call["payload"] for call in bot.calls)
+        assert (kept["subscription_id"], kept["actions"]["pay"]["refusal"]) == (sub_id, "already_paid")
+        assert kept["actions"] == customer_actions(paid, language="en")
+        assert (expired_sub["subscription_id"], expired_sub["actions"]["pay"]["refusal"]) == (sub_id, "order_closed")
+        assert (expired_plain["subscription_id"], expired_plain["actions"]["pay"]["refusal"]) == (None, "order_closed")
+        assert expired_plain["actions"] == customer_actions(ordinary, language="en")
+
+    def test_an_email_for_an_order_past_its_deadline_has_no_pay_link(
+        self, app, monkeypatch, db, on_email, user_address, bot
+    ):
+        order = _cancelled_click_order(db, on_email, user_address)
+
+        with live_send_path(app, monkeypatch, bot_url=BOT_URL) as post:
+            assert customer_notices.send_payment_expired(order.id) == "email"
+
+        html = post.call_args_list[0].kwargs["json"]["htmlContent"]
+        site = app.config["COMPANY_WEBSITE"].rstrip("/")
+        assert "Pay now" not in html
+        assert f'href="{site}/order-tracking?order_id={order.id}"' in html
+
+
+class TestTheActionsFixture:
+    def test_the_actions_fixture_is_what_the_backend_sends(
+        self, db, clock, on_telegram, user_address, sample_product, morning_slot
+    ):
+        """The published `actions` the bot's webhook test replays (tests/fixtures/customer_notices/actions.json):
+        a Click order still payable, a cash order, and a closed one. Regenerate with
+        `UPDATE_CUSTOMER_NOTICE_FIXTURES=1`."""
+        seed_translations(
+            db,
+            [key for key in BACKEND_TRANSLATIONS if key.startswith(("api.orders.actions.", "api.subscriptions.skip_reason.", "web.display_labels."))],
+        )
+        click_sub = _subscription(
+            db, on_telegram, user_address, sample_product, payment_method=PaymentMethod.CLICK, slot=morning_slot
+        )
+        cash_sub = _subscription(db, on_telegram, user_address, sample_product, slot=morning_slot)
+        clock.at(WEDNESDAY)
+        process_daily_subscription_billing()
+        [click_order] = _orders(db, click_sub)
+        [cash_order] = _orders(db, cash_sub)
+        closed = _cancelled_click_order(db, on_telegram, user_address)
+        cases = {
+            "click_unpaid": customer_actions(click_order, language="en"),
+            "cash": customer_actions(cash_order, language="en"),
+            "closed": customer_actions(closed, language="en"),
+        }
+        assert cases["click_unpaid"]["pay"]["allowed"] is True
+        assert [cases[name]["pay"]["allowed"] for name in ("cash", "closed")] == [False, False]
+
+        content = json.loads(json.dumps(cases))
+        path = NOTICE_FIXTURES / "actions.json"
+        if UPDATE:
+            NOTICE_FIXTURES.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(content, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        assert path.exists(), f"{path} is missing: run with UPDATE_CUSTOMER_NOTICE_FIXTURES=1"
+        assert json.loads(path.read_text("utf-8")) == content, (
+            f"{path.name} is stale: regenerate it with UPDATE_CUSTOMER_NOTICE_FIXTURES=1 and re-run the suites"
+        )
 
 
 # --------------------------------------------------------------------------- the email templates
@@ -1043,6 +1275,7 @@ class TestDiscontinuedProductsAreLeftOut:
             _notice(
                 log.id,
                 "subscription_delivery_skipped",
+                subscription_id=sub_id,
                 subscription_name="Water",
                 skipped_dates=["2027-01-07"],
                 reason="a product was out of stock",
@@ -1086,7 +1319,7 @@ class TestDiscontinuedProductsAreLeftOut:
 
 
 @pytest.mark.parametrize("language", ["en", "uz", "ru"])
-@pytest.mark.parametrize("kind", sorted(CONTRACT_KEYS))
+@pytest.mark.parametrize("kind", sorted(customer_notices.NOTICE_KINDS))
 def test_every_notice_has_an_email_template_and_subject_in_every_language(app, kind, language):
     """A notice that reaches the email branch renders its own file template and subject, never the DB
     fallback (which has no row for these types)."""
@@ -1106,8 +1339,11 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "amount_due": None,
             "prepaid_applied": None,
             "deadline": "2027-01-07T12:00:00+05:00",
+            "subscription_id": 3,
+            "actions": {"pay": {"allowed": True}},
         },
         "subscription_delivery_skipped": {
+            "subscription_id": 3,
             "subscription_name": "Office water",
             "skipped_dates": ["2027-01-07"],
             "reason": "a product was out of stock",
@@ -1119,28 +1355,34 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "delivery_date": "2027-01-07",
             "trigger": "skip",
             "next_delivery_date": "2027-01-21",
+            "subscription_id": 3,
+            "actions": {"pay": {"allowed": False}},
         },
         "order_payment_expired": {
             "order_id": 7,
             "order_number": "TG_000777_27",
             "deadline": "2027-01-07T12:00:00+05:00",
+            "subscription_id": None,
+            "actions": {"pay": {"allowed": False}},
         },
         "subscription_schedule_changed": {
             "subscription_id": 7,
             "subscription_name": "Office water",
-            "changes": ["time_cleared", "time_changed", "day_moved", "date_moved", "days_added"],
+            "changes": ["time_cleared", "time_changed", "day_moved", "date_moved", "days_added", "days_removed"],
             "old_window": "10:00–12:00",
             "new_window": "11:00–13:00",
             "old_weekday": 6,
             "new_weekday": 0,
             "added_weekdays": [5, 6],
+            "removed_weekdays": [2],
             "next_delivery_date": "2027-01-11",
+            "kept_order_note": "Your order for 11 January stays as it is.",
             "time_kind": "window",
         },
     }[kind]
 
     with app.app_context():
-        data = customer_notices.email_template_data(kind, facts, language, pay_url="https://pay.example/7")
+        data = customer_notices.email_template_data(kind, facts, language)
         rendered = get_email_template_service().render_notification_email(kind, language, data)
 
     assert rendered is not None, f"no email template for {kind} in {language}"
@@ -1148,10 +1390,26 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
     assert "{{" not in rendered["content"] and "{%" not in rendered["content"]
     if "order_number" in facts:
         assert "TG_000777_27" in rendered["subject"] + rendered["content"]
+    site = app.config["COMPANY_WEBSITE"].rstrip("/")
+    content = rendered["content"]
+    has_pay = kind == "subscription_order_created"  # the only facts above whose published Pay is allowed
+    sub_id = facts["subscription_id"]
+    if sub_id is None:
+        assert "/my-subscriptions" not in content
+    else:
+        assert f'href="{site}/my-subscriptions?sub={sub_id}"' in content
+    assert (f'href="{site}/order-tracking?order_id=7"' in content) == ("order_id" in facts)
+    assert has_pay == (content.count('class="btn-primary"') == 1)
     if kind == "subscription_order_created":
-        assert 'href="https://pay.example/7"' in rendered["content"]
         assert "07.01.2027" in rendered["content"] or "01/07/2027" in rendered["content"]
     if kind == "subscription_schedule_changed":
-        # One paragraph per change, each naming its own facts.
+        # One paragraph per change, each naming its own facts, and the backend's kept-order sentence.
         assert "Office water" in rendered["content"]
         assert "10:00–12:00" in rendered["content"] and "11:00–13:00" in rendered["content"]
+        lost_days = {
+            "en": "Days without delivery from now on:",
+            "uz": "Endi yetkazib berilmaydigan kunlar:",
+            "ru": "Дни, когда доставки больше не будет:",
+        }[language]
+        assert lost_days in rendered["content"]
+        assert "<p>Your order for 11 January stays as it is.</p>" in rendered["content"]

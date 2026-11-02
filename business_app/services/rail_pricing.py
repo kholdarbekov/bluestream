@@ -5,7 +5,9 @@ Spec: docs/superpowers/specs/2026-10-09-corporate-contract-dual-pricing-design.m
 `quote_order_for_rail` is read-only: what this order would cost on `payment_method`.
 `reprice_order_for_rail` applies that quote (line prices, subtotal, tier discount, total), keeps a
 delivered grocery order's AMOUNT-mode charge equal to the new total, and writes one audit event.
-Every place an order's payment method changes calls `reprice_order_for_rail`. Every screen that
+Every staff or system move of an order's payment method calls `reprice_order_for_rail`
+(the customer's own move of a legacy online order onto Click, in `PaymentService.create_payment`,
+is not re-priced: Click is charged the online price the order was shown). Every screen that
 previews such a change, or must recognise money an earlier method asked for, calls
 `quote_order_for_rail`. Import them; never re-derive a line price.
 

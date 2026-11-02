@@ -434,14 +434,10 @@ class FileStorageService:
 
         # Try to use request context for accurate URL generation
         if has_request_context():
-            # Check for forwarded host (proxy scenarios)
-            host = request.headers.get("X-Forwarded-Host") or request.host
-            scheme = request.headers.get("X-Forwarded-Proto") or request.scheme
-
-            # Log all relevant headers for debugging
-            current_app.logger.info(
-                f"Request headers - Host: {request.host}, X-Forwarded-Host: {request.headers.get('X-Forwarded-Host')}, Referer: {request.headers.get('Referer')}"  # noqa: E501
-            )
+            # The host and scheme ProxyFix resolved (ProductionConfig.trust_the_front_proxy), never a raw forwarded
+            # header: a client-sent X-Forwarded-Host passes through nginx untouched.
+            host = request.host
+            scheme = request.scheme
 
             url = f"{scheme}://{host}/uploads/{file_path}"
             current_app.logger.info(f"Generated URL from request context - scheme: {scheme}, host: {host}, url: {url}")

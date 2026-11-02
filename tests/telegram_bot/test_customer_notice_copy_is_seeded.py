@@ -45,6 +45,7 @@ BOT_KEYS = {
     "telegram.customer_notice.schedule_change.time_changed": {"new_window", "old_window"},
     "telegram.customer_notice.schedule_change.day_moved": {"old_day", "new_day"},
     "telegram.customer_notice.schedule_change.days_added": {"days"},
+    "telegram.customer_notice.schedule_change.days_removed": {"days"},
     "telegram.customer_notice.schedule_change.date_moved": {"old_day"},
 }
 

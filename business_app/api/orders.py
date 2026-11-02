@@ -20,7 +20,11 @@ from business_app.utils.service_factory import (
 )
 from business_app.utils.translations import get_translation
 from business_app.utils import display_labels
-from business_app.services.customer_order_actions import pay_refusal_message
+from business_app.services.customer_order_actions import (
+    cancel_refusal_copy,
+    cancel_refusal_message,
+    pay_refusal_message,
+)
 from business_app.serializers.order_serializers import (
     serialize_order,
     serialize_reorder_info,
@@ -526,15 +530,14 @@ def create_order():
             )
 
         if pre_utilization_at is not None:
-            response_data["pre_utilization_at"] = pre_utilization_at.isoformat()
             if pre_utilization_fast_path:
                 # Pool covered the order — no wait, the bot delivers the link instantly.
                 payment_ready_at = pre_utilization_at
             else:
                 wait_seconds = int(current_app.config.get("PRE_PAYMENT_UTILISATION_WAIT_SECONDS", 45) or 45)
                 payment_ready_at = pre_utilization_at + timedelta(seconds=wait_seconds)
-            response_data["payment_ready_at"] = payment_ready_at.isoformat()
-            # The wait as the backend counts it: clients keep it and never work it out from the instant.
+            # The wait as the backend counts it, the one field the clients read: they keep it and never work it
+            # out from an instant, so neither instant is published.
             if payment_ready_at.tzinfo is None:
                 payment_ready_at = payment_ready_at.replace(tzinfo=UTC)
             response_data["payment_ready_in_seconds"] = max(
@@ -665,16 +668,15 @@ def cancel_order(order_id):
             current_app.logger.error(f"Cancel order error: {e}")
             return internal_error_response(message=get_translation("error.server_error"))
         # `error_response`, not `validation_error_response`, which would replace
-        # `message`. The web shows `message`; the bot shows its own copy picked by
-        # `reason_code`, so the backend never has to know which client is calling.
+        # `message`. The web shows `message`; the bot shows its own words for the same
+        # `refusal_copy` (`telegram.orders.<id>`), so the backend never has to know which
+        # client is calling, and both say what the button the customer pressed did.
         reason_code = e.details["reason_code"]
+        refusal_copy = cancel_refusal_copy(reason_code, via=body.expected_via)
         return error_response(
-            message=get_translation(
-                f"api.orders.cancel_refused.{reason_code.lower()}",
-                bot_url=current_app.config["COMPANY_TELEGRAM_BOT_URL"],
-            ),
+            message=cancel_refusal_message(refusal_copy, bot_url=current_app.config["COMPANY_TELEGRAM_BOT_URL"]),
             status_code=400,
-            data={"error_code": e.error_code, "reason_code": reason_code, "can_customer_cancel": False},
+            data={"error_code": e.error_code, "reason_code": reason_code, "refusal_copy": refusal_copy},
         )
     except ConflictError:
         return error_response(message=get_translation("api.orders.cannot_cancel"), status_code=400)

@@ -400,12 +400,12 @@ async def build_bot_harness(
     # Importing `bot` runs setup_logging(); tests/telegram_bot/conftest.py's
     # autouse fixture restores log propagation so caplog keeps working.
     from bot import WaterBusinessBot
+    from login_safe_bot import LoginSafeBot
 
+    # The same bot class the production Application uses, so the dispatcher tests exercise its fallbacks.
     application = (
         ApplicationBuilder()
-        .token("424242:TEST-TOKEN")
-        .request(telegram)
-        .get_updates_request(telegram)
+        .bot(LoginSafeBot("424242:TEST-TOKEN", request=telegram, get_updates_request=telegram))
         .build()
     )
 

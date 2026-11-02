@@ -234,6 +234,21 @@ def _auth(app, user_id, role=None):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _cancelled_checkout_payment(order):
+    """The payment row the checkout wrote before the Asl belgisi pre-utilisation failed; the cancel left it CANCELLED
+    for 0, and the cash rescue marks it (`OrderService.rescue_order_after_psp_failure`)."""
+    from business_app.models.payment import Payment
+    from shared.enums import PaymentStatus
+
+    return Payment(
+        order_id=order.id,
+        user_id=order.user_id,
+        payment_method=PaymentMethod.CLICK,
+        amount=Decimal("0.00"),
+        status=PaymentStatus.CANCELLED,
+    )
+
+
 def _group_under_cap(db, address):
     """Group ``address`` with ONE coworker carrying a single open debt.
 
@@ -443,6 +458,7 @@ class TestCheckoutPaymentRestrictionsPayload:
                 notes="tax_committee_unavailable",
             )
         )
+        db.session.add(_cancelled_checkout_payment(cancelled))
         db.session.commit()
 
         resp = client.post(
@@ -494,6 +510,7 @@ class TestCheckoutPaymentRestrictionsPayload:
                 notes="tax_committee_unavailable",
             )
         )
+        db.session.add(_cancelled_checkout_payment(cancelled))
         db.session.commit()
 
         resp = client.post(

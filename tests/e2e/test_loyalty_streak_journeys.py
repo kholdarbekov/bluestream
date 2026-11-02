@@ -809,11 +809,10 @@ class TestStreakRuleJourneys:
         shows the correct translated name for that language.
 
         Note: the default language is "uz"; requesting ?lang=uz triggers a 301 redirect
-        to the canonical URL (no lang param) which would then render using the session
-        language. We therefore verify the two non-default languages only (ru, en) where
-        the URL lang param overrides cleanly. The uz translation is verified separately
-        via the rule object's get_translated method. This avoids a cross-test session
-        coupling issue inherent to the session-scoped test client.
+        to the canonical URL (no lang param), and the redirect saves uz to the session so the
+        clean URL opens in Uzbek. This journey still verifies only ru and en, where the URL lang
+        param overrides directly; the uz translation is verified separately via the rule object's
+        get_translated method.
         """
         program = _default_program(db)
         en_name = f"English Streak Name {uuid.uuid4().hex[:6]}"

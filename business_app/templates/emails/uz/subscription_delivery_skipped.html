@@ -20,6 +20,16 @@
     </tr>
 </table>
 
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Hozir to'lash</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">Buyurtmani ko'rish</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Obunani ochish</a></p>
+{% endif %}
+
 <hr class="divider">
 
 <div class="info-box">

@@ -58,11 +58,14 @@ CONTRACT_KEYS = {
         "amount_due",
         "prepaid_applied",
         "deadline",
+        "subscription_id",
+        "actions",
     },
-    "subscription_delivery_skipped": ENVELOPE | {"subscription_name", "skipped_dates", "reason", "next_delivery_date"},
+    "subscription_delivery_skipped": ENVELOPE
+    | {"subscription_id", "subscription_name", "skipped_dates", "reason", "next_delivery_date"},
     "subscription_paid_order_kept": ENVELOPE
-    | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date"},
-    "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline"},
+    | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date", "subscription_id", "actions"},
+    "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline", "subscription_id", "actions"},
     "subscription_schedule_changed": ENVELOPE
     | {
         "subscription_id",
@@ -73,7 +76,9 @@ CONTRACT_KEYS = {
         "old_weekday",
         "new_weekday",
         "added_weekdays",
+        "removed_weekdays",
         "next_delivery_date",
+        "kept_order_note",
         "time_kind",
     },
 }
@@ -146,16 +151,39 @@ SCHEDULE_CHANGED = {
     "old_weekday": 6,
     "new_weekday": 0,
     "added_weekdays": [],
+    "removed_weekdays": [],
     "next_delivery_date": "2027-01-11",
+    "kept_order_note": None,
     "time_kind": "any_time",
     "timestamp": "2027-01-06T04:00:00+00:00",
 }
 ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED, SCHEDULE_CHANGED]
 CLICK = dict(ORDER_CREATED, payment="online_unpaid", amount_due=None, deadline="2027-01-07T12:00:00+05:00")
 
+# The same payloads as a backend from before Task 17a queued them (for one release the bot still renders them):
+# no `subscription_id` and no `actions`. The pre-6b order set has no `time_kind` either.
+NEW_KEYS = {"subscription_id", "actions"}
+OLD_SHAPE = {kind: keys - NEW_KEYS for kind, keys in CONTRACT_KEYS.items()}
+# Task 7's kind has carried its subscription_id from the start: its old shape is the set before the final fix wave
+# added the lost days and the kept-order note.
+SCHEDULE_FINAL_WAVE_KEYS = {"removed_weekdays", "kept_order_note"}
+OLD_SHAPE["subscription_schedule_changed"] = CONTRACT_KEYS["subscription_schedule_changed"] - SCHEDULE_FINAL_WAVE_KEYS
+PRE_FINAL_SCHEDULE_CHANGED = {key: value for key, value in SCHEDULE_CHANGED.items() if key not in SCHEDULE_FINAL_WAVE_KEYS}
+PRE_6B_ORDER_CREATED = OLD_SHAPE["subscription_order_created"] - {"time_kind"}
+ACCEPTED_KEYS = {kind: [keys, OLD_SHAPE[kind]] for kind, keys in CONTRACT_KEYS.items()}
+ACCEPTED_KEYS["subscription_order_created"].append(PRE_6B_ORDER_CREATED)
+
+
+# The backend's own answers, written by tests/integration/test_subscription_order_notice.py::
+# TestTheActionsFixture (UPDATE_CUSTOMER_NOTICE_FIXTURES=1): Pay allowed (a Click order), refused (cash), closed.
+ACTIONS = json.loads(
+    (Path(__file__).resolve().parents[1] / "fixtures" / "customer_notices" / "actions.json").read_text("utf-8")
+)
+
 COPY_KEYS = sorted(k for k in BACKEND_TRANSLATIONS if k.startswith("telegram.customer_notice.")) + [
     "telegram.payment.pay_now",
     "telegram.payment.view_order",
+    "telegram.subscription.view",
 ] + [f"telegram.subscription.weekday_{day}" for day in range(7)]
 
 
@@ -253,9 +281,20 @@ def _buttons(kwargs):
     return [(button.text, button.callback_data) for row in markup.inline_keyboard for button in row]
 
 
-@pytest.mark.parametrize("payload", ALL, ids=lambda p: p["kind"])
+CLICK_NEW = dict(CLICK, subscription_id=7, actions=ACTIONS["click_unpaid"])
+PRE_6B = {key: value for key, value in ORDER_CREATED.items() if key != "time_kind"}
+NEW_SHAPE = [
+    CLICK_NEW,
+    dict(DELIVERY_SKIPPED, subscription_id=7),
+    dict(PAID_ORDER_KEPT, subscription_id=7, actions=ACTIONS["closed"]),
+    dict(PAYMENT_EXPIRED, subscription_id=None, actions=ACTIONS["closed"]),
+]
+
+
+@pytest.mark.parametrize("payload", ALL + NEW_SHAPE + [PRE_6B, PRE_FINAL_SCHEDULE_CHANGED], ids=lambda p: p["kind"])
 def test_the_payloads_here_are_the_contract(payload):
-    assert set(payload) - {"timestamp"} == CONTRACT_KEYS[payload["kind"]]
+    """The new key set, or for one release the old one (and the pre-6b order set without `time_kind`)."""
+    assert set(payload) - {"timestamp"} in ACCEPTED_KEYS[payload["kind"]]
 
 
 # --------------------------------------------------------------------------- the order notice
@@ -377,6 +416,98 @@ async def test_the_payment_line_follows_the_rail(ws, facts, line):
     assert _buttons(kwargs) == [("telegram.payment.view_order|en", "order_9001")]  # Pay now only when unpaid online
 
 
+# --------------------------------------------------------------------------- the published actions
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_pay_now_comes_from_the_published_actions(ws):
+    p = ACTIONS["click_unpaid"]["pay"]
+
+    await ws.customer_notice_handler(_make_request(CLICK_NEW))
+
+    assert _buttons(_sent(ws)) == [
+        (p["label"], f"payment_retry_9001_{p['expected_amount']}"),
+        ("telegram.payment.view_order|en", "order_9001"),
+        ("telegram.subscription.view|en", "subscription_7"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("case", ["cash", "closed"])
+async def test_an_unpaid_line_without_a_published_pay_draws_no_pay_now(ws, case):
+    """The payment line still says what the payload says; the BUTTON is the backend's answer, not the line's."""
+    await ws.customer_notice_handler(_make_request(dict(CLICK_NEW, actions=ACTIONS[case])))
+
+    assert _buttons(_sent(ws)) == [
+        ("telegram.payment.view_order|en", "order_9001"),
+        ("telegram.subscription.view|en", "subscription_7"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_skipped_delivery_opens_its_subscription(ws):
+    await ws.customer_notice_handler(_make_request(dict(DELIVERY_SKIPPED, subscription_id=7)))
+
+    assert _buttons(_sent(ws)) == [("telegram.subscription.view|en", "subscription_7")]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_paid_order_that_stays_opens_the_order_and_its_subscription(ws):
+    await ws.customer_notice_handler(
+        _make_request(dict(PAID_ORDER_KEPT, subscription_id=7, actions=ACTIONS["closed"]))
+    )
+
+    assert _buttons(_sent(ws)) == [
+        ("telegram.payment.view_order|en", "order_9001"),
+        ("telegram.subscription.view|en", "subscription_7"),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_ordinary_order_expiry_has_no_subscription_button(ws):
+    await ws.customer_notice_handler(
+        _make_request(dict(PAYMENT_EXPIRED, subscription_id=None, actions=ACTIONS["closed"]))
+    )
+
+    assert _buttons(_sent(ws)) == [("telegram.payment.view_order|en", "order_9001")]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_schedule_change_notice_opens_its_subscription(ws):
+    await ws.customer_notice_handler(_make_request(SCHEDULE_CHANGED))
+
+    assert _buttons(_sent(ws)) == [("telegram.subscription.view|en", "subscription_77")]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "payload, buttons",
+    [
+        (
+            CLICK,
+            [("telegram.payment.pay_now|en", "payment_retry_9001"), ("telegram.payment.view_order|en", "order_9001")],
+        ),
+        (ORDER_CREATED, [("telegram.payment.view_order|en", "order_9001")]),
+        (PRE_6B, [("telegram.payment.view_order|en", "order_9001")]),
+        (DELIVERY_SKIPPED, []),
+        (PRE_FINAL_SCHEDULE_CHANGED, [("telegram.subscription.view|en", "subscription_77")]),
+    ],
+    ids=["click", "cash", "pre-6b", "skipped", "schedule-before-lost-days"],
+)
+async def test_an_old_shape_payload_still_renders_as_before(ws, payload, buttons):
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert _buttons(_sent(ws)) == buttons
+
+
 # --------------------------------------------------------------------------- the other notices
 
 
@@ -457,10 +588,12 @@ async def test_a_schedule_change_names_each_change_and_the_next_delivery(ws):
     payload = dict(
         SCHEDULE_CHANGED,
         subscription_name="Home <i>",
-        changes=["time_cleared", "time_changed", "day_moved", "date_moved", "days_added"],
+        changes=["time_cleared", "time_changed", "day_moved", "date_moved", "days_added", "days_removed"],
         old_window="10:00–12:00",
         new_window="11:00–13:00",
         added_weekdays=[5, 6],
+        removed_weekdays=[2],
+        kept_order_note="Your order for 11 January <stays>.",
     )
 
     resp = await ws.customer_notice_handler(_make_request(payload))
@@ -477,9 +610,11 @@ async def test_a_schedule_change_names_each_change_and_the_next_delivery(ws):
         "\n\ntelegram.customer_notice.schedule_change.date_moved|en|old_day=telegram.subscription.weekday_6|en"
         "\n\ntelegram.customer_notice.schedule_change.days_added|en"
         "|days=telegram.subscription.weekday_5|en, telegram.subscription.weekday_6|en"
+        "\n\ntelegram.customer_notice.schedule_change.days_removed|en|days=telegram.subscription.weekday_2|en"
         "\n\ntelegram.customer_notice.schedule_changed_next|en|date=11.01.2027"
+        "\nYour order for 11 January &lt;stays&gt;."
     )
-    assert _buttons(kwargs) == []  # no order: no buttons (Task 17a adds Open subscription)
+    assert _buttons(kwargs) == [("telegram.subscription.view|en", "subscription_77")]
 
 
 @pytest.mark.unit
@@ -510,8 +645,12 @@ async def test_a_paused_subscription_change_has_no_next_delivery_line(ws):
         {"added_weekdays": ["6"]},
         {"added_weekdays": [True]},
         {"added_weekdays": None},
+        {"removed_weekdays": [7]},
+        {"removed_weekdays": [True]},
+        {"removed_weekdays": None},
     ],
-    ids=["unknown-code", "no-change", "not-a-list", "missing", "nested", "day-7", "day-text", "day-bool", "no-days"],
+    ids=["unknown-code", "no-change", "not-a-list", "missing", "nested", "day-7", "day-text", "day-bool", "no-days",
+         "lost-day-7", "lost-day-bool", "no-lost-days"],
 )
 async def test_an_unknown_change_code_is_refused_before_the_claim(ws, change):
     resp = await ws.customer_notice_handler(_make_request(dict(SCHEDULE_CHANGED, **change)))
@@ -537,6 +676,29 @@ async def test_the_english_schedule_notice_reads_as_written(ws, monkeypatch):
         "We no longer deliver on this day of the week (Sunday). Your new delivery day: Monday. "
         "You can change it in your subscription.\n\n"
         "📅 Next delivery: 11.01.2027"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_english_lost_day_notice_reads_as_written(ws, monkeypatch):
+    """A daily subscriber whose Saturday stops, with tomorrow's order already placed: the lost day, the next delivery
+    (that order) and the backend's sentence that it stays as it is."""
+    _use_real_i18n(monkeypatch)
+    payload = dict(
+        SCHEDULE_CHANGED, changes=["days_removed"], old_window=None, old_weekday=5, new_weekday=None,
+        removed_weekdays=[5], next_delivery_date="2027-01-07", kept_order_note="Your order for 7 January stays as it is.",
+    )
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        "🕒 <b>Office water</b>: your delivery schedule has changed.\n\n"
+        "Days without delivery from now on: Saturday. Your daily deliveries continue on the other days. "
+        "You can pause or change your subscription at any time.\n\n"
+        "📅 Next delivery: 07.01.2027\n"
+        "Your order for 7 January stays as it is."
     )
 
 
@@ -648,10 +810,26 @@ async def test_the_english_order_notice_reads_as_written(ws, monkeypatch):
         "• Pure Water 19L × 2\n"
         "• Cooler cups × 1\n\n"
         "💰 Total: 30,000 UZS\n"
-        "💳 Please pay by 01/07/2027, 12:00 PM with the 💳 Pay Now button. "
-        "An order not paid by then is cancelled."
+        "💳 Please pay by 01/07/2027, 12:00 PM. An order not paid by then is cancelled."
     )
     assert [text for text, _data in _buttons(kwargs)] == ["💳 Pay Now", "View Order"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_online_order_whose_published_pay_is_refused_reads_no_pay_line_and_has_no_pay(ws, monkeypatch):
+    """The backend sends no payment line (`payment` None) for an online order whose Pay it refuses (partly paid,
+    nothing owed, an offline payment row): the message names no way to pay, and Pay is not drawn."""
+    _use_real_i18n(monkeypatch)
+    payload = dict(CLICK_NEW, payment=None, deadline=None, actions=ACTIONS["closed"])
+
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    kwargs = _sent(ws)
+    assert kwargs["text"].rstrip("\n").endswith("💰 Total: 30,000 UZS")
+    assert "pay by" not in kwargs["text"].lower()
+    assert [data for _text, data in _buttons(kwargs)] == ["order_9001", "subscription_7"]
 
 
 @pytest.mark.unit
@@ -668,11 +846,12 @@ async def test_every_notice_renders_in_the_language_the_backend_resolved(ws, mon
     kwargs = _sent(ws)
     for leak in ("{", "}", "None", "telegram.customer_notice", "Customer notice"):
         assert leak not in kwargs["text"]
-    for text, _data in _buttons(kwargs):
-        assert (
-            text
-            == BACKEND_TRANSLATIONS[
-                "telegram.payment.pay_now" if _data.startswith("payment_retry_") else "telegram.payment.view_order"
-            ][language]
-        )
+    words = {
+        "payment_retry_": "telegram.payment.pay_now",
+        "order_": "telegram.payment.view_order",
+        "subscription_": "telegram.subscription.view",
+    }
+    for text, data in _buttons(kwargs):
+        [key] = [words[prefix] for prefix in words if data.startswith(prefix)]
+        assert text == BACKEND_TRANSLATIONS[key][language]
     ws_module.i18n.get_user_language.assert_not_awaited()

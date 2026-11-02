@@ -108,10 +108,12 @@ def _deliver_with_cash(driver, delivery, amount):
 def test_pay_now_on_a_cod_order_is_refused_and_moves_neither_rail(
     matrix_app, db, order_with_address, auth_headers
 ):
-    """POST /payments/create switching a COD order to Click is refused, and leaves BOTH rails on cash.
+    """The customer's Pay (`POST /orders/<id>/retry-payment`) on a COD order is refused, and leaves BOTH rails on
+    cash.
 
     Moving one rail and not the other is what stranded prod TG_000401_26; a customer moves neither now: there
-    is no cash -> Click switch (spec 2026-10-27 §4.3, D4)."""
+    is no cash -> Click switch (spec 2026-10-27 §4.3, D4), so a cash order publishes no Pay and an old Pay
+    button is refused as `not_online`."""
     from business_app.services.cash_collection_service import CashCollectionService
 
     order = order_with_address
@@ -122,13 +124,13 @@ def test_pay_now_on_a_cod_order_is_refused_and_moves_neither_rail(
     order_id, payment_id = order.id, cod_payment.id
 
     resp = matrix_app.test_client().post(
-        "/api/v1/payments/create",
-        json={"order_id": order_id, "payment_method": "click"},
+        f"/api/v1/orders/{order_id}/retry-payment",
+        json={"channel": "bot", "expected_amount": str(order.total_amount)},
         headers=auth_headers,
     )
 
-    assert resp.status_code == 400, resp.get_json()
-    assert resp.get_json()["data"]["error_code"] == "RAIL_MOVE_NOT_ALLOWED"
+    assert resp.status_code == 409, resp.get_json()
+    assert resp.get_json()["data"] == {"reason_code": "PAY_REFUSED", "refusal": "not_online"}
     db.session.expire_all()
     order, payment = Order.query.get(order_id), Payment.query.get(payment_id)
     assert (order.payment_method, payment.payment_method) == (PaymentMethod.CASH, PaymentMethod.CASH)

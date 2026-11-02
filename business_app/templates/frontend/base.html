@@ -318,7 +318,7 @@
                         <li class="user-menu">
                             <div class="dropdown">
                                 <button class="btn theme-btn btn-one btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
-                                    <i class="far fa-user"></i> {{ current_user.name.split()[0] }}
+                                    <i class="far fa-user"></i> {{ current_user.name or ('landing.nav.my_account'|t) }}
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
@@ -406,7 +406,7 @@
                         <li class="user-menu">
                             <div class="dropdown">
                                 <button class="btn theme-btn btn-one btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
-                                    <i class="far fa-user"></i> {{ current_user.name.split()[0] }}
+                                    <i class="far fa-user"></i> {{ current_user.name or ('landing.nav.my_account'|t) }}
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">

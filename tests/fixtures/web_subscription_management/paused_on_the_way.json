@@ -63,7 +63,6 @@
      "items": [
       {
        "amount_label": "30 000 so'm",
-       "can_pay": true,
        "customer_actions": {
         "cancel": {
          "allowed": false,
@@ -71,6 +70,7 @@
          "label": null,
          "reasons": [],
          "refusal": "WITH_DRIVER",
+         "refusal_copy": "cancel_refused.with_driver",
          "subscription_id": 1,
          "via": null
         },
@@ -85,6 +85,10 @@
          "expected_amount": "30000.00",
          "label": "Pay 30 000 so'm",
          "refusal": null
+        },
+        "reorder": {
+         "allowed": false,
+         "label": null
         }
        },
        "date": "2026-10-29",

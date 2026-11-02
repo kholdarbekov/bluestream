@@ -1,41 +1,36 @@
-"""B3 — the backend PUBLISHES payability instead of letting five clients guess.
+"""B3 — the backend PUBLISHES payability to the admin Orders page instead of letting it guess.
 
 `order_is_payable_online(order, payment)` (payment_projection.py) is THE single
-authority on "may money still be taken for this order online". Until B3 it had
-exactly ONE caller — the Click PREPARE guard — so every client surface that had
-to decide whether to offer a way to pay re-derived the answer from whatever it
-could see: the admin Orders page from "we stored a payment_link once", the
-customer bot from `order_status == 'pending'`.
+authority on "may money still be taken for this order online", the function the
+Click PREPARE guard refuses on. Before B3 the admin Orders page re-derived it
+from "we stored a payment_link once", which is wrong under the 2026-08-24
+policy: case B — DELIVERED, unpaid, Click rail, payment still PENDING — is
+payable BY DESIGN (the money can still arrive and the receipt still has to be
+issued).
 
-Both copies are wrong under the 2026-08-24 policy. Case B — DELIVERED, unpaid,
-Click rail, payment still PENDING — is payable BY DESIGN (the money can still
-arrive and the receipt still has to be issued), and both copies say it is not.
+So the two admin payloads that feed `selectedOrder` in Orders.js publish two
+fields, and this file drives them through HTTP:
 
-So two fields are published, on every read surface the two clients actually
-call, and this file drives them through HTTP:
-
-* `is_payable`            — the authority's answer verbatim. A PERMISSION, for
-                            surfaces whose action is "start a payment" (the
-                            bot's Pay/Retry callbacks mint a fresh link
-                            server-side, so there is no URL to hand them).
 * `payable_payment_link`  — the STORED link, non-null only when following it
-                            would work. For surfaces whose action is "open THIS
-                            link". Gate and href collapse into one value, so a
-                            button pointing at a dead link is not writable.
+                            would work. Gate and href collapse into one value,
+                            so a button pointing at a dead link is not writable.
+* `is_payable`            — the authority's answer verbatim.
 
 `payment_link` stays published raw: the admin audit row has to be able to tell
 "a link was issued and is now dead" from "no link was ever issued", which needs
-both values. That is also why one boolean cannot serve both questions.
+both values.
+
+The customer payloads carry neither field: the customer's Pay is the published
+`customer_actions.pay` (spec 2026-10-27 §4.2), pinned with the retired fields in
+tests/unit/test_retired_customer_surfaces.py.
 """
 
 from decimal import Decimal
 
-import pytest
 from flask_jwt_extended import create_access_token
 
 from business_app.models.order import Order
 from business_app.models.payment import Payment
-from business_app.utils.payment_projection import order_is_payable_online
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
 CLICK_LINK = "https://my.click.uz/services/pay?id=1&t=CB"
@@ -82,84 +77,11 @@ def _click_order(
     return order, payment
 
 
-def _customer_headers(app, user):
-    with app.app_context():
-        token = create_access_token(identity=str(user.id))
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-
 def _admin_headers(app, admin_user):
     # manager_or_higher_required reads the role CLAIM; the shared fixture is a 403.
     with app.app_context():
         token = create_access_token(identity=str(admin_user.id), additional_claims={"role": "admin"})
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-
-class TestCustomerOrderDetailPublishesPayability:
-    """GET /api/v1/orders/<id> — the endpoint `api_client.get_order` calls."""
-
-    def test_case_b_delivered_unpaid_click_order_is_published_as_payable(
-        self, client, app, db, sample_user
-    ):
-        order, payment = _click_order(db, sample_user, order_number="B3-C-001")
-
-        resp = client.get(f"/api/v1/orders/{order.id}", headers=_customer_headers(app, sample_user))
-
-        assert resp.status_code == 200
-        payment_info = resp.get_json()["data"]["order"]["payment_info"]
-        assert payment_info["is_payable"] is True, (
-            "case B is payable BY DESIGN — the bot cannot offer the pay button without this"
-        )
-        assert payment_info["payable_payment_link"] == CLICK_LINK
-
-    def test_published_field_is_the_authority_not_a_second_opinion(
-        self, client, app, db, sample_user
-    ):
-        order, payment = _click_order(db, sample_user, order_number="B3-C-002")
-
-        resp = client.get(f"/api/v1/orders/{order.id}", headers=_customer_headers(app, sample_user))
-        payment_info = resp.get_json()["data"]["order"]["payment_info"]
-
-        with app.app_context():
-            live_order = Order.query.get(order.id)
-            expected = order_is_payable_online(live_order, live_order.payment)
-        assert payment_info["is_payable"] is expected
-
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            {"order_status": OrderStatus.CANCELLED},
-            {"order_status": OrderStatus.RETURNED},
-            {"is_paid": True},
-            {"payment_status": PaymentStatus.COMPLETED},
-            {"payment_method": PaymentMethod.CASH},
-        ],
-        ids=["cancelled", "returned", "paid", "payment-completed", "cash-rail"],
-    )
-    def test_unpayable_shapes_publish_false_and_withhold_the_link(
-        self, client, app, db, sample_user, kwargs
-    ):
-        order, _payment = _click_order(db, sample_user, order_number="B3-C-003", **kwargs)
-
-        resp = client.get(f"/api/v1/orders/{order.id}", headers=_customer_headers(app, sample_user))
-        payment_info = resp.get_json()["data"]["order"]["payment_info"]
-
-        assert payment_info["is_payable"] is False
-        assert payment_info["payable_payment_link"] is None
-        # The raw link stays published: "issued then died" must stay
-        # distinguishable from "never issued".
-        assert payment_info["payment_link"] == CLICK_LINK
-
-    def test_order_list_publishes_it_too(self, client, app, db, sample_user):
-        """The bot's My Orders list renders from GET /api/v1/orders."""
-        _click_order(db, sample_user, order_number="B3-C-004")
-
-        resp = client.get("/api/v1/orders/", headers=_customer_headers(app, sample_user))
-
-        assert resp.status_code == 200
-        rows = resp.get_json()["data"]["orders"]
-        assert rows, "expected the seeded order in the customer's list"
-        assert rows[0]["payment_info"]["is_payable"] is True
 
 
 class TestAdminOrderSurfacesPublishPayability:

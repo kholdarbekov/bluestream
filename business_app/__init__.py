@@ -161,9 +161,19 @@ def register_cli_commands(app):
 
 # Frontend pages a LINK opens in the language the link names (`?lang=`), whatever the visitor's
 # browser prefers: the reorder-reminder email's unsubscribe page. The hook below strips the default
-# language from a frontend URL with a 301 and then picks the language from the session or
-# Accept-Language, which would show an Uzbek email's page in the browser's language.
+# language from a frontend URL with a 301 (after remembering it in the session, so the clean URL then
+# opens in that language); this endpoint keeps its `?lang=` so the language rides on the link itself.
 FRONTEND_LINK_LANGUAGE_ENDPOINTS = frozenset({"frontend.reminders_unsubscribe"})
+
+
+def _remember_frontend_language(lang: str) -> None:
+    """Keep `lang` as the visitor's language for the session, so a reload or the next page stays in it.
+
+    The session only: the signed-in customer's stored `preferred_language` is never touched here."""
+    if session.get("language") != lang:
+        session["language"] = lang
+        session.permanent = True
+        session.modified = True
 
 
 def setup_request_handlers(app):
@@ -226,6 +236,8 @@ def setup_request_handlers(app):
                     parsed_url.fragment,
                 )
             )
+            # `?lang=uz` is dropped from the URL, not forgotten: the clean URL must open in Uzbek.
+            _remember_frontend_language(default_language)
             return redirect(cleaned_url, code=301)
 
         # 1. Check URL parameter first (highest priority)
@@ -312,10 +324,7 @@ def setup_request_handlers(app):
         # even when JWT/session source availability changes between requests.
         endpoint = request.endpoint or ""
         if endpoint.startswith("frontend."):
-            if session.get("language") != lang:
-                session["language"] = lang
-                session.permanent = True
-                session.modified = True
+            _remember_frontend_language(lang)
 
     @app.after_request
     def after_request(response):
@@ -364,6 +373,13 @@ def setup_request_handlers(app):
             # cacheable response (e.g. the anonymous /.well-known/api-catalog):
             # a shared/CDN cache could otherwise cross-serve one user's token.
             if "public" in response.headers.get("Cache-Control", ""):
+                return response
+
+            # One cookie writer per response (spec 2026-10-27 §9). A response that already sets the access cookie
+            # (a sign-in's `set_login_cookies`, a logout's unset) is never re-minted from the token the request came
+            # with: the language hook may have verified another login's cookie, which would follow the new login's.
+            access_cookie = f"{app.config['JWT_ACCESS_COOKIE_NAME']}="
+            if any(header.startswith(access_cookie) for header in response.headers.getlist("Set-Cookie")):
                 return response
 
             # Only an access token is extended. On a route that verified a refresh token (the refresh routes,

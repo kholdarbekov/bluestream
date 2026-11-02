@@ -11,6 +11,7 @@ This script populates the database with core translation keys for:
 Based on the I18N Implementation Plan Phase 2
 """
 
+import re
 import sys
 import os
 
@@ -531,11 +532,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovlar muvaffaqiyatli olindi',
         'ru': 'Платежи успешно получены'
     },
-    'api.payments.cash_payment_created': {
-        'en': 'Cash payment created. Pay on delivery.',
-        'uz': 'Naqd to\'lov yaratildi. Yetkazilganda to\'lang.',
-        'ru': 'Наличный платеж создан. Оплатите при доставке.'
-    },
     'api.payments.card_saved': {
         'en': 'Card saved successfully',
         'uz': 'Karta muvaffaqiyatli saqlandi',
@@ -582,11 +578,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Failed to get payment methods',
         'uz': 'To\'lov usullarini olishda xatolik',
         'ru': 'Не удалось получить способы оплаты'
-    },
-    'api.payments.error.create_failed': {
-        'en': 'Failed to create payment',
-        'uz': 'To\'lovni yaratib bo\'lmadi',
-        'ru': 'Не удалось создать платеж'
     },
     'api.payments.error.subscription_create_failed': {
         'en': 'Failed to create subscription payment',
@@ -651,13 +642,15 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu to\'lov allaqachon yakunlandi, shuning uchun bekor qiladigan yoki qaytariladigan narsa yo\'q.',
         'ru': 'Этот платеж уже завершен, отменять или возвращать нечего.'
     },
+    # Step 4 (plan 2026-10-27 Task 21): a subscription order is skipped, not cancelled, so the advice names
+    # the order's own button for either ("Cancel" or "Skip this delivery"), not "cancel".
     'api.payments.error.lifecycle.advice_cancel_order': {
-        'en': 'If you no longer want the order, cancel the order instead - anything already '
+        'en': 'If you no longer need this order, open it to cancel or skip it - anything already '
               'paid stays on your account as prepaid balance.',
-        'uz': 'Agar buyurtma sizga kerak bo\'lmasa, buyurtmani bekor qiling - to\'langan summa '
-              'hisobingizda oldindan to\'lov sifatida saqlanadi.',
-        'ru': 'Если заказ больше не нужен, отмените заказ - уже оплаченная сумма останется на '
-              'вашем счете как предоплата.'
+        'uz': 'Agar bu buyurtma sizga kerak bo\'lmasa, uni ochib bekor qiling yoki o\'tkazib yuboring - '  # NATIVE-READ
+              'to\'langan summa hisobingizda oldindan to\'lov sifatida saqlanadi.',
+        'ru': 'Если этот заказ больше не нужен, откройте его, чтобы отменить или пропустить, - уже '  # NATIVE-READ
+              'оплаченная сумма останется на вашем счете как предоплата.'
     },
     'api.payments.error.lifecycle.advice_order_delivered': {
         'en': 'This order has already been delivered, so it can no longer be cancelled either.',
@@ -678,37 +671,20 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Этот заказ уже отменен - оплаченная по нему сумма останется на вашем счете как '
               'предоплата.'
     },
-    # Rail-flip refusal when the marking-code pool cannot cover the order: the
-    # API-facing half here, the customer-bot half as
-    # 'telegram.payment.marking_codes_unavailable' below.
-    #
-    # Both moved here from the now-deleted
-    # scripts/seed_marking_codes_pool_short_translations.py. That script seeded
-    # the bot copy under category "telegram_bot", and telegram_bot/i18n.py:67
-    # loads ONLY `category = 'telegram'` (the staff bot loads 'staff_bot' OR
-    # key LIKE 'staff.%'), so the row was invisible to BOTH bots: the handler at
-    # telegram_bot/handlers/payments.py:372 fell through to i18n's missing-key
-    # path and showed every customer, in every language, the humanised English
-    # "Marking codes unavailable" -- on the one screen whose job is to explain
-    # that their order stays on Cash on Delivery.
-    #
-    # Seeding from HERE is what fixes that: `_category_for` derives the category
-    # from the key's first segment, so 'telegram.*' lands under 'telegram',
-    # which is exactly the category the bot reads. It also makes both keys
-    # visible to scripts/audit_translation_keys.py, which maps the 'api' and
-    # 'telegram' prefixes to this file and reported both as unseeded references
-    # while they lived in a one-off script.
+    # The rail-flip refusal of the retired POST /payments/create when the
+    # marking-code pool could not cover the order. Moved here from the
+    # now-deleted scripts/seed_marking_codes_pool_short_translations.py, so
+    # scripts/audit_translation_keys.py (which maps the 'api' prefix to this
+    # file) sees it. Its route and its bot half went in step 4 (plan 2026-10-27
+    # Task 21); the row stays by that task's pre-flight ruling and is on the
+    # deploy runbook's next-release list
+    # (docs/operations/2026-10-27-subscriptions-step3-step4-deploy.md §15).
     'api.payments.marking_codes_unavailable': {
         'en': '{product} cannot be paid for by card right now. Please pay with cash on delivery.',
         'uz': '{product} hozir karta bilan to\'lab bo\'lmaydi. Iltimos, yetkazib berishda naqd '
               'pul bilan to\'lang.',
         'ru': '{product} сейчас нельзя оплатить картой. Пожалуйста, оплатите наличными при '
               'доставке.'
-    },
-    'telegram.payment.marking_codes_unavailable': {
-        'en': 'This order cannot be switched to online payment right now due to a temporary stock issue.\n\nYour order stays on Cash on Delivery -- you can pay in cash when it arrives.',
-        'uz': "Ushbu buyurtmani hozircha onlayn to'lovga o'tkazib bo'lmaydi (vaqtinchalik ombor muammosi tufayli).\n\nBuyurtmangiz naqd pul (Cash on Delivery) usulida qoladi -- yetkazib berilganda naqd pul bilan to'lashingiz mumkin.",
-        'ru': 'Сейчас невозможно перевести этот заказ на онлайн-оплату из-за временной проблемы со складом.\n\nВаш заказ остаётся с оплатой наличными при доставке -- вы сможете оплатить наличными при получении.'
     },
     # ---------------------------------------------------------------- #
     # B4b -- the customer-facing half of "a cancelled card/Click order settles
@@ -1224,21 +1200,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna davom ettirildi',
         'ru': 'Подписка возобновлена'
     },
-    'api.subscriptions.item_added': {
-        'en': 'Subscription item added',
-        'uz': 'Obuna elementi qo\'shildi',
-        'ru': 'Элемент подписки добавлен'
-    },
-    'api.subscriptions.item_updated': {
-        'en': 'Subscription item updated',
-        'uz': 'Obuna elementi yangilandi',
-        'ru': 'Элемент подписки обновлен'
-    },
-    'api.subscriptions.item_removed': {
-        'en': 'Subscription item removed',
-        'uz': 'Obuna elementi olib tashlandi',
-        'ru': 'Элемент подписки удален'
-    },
     'api.subscriptions.preview_calculated': {
         'en': 'Subscription preview calculated',
         'uz': 'Obuna oldindan ko\'rish hisoblandi',
@@ -1263,11 +1224,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Manual resume required',
         'uz': 'Qo\'lda davom ettirish talab etiladi',
         'ru': 'Требуется ручное возобновление'
-    },
-    'api.subscriptions.unknown_product': {
-        'en': 'Unknown product',
-        'uz': 'Noma\'lum mahsulot',
-        'ru': 'Неизвестный товар'
     },
     'api.subscriptions.error.not_found': {
         'en': 'Subscription not found',
@@ -1354,11 +1310,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Mahsulot obunada allaqachon mavjud',
         'ru': 'Товар уже есть в подписке'
     },
-    'api.subscriptions.error.item_not_found': {
-        'en': 'Subscription item not found',
-        'uz': 'Obuna elementi topilmadi',
-        'ru': 'Элемент подписки не найден'
-    },
     'api.subscriptions.error.below_min_order_quantity': {
         'en': '{product}: at least {minimum} per delivery (you chose {quantity})',
         'uz': '{product}: har bir yetkazishda kamida {minimum} ta (siz {quantity} ta tanladingiz)',
@@ -1399,30 +1350,10 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Obuna elementlarini olishda xatolik',
         'ru': 'Не удалось получить элементы подписки'
     },
-    'api.subscriptions.error.add_item_failed': {
-        'en': 'Failed to add subscription item',
-        'uz': 'Obunaga element qo\'shishda xatolik',
-        'ru': 'Не удалось добавить элемент подписки'
-    },
-    'api.subscriptions.error.update_item_failed': {
-        'en': 'Failed to update subscription item',
-        'uz': 'Obuna elementini yangilashda xatolik',
-        'ru': 'Не удалось обновить элемент подписки'
-    },
-    'api.subscriptions.error.remove_item_failed': {
-        'en': 'Failed to remove subscription item',
-        'uz': 'Obuna elementini olib tashlashda xatolik',
-        'ru': 'Не удалось удалить элемент подписки'
-    },
     'api.subscriptions.error.get_billing_history_failed': {
         'en': 'Failed to retrieve billing history',
         'uz': 'Hisob-kitob tarixini olishda xatolik',
         'ru': 'Не удалось получить историю списаний'
-    },
-    'api.subscriptions.error.get_logs_failed': {
-        'en': 'Failed to retrieve subscription logs',
-        'uz': 'Obuna jurnallarini olishda xatolik',
-        'ru': 'Не удалось получить журналы подписки'
     },
     'api.subscriptions.error.preview_failed': {
         'en': 'Failed to calculate subscription preview',
@@ -1463,21 +1394,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Reason: {reason}',
         'uz': 'Sabab: {reason}',
         'ru': 'Причина: {reason}'
-    },
-    'api.subscriptions.log.item_added': {
-        'en': 'Added {quantity}x {product}',
-        'uz': '{quantity}x {product} qo\'shildi',
-        'ru': 'Добавлено {quantity}x {product}'
-    },
-    'api.subscriptions.log.item_updated': {
-        'en': 'Updated {product} quantity from {old_quantity} to {new_quantity}',
-        'uz': '{product} miqdori {old_quantity} dan {new_quantity} ga yangilandi',
-        'ru': 'Количество {product} изменено с {old_quantity} на {new_quantity}'
-    },
-    'api.subscriptions.log.item_removed': {
-        'en': 'Removed {product}',
-        'uz': '{product} olib tashlandi',
-        'ru': 'Удален {product}'
     },
     'api.subscriptions.log.delivery_skipped': {
         'en': 'Skipped delivery scheduled for {date}. Reason: {reason}',
@@ -3940,11 +3856,6 @@ BACKEND_TRANSLATIONS = {
         'uz': '💳 Hozir to\'lash',
         'ru': '💳 Оплатить'
     },
-    'telegram.payment.cancel_order': {
-        'en': '❌ Cancel Order',
-        'uz': '❌ Buyurtmani bekor qilish',
-        'ru': '❌ Отменить заказ'
-    },
     'telegram.payment.cancel': {
         'en': 'Cancel Payment',
         'uz': 'To\'lovni bekor qilish',
@@ -3995,41 +3906,12 @@ BACKEND_TRANSLATIONS = {
         'uz': 'To\'lovni yaratib bo\'lmadi. Iltimos, qayta urinib ko\'ring.',
         'ru': 'Не удалось создать оплату. Пожалуйста, попробуйте снова.'
     },
-    'telegram.payment.error_order_not_found': {
-        'en': 'Order not found. Please create a new order.',
-        'uz': 'Buyurtma topilmadi. Iltimos, yangi buyurtma yarating.',
-        'ru': 'Заказ не найден. Пожалуйста, создайте новый заказ.'
-    },
-    'telegram.payment.error_already_paid': {
-        'en': 'This order has already been paid.',
-        'uz': 'Bu buyurtma allaqachon to\'langan.',
-        'ru': 'Этот заказ уже оплачен.'
-    },
-    # B3 -- `retry_payment` refuses when the backend's published `is_payable`
-    # says no (a cancelled/returned order, or a payment the gateway already
-    # ended). The Pay button is gone from the keyboard, but the MESSAGE that
-    # carried it stays in the chat forever, so this is the copy for a tap on a
-    # stale one. Deliberately NOT "payment failed": nothing failed, and the
-    # order may well have been settled in cash at the door.
-    #
-    # Category is derived from the key's first segment, so 'telegram.*' lands
-    # under 'telegram' -- the ONLY category telegram_bot/i18n.py:67 loads.
-    # Seeding it anywhere else renders the humanised English fallback.
-    # The WEB twin of `telegram.payment.error_not_payable`, shown on
-    # frontend/payment_cancelled.html when the published payability says the
-    # Retry button must not be drawn. Dotless English-literal key, so
-    # `_category_for` files it under 'general' — the category the Jinja `|t`
-    # filter reads. Copy kept identical to the bot's on purpose: one message,
-    # two surfaces, no chance of them drifting apart.
+    # Shown on frontend/payment_cancelled.html when the order's published Pay
+    # (`customer_actions.pay`) is not allowed. Deliberately NOT "payment
+    # failed": nothing failed, and the order may well have been settled in cash
+    # at the door. Dotless English-literal key, so `_category_for` files it
+    # under 'general' — the category the Jinja `|t` filter reads.
     'This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.': {
-        'en': 'This order can no longer be paid online. If anything is still owed on it, '
-              'our team will settle it with you.',
-        'uz': 'Bu buyurtmani endi onlayn to\'lab bo\'lmaydi. Agar u bo\'yicha qarz qolgan '
-              'bo\'lsa, jamoamiz siz bilan bog\'lanib hal qiladi.',
-        'ru': 'Этот заказ больше нельзя оплатить онлайн. Если по нему остался долг, '
-              'наша команда свяжется с вами и решит вопрос.'
-    },
-    'telegram.payment.error_not_payable': {
         'en': 'This order can no longer be paid online. If anything is still owed on it, '
               'our team will settle it with you.',
         'uz': 'Bu buyurtmani endi onlayn to\'lab bo\'lmaydi. Agar u bo\'yicha qarz qolgan '
@@ -4118,11 +4000,6 @@ BACKEND_TRANSLATIONS = {
         'uz': '📍 Buyurtmani kuzatish',
         'ru': '📍 Отследить заказ'
     },
-    'telegram.order.reorder': {
-        'en': '🔄 Reorder',
-        'uz': '🔄 Qayta buyurtma berish',
-        'ru': '🔄 Повторить заказ'
-    },
     'telegram.order.number': {
         'en': 'Order #{0}',
         'uz': 'Buyurtma #{0}',
@@ -4161,11 +4038,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Are you sure you want to cancel this order?',
         'uz': 'Ushbu buyurtmani bekor qilmoqchimisiz?',
         'ru': 'Вы уверены, что хотите отменить этот заказ?'
-    },
-    'telegram.orders.cancel_success': {
-        'en': 'Order cancelled successfully.',
-        'uz': 'Buyurtma muvaffaqiyatli bekor qilindi.',
-        'ru': 'Заказ успешно отменен.'
     },
     # The customer's own cancel, refused (F5/F16 of
     # docs/superpowers/specs/2026-09-25-failed-delivery-awaits-new-date-design.md): one
@@ -4560,21 +4432,6 @@ BACKEND_TRANSLATIONS = {
         'uz': '📊 Mening statistikam',
         'ru': '📊 Моя статистика'
     },
-    'telegram.subscription.pause': {
-        'en': '⏸️ Pause',
-        'uz': '⏸️ To\'xtatish',
-        'ru': '⏸️ Приостановить'
-    },
-    'telegram.subscription.skip_next': {
-        'en': '⏭️ Skip Next Delivery',
-        'uz': '⏭️ Keyingisini o\'tkazib yuborish',
-        'ru': '⏭️ Пропустить следующую'
-    },
-    'telegram.subscription.resume': {
-        'en': '▶️ Resume',
-        'uz': '▶️ Davom ettirish',
-        'ru': '▶️ Возобновить'
-    },
     'telegram.subscription.edit': {
         'en': '✏️ Edit Subscription',
         'uz': '✏️ Obunani tahrirlash',
@@ -4589,11 +4446,6 @@ BACKEND_TRANSLATIONS = {
         'en': '💳 Billing',
         'uz': '💳 To\'lovlar',
         'ru': '💳 Платежи'
-    },
-    'telegram.subscription.logs': {
-        'en': '📋 Logs',
-        'uz': '📋 Loglar',
-        'ru': '📋 Журнал'
     },
     'telegram.subscription.add_item': {
         'en': '➕ Add Item',
@@ -4614,11 +4466,6 @@ BACKEND_TRANSLATIONS = {
         'en': '💳 Change Payment Method',
         'uz': '💳 To\'lov usulini o\'zgartirish',
         'ru': '💳 Изменить способ оплаты'
-    },
-    'telegram.subscription.view_logs': {
-        'en': '📋 View Activity Log',
-        'uz': '📋 Faoliyat jurnali',
-        'ru': '📋 Журнал активности'
     },
     'telegram.subscription.total_deliveries': {
         'en': 'Total Deliveries',
@@ -5778,16 +5625,6 @@ BACKEND_TRANSLATIONS = {
         'uz': '🌐 Til',
         'ru': '🌐 Язык'
     },
-    'telegram.yes': {
-        'en': '✅ Yes',
-        'uz': '✅ Ha',
-        'ru': '✅ Да'
-    },
-    'telegram.no': {
-        'en': '❌ No',
-        'uz': '❌ Yo\'q',
-        'ru': '❌ Нет'
-    },
     'telegram.product.add_to_cart': {
         'en': '➕ Add to Cart',
         'uz': '➕ Savatga qo\'shish',
@@ -5863,11 +5700,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Delivery time',
         'uz': 'Yetkazib berish vaqti',
         'ru': 'Время доставки'
-    },
-    'telegram.subscription.time_to_be_confirmed': {
-        'en': 'time to be confirmed',
-        'uz': 'vaqti keyin aniqlanadi',
-        'ru': 'время уточним'
     },
     'telegram.subscription.weekday_0': {
         'en': 'Monday',
@@ -6553,11 +6385,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Faol',
         'ru': 'Активные'
     },
-    'telegram.subscription.activity_logs': {
-        'en': 'Activity Log',
-        'uz': 'Faoliyat tarixi',
-        'ru': 'История действий'
-    },
     'telegram.subscription.add_address': {
         'en': 'Add Address',
         'uz': 'Manzil qo\'shish',
@@ -6665,11 +6492,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Davriylik',
         'ru': 'Периодичность'
     },
-    'telegram.subscription.frequency_updated_successfully': {
-        'en': 'Delivery frequency updated.',
-        'uz': 'Yetkazib berish davriyligi yangilandi.',
-        'ru': 'Периодичность доставки обновлена.'
-    },
     'telegram.subscription.id': {
         'en': 'Subscription ID',
         'uz': 'Obuna ID',
@@ -6680,21 +6502,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Mahsulot obunangizga qo\'shildi.',
         'ru': 'Товар добавлен в подписку.'
     },
-    'telegram.subscription.item_added_successfully': {
-        'en': 'Item added.',
-        'uz': 'Mahsulot qo\'shildi.',
-        'ru': 'Товар добавлен.'
-    },
-    'telegram.subscription.item_removed_successfully': {
-        'en': 'Item removed.',
-        'uz': 'Mahsulot olib tashlandi.',
-        'ru': 'Товар удалён.'
-    },
-    'telegram.subscription.item_updated_successfully': {
-        'en': 'Item updated.',
-        'uz': 'Mahsulot yangilandi.',
-        'ru': 'Товар обновлён.'
-    },
     'telegram.subscription.items': {
         'en': 'Items',
         'uz': 'Mahsulotlar',
@@ -6704,11 +6511,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Next delivery',
         'uz': 'Keyingi yetkazib berish',
         'ru': 'Следующая доставка'
-    },
-    'telegram.subscription.no_activity_logs': {
-        'en': 'No activity yet.',
-        'uz': 'Hozircha faoliyat yo\'q.',
-        'ru': 'Пока нет активности.'
     },
     'telegram.subscription.no_addresses': {
         'en': 'You don\'t have any saved addresses yet.',
@@ -7052,13 +6854,12 @@ BACKEND_TRANSLATIONS = {
         'uz': '🏢 Kompaniya hisobingizdan yechiladi.',
         'ru': '🏢 Списывается с корпоративного счёта.'
     },
-    # Names the Pay button as telegram.payment.pay_now labels it.
+    # Shown only while the published Pay is allowed (customer_notices.payment_facts); {deadline} is when it closes. It
+    # names no button: the Pay button's label is the published one ("Pay 30 000 so'm"). The email says the same.
     'telegram.customer_notice.pay_online': {
-        'en': '💳 Please pay by {deadline} with the 💳 Pay Now button. An order not paid by then is cancelled.',
-        'uz': '💳 Iltimos, {deadline} gacha «💳 Hozir to\'lash» tugmasi orqali to\'lang. '
-              'Shu vaqtgacha to\'lanmagan buyurtma bekor qilinadi.',
-        'ru': '💳 Пожалуйста, оплатите до {deadline} кнопкой «💳 Оплатить». '
-              'Заказ, не оплаченный к этому времени, будет отменён.'
+        'en': '💳 Please pay by {deadline}. An order not paid by then is cancelled.',
+        'uz': '💳 Iltimos, {deadline} gacha to\'lang. Shu vaqtgacha to\'lanmagan buyurtma bekor qilinadi.',  # NATIVE-READ
+        'ru': '💳 Пожалуйста, оплатите до {deadline}. Заказ, не оплаченный к этому времени, будет отменён.',  # NATIVE-READ
     },
     'telegram.customer_notice.pay_online_paid': {
         'en': '✅ Paid.',
@@ -7147,16 +6948,21 @@ def _resolve_seed_value(
     return localized_value, False
 
 
+_DOTTED_KEY = re.compile(r'^[a-z][a-z0-9_]*\.\S+$')
+
+
 def _category_for(key: str) -> str:
     """Derive the Translation.category for a key.
 
-    Dotted keys (``ui.loyalty.x``) use their first segment; dotless
-    English-literal storefront keys (looked up by the literal text via the
-    ``t`` filter) have no category and default to ``general`` — mirroring
-    TranslationService._get_cache_timeout. The result is capped to the
-    ``varchar(50)`` column width so a long key can never abort the reseed.
+    A dotted key (ui.loyalty.x) uses its first segment, but only when it is
+    shaped like one: prefix.rest with no whitespace. English-literal
+    storefront keys (looked up by the literal text via the t filter) have no
+    category and default to general, mirroring
+    TranslationService._get_cache_timeout; an English sentence that merely holds a
+    dot ("Code expired.") is such a key. The result is capped to the
+    varchar(50) column width so a long key can never abort the reseed.
     """
-    category = key.split('.')[0] if '.' in key else 'general'
+    category = key.split('.')[0] if _DOTTED_KEY.match(key) else 'general'
     return category[:50]
 
 
@@ -9077,11 +8883,6 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'keyingi darajagacha AquaCoins',
         'AquaCoins до следующего уровня',
     ),
-    'more coins to keep status': _ui_tr(
-        'more coins to keep status',
-        'maqomni saqlash uchun yana AquaCoins',
-        'ещё AquaCoins для сохранения статуса',
-    ),
     'Blue Stream AquaCoins': _ui_tr('Blue Stream AquaCoins', 'Blue Stream AquaCoins', 'Blue Stream AquaCoins'),
     'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards': _ui_tr(
         'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards',
@@ -9262,30 +9063,30 @@ SUBSCRIPTION_PAGE_TRANSLATIONS = {
         "Obunani saytimizda yoki Telegram botimizda yarating",
         'Оформите подписку на сайте или в нашем Telegram-боте',
     ),
-    "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.": _ui_tr(
-        "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.",
-        "Albatta! Qat'iy tariflardan farqli o'laroq, obunalarimiz to'liq moslashtiriladi. Katalogimizdan istalgan mahsulotni tanlang, miqdorni o'zingiz belgilang, qulay yetkazib berish chastotasini tanlang va hatto aniq yetkazib berish kunlarini belgilang. Mahsulotlar, miqdor yoki chastotani istalgan vaqtda Telegram botimizda o'zgartirishingiz mumkin. Yangi mahsulotlar va miqdorlar biz beradigan keyingi buyurtmadan boshlab kuchga kiradi, yangi chastota, kun yoki vaqt oralig'i esa keyingi yetkazishni yangi jadval bo'yicha belgilaydi. Biz allaqachon bergan buyurtma o'zgarmaydi.",
-        'Конечно! В отличие от фиксированных тарифов, наши подписки полностью настраиваются. Выберите любые товары из каталога, задайте свои количества, выберите удобную частоту доставки и даже конкретные дни доставки. Менять товары, количества или частоту можно в любое время в нашем Telegram-боте. Новые товары и количества действуют со следующего заказа, который мы оформим, а новая частота, день или временной интервал определяют следующую доставку по новому расписанию. Уже оформленный заказ не меняется.',
+    "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or the schedule anytime in your online account or in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.": _ui_tr(
+        "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or the schedule anytime in your online account or in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.",
+        "Albatta! Qat'iy tariflardan farqli o'laroq, obunalarimiz to'liq moslashtiriladi. Katalogimizdan istalgan mahsulotni tanlang, miqdorni o'zingiz belgilang, qulay yetkazib berish chastotasini tanlang va hatto aniq yetkazib berish kunlarini belgilang. Mahsulotlar, miqdor yoki jadvalni istalgan vaqtda shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin. Yangi mahsulotlar va miqdorlar biz beradigan keyingi buyurtmadan boshlab kuchga kiradi, yangi chastota, kun yoki vaqt oralig'i esa keyingi yetkazishni yangi jadval bo'yicha belgilaydi. Biz allaqachon bergan buyurtma o'zgarmaydi.",  # NATIVE-READ
+        'Конечно! В отличие от фиксированных тарифов, наши подписки полностью настраиваются. Выберите любые товары из каталога, задайте свои количества, выберите удобную частоту доставки и даже конкретные дни доставки. Менять товары, количество или расписание можно в любое время в личном кабинете или в нашем Telegram-боте. Новые товары и количества действуют со следующего заказа, который мы оформим, а новая частота, день или временной интервал определяют следующую доставку по новому расписанию. Уже оформленный заказ не меняется.',  # NATIVE-READ
     ),
-    'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip your next delivery in the Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.': _ui_tr(
-        'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip your next delivery in the Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.',
-        "Obunani istalgan vaqtda to'xtatib turishingiz mumkin, masalan ta'til paytida, va qaytganingizda davom ettirasiz: buni shaxsiy kabinetda yoki Telegram botimizda qilish mumkin. Keyingi yetkazishni o'tkazib yuborish Telegram botimizda mavjud. To'xtatish, o'tkazib yuborish yoki bekor qilish hali to'lanmagan kelgusi buyurtmani bekor qiladi. Siz allaqachon to'lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o'tkazib yuborib ham, to'xtatib ham bo'lmaydi: u qoladi va yetkaziladi, o'zgarish esa keyingi yetkazishdan boshlab kuchga kiradi.",
-        'Вы можете приостановить подписку в любое время, например на время отпуска, и возобновить её, когда вернётесь, в личном кабинете или в нашем Telegram-боте. Пропустить ближайшую доставку можно в Telegram-боте. Приостановка, пропуск или отмена отменяют ближайший ещё не оплаченный заказ. Уже оплаченный заказ или заказ, который курьер уже забрал для доставки, нельзя пропустить или приостановить: он остаётся и будет доставлен, а изменение действует со следующей доставки.',
+    'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip any upcoming delivery in your online account or in our Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.': _ui_tr(
+        'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip any upcoming delivery in your online account or in our Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.',
+        "Obunani istalgan vaqtda to'xtatib turishingiz mumkin, masalan ta'til paytida, va qaytganingizda davom ettirasiz: buni shaxsiy kabinetda yoki Telegram botimizda qilish mumkin. Istalgan navbatdagi yetkazishni ham shaxsiy kabinetda yoki Telegram botimizda o'tkazib yuborishingiz mumkin. To'xtatish, o'tkazib yuborish yoki bekor qilish hali to'lanmagan kelgusi buyurtmani bekor qiladi. Siz allaqachon to'lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o'tkazib yuborib ham, to'xtatib ham bo'lmaydi: u qoladi va yetkaziladi, o'zgarish esa keyingi yetkazishdan boshlab kuchga kiradi.",  # NATIVE-READ
+        'Вы можете приостановить подписку в любое время, например на время отпуска, и возобновить её, когда вернётесь, в личном кабинете или в нашем Telegram-боте. Любую предстоящую доставку тоже можно пропустить в личном кабинете или в нашем Telegram-боте. Приостановка, пропуск или отмена отменяют ближайший ещё не оплаченный заказ. Уже оплаченный заказ или заказ, который курьер уже забрал для доставки, нельзя пропустить или приостановить: он остаётся и будет доставлен, а изменение действует со следующей доставки.',  # NATIVE-READ
     ),
-    'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in our Telegram bot.': _ui_tr(
-        'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in our Telegram bot.',
-        "Obunani Click orqali karta bilan, yetkazib berishda naqd pul bilan yoki biznes mijozlar uchun biznes hisobi orqali to'lash mumkin. Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi va obunangizdagi to'lov usuli bilan to'lanadi; uni Telegram botimizda o'zgartirish mumkin.",
-        'Подписку можно оплачивать картой через Click, наличными при доставке, а бизнес-клиентам через бизнес-счёт. Каждая плановая доставка оформляется как обычный заказ и оплачивается способом оплаты, указанным в подписке; его можно изменить в нашем Telegram-боте.',
+    'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in your online account or in our Telegram bot.': _ui_tr(
+        'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in your online account or in our Telegram bot.',
+        "Obunani Click orqali karta bilan, yetkazib berishda naqd pul bilan yoki biznes mijozlar uchun biznes hisobi orqali to'lash mumkin. Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi va obunangizdagi to'lov usuli bilan to'lanadi; uni shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",  # NATIVE-READ
+        'Подписку можно оплачивать картой через Click, наличными при доставке, а бизнес-клиентам через бизнес-счёт. Каждая плановая доставка оформляется как обычный заказ и оплачивается способом оплаты, указанным в подписке; его можно изменить в личном кабинете или в нашем Telegram-боте.',  # NATIVE-READ
     ),
-    'Your subscription delivers to the address you chose when you created it. If you need a different address, message us in our Telegram bot and we will update it for you.': _ui_tr(
-        'Your subscription delivers to the address you chose when you created it. If you need a different address, message us in our Telegram bot and we will update it for you.',
-        "Obunangiz yaratishda tanlagan manzilingizga yetkaziladi. Boshqa manzil kerak bo'lsa, Telegram botimizga yozing, biz uni siz uchun yangilaymiz.",
-        'Подписка доставляется на адрес, который вы выбрали при её создании. Если нужен другой адрес, напишите нам в Telegram-боте, и мы обновим его за вас.',
+    'Your subscription delivers to the address you chose. You can change it in your online account or in our Telegram bot by picking one of your saved addresses. Your upcoming deliveries move to the new address too, unless the driver already has them.': _ui_tr(
+        'Your subscription delivers to the address you chose. You can change it in your online account or in our Telegram bot by picking one of your saved addresses. Your upcoming deliveries move to the new address too, unless the driver already has them.',
+        "Obunangiz siz tanlagan manzilga yetkaziladi. Uni shaxsiy kabinetda yoki Telegram botimizda saqlangan manzillaringizdan birini tanlab o'zgartirishingiz mumkin. Agar kuryer navbatdagi buyurtmalarni hali olmagan bo'lsa, ular ham yangi manzilga o'tadi.",  # NATIVE-READ
+        'Подписка доставляется на выбранный вами адрес. Изменить его можно в личном кабинете или в нашем Telegram-боте, выбрав один из сохранённых адресов. Ближайшие доставки тоже переедут на новый адрес, если курьер их ещё не забрал.',  # NATIVE-READ
     ),
-    'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If you run into a problem with a payment, message us in our Telegram bot and we will help.': _ui_tr(
-        'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If you run into a problem with a payment, message us in our Telegram bot and we will help.',
-        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi kabi amalga oshiriladi. To'lovda muammo bo'lsa, Telegram botimizga yozing, yordam beramiz.",
-        'Каждая плановая доставка оформляется как обычный заказ, поэтому оплата проходит так же, как и для любого заказа. Если возникнут трудности с оплатой, напишите нам в Telegram-боте, и мы поможем.',
+    'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If a Click payment does not go through, you can pay the order again in your online account or in our Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.': _ui_tr(
+        'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If a Click payment does not go through, you can pay the order again in your online account or in our Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.',
+        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi kabi amalga oshiriladi. Click orqali to'lov o'tmasa, buyurtmani to'lov muddati tugaguncha shaxsiy kabinetda yoki Telegram botimizda qayta to'lashingiz mumkin. Yordam kerak bo'lsa, Telegram botimizga yozing.",  # NATIVE-READ
+        'Каждая плановая доставка оформляется как обычный заказ, поэтому оплата проходит так же, как и для любого заказа. Если оплата через Click не прошла, заказ можно оплатить ещё раз в личном кабинете или в нашем Telegram-боте до срока оплаты. Если нужна помощь, напишите нам в Telegram-боте.',  # NATIVE-READ
     ),
     # /services blurb: DB-only until now, so the old "special discounts" text lived only in the database.
     'landing.services.subscription_plans.description': _ui_tr(
@@ -10098,11 +9899,6 @@ SUBSCRIPTION_ACTION_GUARD_TRANSLATIONS = {
         'uz': "Obuna faol bo'lganda yetkazib berishni o'tkazib yuborishingiz mumkin.",
         'ru': 'Пропустить доставку можно, пока подписка активна.',
     },
-    'api.subscriptions.action.skip.stale': {
-        'en': 'This changed. Refresh to see the latest.',
-        'uz': "Bu o'zgardi. Eng so'nggi holatni ko'rish uchun yangilang.",
-        'ru': 'Это изменилось. Обновите, чтобы увидеть актуальное.',
-    },
     'api.subscriptions.action.pause.not_active': {
         'en': "This subscription isn't running right now, so there's nothing to pause.",
         'uz': "Bu obuna hozir ishlamayapti, shuning uchun to'xtatadigan narsa yo'q.",
@@ -10392,30 +10188,11 @@ BACKEND_TRANSLATIONS.update(SUBSCRIPTION_PAGE_DATA_TRANSLATIONS)
 
 # ============================================================================
 # The customer bot's subscription screens, reading the backend's published answers (plan 2026-10-26 Task 5;
-# spec §6): Cancel asks first with its own label, a stale Skip says so, and the delivery time can be changed.
+# spec §6): a stale Skip says so, and the delivery time can be changed. Cancel's label and confirm words are the
+# backend's published `allowed_actions.cancel` (step 4).
 # Positive tone; never "call us"; no discount language. uz/ru need a native read before prod.
 # ============================================================================
 SUBSCRIPTION_BOT_PUBLISHED_ANSWERS_TRANSLATIONS = {
-    'telegram.subscription.cancel_button': {
-        'en': '🛑 Cancel subscription',
-        'uz': "🛑 Obunani bekor qilish",
-        'ru': '🛑 Отменить подписку',
-    },
-    'telegram.subscription.cancel_confirm': {
-        'en': 'Cancel this subscription? You can set up a new one at any time.',
-        'uz': "Bu obunani bekor qilamizmi? Istalgan payt yangisini yaratishingiz mumkin.",
-        'ru': 'Отменить эту подписку? Новую можно оформить в любой момент.',
-    },
-    'telegram.subscription.cancel_confirm_yes': {
-        'en': '✅ Yes, cancel it',
-        'uz': "✅ Ha, bekor qilish",
-        'ru': '✅ Да, отменить',
-    },
-    'telegram.subscription.cancel_confirm_no': {
-        'en': '↩️ Keep my subscription',
-        'uz': "↩️ Obunani saqlab qolish",
-        'ru': '↩️ Оставить подписку',
-    },
     'telegram.subscription.skip_stale': {
         'en': 'This changed. Refresh to see the latest.',
         'uz': "Ma'lumot o'zgargan. Yangilab, so'nggisini ko'ring.",
@@ -10430,16 +10207,6 @@ SUBSCRIPTION_BOT_PUBLISHED_ANSWERS_TRANSLATIONS = {
         'en': 'Choose the new delivery time:',
         'uz': 'Yangi yetkazish vaqtini tanlang:',
         'ru': 'Выберите новое время доставки:',
-    },
-    'telegram.subscription.time_slot_updated_successfully': {
-        'en': 'Delivery time updated.',
-        'uz': 'Yetkazish vaqti yangilandi.',
-        'ru': 'Время доставки обновлено.',
-    },
-    'telegram.subscription.no_time_slots': {
-        'en': 'No delivery times are available for this schedule right now.',
-        'uz': "Hozircha bu jadval uchun yetkazish vaqtlari mavjud emas.",
-        'ru': 'Для этого расписания сейчас нет доступного времени доставки.',
     },
 }
 BACKEND_TRANSLATIONS.update(SUBSCRIPTION_BOT_PUBLISHED_ANSWERS_TRANSLATIONS)
@@ -10896,7 +10663,7 @@ BACKEND_TRANSLATIONS.update(CUSTOMER_PAY_ACTION_TRANSLATIONS)
 # ============================================================================
 # The one answer to a stale customer write (spec 2026-10-27 §16 M2): the screen showed an amount, a date or a state
 # that has moved since (`StateChangedError`, `api_responses.state_changed_response`). Backend-rendered `api.*` key.
-# All three languages are `api.subscriptions.action.skip.stale`'s, already read.
+# All three languages are those of the retired `api.subscriptions.action.skip.stale`, already native-read.
 # ============================================================================
 STATE_CHANGED_TRANSLATIONS = {
     'api.common.state_changed': {
@@ -10916,7 +10683,7 @@ BACKEND_TRANSLATIONS.update(STATE_CHANGED_TRANSLATIONS)
 # - marking_codes_pool_short: a legacy Payme order paid through Click when the marking-code pool cannot cover
 #   it (MARKING_CODES_POOL_SHORT). It names no other way to pay: the customer cannot move the order to cash
 #   (D5), and it is usually delivered already. `api.payments.marking_codes_unavailable` ("pay with cash on
-#   delivery") stays for `POST /payments/create`'s own cash -> Click check until that route goes.
+#   delivery") was the retired `POST /payments/create`'s cash -> Click refusal.
 #   OWNER-APPROVAL: draft wording (Task 2b fix round 1), awaiting the owner.
 # ============================================================================
 RAIL_MOVE_TRANSLATIONS = {
@@ -11342,6 +11109,11 @@ WEB_ORDER_ACTIONS_TRANSLATIONS = {
         'en': 'Try again',
         'uz': 'Qayta urinish',  # NATIVE-READ
         'ru': 'Попробовать снова',  # NATIVE-READ
+    },
+    'web.order_actions.reorder_dropped': {
+        'en': 'Some items from this order are no longer available and were left out.',
+        'uz': "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",  # NATIVE-READ
+        'ru': 'Некоторых товаров из этого заказа больше нет, они не добавлены.',  # NATIVE-READ
     },
     'api.orders.agent_confirmation.not_pending': {
         'en': 'This order is no longer waiting for your answer.',
@@ -11813,6 +11585,1575 @@ BOT_SUBSCRIPTION_ADDRESS_PAYMENT_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(BOT_SUBSCRIPTION_ADDRESS_PAYMENT_TRANSLATIONS)
+
+
+# "Open on website" could not sign the customer in (spec 2026-10-27 §9; step 4 Task 16a; `business_app/frontend/routes.py`
+# `telegram_login_page`, `templates/frontend/telegram_login_refused.html`). Each sentence sends the customer back to the
+# bot, never to a phone. Website `web.*` keys. uz/ru need a native read.
+TELEGRAM_LOGIN_PAGE_TRANSLATIONS = {
+    'web.telegram_login.title': {
+        'en': "We couldn't sign you in",
+        'uz': "Kirishning iloji bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось войти',  # NATIVE-READ
+    },
+    'web.telegram_login.expired': {
+        'en': 'This sign-in link has expired. Go back to the bot and tap “Open on website” again.',
+        'uz': "Bu kirish havolasining muddati tugagan. Botga qayting va «Saytda ochish» tugmasini yana bosing.",  # NATIVE-READ
+        'ru': 'Срок действия ссылки для входа истёк. Вернитесь в бот и снова нажмите «Открыть на сайте».',  # NATIVE-READ
+    },
+    'web.telegram_login.no_account': {
+        'en': "We couldn't find your account. Open our Telegram bot, finish signing up there, then tap “Open on website”.",
+        'uz': (
+            "Hisobingizni topa olmadik. Telegram botimizni oching, u yerda ro'yxatdan o'tishni yakunlang, "
+            "so'ng «Saytda ochish» tugmasini bosing."
+        ),  # NATIVE-READ
+        'ru': (
+            'Мы не нашли ваш аккаунт. Откройте нашего Telegram-бота, завершите там регистрацию '
+            'и нажмите «Открыть на сайте».'
+        ),  # NATIVE-READ
+    },
+    'web.telegram_login.staff': {
+        'en': 'Staff accounts sign in to the admin panel.',
+        'uz': 'Xodimlar hisoblari admin paneli orqali kiradi.',  # NATIVE-READ
+        'ru': 'Сотрудники входят через панель администратора.',  # NATIVE-READ
+    },
+    'web.telegram_login.busy': {
+        'en': 'Too many sign-in attempts. Please try again in a few minutes.',
+        'uz': "Kirishga urinishlar juda ko'p. Bir necha daqiqadan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Слишком много попыток входа. Попробуйте через несколько минут.',  # NATIVE-READ
+    },
+    'web.telegram_login.unavailable': {
+        'en': "Signing in from the bot isn't available right now. Please try again in a few minutes.",
+        'uz': "Botdan kirish hozircha ishlamayapti. Bir necha daqiqadan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Вход из бота сейчас недоступен. Попробуйте через несколько минут.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(TELEGRAM_LOGIN_PAGE_TRANSLATIONS)
+
+# Step 4 Task 16b: the bot's "Open on website" button and the forgot-password page's pointer to it.
+OPEN_ON_WEBSITE_TRANSLATIONS = {
+    'telegram.common.open_on_website': {
+        'en': '🌐 Open on website',
+        'uz': '🌐 Saytda ochish',  # NATIVE-READ
+        'ru': '🌐 Открыть на сайте',  # NATIVE-READ
+    },
+    'web.forgot_password.telegram_hint': {
+        'en': "Signed up in our Telegram bot? You don't need a password: open the bot, go to My Profile and tap “Open on website”.",
+        'uz': "Telegram botimizda ro'yxatdan o'tganmisiz? Parol kerak emas: botni oching, «Profilim» bo'limiga kiring va «Saytda ochish» tugmasini bosing.",  # NATIVE-READ
+        'ru': 'Регистрировались в нашем Telegram-боте? Пароль не нужен: откройте бота, перейдите в «Мой профиль» и нажмите «Открыть на сайте».',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(OPEN_ON_WEBSITE_TRANSLATIONS)
+
+# Step 4 Task 19 (D24): the website cabinet's page copy. This block is the ONE owner of every literal key the cabinet
+# templates render; `tests/unit/test_cabinet_template_keys_are_seeded.py` fails when a cabinet key has no row here.
+# Keys that other pages also use under the bare English text got page-unique names (`cabinet.*`, `web.order_modal.*`).
+CABINET_PAGE_TRANSLATIONS = {
+    'cabinet.addresses.home': {
+        'en': 'Home',
+        'uz': 'Uy',  # NATIVE-READ
+        'ru': 'Дом',  # NATIVE-READ
+    },
+    'cabinet.loyalty.earn_more_to_keep': {
+        'en': 'Earn {count} more AquaCoins to keep your status',
+        'uz': "Maqomingizni saqlab qolish uchun yana {count} AquaCoins yig'ing",  # NATIVE-READ
+        'ru': 'Заработайте ещё {count} AquaCoins, чтобы сохранить статус',  # NATIVE-READ
+    },
+    'landing.account.dashboard': {
+        'en': 'Dashboard',
+        'uz': 'Boshqaruv paneli',  # NATIVE-READ
+        'ru': 'Панель управления',  # NATIVE-READ
+    },
+    'landing.account.profile': {
+        'en': 'Profile Settings',
+        'uz': 'Profil sozlamalari',  # NATIVE-READ
+        'ru': 'Настройки профиля',  # NATIVE-READ
+    },
+    'landing.account.addresses': {
+        'en': 'My Addresses',
+        'uz': 'Manzillarim',  # NATIVE-READ
+        'ru': 'Мои адреса',  # NATIVE-READ
+    },
+    'landing.account.security': {
+        'en': 'Security',
+        'uz': 'Xavfsizlik',  # NATIVE-READ
+        'ru': 'Безопасность',  # NATIVE-READ
+    },
+    'landing.account.orders': {
+        'en': 'My Orders',
+        'uz': 'Buyurtmalarim',  # NATIVE-READ
+        'ru': 'Мои заказы',  # NATIVE-READ
+    },
+    'landing.account.loyalty': {
+        'en': 'Aqua Club',
+        'uz': 'Aqua Club',
+        'ru': 'Aqua Club',
+    },
+    'landing.nav.home': {
+        'en': 'Home',
+        'uz': 'Bosh sahifa',  # NATIVE-READ
+        'ru': 'Главная',  # NATIVE-READ
+    },
+    'landing.nav.my_account': {
+        'en': 'My Account',
+        'uz': 'Mening hisobim',  # NATIVE-READ
+        'ru': 'Мой аккаунт',  # NATIVE-READ
+    },
+    'landing.nav.subscriptions': {
+        'en': 'Subscriptions',
+        'uz': 'Obunalar',  # NATIVE-READ
+        'ru': 'Подписки',  # NATIVE-READ
+    },
+    'landing.nav.logout': {
+        'en': 'Logout',
+        'uz': 'Chiqish',  # NATIVE-READ
+        'ru': 'Выйти',  # NATIVE-READ
+    },
+    'landing.nav.login': {
+        'en': 'Login',
+        'uz': 'Kirish',  # NATIVE-READ
+        'ru': 'Войти',  # NATIVE-READ
+    },
+    'landing.button.view_all': {
+        'en': 'View All',
+        'uz': "Barchasini ko'rish",  # NATIVE-READ
+        'ru': 'Посмотреть все',  # NATIVE-READ
+    },
+    'landing.contact.info.address': {
+        'en': 'Address',
+        'uz': 'Manzil',  # NATIVE-READ
+        'ru': 'Адрес',  # NATIVE-READ
+    },
+    'cabinet.account.actions': {
+        'en': 'Actions',
+        'uz': 'Harakatlar',  # NATIVE-READ
+        'ru': 'Действия',  # NATIVE-READ
+    },
+    'cabinet.account.date': {
+        'en': 'Date',
+        'uz': 'Sana',  # NATIVE-READ
+        'ru': 'Дата',  # NATIVE-READ
+    },
+    'cabinet.account.status': {
+        'en': 'Status',
+        'uz': 'Holat',  # NATIVE-READ
+        'ru': 'Статус',  # NATIVE-READ
+    },
+    'cabinet.account.total': {
+        'en': 'Total',
+        'uz': 'Jami',  # NATIVE-READ
+        'ru': 'Итого',  # NATIVE-READ
+    },
+    'cabinet.account.order_number': {
+        'en': 'Order #',
+        'uz': 'Buyurtma №',  # NATIVE-READ
+        'ru': 'Заказ №',  # NATIVE-READ
+    },
+    'cabinet.account.active': {
+        'en': 'Active',
+        'uz': 'Faol',  # NATIVE-READ
+        'ru': 'Активный',  # NATIVE-READ
+    },
+    'cabinet.account.last_order': {
+        'en': 'Last order',
+        'uz': 'Oxirgi buyurtma',  # NATIVE-READ
+        'ru': 'Последний заказ',  # NATIVE-READ
+    },
+    'cabinet.account.manage': {
+        'en': 'Manage',
+        'uz': 'Boshqarish',  # NATIVE-READ
+        'ru': 'Управлять',  # NATIVE-READ
+    },
+    'cabinet.account.manage_addresses': {
+        'en': 'Manage Addresses',
+        'uz': 'Manzillarni boshqarish',  # NATIVE-READ
+        'ru': 'Управлять адресами',  # NATIVE-READ
+    },
+    'cabinet.account.recent_orders': {
+        'en': 'Recent Orders',
+        'uz': "So'nggi buyurtmalar",  # NATIVE-READ
+        'ru': 'Последние заказы',  # NATIVE-READ
+    },
+    'cabinet.account.tier': {
+        'en': 'Tier',
+        'uz': 'Daraja',  # NATIVE-READ
+        'ru': 'Уровень',  # NATIVE-READ
+    },
+    'cabinet.account.view': {
+        'en': 'View',
+        'uz': "Ko'rish",  # NATIVE-READ
+        'ru': 'Просмотр',  # NATIVE-READ
+    },
+    'cabinet.security.active': {
+        'en': 'Active',
+        'uz': 'Faol',  # NATIVE-READ
+        'ru': 'Активный',  # NATIVE-READ
+    },
+    'cabinet.addresses.back': {
+        'en': 'Back',
+        'uz': 'Orqaga',  # NATIVE-READ
+        'ru': 'Назад',  # NATIVE-READ
+    },
+    'cabinet.addresses.cancel': {
+        'en': 'Cancel',
+        'uz': 'Bekor qilish',  # NATIVE-READ
+        'ru': 'Отмена',  # NATIVE-READ
+    },
+    'cabinet.addresses.city': {
+        'en': 'City',
+        'uz': 'Shahar',  # NATIVE-READ
+        'ru': 'Город',  # NATIVE-READ
+    },
+    'cabinet.addresses.confirm': {
+        'en': 'Confirm',
+        'uz': 'Tasdiqlash',  # NATIVE-READ
+        'ru': 'Подтвердить',  # NATIVE-READ
+    },
+    'cabinet.addresses.delete': {
+        'en': 'Delete',
+        'uz': "O'chirish",  # NATIVE-READ
+        'ru': 'Удалить',  # NATIVE-READ
+    },
+    'cabinet.addresses.district': {
+        'en': 'District',
+        'uz': 'Tuman',  # NATIVE-READ
+        'ru': 'Район',  # NATIVE-READ
+    },
+    'cabinet.addresses.edit': {
+        'en': 'Edit',
+        'uz': 'Tahrirlash',  # NATIVE-READ
+        'ru': 'Редактировать',  # NATIVE-READ
+    },
+    'cabinet.addresses.floor': {
+        'en': 'Floor',
+        'uz': 'Qavat',  # NATIVE-READ
+        'ru': 'Этаж',  # NATIVE-READ
+    },
+    'cabinet.addresses.full_address': {
+        'en': 'Full Address',
+        'uz': "To'liq manzil",  # NATIVE-READ
+        'ru': 'Полный адрес',  # NATIVE-READ
+    },
+    'cabinet.addresses.next': {
+        'en': 'Next',
+        'uz': 'Keyingisi',  # NATIVE-READ
+        'ru': 'Далее',  # NATIVE-READ
+    },
+    'cabinet.addresses.other': {
+        'en': 'Other',
+        'uz': 'Boshqa',  # NATIVE-READ
+        'ru': 'Другое',  # NATIVE-READ
+    },
+    'cabinet.orders.order': {
+        'en': 'Order',
+        'uz': 'Buyurtma',  # NATIVE-READ
+        'ru': 'Заказ',  # NATIVE-READ
+    },
+    'cabinet.orders.quantity': {
+        'en': 'Quantity',
+        'uz': 'Miqdor',  # NATIVE-READ
+        'ru': 'Количество',  # NATIVE-READ
+    },
+    'cabinet.orders.tracking': {
+        'en': 'Tracking',
+        'uz': 'Kuzatuv',  # NATIVE-READ
+        'ru': 'Отслеживание',  # NATIVE-READ
+    },
+    'cabinet.orders.view_details': {
+        'en': 'View Details',
+        'uz': "Batafsil ko'rish",  # NATIVE-READ
+        'ru': 'Посмотреть детали',  # NATIVE-READ
+    },
+    'cabinet.loyalty.close': {
+        'en': 'Close',
+        'uz': 'Yopish',  # NATIVE-READ
+        'ru': 'Закрыть',  # NATIVE-READ
+    },
+    'cabinet.loyalty.order': {
+        'en': 'Order',
+        'uz': 'Buyurtma',  # NATIVE-READ
+        'ru': 'Заказ',  # NATIVE-READ
+    },
+    'cabinet.loyalty.share': {
+        'en': 'Share',
+        'uz': 'Ulashish',  # NATIVE-READ
+        'ru': 'Поделиться',  # NATIVE-READ
+    },
+    'cabinet.loyalty.discount': {
+        'en': 'discount',
+        'uz': 'chegirma',  # NATIVE-READ
+        'ru': 'скидка',  # NATIVE-READ
+    },
+    'cabinet.profile.first_name': {
+        'en': 'First Name',
+        'uz': 'Ism',  # NATIVE-READ
+        'ru': 'Имя',  # NATIVE-READ
+    },
+    'cabinet.profile.last_name': {
+        'en': 'Last Name',
+        'uz': 'Familiya',  # NATIVE-READ
+        'ru': 'Фамилия',  # NATIVE-READ
+    },
+    'cabinet.profile.verified': {
+        'en': 'Verified',
+        'uz': 'Tasdiqlangan',  # NATIVE-READ
+        'ru': 'Подтверждено',  # NATIVE-READ
+    },
+    'web.order_modal.close': {
+        'en': 'Close',
+        'uz': 'Yopish',  # NATIVE-READ
+        'ru': 'Закрыть',  # NATIVE-READ
+    },
+    'web.order_modal.delivery_fee': {
+        'en': 'Delivery Fee',
+        'uz': 'Yetkazib berish narxi',  # NATIVE-READ
+        'ru': 'Плата за доставку',  # NATIVE-READ
+    },
+    'web.order_modal.order': {
+        'en': 'Order',
+        'uz': 'Buyurtma',  # NATIVE-READ
+        'ru': 'Заказ',  # NATIVE-READ
+    },
+    'web.order_modal.price': {
+        'en': 'Price',
+        'uz': 'Narx',  # NATIVE-READ
+        'ru': 'Цена',  # NATIVE-READ
+    },
+    'web.order_modal.quantity': {
+        'en': 'Quantity',
+        'uz': 'Miqdor',  # NATIVE-READ
+        'ru': 'Количество',  # NATIVE-READ
+    },
+    'web.order_modal.subtotal': {
+        'en': 'Subtotal',
+        'uz': 'Oraliq summa',  # NATIVE-READ
+        'ru': 'Промежуточный итог',  # NATIVE-READ
+    },
+    'web.order_modal.total': {
+        'en': 'Total',
+        'uz': 'Jami',  # NATIVE-READ
+        'ru': 'Итого',  # NATIVE-READ
+    },
+    'Account Activity': {
+        'en': 'Account Activity',
+        'uz': 'Hisob faoliyati',  # NATIVE-READ
+        'ru': 'Активность аккаунта',  # NATIVE-READ
+    },
+    'Account Created': {
+        'en': 'Account Created',
+        'uz': 'Hisob yaratildi',  # NATIVE-READ
+        'ru': 'Аккаунт создан',  # NATIVE-READ
+    },
+    'Account Security': {
+        'en': 'Account Security',
+        'uz': 'Hisob xavfsizligi',  # NATIVE-READ
+        'ru': 'Безопасность аккаунта',  # NATIVE-READ
+    },
+    'Account Status': {
+        'en': 'Account Status',
+        'uz': 'Hisob holati',  # NATIVE-READ
+        'ru': 'Статус аккаунта',  # NATIVE-READ
+    },
+    'Account data downloaded successfully!': {
+        'en': 'Account data downloaded successfully!',
+        'uz': "Hisob ma'lumotlari muvaffaqiyatli yuklab olindi!",  # NATIVE-READ
+        'ru': 'Данные аккаунта успешно загружены!',  # NATIVE-READ
+    },
+    'Account was successfully created': {
+        'en': 'Account was successfully created',
+        'uz': 'Hisob muvaffaqiyatli yaratildi',  # NATIVE-READ
+        'ru': 'Аккаунт был успешно создан',  # NATIVE-READ
+    },
+    'Active Subscriptions': {
+        'en': 'Active Subscriptions',
+        'uz': 'Faol obunalar',  # NATIVE-READ
+        'ru': 'Активные подписки',  # NATIVE-READ
+    },
+    'Add New Address': {
+        'en': 'Add New Address',
+        'uz': "Yangi manzil qo'shish",  # NATIVE-READ
+        'ru': 'Добавить новый адрес',  # NATIVE-READ
+    },
+    'Add Your First Address': {
+        'en': 'Add Your First Address',
+        'uz': "Birinchi manzilingizni qo'shing",  # NATIVE-READ
+        'ru': 'Добавьте свой первый адрес',  # NATIVE-READ
+    },
+    'Add an extra layer of security by requiring SMS verification for login.': {
+        'en': 'Add an extra layer of security by requiring SMS verification for login.',
+        'uz': "Kirish uchun SMS tasdiqlashni talab qilib, qo'shimcha xavfsizlik qatlamini qo'shing.",  # NATIVE-READ
+        'ru': 'Добавьте дополнительный уровень безопасности, требуя SMS-подтверждение для входа.',  # NATIVE-READ
+    },
+    'Add your delivery addresses to make ordering easier': {
+        'en': 'Add your delivery addresses to make ordering easier',
+        'uz': "Buyurtmani osonlashtirish uchun yetkazib berish manzillaringizni qo'shing",  # NATIVE-READ
+        'ru': 'Добавьте адреса доставки, чтобы упростить заказ',  # NATIVE-READ
+    },
+    'Address Details': {
+        'en': 'Address Details',
+        'uz': 'Manzil tafsilotlari',  # NATIVE-READ
+        'ru': 'Данные адреса',  # NATIVE-READ
+    },
+    'Address Summary': {
+        'en': 'Address Summary',
+        'uz': 'Manzil xulosasi',  # NATIVE-READ
+        'ru': 'Сводка по адресу',  # NATIVE-READ
+    },
+    'Address Title': {
+        'en': 'Address Title',
+        'uz': 'Manzil nomi',  # NATIVE-READ
+        'ru': 'Название адреса',  # NATIVE-READ
+    },
+    'Address deleted successfully!': {
+        'en': 'Address deleted successfully!',
+        'uz': "Manzil muvaffaqiyatli o'chirildi!",  # NATIVE-READ
+        'ru': 'Адрес успешно удалён!',  # NATIVE-READ
+    },
+    'All Activity': {
+        'en': 'All Activity',
+        'uz': 'Barcha faoliyat',  # NATIVE-READ
+        'ru': 'Вся активность',  # NATIVE-READ
+    },
+    'All Orders': {
+        'en': 'All Orders',
+        'uz': 'Barcha buyurtmalar',  # NATIVE-READ
+        'ru': 'Все заказы',  # NATIVE-READ
+    },
+    'All Time': {
+        'en': 'All Time',
+        'uz': 'Har doim',  # NATIVE-READ
+        'ru': 'Все время',  # NATIVE-READ
+    },
+    'Apartment': {
+        'en': 'Apartment',
+        'uz': 'Xonadon',  # NATIVE-READ
+        'ru': 'Квартира',  # NATIVE-READ
+    },
+    'Apartment #': {
+        'en': 'Apartment #',
+        'uz': 'Xonadon raqami',  # NATIVE-READ
+        'ru': 'Номер квартиры',  # NATIVE-READ
+    },
+    'Apartment/Floor': {
+        'en': 'Apartment/Floor',
+        'uz': 'Kvartira/Qavat',  # NATIVE-READ
+        'ru': 'Квартира/Этаж',  # NATIVE-READ
+    },
+    'Applied automatically to every order': {
+        'en': 'Applied automatically to every order',
+        'uz': "Har bir buyurtmaga avtomatik qo'llanadi",  # NATIVE-READ
+        'ru': 'Применяется к каждому заказу автоматически',  # NATIVE-READ
+    },
+    'Are you sure you want to delete this address?': {
+        'en': 'Are you sure you want to delete this address?',
+        'uz': "Ushbu manzilni o'chirib tashlamoqchimisiz?",  # NATIVE-READ
+        'ru': 'Вы уверены, что хотите удалить этот адрес?',  # NATIVE-READ
+    },
+    'Auto-Applied': {
+        'en': 'Auto-Applied',
+        'uz': "Avtomatik qo'llanadi",  # NATIVE-READ
+        'ru': 'Применяется автоматически',  # NATIVE-READ
+    },
+    'Auto-filled from map selection': {
+        'en': 'Auto-filled from map selection',
+        'uz': "Xaritadan tanlangan joy bo'yicha avtomatik to'ldirildi",  # NATIVE-READ
+        'ru': 'Заполнено автоматически по выбранной на карте точке',  # NATIVE-READ
+    },
+    'Available Rewards': {
+        'en': 'Available Rewards',
+        'uz': 'Mavjud mukofotlar',  # NATIVE-READ
+        'ru': 'Доступные награды',  # NATIVE-READ
+    },
+    'Birthday Bonus': {
+        'en': 'Birthday Bonus',
+        'uz': "Tug'ilgan kun bonusi",  # NATIVE-READ
+        'ru': 'Бонус на день рождения',  # NATIVE-READ
+    },
+    'Bonus: 3 Orders/Month': {
+        'en': 'Bonus: 3 Orders/Month',
+        'uz': 'Bonus: oyiga 3 ta buyurtma',  # NATIVE-READ
+        'ru': 'Бонус: 3 заказа в месяц',  # NATIVE-READ
+    },
+    'Building': {
+        'en': 'Building',
+        'uz': 'Bino',  # NATIVE-READ
+        'ru': 'Здание',  # NATIVE-READ
+    },
+    'Building #': {
+        'en': 'Building #',
+        'uz': 'Bino raqami',  # NATIVE-READ
+        'ru': 'Номер здания',  # NATIVE-READ
+    },
+    'Business': {
+        'en': 'Business',
+        'uz': 'Biznes',  # NATIVE-READ
+        'ru': 'Бизнес',  # NATIVE-READ
+    },
+    'Change Password': {
+        'en': 'Change Password',
+        'uz': "Parolni o'zgartirish",  # NATIVE-READ
+        'ru': 'Изменить пароль',  # NATIVE-READ
+    },
+    'Click on the map to select your delivery location. You can drag the marker to adjust the position.': {
+        'en': 'Click on the map to select your delivery location. You can drag the marker to adjust the position.',
+        'uz': "Yetkazib berish joyini tanlash uchun xaritani bosing. Joylashuvni aniqlashtirish uchun belgini sudrab o'tkazishingiz mumkin.",  # NATIVE-READ
+        'ru': 'Нажмите на карту, чтобы выбрать место доставки. Чтобы уточнить позицию, перетащите маркер.',  # NATIVE-READ
+    },
+    'Confirm & Save': {
+        'en': 'Confirm & Save',
+        'uz': 'Tasdiqlash va saqlash',  # NATIVE-READ
+        'ru': 'Подтвердить и сохранить',  # NATIVE-READ
+    },
+    'Confirm New Password': {
+        'en': 'Confirm New Password',
+        'uz': 'Yangi parolni tasdiqlash',  # NATIVE-READ
+        'ru': 'Подтвердите новый пароль',  # NATIVE-READ
+    },
+    'Confirm new password': {
+        'en': 'Confirm new password',
+        'uz': 'Yangi parolni tasdiqlang',  # NATIVE-READ
+        'ru': 'Подтвердите новый пароль',  # NATIVE-READ
+    },
+    'Connect': {
+        'en': 'Connect',
+        'uz': 'Ulanish',  # NATIVE-READ
+        'ru': 'Подключить',  # NATIVE-READ
+    },
+    'Connected': {
+        'en': 'Connected',
+        'uz': 'Ulandi',  # NATIVE-READ
+        'ru': 'Подключено',  # NATIVE-READ
+    },
+    'Connected platforms': {
+        'en': 'Connected platforms',
+        'uz': 'Ulangan platformalar',  # NATIVE-READ
+        'ru': 'Подключенные платформы',  # NATIVE-READ
+    },
+    'Contact Information': {
+        'en': 'Contact Information',
+        'uz': "Aloqa ma'lumotlari",  # NATIVE-READ
+        'ru': 'Контактная информация',  # NATIVE-READ
+    },
+    'Contact information updated successfully!': {
+        'en': 'Contact information updated successfully!',
+        'uz': "Aloqa ma'lumotlari muvaffaqiyatli yangilandi!",  # NATIVE-READ
+        'ru': 'Контактная информация успешно обновлена!',  # NATIVE-READ
+    },
+    'Copy Code': {
+        'en': 'Copy Code',
+        'uz': 'Kod nusxalash',  # NATIVE-READ
+        'ru': 'Скопировать код',  # NATIVE-READ
+    },
+    'Current Password': {
+        'en': 'Current Password',
+        'uz': 'Joriy parol',  # NATIVE-READ
+        'ru': 'Текущий пароль',  # NATIVE-READ
+    },
+    'Date of Birth': {
+        'en': 'Date of Birth',
+        'uz': "Tug'ilgan sana",  # NATIVE-READ
+        'ru': 'Дата рождения',  # NATIVE-READ
+    },
+    'Default': {
+        'en': 'Default',
+        'uz': 'Standart',  # NATIVE-READ
+        'ru': 'По умолчанию',  # NATIVE-READ
+    },
+    'Default address updated!': {
+        'en': 'Default address updated!',
+        'uz': 'Standart manzil yangilandi!',  # NATIVE-READ
+        'ru': 'Адрес по умолчанию обновлен!',  # NATIVE-READ
+    },
+    'Delivery Address': {
+        'en': 'Delivery Address',
+        'uz': 'Yetkazib berish manzili',  # NATIVE-READ
+        'ru': 'Адрес доставки',  # NATIVE-READ
+    },
+    'Delivery Instructions': {
+        'en': 'Delivery Instructions',
+        'uz': "Yetkazib berish bo'yicha ko'rsatmalar",  # NATIVE-READ
+        'ru': 'Инструкции по доставке',  # NATIVE-READ
+    },
+    'Delivery Location': {
+        'en': 'Delivery Location',
+        'uz': 'Yetkazib berish joyi',  # NATIVE-READ
+        'ru': 'Место доставки',  # NATIVE-READ
+    },
+    'Edit Profile': {
+        'en': 'Edit Profile',
+        'uz': 'Profilni tahrirlash',  # NATIVE-READ
+        'ru': 'Редактировать профиль',  # NATIVE-READ
+    },
+    'Email Address': {
+        'en': 'Email Address',
+        'uz': 'Elektron pochta manzili',  # NATIVE-READ
+        'ru': 'Адрес электронной почты',  # NATIVE-READ
+    },
+    'Email Verification': {
+        'en': 'Email Verification',
+        'uz': 'Elektron pochtani tasdiqlash',  # NATIVE-READ
+        'ru': 'Подтверждение электронной почты',  # NATIVE-READ
+    },
+    'Email address cannot be changed. Contact support if needed.': {
+        'en': 'Email address cannot be changed. Contact support if needed.',
+        'uz': "Elektron pochta manzilini o'zgartirib bo'lmaydi. Kerak bo'lsa, yordam xizmati bilan bog'laning.",  # NATIVE-READ
+        'ru': 'Адрес электронной почты нельзя изменить. Свяжитесь с поддержкой, если необходимо.',  # NATIVE-READ
+    },
+    'Enable 2FA': {
+        'en': 'Enable 2FA',
+        'uz': 'Ikki bosqichli autentifikatsiyani yoqish',  # NATIVE-READ
+        'ru': 'Включить двухфакторную аутентификацию',  # NATIVE-READ
+    },
+    'Enter current password': {
+        'en': 'Enter current password',
+        'uz': 'Joriy parolni kiriting',  # NATIVE-READ
+        'ru': 'Введите текущий пароль',  # NATIVE-READ
+    },
+    'Enter first name': {
+        'en': 'Enter first name',
+        'uz': 'Ismni kiriting',  # NATIVE-READ
+        'ru': 'Введите имя',  # NATIVE-READ
+    },
+    'Enter last name': {
+        'en': 'Enter last name',
+        'uz': 'Familiyani kiriting',  # NATIVE-READ
+        'ru': 'Введите фамилию',  # NATIVE-READ
+    },
+    'Enter new password': {
+        'en': 'Enter new password',
+        'uz': 'Yangi parolni kiriting',  # NATIVE-READ
+        'ru': 'Введите новый пароль',  # NATIVE-READ
+    },
+    'Entrance': {
+        'en': 'Entrance',
+        'uz': 'Podyezd',  # NATIVE-READ
+        'ru': 'Подъезд',  # NATIVE-READ
+    },
+    'Entrance #': {
+        'en': 'Entrance #',
+        'uz': 'Podyezd raqami',  # NATIVE-READ
+        'ru': 'Номер подъезда',  # NATIVE-READ
+    },
+    'Est. delivery': {
+        'en': 'Est. delivery',
+        'uz': 'Taxminiy yetkazib berish',  # NATIVE-READ
+        'ru': 'Ориентировочная доставка',  # NATIVE-READ
+    },
+    'Expires': {
+        'en': 'Expires',
+        'uz': 'Muddati tugaydi',  # NATIVE-READ
+        'ru': 'Истекает',  # NATIVE-READ
+    },
+    'Export Data': {
+        'en': 'Export Data',
+        'uz': "Ma'lumotlarni eksport qilish",  # NATIVE-READ
+        'ru': 'Экспорт данных',  # NATIVE-READ
+    },
+    'Failed to change password': {
+        'en': 'Failed to change password',
+        'uz': "Parolni o'zgartirib bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось изменить пароль',  # NATIVE-READ
+    },
+    'Failed to copy referral code': {
+        'en': 'Failed to copy referral code',
+        'uz': "Referal kodni nusxalab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось скопировать реферальный код',  # NATIVE-READ
+    },
+    'Failed to delete address': {
+        'en': 'Failed to delete address',
+        'uz': "Manzilni o'chirib bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось удалить адрес',  # NATIVE-READ
+    },
+    'Failed to download account data. Please try again.': {
+        'en': 'Failed to download account data. Please try again.',
+        'uz': "Hisob ma'lumotlarini yuklab bo'lmadi. Iltimos, qaytadan urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить данные учетной записи. Пожалуйста, попробуйте снова.',  # NATIVE-READ
+    },
+    'Failed to generate referral code': {
+        'en': 'Failed to generate referral code',
+        'uz': "Referal kodni yaratib bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось сгенерировать реферальный код',  # NATIVE-READ
+    },
+    'Failed to load membership tiers': {
+        'en': 'Failed to load membership tiers',
+        'uz': "A'zolik darajalarini yuklab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось загрузить уровни членства',  # NATIVE-READ
+    },
+    'Failed to load order details': {
+        'en': 'Failed to load order details',
+        'uz': "Buyurtma tafsilotlarini yuklab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось загрузить детали заказа',  # NATIVE-READ
+    },
+    'Failed to load orders': {
+        'en': 'Failed to load orders',
+        'uz': "Buyurtmalarni yuklab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось загрузить заказы',  # NATIVE-READ
+    },
+    'Failed to load orders. Please try again.': {
+        'en': 'Failed to load orders. Please try again.',
+        'uz': "Buyurtmalarni yuklab bo'lmadi. Iltimos, qaytadan urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Не удалось загрузить заказы. Пожалуйста, попробуйте снова.',  # NATIVE-READ
+    },
+    'Failed to load reward details': {
+        'en': 'Failed to load reward details',
+        'uz': "Mukofot tafsilotlarini yuklab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось загрузить детали награды',  # NATIVE-READ
+    },
+    'Failed to load rewards': {
+        'en': 'Failed to load rewards',
+        'uz': "Mukofotlarni yuklab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось загрузить награды',  # NATIVE-READ
+    },
+    'Failed to redeem reward': {
+        'en': 'Failed to redeem reward',
+        'uz': 'Mukofotni olish amalga oshmadi',  # NATIVE-READ
+        'ru': 'Не удалось использовать награду',  # NATIVE-READ
+    },
+    'Failed to send verification email': {
+        'en': 'Failed to send verification email',
+        'uz': 'Tasdiqlash xati yuborilmadi',  # NATIVE-READ
+        'ru': 'Не удалось отправить письмо для подтверждения',  # NATIVE-READ
+    },
+    'Failed to set default address': {
+        'en': 'Failed to set default address',
+        'uz': "Asosiy manzilni belgilab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось установить адрес по умолчанию',  # NATIVE-READ
+    },
+    'Failed to update contact information': {
+        'en': 'Failed to update contact information',
+        'uz': "Kontakt ma'lumotlarini yangilab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось обновить контактную информацию',  # NATIVE-READ
+    },
+    'Failed to update personal information': {
+        'en': 'Failed to update personal information',
+        'uz': "Shaxsiy ma'lumotlarni yangilab bo'lmadi",  # NATIVE-READ
+        'ru': 'Не удалось обновить личные данные',  # NATIVE-READ
+    },
+    'Fair': {
+        'en': 'Fair',
+        'uz': "O'rtacha",  # NATIVE-READ
+        'ru': 'Удовлетворительно',  # NATIVE-READ
+    },
+    'Female': {
+        'en': 'Female',
+        'uz': 'Ayol',  # NATIVE-READ
+        'ru': 'Женский',  # NATIVE-READ
+    },
+    'Filter': {
+        'en': 'Filter',
+        'uz': 'Filtr',  # NATIVE-READ
+        'ru': 'Фильтр',  # NATIVE-READ
+    },
+    'Floor #': {
+        'en': 'Floor #',
+        'uz': 'Qavat raqami',  # NATIVE-READ
+        'ru': 'Номер этажа',  # NATIVE-READ
+    },
+    'Free Product': {
+        'en': 'Free Product',
+        'uz': 'Bepul mahsulot',  # NATIVE-READ
+        'ru': 'Бесплатный товар',  # NATIVE-READ
+    },
+    'Friends Referred': {
+        'en': 'Friends Referred',
+        'uz': "Taklif qilingan do'stlar",  # NATIVE-READ
+        'ru': 'Привлеченные друзья',  # NATIVE-READ
+    },
+    'Gender': {
+        'en': 'Gender',
+        'uz': 'Jins',  # NATIVE-READ
+        'ru': 'Пол',  # NATIVE-READ
+    },
+    'Get My Referral Code': {
+        'en': 'Get My Referral Code',
+        'uz': 'Referal kodimni oling',  # NATIVE-READ
+        'ru': 'Получить мой реферальный код',  # NATIVE-READ
+    },
+    'Gift Card': {
+        'en': 'Gift Card',
+        'uz': "Sovg'a kartasi",  # NATIVE-READ
+        'ru': 'Подарочная карта',  # NATIVE-READ
+    },
+    'Good': {
+        'en': 'Good',
+        'uz': 'Yaxshi',  # NATIVE-READ
+        'ru': 'Хорошо',  # NATIVE-READ
+    },
+    'Guaranteed until': {
+        'en': 'Guaranteed until',
+        'uz': 'Kafolat muddati:',  # NATIVE-READ
+        'ru': 'Гарантировано до',  # NATIVE-READ
+    },
+    'Instructions': {
+        'en': 'Instructions',
+        'uz': "Ko'rsatmalar",  # NATIVE-READ
+        'ru': 'Инструкции',  # NATIVE-READ
+    },
+    'Join Aqua Element Water Delivery': {
+        'en': 'Join Aqua Element Water Delivery',
+        'uz': "Aqua Element suv yetkazib berish xizmatiga qo'shiling",  # NATIVE-READ
+        'ru': 'Присоединяйтесь к доставке воды Aqua Element',  # NATIVE-READ
+    },
+    'Landmark': {
+        'en': 'Landmark',
+        'uz': "Mo'ljal",  # NATIVE-READ
+        'ru': 'Ориентир',  # NATIVE-READ
+    },
+    'Last 3 Months': {
+        'en': 'Last 3 Months',
+        'uz': 'Oxirgi 3 oy',  # NATIVE-READ
+        'ru': 'Последние 3 месяца',  # NATIVE-READ
+    },
+    'Last 30 Days': {
+        'en': 'Last 30 Days',
+        'uz': 'Oxirgi 30 kun',  # NATIVE-READ
+        'ru': 'Последние 30 дней',  # NATIVE-READ
+    },
+    'Last 7 Days': {
+        'en': 'Last 7 Days',
+        'uz': 'Oxirgi 7 kun',  # NATIVE-READ
+        'ru': 'Последние 7 дней',  # NATIVE-READ
+    },
+    'Last Login': {
+        'en': 'Last Login',
+        'uz': 'Oxirgi kirish',  # NATIVE-READ
+        'ru': 'Последний вход',  # NATIVE-READ
+    },
+    'Last Year': {
+        'en': 'Last Year',
+        'uz': "O'tgan yil",  # NATIVE-READ
+        'ru': 'Прошлый год',  # NATIVE-READ
+    },
+    'Last login': {
+        'en': 'Last login',
+        'uz': 'Oxirgi kirish',  # NATIVE-READ
+        'ru': 'Последний вход',  # NATIVE-READ
+    },
+    'Loading membership tiers...': {
+        'en': 'Loading membership tiers...',
+        'uz': "A'zolik darajalari yuklanmoqda...",  # NATIVE-READ
+        'ru': 'Загрузка уровней членства...',  # NATIVE-READ
+    },
+    'Loading rewards...': {
+        'en': 'Loading rewards...',
+        'uz': 'Mukofotlar yuklanmoqda...',  # NATIVE-READ
+        'ru': 'Загрузка наград...',  # NATIVE-READ
+    },
+    'Loading your orders...': {
+        'en': 'Loading your orders...',
+        'uz': 'Buyurtmalaringiz yuklanmoqda...',  # NATIVE-READ
+        'ru': 'Загрузка ваших заказов...',  # NATIVE-READ
+    },
+    'Make Purchases': {
+        'en': 'Make Purchases',
+        'uz': 'Xarid qilish',  # NATIVE-READ
+        'ru': 'Совершать покупки',  # NATIVE-READ
+    },
+    'Male': {
+        'en': 'Male',
+        'uz': 'Erkak',  # NATIVE-READ
+        'ru': 'Мужчина',  # NATIVE-READ
+    },
+    'Manage All': {
+        'en': 'Manage All',
+        'uz': 'Hammasini boshqarish',  # NATIVE-READ
+        'ru': 'Управлять всем',  # NATIVE-READ
+    },
+    'Manage your account, orders, and preferences from your unified dashboard.': {
+        'en': 'Manage your account, orders, and preferences from your unified dashboard.',
+        'uz': 'Hisobingiz, buyurtmalaringiz va sozlamalaringizni yagona boshqaruv panelidan boshqaring.',  # NATIVE-READ
+        'ru': 'Управляйте аккаунтом, заказами и настройками из единой панели.',  # NATIVE-READ
+    },
+    'Member Since': {
+        'en': 'Member Since',
+        'uz': "Aʼzo bo'lgan vaqtidan",  # NATIVE-READ
+        'ru': 'Участник с',  # NATIVE-READ
+    },
+    'Membership Tiers': {
+        'en': 'Membership Tiers',
+        'uz': 'Aʼzolik darajalari',  # NATIVE-READ
+        'ru': 'Уровни членства',  # NATIVE-READ
+    },
+    'Month Streak': {
+        'en': 'Month Streak',
+        'uz': 'Oylik ketma-ketlik',  # NATIVE-READ
+        'ru': 'Месяцев подряд',  # NATIVE-READ
+    },
+    'Nearby landmark': {
+        'en': 'Nearby landmark',
+        'uz': "Yaqin mo'ljal",  # NATIVE-READ
+        'ru': 'Ближайший ориентир',  # NATIVE-READ
+    },
+    'Network error. Please try again.': {
+        'en': 'Network error. Please try again.',
+        'uz': "Tarmoq xatosi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'ru': 'Ошибка сети. Пожалуйста, попробуйте снова.',  # NATIVE-READ
+    },
+    'New Password': {
+        'en': 'New Password',
+        'uz': 'Yangi parol',  # NATIVE-READ
+        'ru': 'Новый пароль',  # NATIVE-READ
+    },
+    'New passwords do not match': {
+        'en': 'New passwords do not match',
+        'uz': 'Yangi parollar mos kelmayapti',  # NATIVE-READ
+        'ru': 'Новые пароли не совпадают',  # NATIVE-READ
+    },
+    'No addresses saved yet': {
+        'en': 'No addresses saved yet',
+        'uz': 'Hali manzillar saqlanmagan',  # NATIVE-READ
+        'ru': 'Адреса еще не сохранены',  # NATIVE-READ
+    },
+    'No delivery address provided': {
+        'en': 'No delivery address provided',
+        'uz': "Yetkazib berish manzili ko'rsatilmagan",  # NATIVE-READ
+        'ru': 'Адрес доставки не указан',  # NATIVE-READ
+    },
+    'No membership tiers available': {
+        'en': 'No membership tiers available',
+        'uz': "A'zolik darajalari mavjud emas",  # NATIVE-READ
+        'ru': 'Уровни членства недоступны',  # NATIVE-READ
+    },
+    'No orders found': {
+        'en': 'No orders found',
+        'uz': 'Buyurtmalar topilmadi',  # NATIVE-READ
+        'ru': 'Заказы не найдены',  # NATIVE-READ
+    },
+    'No orders yet': {
+        'en': 'No orders yet',
+        'uz': "Hali buyurtmalar yo'q",  # NATIVE-READ
+        'ru': 'Пока нет заказов',  # NATIVE-READ
+    },
+    'No rewards available': {
+        'en': 'No rewards available',
+        'uz': 'Mukofotlar mavjud emas',  # NATIVE-READ
+        'ru': 'Нет доступных наград',  # NATIVE-READ
+    },
+    'Order Date': {
+        'en': 'Order Date',
+        'uz': 'Buyurtma sanasi',  # NATIVE-READ
+        'ru': 'Дата заказа',  # NATIVE-READ
+    },
+    'Order Details': {
+        'en': 'Order Details',
+        'uz': 'Buyurtma tafsilotlari',  # NATIVE-READ
+        'ru': 'Детали заказа',  # NATIVE-READ
+    },
+    'Order Items': {
+        'en': 'Order Items',
+        'uz': 'Buyurtmadagi mahsulotlar',  # NATIVE-READ
+        'ru': 'Товары в заказе',  # NATIVE-READ
+    },
+    'Order Status': {
+        'en': 'Order Status',
+        'uz': 'Buyurtma holati',  # NATIVE-READ
+        'ru': 'Статус заказа',  # NATIVE-READ
+    },
+    'Order Summary': {
+        'en': 'Order Summary',
+        'uz': 'Buyurtma xulosasi',  # NATIVE-READ
+        'ru': 'Сводка заказа',  # NATIVE-READ
+    },
+    'Order Tracking': {
+        'en': 'Order Tracking',
+        'uz': 'Buyurtma kuzatuvi',  # NATIVE-READ
+        'ru': 'Отслеживание заказа',  # NATIVE-READ
+    },
+    'Order more to keep streak!': {
+        'en': 'Order more to keep streak!',
+        'uz': 'Ketma-ketlikni saqlash uchun yana buyurtma bering!',  # NATIVE-READ
+        'ru': 'Закажите ещё, чтобы сохранить серию!',  # NATIVE-READ
+    },
+    'Order number, product name...': {
+        'en': 'Order number, product name...',
+        'uz': 'Buyurtma raqami, mahsulot nomi...',  # NATIVE-READ
+        'ru': 'Номер заказа, название товара...',  # NATIVE-READ
+    },
+    'Password Protection': {
+        'en': 'Password Protection',
+        'uz': 'Parol bilan himoya',  # NATIVE-READ
+        'ru': 'Защита паролем',  # NATIVE-READ
+    },
+    'Password changed successfully!': {
+        'en': 'Password changed successfully!',
+        'uz': "Parol muvaffaqiyatli o'zgartirildi!",  # NATIVE-READ
+        'ru': 'Пароль успешно изменён!',  # NATIVE-READ
+    },
+    'Password is too weak. Please choose a stronger password.': {
+        'en': 'Password is too weak. Please choose a stronger password.',
+        'uz': 'Parol juda zaif. Iltimos, kuchliroq parol tanlang.',  # NATIVE-READ
+        'ru': 'Пароль слишком слабый. Пожалуйста, выберите более надежный пароль.',  # NATIVE-READ
+    },
+    'Password must be at least 8 characters long': {
+        'en': 'Password must be at least 8 characters long',
+        'uz': "Parol kamida 8 ta belgidan iborat bo'lishi kerak",  # NATIVE-READ
+        'ru': 'Пароль должен содержать не менее 8 символов',  # NATIVE-READ
+    },
+    'Password strength': {
+        'en': 'Password strength',
+        'uz': 'Parol kuchi',  # NATIVE-READ
+        'ru': 'Надежность пароля',  # NATIVE-READ
+    },
+    'Personal Information': {
+        'en': 'Personal Information',
+        'uz': "Shaxsiy ma'lumotlar",  # NATIVE-READ
+        'ru': 'Личная информация',  # NATIVE-READ
+    },
+    'Personal information updated successfully!': {
+        'en': 'Personal information updated successfully!',
+        'uz': "Shaxsiy ma'lumotlar muvaffaqiyatli yangilandi!",  # NATIVE-READ
+        'ru': 'Личная информация успешно обновлена!',  # NATIVE-READ
+    },
+    'Personal information was updated': {
+        'en': 'Personal information was updated',
+        'uz': "Shaxsiy ma'lumotlar yangilandi",  # NATIVE-READ
+        'ru': 'Личная информация обновлена',  # NATIVE-READ
+    },
+    'Phone Number': {
+        'en': 'Phone Number',
+        'uz': 'Telefon raqami',  # NATIVE-READ
+        'ru': 'Номер телефона',  # NATIVE-READ
+    },
+    'Phone Verification': {
+        'en': 'Phone Verification',
+        'uz': 'Telefonni tasdiqlash',  # NATIVE-READ
+        'ru': 'Подтверждение телефона',  # NATIVE-READ
+    },
+    'Place New Order': {
+        'en': 'Place New Order',
+        'uz': 'Yangi buyurtma berish',  # NATIVE-READ
+        'ru': 'Сделать новый заказ',  # NATIVE-READ
+    },
+    'Placed on': {
+        'en': 'Placed on',
+        'uz': 'Joylashtirilgan',  # NATIVE-READ
+        'ru': 'Размещено',  # NATIVE-READ
+    },
+    'Platform Usage': {
+        'en': 'Platform Usage',
+        'uz': 'Platformadan foydalanish',  # NATIVE-READ
+        'ru': 'Использование платформы',  # NATIVE-READ
+    },
+    'Please verify your email address to access all features': {
+        'en': 'Please verify your email address to access all features',
+        'uz': 'Iltimos, barcha funksiyalardan foydalanish uchun emailingizni tasdiqlang',  # NATIVE-READ
+        'ru': 'Пожалуйста, подтвердите свой адрес электронной почты, чтобы получить доступ ко всем функциям',  # NATIVE-READ
+    },
+    'Please verify your phone number for enhanced security': {
+        'en': 'Please verify your phone number for enhanced security',
+        'uz': 'Iltimos, xavfsizlikni oshirish uchun telefon raqamingizni tasdiqlang',  # NATIVE-READ
+        'ru': 'Пожалуйста, подтвердите номер телефона для повышения безопасности',  # NATIVE-READ
+    },
+    'Preferences': {
+        'en': 'Preferences',
+        'uz': 'Sozlamalar',  # NATIVE-READ
+        'ru': 'Настройки',  # NATIVE-READ
+    },
+    'Preferences saved successfully!': {
+        'en': 'Preferences saved successfully!',
+        'uz': 'Sozlamalar muvaffaqiyatli saqlandi!',  # NATIVE-READ
+        'ru': 'Настройки успешно сохранены!',  # NATIVE-READ
+    },
+    'Preferred Language': {
+        'en': 'Preferred Language',
+        'uz': "Afzal ko'rilgan til",  # NATIVE-READ
+        'ru': 'Предпочтительный язык',  # NATIVE-READ
+    },
+    'Preparing your account data for download...': {
+        'en': 'Preparing your account data for download...',
+        'uz': "Hisob ma'lumotlaringizni yuklab olish uchun tayyorlanmoqda...",  # NATIVE-READ
+        'ru': 'Подготавливаем данные вашего аккаунта для скачивания...',  # NATIVE-READ
+    },
+    'Profile Updated': {
+        'en': 'Profile Updated',
+        'uz': 'Profil yangilandi',  # NATIVE-READ
+        'ru': 'Профиль обновлен',  # NATIVE-READ
+    },
+    'Profile updated': {
+        'en': 'Profile updated',
+        'uz': 'Profil yangilandi',  # NATIVE-READ
+        'ru': 'Профиль обновлен',  # NATIVE-READ
+    },
+    'Quick Actions': {
+        'en': 'Quick Actions',
+        'uz': 'Tezkor amallar',  # NATIVE-READ
+        'ru': 'Быстрые действия',  # NATIVE-READ
+    },
+    'Quick Select Title': {
+        'en': 'Quick Select Title',
+        'uz': 'Sarlavhani tez tanlash',  # NATIVE-READ
+        'ru': 'Быстрый выбор названия',  # NATIVE-READ
+    },
+    'Receive SMS notifications about deliveries': {
+        'en': 'Receive SMS notifications about deliveries',
+        'uz': 'Yetkazib berish haqida SMS xabarnomalarini oling',  # NATIVE-READ
+        'ru': 'Получать SMS-уведомления о доставках',  # NATIVE-READ
+    },
+    'Receive email notifications about orders': {
+        'en': 'Receive email notifications about orders',
+        'uz': 'Buyurtmalar haqida email xabarnomalarini oling',  # NATIVE-READ
+        'ru': 'Получать email-уведомления о заказах',  # NATIVE-READ
+    },
+    'Receive promotional emails and offers': {
+        'en': 'Receive promotional emails and offers',
+        'uz': 'Reklama email va takliflarni oling',  # NATIVE-READ
+        'ru': 'Получать рекламные письма и предложения',  # NATIVE-READ
+    },
+    'Recent Account Activity': {
+        'en': 'Recent Account Activity',
+        'uz': "Hisobdagi so'nggi faoliyat",  # NATIVE-READ
+        'ru': 'Последняя активность аккаунта',  # NATIVE-READ
+    },
+    'Recent Activity': {
+        'en': 'Recent Activity',
+        'uz': "So'nggi faoliyat",  # NATIVE-READ
+        'ru': 'Последняя активность',  # NATIVE-READ
+    },
+    'Redeem': {
+        'en': 'Redeem',
+        'uz': 'Foydalanish',  # NATIVE-READ
+        'ru': 'Использовать',  # NATIVE-READ
+    },
+    'Refer Friends': {
+        'en': 'Refer Friends',
+        'uz': "Do'stlarni taklif qilish",  # NATIVE-READ
+        'ru': 'Пригласить друзей',  # NATIVE-READ
+    },
+    'Referral code copied to clipboard!': {
+        'en': 'Referral code copied to clipboard!',
+        'uz': 'Referal kod xotiraga nusxalandi!',  # NATIVE-READ
+        'ru': 'Реферальный код скопирован в буфер обмена!',  # NATIVE-READ
+    },
+    'Registration Source': {
+        'en': 'Registration Source',
+        'uz': "Ro'yxatdan o'tish manbai",  # NATIVE-READ
+        'ru': 'Источник регистрации',  # NATIVE-READ
+    },
+    'Reward redeemed successfully!': {
+        'en': 'Reward redeemed successfully!',
+        'uz': 'Mukofot muvaffaqiyatli foydalanildi!',  # NATIVE-READ
+        'ru': 'Награда успешно использована!',  # NATIVE-READ
+    },
+    'SKU': {
+        'en': 'SKU',
+        'uz': 'SKU',  # NATIVE-READ
+        'ru': 'Артикул',  # NATIVE-READ
+    },
+    'SMS Authentication': {
+        'en': 'SMS Authentication',
+        'uz': 'SMS autentifikatsiya',  # NATIVE-READ
+        'ru': 'SMS-аутентификация',  # NATIVE-READ
+    },
+    'Save Address': {
+        'en': 'Save Address',
+        'uz': 'Manzilni saqlash',  # NATIVE-READ
+        'ru': 'Сохранить адрес',  # NATIVE-READ
+    },
+    'Save Changes': {
+        'en': 'Save Changes',
+        'uz': "O'zgarishlarni saqlash",  # NATIVE-READ
+        'ru': 'Сохранить изменения',  # NATIVE-READ
+    },
+    'Save Preferences': {
+        'en': 'Save Preferences',
+        'uz': 'Afzalliklarni saqlash',  # NATIVE-READ
+        'ru': 'Сохранить предпочтения',  # NATIVE-READ
+    },
+    'Save Security Settings': {
+        'en': 'Save Security Settings',
+        'uz': 'Xavfsizlik sozlamalarini saqlash',  # NATIVE-READ
+        'ru': 'Сохранить настройки безопасности',  # NATIVE-READ
+    },
+    'Saved Addresses': {
+        'en': 'Saved Addresses',
+        'uz': 'Saqlangan manzillar',  # NATIVE-READ
+        'ru': 'Сохраненные адреса',  # NATIVE-READ
+    },
+    'Search Orders': {
+        'en': 'Search Orders',
+        'uz': 'Buyurtmalarni qidirish',  # NATIVE-READ
+        'ru': 'Поиск заказов',  # NATIVE-READ
+    },
+    'Search for an address...': {
+        'en': 'Search for an address...',
+        'uz': 'Manzilni qidiring...',  # NATIVE-READ
+        'ru': 'Найдите адрес...',  # NATIVE-READ
+    },
+    'Security Overview': {
+        'en': 'Security Overview',
+        'uz': 'Xavfsizlikga umumiy nazar',  # NATIVE-READ
+        'ru': 'Обзор безопасности',  # NATIVE-READ
+    },
+    'Security Settings': {
+        'en': 'Security Settings',
+        'uz': 'Xavfsizlik sozlamalari',  # NATIVE-READ
+        'ru': 'Настройки безопасности',  # NATIVE-READ
+    },
+    'Security settings saved successfully!': {
+        'en': 'Security settings saved successfully!',
+        'uz': 'Xavfsizlik sozlamalari muvaffaqiyatli saqlandi!',  # NATIVE-READ
+        'ru': 'Настройки безопасности успешно сохранены!',  # NATIVE-READ
+    },
+    'Select District': {
+        'en': 'Select District',
+        'uz': 'Tumanni tanlang',  # NATIVE-READ
+        'ru': 'Выберите район',  # NATIVE-READ
+    },
+    'Select Gender': {
+        'en': 'Select Gender',
+        'uz': 'Jinsni tanlang',  # NATIVE-READ
+        'ru': 'Выберите пол',  # NATIVE-READ
+    },
+    'Select Location': {
+        'en': 'Select Location',
+        'uz': 'Joylashuvni tanlang',  # NATIVE-READ
+        'ru': 'Выберите местоположение',  # NATIVE-READ
+    },
+    'Select Your Location': {
+        'en': 'Select Your Location',
+        'uz': 'Joylashuvingizni tanlang',  # NATIVE-READ
+        'ru': 'Выберите ваше местоположение',  # NATIVE-READ
+    },
+    'Send email notifications for new logins': {
+        'en': 'Send email notifications for new logins',
+        'uz': 'Yangi kirishlar uchun email xabarnoma yuborish',  # NATIVE-READ
+        'ru': 'Отправлять уведомления по email о новых входах',  # NATIVE-READ
+    },
+    'Send email notifications for password changes': {
+        'en': 'Send email notifications for password changes',
+        'uz': "Parol o'zgarishlari uchun email xabarnoma yuborish",  # NATIVE-READ
+        'ru': 'Отправлять уведомления по email об изменении пароля',  # NATIVE-READ
+    },
+    'Set Default': {
+        'en': 'Set Default',
+        'uz': 'Standart qilib belgilash',  # NATIVE-READ
+        'ru': 'Установить по умолчанию',  # NATIVE-READ
+    },
+    'Set as default address': {
+        'en': 'Set as default address',
+        'uz': 'Standart manzil sifatida belgilash',  # NATIVE-READ
+        'ru': 'Установить как адрес по умолчанию',  # NATIVE-READ
+    },
+    'Share this code with friends': {
+        'en': 'Share this code with friends',
+        'uz': "Ushbu kodni do'stlaringiz bilan ulashing",  # NATIVE-READ
+        'ru': 'Поделитесь этим кодом с друзьями',  # NATIVE-READ
+    },
+    'Shop Products': {
+        'en': 'Shop Products',
+        'uz': 'Mahsulotlarni xarid qilish',  # NATIVE-READ
+        'ru': 'Товары магазина',  # NATIVE-READ
+    },
+    'Show passwords': {
+        'en': 'Show passwords',
+        'uz': "Parollarni ko'rsatish",  # NATIVE-READ
+        'ru': 'Показать пароли',  # NATIVE-READ
+    },
+    'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)': {
+        'en': 'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)',
+        'uz': "Yetkazib berish bo'yicha maxsus ko'rsatmalar (masalan, qo'ng'iroq qiling, eshik oldiga qoldiring va h.k.)",  # NATIVE-READ
+        'ru': 'Особые указания по доставке (например, позвонить в дверь, оставить у двери и т. д.)',  # NATIVE-READ
+    },
+    'Start Shopping': {
+        'en': 'Start Shopping',
+        'uz': 'Xarid qilishni boshlang',  # NATIVE-READ
+        'ru': 'Начать покупки',  # NATIVE-READ
+    },
+    'Start shopping to see your orders here': {
+        'en': 'Start shopping to see your orders here',
+        'uz': "Buyurtmalaringizni bu yerda ko'rish uchun xarid qilishni boshlang",  # NATIVE-READ
+        'ru': 'Начните покупки, чтобы увидеть свои заказы здесь',  # NATIVE-READ
+    },
+    'Status Secured': {
+        'en': 'Status Secured',
+        'uz': 'Maqom saqlab qolindi',  # NATIVE-READ
+        'ru': 'Статус сохранён',  # NATIVE-READ
+    },
+    'Street': {
+        'en': 'Street',
+        'uz': "Ko'cha",  # NATIVE-READ
+        'ru': 'Улица',  # NATIVE-READ
+    },
+    'Street name': {
+        'en': 'Street name',
+        'uz': "Ko'cha nomi",  # NATIVE-READ
+        'ru': 'Название улицы',  # NATIVE-READ
+    },
+    'Strong': {
+        'en': 'Strong',
+        'uz': 'Kuchli',  # NATIVE-READ
+        'ru': 'Сильный',  # NATIVE-READ
+    },
+    'Successful login from web browser': {
+        'en': 'Successful login from web browser',
+        'uz': 'Veb-brauzer orqali muvaffaqiyatli kirildi',  # NATIVE-READ
+        'ru': 'Успешный вход через веб-браузер',  # NATIVE-READ
+    },
+    'Sync Error': {
+        'en': 'Sync Error',
+        'uz': 'Sinxronizatsiya xatosi',  # NATIVE-READ
+        'ru': 'Ошибка синхронизации',  # NATIVE-READ
+    },
+    'Synchronized': {
+        'en': 'Synchronized',
+        'uz': 'Sinxronlashtirildi',  # NATIVE-READ
+        'ru': 'Синхронизировано',  # NATIVE-READ
+    },
+    'Syncing...': {
+        'en': 'Syncing...',
+        'uz': 'Sinxronizatsiya qilinmoqda...',  # NATIVE-READ
+        'ru': 'Синхронизация...',  # NATIVE-READ
+    },
+    'Tax': {
+        'en': 'Tax',
+        'uz': 'Soliq',  # NATIVE-READ
+        'ru': 'Налог',  # NATIVE-READ
+    },
+    'Telegram Bot': {
+        'en': 'Telegram Bot',
+        'uz': 'Telegram bot',  # NATIVE-READ
+        'ru': 'Телеграм-бот',  # NATIVE-READ
+    },
+    'This is a business address': {
+        'en': 'This is a business address',
+        'uz': 'Bu ish manzili',  # NATIVE-READ
+        'ru': 'Это рабочий адрес',  # NATIVE-READ
+    },
+    'Time Period': {
+        'en': 'Time Period',
+        'uz': "Vaqt oralig'i",  # NATIVE-READ
+        'ru': 'Период времени',  # NATIVE-READ
+    },
+    'Total Orders': {
+        'en': 'Total Orders',
+        'uz': 'Jami buyurtmalar',  # NATIVE-READ
+        'ru': 'Всего заказов',  # NATIVE-READ
+    },
+    'Track Package': {
+        'en': 'Track Package',
+        'uz': 'Posilkani kuzatish',  # NATIVE-READ
+        'ru': 'Отслеживать посылку',  # NATIVE-READ
+    },
+    'Tracking Number': {
+        'en': 'Tracking Number',
+        'uz': 'Kuzatuv raqami',  # NATIVE-READ
+        'ru': 'Номер отслеживания',  # NATIVE-READ
+    },
+    'Two-Factor Authentication': {
+        'en': 'Two-Factor Authentication',
+        'uz': 'Ikki bosqichli autentifikatsiya',  # NATIVE-READ
+        'ru': 'Двухфакторная аутентификация',  # NATIVE-READ
+    },
+    'Two-factor authentication setup coming soon!': {
+        'en': 'Two-factor authentication setup coming soon!',
+        'uz': "Ikki bosqichli autentifikatsiya sozlamasi tez orada qo'shiladi!",  # NATIVE-READ
+        'ru': 'Настройка двухфакторной аутентификации скоро появится!',  # NATIVE-READ
+    },
+    'Update Contact Info': {
+        'en': 'Update Contact Info',
+        'uz': "Aloqa ma'lumotlarini yangilash",  # NATIVE-READ
+        'ru': 'Обновить контактную информацию',  # NATIVE-READ
+    },
+    'Use My Location': {
+        'en': 'Use My Location',
+        'uz': 'Mening joylashuvimdan foydalanish',  # NATIVE-READ
+        'ru': 'Использовать моё местоположение',  # NATIVE-READ
+    },
+    'Use my referral code': {
+        'en': 'Use my referral code',
+        'uz': 'Mening referal kodimdan foydalaning',  # NATIVE-READ
+        'ru': 'Используйте мой реферальный код',  # NATIVE-READ
+    },
+    'Verification email sent! Please check your inbox.': {
+        'en': 'Verification email sent! Please check your inbox.',
+        'uz': 'Tasdiqlash xati yuborildi! Iltimos, pochtangizni tekshiring.',  # NATIVE-READ
+        'ru': 'Письмо с подтверждением отправлено! Пожалуйста, проверьте вашу почту.',  # NATIVE-READ
+    },
+    'Verify Phone First': {
+        'en': 'Verify Phone First',
+        'uz': 'Avval telefonni tasdiqlang',  # NATIVE-READ
+        'ru': 'Сначала подтвердите телефон',  # NATIVE-READ
+    },
+    'Very Strong': {
+        'en': 'Very Strong',
+        'uz': 'Juda kuchli',  # NATIVE-READ
+        'ru': 'Очень сильный',  # NATIVE-READ
+    },
+    'Weak': {
+        'en': 'Weak',
+        'uz': 'Kuchsiz',  # NATIVE-READ
+        'ru': 'Слабый',  # NATIVE-READ
+    },
+    'Web App': {
+        'en': 'Web App',
+        'uz': 'Veb ilova',  # NATIVE-READ
+        'ru': 'Веб-приложение',  # NATIVE-READ
+    },
+    'Welcome back': {
+        'en': 'Welcome back',
+        'uz': 'Xush kelibsiz',  # NATIVE-READ
+        'ru': 'С возвращением',  # NATIVE-READ
+    },
+    'Work': {
+        'en': 'Work',
+        'uz': 'Ish',  # NATIVE-READ
+        'ru': 'Работа',  # NATIVE-READ
+    },
+    'Would you like to verify your new phone number now?': {
+        'en': 'Would you like to verify your new phone number now?',
+        'uz': 'Yangi telefon raqamingizni hozir tasdiqlamoqchimisiz?',  # NATIVE-READ
+        'ru': 'Хотите подтвердить свой новый номер телефона сейчас?',  # NATIVE-READ
+    },
+    'Write Reviews': {
+        'en': 'Write Reviews',
+        'uz': 'Sharh yozish',  # NATIVE-READ
+        'ru': 'Написать отзывы',  # NATIVE-READ
+    },
+    'You havent placed any orders yet or no orders match your filters': {
+        'en': "You haven't placed any orders yet or no orders match your filters",
+        'uz': 'Siz hali buyurtma qilmagansiz yoki hech qanday buyurtma filtrlaringizga mos kelmaydi',  # NATIVE-READ
+        'ru': 'Вы еще не сделали заказ или ни один заказ не соответствует вашим фильтрам',  # NATIVE-READ
+    },
+    'You need to verify your phone number before enabling 2FA. Go to phone verification?': {
+        'en': 'You need to verify your phone number before enabling 2FA. Go to phone verification?',
+        'uz': "Ikki faktorli autentifikatsiyani yoqishdan oldin telefon raqamingizni tasdiqlashingiz kerak. Telefonni tasdiqlashga o'tasizmi?",  # NATIVE-READ
+        'ru': 'Вам нужно подтвердить свой номер телефона, прежде чем включить двухфакторную аутентификацию. Перейти к подтверждению номера?',  # NATIVE-READ
+    },
+    'Your Referral Code': {
+        'en': 'Your Referral Code',
+        'uz': 'Sizning referal kodingiz',  # NATIVE-READ
+        'ru': 'Ваш реферальный код',  # NATIVE-READ
+    },
+    'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.': {
+        'en': 'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.',
+        'uz': "Manzilingiz xaritada tanlangan joylashuv bilan saqlanadi. Belgi to'g'ri qo'yilganiga ishonch hosil qiling.",  # NATIVE-READ
+        'ru': 'Адрес будет сохранён с точкой, выбранной на карте. Убедитесь, что метка поставлена верно.',  # NATIVE-READ
+    },
+    'and': {
+        'en': 'and',
+        'uz': 'va',  # NATIVE-READ
+        'ru': 'и',  # NATIVE-READ
+    },
+    'e.g., Home, Office, etc.': {
+        'en': 'e.g., Home, Office, etc.',
+        'uz': 'masalan, Uy, Ofis va boshqalar',  # NATIVE-READ
+        'ru': 'например, Дом, Офис и т.д.',  # NATIVE-READ
+    },
+    'more items': {
+        'en': 'more items',
+        'uz': "ko'proq mahsulot",  # NATIVE-READ
+        'ru': 'больше товаров',  # NATIVE-READ
+    },
+    'this month': {
+        'en': 'this month',
+        'uz': 'shu oyda',  # NATIVE-READ
+        'ru': 'за этот месяц',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CABINET_PAGE_TRANSLATIONS)
+
+
+# Step 4 Task 20a (D25): the checkout's delivery-window words. Only the word is stored; checkout.js adds the times from
+# its own window table, so the bounds live in one place. The uz/ru words are the `ui.orders.window_*` ones.
+CHECKOUT_WINDOW_TRANSLATIONS = {
+    'web.checkout.window_morning': {
+        'en': 'Morning',
+        'uz': 'Ertalab',  # NATIVE-READ
+        'ru': 'Утро',  # NATIVE-READ
+    },
+    'web.checkout.window_afternoon': {
+        'en': 'Afternoon',
+        'uz': 'Kunduzi',  # NATIVE-READ
+        'ru': 'День',  # NATIVE-READ
+    },
+    'web.checkout.window_evening': {
+        'en': 'Evening',
+        'uz': 'Kechqurun',  # NATIVE-READ
+        'ru': 'Вечер',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CHECKOUT_WINDOW_TRANSLATIONS)
+
+
+# Step 4 final fix wave, part 1 (M4): a second cash rescue of the same Asl belgisi-cancelled order (the bot and the
+# website both offer it) answers 409 with this sentence; the website shows it under the rescue, the bot as its alert.
+CASH_RESCUE_ONCE_TRANSLATIONS = {
+    'api.orders.cash_rescue.already_placed': {
+        'en': "This order has already been placed for cash payment. You'll find it in My orders.",
+        'uz': "Bu buyurtma naqd to'lov bilan allaqachon rasmiylashtirilgan. Uni «Buyurtmalarim» bo'limidan topasiz.",  # NATIVE-READ
+        'ru': 'Этот заказ уже оформлен с оплатой наличными. Он есть в разделе «Мои заказы».',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(CASH_RESCUE_ONCE_TRANSLATIONS)
+
+
+# Step 4 final fix wave, part 2 (subscriptions). S1: a slot write that takes delivery days away from a daily
+# subscription tells it which days stop (bot `schedule_change.days_removed`; the email has the same paragraph). S3: a
+# daily schedule that does not deliver all week names its days ("Every day (Mon–Sat)", `{days}` from
+# `display_labels.weekday_span`, the short weekday names in brackets). S4: the bot's Change address names the current
+# address instead of offering it.
+SUBSCRIPTION_FINAL_FIX_TRANSLATIONS = {
+    'telegram.customer_notice.schedule_change.days_removed': {
+        'en': 'Days without delivery from now on: {days}. Your daily deliveries continue on the other days. You can '
+              'pause or change your subscription at any time.',
+        'uz': 'Endi yetkazib berilmaydigan kunlar: {days}. Kundalik yetkazib berishlaringiz qolgan kunlarda davom '
+              "etadi. Obunani istalgan vaqtda to'xtatib turish yoki o'zgartirish mumkin.",  # NATIVE-READ
+        'ru': 'Дни, когда доставки больше не будет: {days}. Ежедневные доставки продолжатся в остальные дни. '
+              'Подписку можно приостановить или изменить в любое время.',  # NATIVE-READ
+    },
+    'api.subscriptions.page.cadence.daily_on_days': {
+        'en': 'Every day ({days})',
+        'uz': 'Har kuni ({days})',  # NATIVE-READ
+        'ru': 'Каждый день ({days})',  # NATIVE-READ
+    },
+    'telegram.subscription.current_address': {
+        'en': '📍 Current address: {address}',
+        'uz': '📍 Joriy manzil: {address}',  # NATIVE-READ
+        'ru': '📍 Текущий адрес: {address}',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(SUBSCRIPTION_FINAL_FIX_TRANSLATIONS)
+
+
+# Step 4 final fix wave, part 3 (E1). Reorder is a published customer action (`customer_actions.reorder`, the one
+# reorder rule R8): its label is the one word the My orders card, the order modal and the bot draw, and its refusal is
+# what POST /cart/fill-from-order/<id> answers a stale button for an order the rule refuses (a subscription's
+# delivery, or nothing to copy). The label's uz/ru are the retired `telegram.order.reorder` / 'Reorder' copy without
+# its emoji (already read); the refusal is new.
+REORDER_ACTION_TRANSLATIONS = {
+    'api.orders.actions.reorder.label': {'en': 'Reorder', 'uz': 'Qayta buyurtma berish', 'ru': 'Повторить заказ'},
+    'api.orders.actions.reorder.refusal': {
+        'en': "This order can't be repeated. To order more, choose products from our catalog.",
+        'uz': "Bu buyurtmani takrorlab bo'lmaydi. Yana buyurtma berish uchun katalogimizdan mahsulot tanlang.",  # NATIVE-READ
+        'ru': 'Этот заказ нельзя повторить. Чтобы заказать ещё, выберите товары в нашем каталоге.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(REORDER_ACTION_TRANSLATIONS)
+
+
+# Step 4 live-drive fix D7. A Skip pressed on an order that can no longer be removed (a tab or a chat card left open
+# after the delivery was skipped) is refused in skip words, not with the cancel sentence. The backend chooses the words
+# once (`customer_order_actions.cancel_refusal_copy`) and publishes their id as `refusal_copy`: the website shows
+# `api.orders.<id>` (the cancel route's `message`), the bot `telegram.orders.<id>`. Same tone and next step as each
+# family's `cancel_refused.not_cancellable`.
+ORDER_SKIP_REFUSAL_TRANSLATIONS = {
+    'api.orders.skip_refused.not_skippable': {
+        'en': 'This delivery can no longer be skipped. If you have a question about it, '
+              'message us in our Telegram bot: {bot_url}',
+        'uz': "Bu yetkazishni endi o'tkazib yuborib bo'lmaydi. Savolingiz bo'lsa, "
+              'Telegram botimizga yozing: {bot_url}',  # NATIVE-READ
+        'ru': 'Эту доставку больше нельзя пропустить. Если у вас есть вопрос, '
+              'напишите нам в Telegram-бот: {bot_url}',  # NATIVE-READ
+    },
+    'telegram.orders.skip_refused.not_skippable': {
+        'en': 'This delivery can no longer be skipped. '
+              'If you have a question about it, write to us here in the chat.',
+        'uz': "Bu yetkazishni endi o'tkazib yuborib bo'lmaydi. Savolingiz bo'lsa, shu chatda bizga yozing.",  # NATIVE-READ
+        'ru': 'Эту доставку больше нельзя пропустить. '
+              'Если у вас есть вопрос, напишите нам здесь, в этом чате.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(ORDER_SKIP_REFUSAL_TRANSLATIONS)
 
 
 def main():

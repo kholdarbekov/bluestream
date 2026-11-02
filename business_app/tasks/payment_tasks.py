@@ -13,14 +13,21 @@ from business_app.models.payment import Payment, PaymentTransaction, PaymentFisc
 from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
-from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger
 from business_app.utils.exceptions import ProviderUnavailableError, PaymentError
 from business_app.utils.payment_projection import FISCALIZED_RAILS, order_is_dead, order_is_resolved
+from business_app.utils.timezone_utils import ensure_utc, get_utc_now
 from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
 
 logger = get_task_logger(__name__)
+
+# How long the side-effect sweep leaves a newly completed payment's confirmation to its own completion. A Click
+# COMPLETE on a pending order commits COMPLETED inside the order's confirmation and writes the confirmation mark only
+# in its next commit, holding no lock in between, so a locked re-read by the sweep would still find no mark. That gap
+# is one webhook request (gunicorn's timeout is 30 s); the sweep runs every 15 minutes, so a confirmation that was
+# really lost goes out one run later at most.
+CONFIRMATION_REDISPATCH_FLOOR = timedelta(minutes=5)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
@@ -96,9 +103,13 @@ def process_payment_confirmation(self, payment_id: int):
                 order_service = OrderService()
                 order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
 
-            # Send payment confirmation notification
-            notification_service = NotificationService()
-            notification_service.send_payment_notification(payment_id)
+            # The payment's one confirmation, by the customer's channel (spec 2026-10-27 §10). The stamp is read
+            # first: a payment the webhook already confirmed (a held order still reaches here PENDING) gets
+            # nothing more. Dispatch only parks it; this commit publishes it (payment_confirmation_dispatch).
+            payment_service = PaymentService()
+            if not payment_service.payment_confirmation_dispatched(payment):
+                if payment_service.dispatch_payment_confirmation(payment):
+                    db.session.commit()
 
             if awaiting:
                 logger.info(f"Order for payment {payment_id} awaits staff approval; left pending")
@@ -244,13 +255,16 @@ def reconcile_completed_payment_side_effects():
     re-drives both for CLICK/CARD payments completed in the last 7 days; each
     target is idempotent. Terminal fiscalization states (COMPLETED — done;
     NOT_REQUIRED — no fiscalizable items on the order) and ones already flagged
-    ``retries_exhausted_at`` (admin review pending) are left alone.
+    ``retries_exhausted_at`` (admin review pending) are left alone. A confirmation
+    is re-sent only for a payment completed at least CONFIRMATION_REDISPATCH_FLOOR
+    ago, so the sweep never sends one beside the completion still writing its own.
     """
     from shared.enums import FiscalizationStatus
 
-    now = datetime.now(timezone.utc)
+    now = get_utc_now()
     window_start = now - timedelta(days=7)
     stale_before = now - timedelta(minutes=30)
+    completed_before = now - CONFIRMATION_REDISPATCH_FLOOR
     settled_fiscalization_statuses = {FiscalizationStatus.COMPLETED.value, FiscalizationStatus.NOT_REQUIRED.value}
 
     payments = Payment.query.filter(
@@ -291,8 +305,13 @@ def reconcile_completed_payment_side_effects():
                     process_click_fiscalization_task.delay(payment.id)
                     counts["fiscalization_requeued"] += 1
 
-            post_payment = (payment.provider_data or {}).get("post_payment") or {}
-            if not post_payment.get("confirmation_enqueued_at"):
+            # Parked by dispatch; the commit below (or an earlier one in this loop) publishes it. A payment completed
+            # less than CONFIRMATION_REDISPATCH_FLOOR ago is left to its own completion, which may not have written
+            # its mark yet.
+            if (
+                not payment_service.payment_confirmation_dispatched(payment)
+                and ensure_utc(payment.paid_at) <= completed_before
+            ):
                 if payment_service.dispatch_payment_confirmation(payment):
                     counts["confirmation_redispatched"] += 1
         except Exception:  # noqa: BLE001
@@ -662,14 +681,20 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
             # the same permanent lockout, on the same population, triggered by
             # their own POST /payments/<id>/verify.
             #
-            # Two conditions, both load-bearing:
+            # Three conditions, all load-bearing:
             #  * order_is_resolved — same predicate as update_payment_status and
             #    the three Click COMPLETE branches, so all four agree.
             #  * status == PENDING — writing a terminal status OVER an already
             #    terminal one is its own bug: it would overwrite a CANCELLED
             #    payment's real reason with a generic "Verification failed", and
             #    a stray verification could downgrade a COMPLETED payment.
-            may_end = payment.status == PaymentStatus.PENDING and order_is_resolved(payment.order)
+            #  * decided on the locked row (step-4 Task Hfix) — the read above is unlocked, so a COMPLETE
+            #    that committed behind it is seen here and never overwritten.
+            may_end = (
+                payment.status == PaymentStatus.PENDING
+                and order_is_resolved(payment.order)
+                and PaymentService._still_pending_under_lock(payment)
+            )
             if may_end:
                 payment.status = PaymentStatus.FAILED
                 payment.failure_reason = failure_reason

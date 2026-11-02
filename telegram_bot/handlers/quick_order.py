@@ -4,7 +4,7 @@ Quick Order handlers — one-tap re-ordering for habitual customers.
 Two entry points lead here:
   * "🔁 Repeat last" / "⭐ Your usual" buttons rendered at the top of the
     Products menu by `ProductHandlers.products_menu`.
-  * "🔁 Reorder" button rendered on delivered orders in order history.
+  * "Reorder" on an order's screen, drawn when the backend publishes it (`customer_actions.reorder`).
 
 The flow is intentionally non-destructive: both reorder entry points refill the
 cart through the backend's fill-from-order (the backend decides which lines a
@@ -325,11 +325,15 @@ class QuickOrderHandlers(BaseHandler):
         address_id: Optional[int],
         language: str,
     ) -> None:
-        """Fill the cart from the order through the backend, then open the right next screen."""
+        """Fill the cart from the order through the backend, then open the right next screen.
+
+        A 409 is the reorder rule refusing the order (a button drawn before the backend stopped offering Reorder on
+        it): the backend's own sentence is said. Any other failure is the generic error."""
         response = await client.fill_cart_from_order(user_token, order_id)
         if not response.success:
             logger.warning("Quick order: fill-from-order %s failed: %s", order_id, response.error)
-            await self._reply_error(screen, i18n.get('telegram.error.generic', language))
+            refused = response.status_code == 409 and response.error
+            await self._reply_error(screen, response.error if refused else i18n.get('telegram.error.generic', language))
             return
 
         result = (response.data or {}).get('data') or {}

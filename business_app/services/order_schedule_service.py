@@ -709,6 +709,9 @@ class OrderScheduleService:
           reschedule never confirms an order (R23), so a PENDING one stays
           PENDING, and its row is held even on a due date until the order is
           confirmed.
+        * An unpaid online order gets a fresh 24-hour payment window from the
+          re-date (`PaymentService.reopen_click_payment_window`, owner ruling
+          2026-11-02).
 
         `reason` is stripped; longer than 100 characters is refused, never cut
         (R24). `expected_delivery_status` is the re-dispatch guard, and the admin
@@ -896,6 +899,7 @@ class OrderScheduleService:
         """
         from business_app import db
         from business_app.services.delivery_service import DeliveryService
+        from business_app.services.payment_service import PaymentService
         from business_app.services.staff_service import StaffService
         from business_app.utils.delivery_window import format_delivery_window
         from business_app.utils.exceptions import ValidationError
@@ -956,6 +960,7 @@ class OrderScheduleService:
             order.delivery_window_start = window_start
             order.delivery_window_end = window_end
 
+            now = get_utc_now()
             landed_status = None
             if delivery is not None:
                 # R23: a reschedule never confirms an order. Its only order
@@ -976,7 +981,6 @@ class OrderScheduleService:
                 # pool and broadcast it. Confirming the order releases the held
                 # row: CONFIRMED runs `ensure_delivery_if_due`, which hands it
                 # to `_release_held_delivery`.
-                now = get_utc_now()
                 landed_status = (
                     DeliveryStatus.SCHEDULED
                     if post_status in RELEASABLE_ORDER_STATUSES and cls.release_at(order) <= now
@@ -991,6 +995,9 @@ class OrderScheduleService:
                     restore_order=(post_status != order.status),
                 )
                 DeliveryService().stamp_schedule(delivery, order, now=now)
+            # A staff re-date gives an unpaid online order a fresh payment window from now (owner ruling 2026-11-02),
+            # also after a failed delivery or a driver's stop: no deadline bound it there, and the old one has passed.
+            PaymentService.reopen_click_payment_window(order, now=now)
             delivery_id = delivery.id if delivery is not None else None
 
         return RescheduleOutcome(

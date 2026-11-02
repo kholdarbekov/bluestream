@@ -334,7 +334,6 @@
      "items": [
       {
        "amount_label": "30 000 so'm",
-       "can_pay": true,
        "customer_actions": {
         "cancel": {
          "allowed": true,
@@ -355,6 +354,7 @@
           }
          ],
          "refusal": null,
+         "refusal_copy": null,
          "subscription_id": 1,
          "via": "skip"
         },
@@ -369,6 +369,10 @@
          "expected_amount": "30000.00",
          "label": "Pay 30 000 so'm",
          "refusal": null
+        },
+        "reorder": {
+         "allowed": false,
+         "label": null
         }
        },
        "date": "2026-10-29",
@@ -464,7 +468,6 @@
    "response": {
     "data": {
      "order": {
-      "can_customer_cancel": false,
       "confirmed_at": null,
       "created_at": "<wall-clock>",
       "customer_actions": {
@@ -474,6 +477,7 @@
         "label": null,
         "reasons": [],
         "refusal": "NOT_CANCELLABLE",
+        "refusal_copy": "skip_refused.not_skippable",
         "subscription_id": 1,
         "via": null
        },
@@ -488,9 +492,12 @@
         "expected_amount": null,
         "label": null,
         "refusal": "order_closed"
+       },
+       "reorder": {
+        "allowed": false,
+        "label": null
        }
       },
-      "customer_cancel_via": null,
       "delivered_at": null,
       "delivery_address": {
        "apartment_number": null,
@@ -832,7 +839,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-10-29",
        "date_label": "Thu 29 Oct",

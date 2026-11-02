@@ -154,12 +154,10 @@ def _order_with_address(title, full_address):
         "total_amount": 18000,
         "created_at": "2026-10-18T11:54:00+00:00",
         "order_items": [],
-        "can_customer_cancel": True,
         "payment_info": {
             "id": 1229, "payment_method": "cash", "payment_status": "pending",
             "payment_provider": "cash", "amount": 18000, "amount_collected": 0,
             "outstanding_amount": 18000, "payment_link": None,
-            "is_payable": False, "payable_payment_link": None,
         },
         "delivery_address": {"id": 900, "title": title, "full_address": full_address},
     }

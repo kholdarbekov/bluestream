@@ -11,7 +11,7 @@ Order 1277 (TG_000508_26) is why. Its Cancel button was drawn while the order wa
 the customer tapped it after the delivery had failed, and it ended an order that was only
 waiting for a new date. The rule is now one backend predicate,
 `OrderService.customer_cancel_block_code`. `GET /orders` and `GET /orders/<id>` publish it
-as `can_customer_cancel` and `customer_actions.cancel`, and `POST /orders/<id>/cancel` enforces
+in `customer_actions.cancel`, and `POST /orders/<id>/cancel` enforces
 it on locked rows. Every test drives those routes the way the bot and the web call them: the
 cancel POST carries the `expected_via` the screen showed, `{"expected_via": "cancel"}` for these
 one-off orders (spec 2026-10-27 §5.2).
@@ -426,10 +426,8 @@ def test_the_cancel_a_customer_is_offered_is_the_cancel_the_backend_allows(
     published = detail.get_json()["data"]["order"]
     assert "error" not in published, f"the degraded fallback answered, so its False proves nothing: {published}"
     listed = client.get(ORDERS_URL, headers=headers).get_json()["data"]["orders"]
-    assert [row["can_customer_cancel"] for row in listed if row["id"] == order.id] == [
-        published["can_customer_cancel"]
-    ], "the list the web draws Cancel from must agree with the detail"
     # The published Cancel (spec 2026-10-27 §5.1): a one-off order is cancelled on its own, with no reasons.
+    # The list the web draws Cancel from must agree with the detail.
     cancel = published["customer_actions"]["cancel"]
     assert [row["customer_actions"]["cancel"] for row in listed if row["id"] == order.id] == [cancel]
     allowed = case.refused is None
@@ -451,12 +449,12 @@ def test_the_cancel_a_customer_is_offered_is_the_cancel_the_backend_allows(
     db.session.expire_all()
 
     # The button a customer is shown and the write it sends agree, in every row.
-    assert published["can_customer_cancel"] is (response.status_code == 200), body
+    assert cancel["allowed"] is (response.status_code == 200), body
 
     if case.refused is None:
         assert response.status_code == 200, body
         assert body["data"]["order"]["status"] == "cancelled"
-        assert body["data"]["order"]["can_customer_cancel"] is False
+        assert body["data"]["order"]["customer_actions"]["cancel"]["allowed"] is False
         assert db.session.get(Order, order.id).status is OrderStatus.CANCELLED
         if delivery is not None:
             assert db.session.get(Delivery, delivery.id).status is case.delivery_after
@@ -474,7 +472,12 @@ def test_the_cancel_a_customer_is_offered_is_the_cancel_the_backend_allows(
     else:
         assert response.status_code == 400, body
         assert body["success"] is False
-        assert body["data"] == {"error_code": REFUSED, "reason_code": case.refused, "can_customer_cancel": False}
+        assert body["data"] == {
+            "error_code": REFUSED,
+            "reason_code": case.refused,
+            # A one-off order's Cancel: the words the web copy is rendered from, named without their family.
+            "refusal_copy": REFUSAL_COPY_KEY[case.refused].removeprefix("api.orders."),
+        }
         _assert_web_copy(app, body["message"], refusal_copy[REFUSAL_COPY_KEY[case.refused]])
         # Refused before anything moved: the order, its delivery and its money are as they were,
         # and the customer is told nothing beyond the refusal itself.
@@ -526,7 +529,7 @@ def test_a_driver_pickup_this_session_has_not_seen_is_still_refused(
 
     body = response.get_json()
     assert response.status_code == 400, body
-    assert body["data"] == {"error_code": REFUSED, "reason_code": "WITH_DRIVER", "can_customer_cancel": False}
+    assert body["data"] == {"error_code": REFUSED, "reason_code": "WITH_DRIVER", "refusal_copy": "cancel_refused.with_driver"}
     db.session.expire_all()
     landed = db.session.get(Delivery, delivery.id)
     assert (landed.status, landed.delivery_person_id) == (DeliveryStatus.PICKED_UP, delivery_driver.id)
@@ -574,7 +577,7 @@ def test_after_the_driver_accepts_the_customer_still_cancels_and_the_drivers_car
     db.session.add(route)
     db.session.commit()
     published = client.get(ORDER_URL.format(order_id=order.id), headers=customer_headers)
-    assert published.get_json()["data"]["order"]["can_customer_cancel"] is True
+    assert published.get_json()["data"]["order"]["customer_actions"]["cancel"]["allowed"] is True
     customer_told.clear()
     staff_told.forget()
 
@@ -582,7 +585,10 @@ def test_after_the_driver_accepts_the_customer_still_cancels_and_the_drivers_car
 
     body = response.get_json()
     assert response.status_code == 200, body
-    assert (body["data"]["order"]["status"], body["data"]["order"]["can_customer_cancel"]) == ("cancelled", False)
+    assert (body["data"]["order"]["status"], body["data"]["order"]["customer_actions"]["cancel"]["allowed"]) == (
+        "cancelled",
+        False,
+    )
     db.session.expire_all()
     assert db.session.get(Order, order.id).status is OrderStatus.CANCELLED
     landed = db.session.get(Delivery, delivery.id)

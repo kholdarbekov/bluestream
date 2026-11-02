@@ -64,9 +64,11 @@
 
 <hr class="divider">
 
+{% if order_tracking_url %}
 <p style="text-align: center;">
     <a href="{{ order_tracking_url }}" class="btn-primary">Buyurtmani kuzatish</a>
 </p>
+{% endif %}
 
 <div class="info-box">
     <p>Buyurtmangiz bo'yicha savollaringiz bo'lsa, <a href="tel:{{ company_phone }}">{{ company_phone }}</a> raqamiga qo'ng'iroq qiling yoki bu xatga javob bering.</p>

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.contract_pricing_factory import customer_headers
+
 from business_app.models.translation import Translation
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
 
@@ -86,6 +88,15 @@ def _visible_text(html: str) -> str:
     return re.sub(r"(?s)<[^>]+>", " ", html)
 
 
+def _content_text(html: str) -> str:
+    """The page's own visible text: the shared header, mobile menu and footer (site-wide links to
+    /subscriptions) are left out, so a check on the content flags only copy the page itself shows."""
+    html = re.sub(r"(?is)<header\b.*?</header>", " ", html)
+    html = re.sub(r'(?is)<nav class="menu-box".*?</nav>', " ", html)
+    html = re.sub(r"(?is)<footer\b.*?</footer>", " ", html)
+    return _visible_text(html)
+
+
 @pytest.mark.integration
 @pytest.mark.api
 @pytest.mark.parametrize("lang", LANGS)
@@ -136,12 +147,21 @@ def test_subscriptions_page_matches_the_pause_skip_cancel_rule_and_promises_no_i
 
 @pytest.mark.integration
 @pytest.mark.api
-def test_subscriptions_page_points_to_the_real_ways_to_subscribe(client, db):
-    """The home-page builder and the Telegram bot are the two real routes; checkout has no Subscribe option."""
+def test_subscriptions_page_points_to_the_real_ways_to_subscribe(client, db, app, sample_user):
+    """The home-page builder and the Telegram bot are the two real routes; checkout shows no subscription copy.
+
+    Checked on the RENDERED checkout's visible text: the raw template source holds translation-key names
+    (e.g. 'api.subscriptions.time.any_time'), which a customer never reads.
+    """
     html = _render(client, db, "/subscriptions", "en", _page_keys())
     assert "/#subscription-constructor" in html
     assert "t.me/" in html
-    checkout = (TEMPLATES / "checkout.html").read_text(encoding="utf-8").lower()
+    app.jinja_env.cache.clear()
+    checkout_response = app.test_client().get(
+        "/checkout?lang=en", headers=customer_headers(app, sample_user), follow_redirects=True
+    )
+    assert checkout_response.status_code == 200
+    checkout = _content_text(checkout_response.get_data(as_text=True)).lower()
     assert "subscri" not in checkout, "checkout grew a Subscribe option: the page copy must be revisited"
 
 
@@ -227,3 +247,71 @@ def test_shop_faq_does_not_promise_a_subscription_price_cut(client, db, lang):
     for word in ("lower unit", "reduce cost", "снизить стоимость", "narxini tushir", "foyda bormi"):
         assert word not in text, f"shop FAQ ({lang}) still promises a subscription saving: {word!r}"
     assert "subscri" in text or "подписк" in text or "obuna" in text
+
+
+# Task 20c (D20, spec §7): the FAQ answers name both surfaces, the online account and the Telegram bot.
+BOTH_SURFACES = {
+    "en": [
+        "Change items, quantities, or the schedule anytime in your online account or in our Telegram bot.",
+        "You can also skip any upcoming delivery in your online account or in our Telegram bot.",
+        "which you can change in your online account or in our Telegram bot.",
+        "Your subscription delivers to the address you chose. You can change it in your online account or in our "
+        "Telegram bot by picking one of your saved addresses. Your upcoming deliveries move to the new address too, "
+        "unless the driver already has them.",
+        "Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. "
+        "If a Click payment does not go through, you can pay the order again in your online account or in our "
+        "Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.",
+    ],
+    "uz": [
+        "Mahsulotlar, miqdor yoki jadvalni istalgan vaqtda shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",
+        "Istalgan navbatdagi yetkazishni ham shaxsiy kabinetda yoki Telegram botimizda o'tkazib yuborishingiz mumkin.",
+        "uni shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",
+        "Obunangiz siz tanlagan manzilga yetkaziladi. Uni shaxsiy kabinetda yoki Telegram botimizda saqlangan manzillaringizdan "
+        "birini tanlab o'zgartirishingiz mumkin. Agar kuryer navbatdagi buyurtmalarni hali olmagan bo'lsa, ular ham yangi "
+        "manzilga o'tadi.",
+        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi "
+        "kabi amalga oshiriladi. Click orqali to'lov o'tmasa, buyurtmani to'lov muddati tugaguncha shaxsiy kabinetda yoki "
+        "Telegram botimizda qayta to'lashingiz mumkin. Yordam kerak bo'lsa, Telegram botimizga yozing.",
+    ],
+    "ru": [
+        "Менять товары, количество или расписание можно в любое время в личном кабинете или в нашем Telegram-боте.",
+        "Любую предстоящую доставку тоже можно пропустить в личном кабинете или в нашем Telegram-боте.",
+        "его можно изменить в личном кабинете или в нашем Telegram-боте.",
+        "Подписка доставляется на выбранный вами адрес. Изменить его можно в личном кабинете или в нашем Telegram-боте, "
+        "выбрав один из сохранённых адресов. Ближайшие доставки тоже переедут на новый адрес, если курьер их ещё не забрал.",
+        "Каждая плановая доставка оформляется как обычный заказ, поэтому оплата проходит так же, как и для любого заказа. "
+        "Если оплата через Click не прошла, заказ можно оплатить ещё раз в личном кабинете или в нашем Telegram-боте до "
+        "срока оплаты. Если нужна помощь, напишите нам в Telegram-боте.",
+    ],
+}
+# The bot-only wording the FAQ used to carry (each phrase is absent from the BOTH_SURFACES sentences).
+NO_BOT_ONLY = {
+    "en": ["skip your next delivery in the Telegram bot", "message us in our Telegram bot and we will update",
+           "which you can change in our Telegram bot", "anytime in our Telegram bot"],
+    "uz": ["Keyingi yetkazishni o'tkazib yuborish Telegram botimizda mavjud", "biz uni siz uchun yangilaymiz",
+           "chastotani istalgan vaqtda Telegram botimizda", "uni Telegram botimizda o'zgartirish mumkin"],
+    "ru": ["и мы обновим его", "Пропустить ближайшую доставку можно в Telegram-боте",
+           "частоту можно в любое время в нашем Telegram-боте", "его можно изменить в нашем Telegram-боте"],
+}
+FAQ_NO_CALL = r"\bcall|позвон|qo.ng.iroq|телефон|telefon"
+
+
+@pytest.mark.integration
+@pytest.mark.api
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_faq_offers_every_subscription_tool_on_both_surfaces(client, db, lang):
+    html = unescape(_render(client, db, "/subscriptions", lang, _page_keys()))
+
+    for phrase in NO_BOT_ONLY[lang]:
+        assert phrase not in html, f"/subscriptions?lang={lang} still says {phrase!r}"
+    for sentence in BOTH_SURFACES[lang]:
+        assert sentence in html, f"/subscriptions?lang={lang} lost {sentence[:60]!r}"
+        assert not re.search(FAQ_NO_CALL, sentence, re.I), f"FAQ copy ({lang}) tells the customer to call"
+
+    faq_paragraphs = [
+        _visible_text(p) for p in re.findall(r"(?s)<p>(.*?)</p>", html)
+        if any(sentence in unescape(p) for sentence in BOTH_SURFACES[lang])
+    ]
+    assert len(faq_paragraphs) == len(BOTH_SURFACES[lang])
+    for text in faq_paragraphs:
+        assert not re.search(FAQ_NO_CALL, text, re.I), f"rendered FAQ ({lang}) tells the customer to call"

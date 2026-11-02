@@ -143,35 +143,47 @@ class TestCustomerCreate:
 
 @pytest.mark.integration
 class TestCustomerItemEdits:
+    """The website's and the bot's one item write: `PUT /subscriptions/<id>/items` with the whole list and the
+    `expected_state` the screen was drawn from."""
+
     @pytest.fixture
     def subscription_id(self, client, auth_headers, user_address, min_two_product):
         resp = _create(client, auth_headers, min_two_product.id, 3, user_address.id)
         assert resp.status_code == 201, resp.get_json()
         return resp.get_json()["data"]["subscription"]["id"]
 
-    def test_adding_an_item_below_its_minimum_is_refused(
-        self, client, db, auth_headers, subscription_id, min_three_product, min_qty_translation
-    ):
-        resp = client.post(
+    @staticmethod
+    def _save_items(client, auth_headers, subscription_id, items):
+        shown = client.get(f"/api/v1/subscriptions/{subscription_id}", headers=auth_headers)
+        assert shown.status_code == 200, shown.get_json()
+        expected_state = shown.get_json()["data"]["subscription"]["allowed_actions"]["expected_state"]
+        return client.put(
             f"/api/v1/subscriptions/{subscription_id}/items",
             headers=auth_headers,
-            json={"product_id": min_three_product.id, "quantity": 2},
+            json={"items": items, "expected_state": expected_state},
         )
+
+    def test_adding_an_item_below_its_minimum_is_refused(
+        self, client, db, auth_headers, subscription_id, min_two_product, min_three_product, min_qty_translation
+    ):
+        resp = self._save_items(client, auth_headers, subscription_id, [
+            {"product_id": min_two_product.id, "quantity": 3},
+            {"product_id": min_three_product.id, "quantity": 2},
+        ])
 
         assert resp.status_code == 400
         assert "Cooler Water 10L: at least 3 per delivery (you chose 2)" in _body(resp)
         assert SubscriptionItem.query.filter_by(product_id=min_three_product.id).count() == 0
 
     def test_adding_an_item_at_its_minimum_is_accepted(
-        self, client, db, auth_headers, subscription_id, min_three_product
+        self, client, db, auth_headers, subscription_id, min_two_product, min_three_product
     ):
-        resp = client.post(
-            f"/api/v1/subscriptions/{subscription_id}/items",
-            headers=auth_headers,
-            json={"product_id": min_three_product.id, "quantity": 3},
-        )
+        resp = self._save_items(client, auth_headers, subscription_id, [
+            {"product_id": min_two_product.id, "quantity": 3},
+            {"product_id": min_three_product.id, "quantity": 3},
+        ])
 
-        assert resp.status_code == 201
+        assert resp.status_code == 200, resp.get_json()
         assert SubscriptionItem.query.filter_by(product_id=min_three_product.id).one().quantity == 3
 
     def test_lowering_an_item_below_its_minimum_is_refused_and_the_quantity_stays(
@@ -179,10 +191,8 @@ class TestCustomerItemEdits:
     ):
         item = SubscriptionItem.query.filter_by(subscription_id=subscription_id).one()
 
-        resp = client.put(
-            f"/api/v1/subscriptions/{subscription_id}/items/{item.id}",
-            headers=auth_headers,
-            json={"quantity": 1},
+        resp = self._save_items(
+            client, auth_headers, subscription_id, [{"product_id": min_two_product.id, "quantity": 1}]
         )
 
         assert resp.status_code == 400
@@ -191,17 +201,15 @@ class TestCustomerItemEdits:
         assert SubscriptionItem.query.get(item.id).quantity == 3
 
     def test_lowering_an_item_to_its_minimum_is_accepted(
-        self, client, db, auth_headers, subscription_id
+        self, client, db, auth_headers, subscription_id, min_two_product
     ):
         item = SubscriptionItem.query.filter_by(subscription_id=subscription_id).one()
 
-        resp = client.put(
-            f"/api/v1/subscriptions/{subscription_id}/items/{item.id}",
-            headers=auth_headers,
-            json={"quantity": 2},
+        resp = self._save_items(
+            client, auth_headers, subscription_id, [{"product_id": min_two_product.id, "quantity": 2}]
         )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.get_json()
         _db.session.expire_all()
         assert SubscriptionItem.query.get(item.id).quantity == 2
 

@@ -1,10 +1,10 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'profile' %}
 
-{% block cabinet_title %}{{ 'Profile Settings'|t }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.account.profile'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'Profile Settings'|t }}</li>
+<li>{{ 'landing.account.profile'|t }}</li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
@@ -270,11 +270,11 @@
             <form id="personalInfoForm" class="default-form">
                 <div class="row clearfix">
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'First Name'|t }}</label>
+                        <label>{{ 'cabinet.profile.first_name'|t }}</label>
                         <input type="text" name="first_name" value="{{ user.first_name or '' }}" placeholder="{{ 'Enter first name'|t }}" required>
                     </div>
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Last Name'|t }}</label>
+                        <label>{{ 'cabinet.profile.last_name'|t }}</label>
                         <input type="text" name="last_name" value="{{ user.last_name or '' }}" placeholder="{{ 'Enter last name'|t }}" required>
                     </div>
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
@@ -317,14 +317,15 @@
         <div class="card-body">
             <form id="contactInfoForm" class="default-form">
                 <div class="row clearfix">
+                    {% if user.contact_email %}
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
                         <label>{{ 'Email Address'|t }}</label>
                         <div class="input-group">
-                            <input type="email" name="email" value="{{ user.email }}" readonly>
+                            <input type="email" name="email" value="{{ user.contact_email }}" readonly>
                             <div class="input-group-append">
                                 {% if user.email_verified_at %}
                                 <span class="input-group-text text-success">
-                                    <i class="far fa-check-circle"></i> {{ 'Verified'|t }}
+                                    <i class="far fa-check-circle"></i> {{ 'cabinet.profile.verified'|t }}
                                 </span>
                                 {% else %}
                                 <button type="button" class="btn btn-outline-warning btn-sm" data-action="resend-email-verification">
@@ -335,6 +336,7 @@
                         </div>
                         <small class="text-muted">{{ 'Email address cannot be changed. Contact support if needed.'|t }}</small>
                     </div>
+                    {% endif %}
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
                         <label>{{ 'Phone Number'|t }}</label>
                         <div class="input-group">
@@ -342,7 +344,7 @@
                             <div class="input-group-append">
                                 {% if user.phone_verified_at %}
                                 <span class="input-group-text text-success">
-                                    <i class="far fa-check-circle"></i> {{ 'Verified'|t }}
+                                    <i class="far fa-check-circle"></i> {{ 'cabinet.profile.verified'|t }}
                                 </span>
                                 {% else %}
                                 <button type="button" class="btn btn-outline-warning btn-sm" data-action="verify-phone">

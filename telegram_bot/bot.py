@@ -59,6 +59,7 @@ from api_client import api_client
 from support_capture import capture_support_message
 from webhook_server import webhook_server
 from token_manager import TokenManager
+from login_safe_bot import LoginSafeBot
 from handlers import (
     main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
@@ -395,9 +396,11 @@ class WaterBusinessBot:
             # duplicate messages on an impatient double-tap.
             self.application = (
                 Application.builder()
-                .token(config.telegram.bot_token)
-                .request(request)
-                .get_updates_request(get_updates_request)
+                .bot(LoginSafeBot(
+                    config.telegram.bot_token,
+                    request=request,
+                    get_updates_request=get_updates_request,
+                ))
                 .concurrent_updates(
                     PerChatSerialUpdateProcessor(
                         max_concurrent_updates=int(

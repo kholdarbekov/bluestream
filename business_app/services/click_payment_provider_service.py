@@ -13,7 +13,7 @@ from flask import current_app
 
 from business_app import db
 from business_app.models.order import Order
-from business_app.models.payment import CreditCard, Payment, PaymentTransaction
+from business_app.models.payment import Payment, PaymentTransaction
 from business_app.services.customer_links import pay_return_urls
 from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError
@@ -1054,8 +1054,9 @@ class ClickPaymentProviderService:
         )
 
         # LAST, after the whole restore: both COMMIT (queue_click_fiscalization always, and
-        # _handle_successful_payment through update_order_status for a PENDING order) and both
-        # notify. Anything after them would run in a second transaction, without the locks
+        # _handle_successful_payment through update_order_status for a PENDING order). The payment's
+        # confirmation is parked and published only after that commit, so its worker reads the cash
+        # already freed. Anything after them would run in a second transaction, without the locks
         # this one holds, and would be lost to a Click retry answered -4 (Case D).
         if self.payment_service:
             self.payment_service._handle_successful_payment(payment)
@@ -1072,7 +1073,6 @@ class ClickPaymentProviderService:
         money as unapplied customer prepaid credit; -4 tells Click to keep the
         debit on its side too."""
         from business_app.services.cash_collection_service import CashCollectionService
-        from business_app.services.notification_service import NotificationService
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
         from shared.enums import CashCollectionSource
 
@@ -1145,11 +1145,12 @@ class ClickPaymentProviderService:
             },
         )
         try:
-            NotificationService().send_notification(
-                payment.user_id,
-                "payment_late_debit_credited",
-                template_data={"order_number": order_number, "amount": str(amount)},
-            )
+            # Parked, never sent here: it is published after the commit that books the credit, so a rollback tells
+            # nobody, and no Telegram/Brevo call runs under this transaction's row locks. Its task picks the customer's
+            # one channel (NotificationService.send_payment_late_debit_credited).
+            from business_app.utils.payment_confirmation_dispatch import queue_late_debit_credit_notice
+
+            queue_late_debit_credit_notice(db.session, payment.user_id, order_number=order_number, amount=str(amount))
         except Exception:  # noqa: BLE001
             current_app.logger.exception("Failed to notify customer of late-debit credit (payment %s)", payment.id)
 
@@ -1583,8 +1584,20 @@ class ClickPaymentProviderService:
         return result
 
     def _persist_click_payment_id(self, payment: Payment, click_payment_id: Any) -> None:
+        """Record a Click payment id the status_by_mti lookup discovered (step-4 Task Hfix fix round 1).
+
+        The caller's copy may be stale: the reconcile loads every PENDING payment before its loop, and the customer
+        can pay (PREPARE, COMPLETE) while it runs. Rebuilding provider_data from that copy would wipe what the webhook
+        committed: the winning click_trans_id (so the real COMPLETE would read as a second charge and be reversed),
+        complete_payload, the callback audit and the confirmation mark. So the row is re-read under the lock every
+        Click writer takes, and the id is added only if it is still absent. A value that is not a numeric id counts as
+        absent: `_resolve_click_payment_id` cannot use it, and keeping it would send the next poll back here forever.
+        """
+        Payment.query.filter_by(id=payment.id).with_for_update().populate_existing().one()
         provider_data = dict(payment.provider_data or {})
         click_data = dict(provider_data.get("click") or {})
+        if str(click_data.get("click_paydoc_id") or "").strip().isdigit():
+            return
         click_data["click_paydoc_id"] = str(click_payment_id)
         provider_data["click"] = click_data
         payment.provider_data = provider_data
@@ -1906,26 +1919,3 @@ class ClickPaymentProviderService:
             receipt_url_present=bool(receipt_url),
         )
         return result
-
-    def process_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
-        """
-        Process card payment through Click gateway.
-
-        Placeholder — test mode returns a synthetic transaction; production path
-        raises until the real Click card API integration lands.
-        """
-        try:
-            current_app.logger.info(f"Processing Click card payment for payment {payment.id}")
-
-            if self.test_mode:
-                return {
-                    "success": True,
-                    "transaction_id": f"click_{int(datetime.now(timezone.utc).timestamp())}",
-                    "amount": payment.amount,
-                    "card_token": card.card_token,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-            raise NotImplementedError("Click card payment API integration required")
-        except Exception as e:
-            current_app.logger.exception("Click card payment error")
-            return {"success": False, "error_message": str(e)}

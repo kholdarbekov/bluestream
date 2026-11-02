@@ -10,7 +10,8 @@ from decimal import Decimal
 import pytest
 
 from business_app.models.order import Order, OrderStatusHistory
-from shared.enums import OrderStatus, PaymentMethod
+from business_app.models.payment import Payment
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 from tests.integration.reorder_reminder_builders import (
     add_order_lines,
     customer_headers,
@@ -45,13 +46,16 @@ def test_your_usual_counts_the_paid_lines_of_delivered_orders_only(app, client, 
 
 
 def _cancelled_by_tax_committee(db, user, address, lines, reward_lines=()):
-    """The Click order `create_order` cancelled while Asl belgisi was down. It is CANCELLED and
-    carries the `tax_committee_unavailable` history note that the rescue checks for."""
+    """The Click order `create_order` cancelled while Asl belgisi was down. It is CANCELLED,
+    carries the `tax_committee_unavailable` history note that the rescue checks for, and keeps
+    the payment row the checkout wrote before the pre-utilisation failed (the rescue marks it)."""
     order = live_order(db, user, datetime.now(UTC) - timedelta(minutes=5),
                        status=OrderStatus.CANCELLED, address=address)
     order.payment_method = PaymentMethod.CLICK
     db.session.add(OrderStatusHistory(order_id=order.id, old_status=OrderStatus.PENDING,
                                       new_status=OrderStatus.CANCELLED, notes="tax_committee_unavailable"))
+    db.session.add(Payment(order_id=order.id, user_id=user.id, payment_method=PaymentMethod.CLICK,
+                           amount=Decimal("0.00"), status=PaymentStatus.CANCELLED))
     db.session.commit()
     return add_order_lines(db, order, lines, reward_lines=reward_lines)
 

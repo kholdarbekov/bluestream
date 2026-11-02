@@ -35,6 +35,29 @@ def weekday_name(weekday: int, language: Optional[str] = None) -> str:
     return _t(f"weekday.{weekday}", language)
 
 
+def weekday_short(weekday: int, language: Optional[str] = None) -> str:
+    """A weekday's short name: "Thu" / "чт" / "Pa"; 0 = Monday."""
+    return _t(f"weekday_short.{weekday}", language)
+
+
+def weekday_span(weekdays, language: Optional[str] = None) -> str:
+    """Some weekdays by short name, Monday first: three or more in a row as one span ("Mon–Sat"), the others one by
+    one ("Mon, Wed, Fri", "Sat, Sun")."""
+    runs = []
+    for day in sorted(set(weekdays)):
+        if runs and day == runs[-1][-1] + 1:
+            runs[-1].append(day)
+        else:
+            runs.append([day])
+    parts = []
+    for run in runs:
+        if len(run) >= 3:
+            parts.append(f"{weekday_short(run[0], language)}{EN_DASH}{weekday_short(run[-1], language)}")
+        else:
+            parts.extend(weekday_short(day, language) for day in run)
+    return ", ".join(parts)
+
+
 def date_long(day: date, language: Optional[str] = None) -> str:
     """The long date: "Thursday, 30 October" / "четверг, 30 октября" / "30-oktabr, payshanba"."""
     return _t(
@@ -51,7 +74,7 @@ def date_short(day: date, language: Optional[str] = None) -> str:
     return _t(
         "date_short",
         language,
-        weekday=_t(f"weekday_short.{day.weekday()}", language),
+        weekday=weekday_short(day.weekday(), language),
         day=day.day,
         month=_t(f"month_short.{day.month}", language),
     )

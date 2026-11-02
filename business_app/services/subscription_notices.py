@@ -15,8 +15,10 @@ when the customer has no Telegram).
                       next_delivery_date (None when no delivery follows: paused or cancelled)
     SCHEDULE_CHANGED  subscription_id, subscription_name, changes (an ordered subset of SCHEDULE_CHANGES),
                       old_window, new_window ("HH:MM–HH:MM" or None), old_weekday, new_weekday (0-6 or None),
-                      added_weekdays ([0-6], empty unless "days_added"), next_delivery_date (None unless ACTIVE),
-                      time_kind; a slot write changed the delivery time or day (spec 2026-10-27 §6.5)
+                      added_weekdays ([0-6], empty unless "days_added"), removed_weekdays ([0-6], empty unless
+                      "days_removed"; absent on a row recorded before it existed), time_kind; a slot write changed
+                      the delivery time or day (spec 2026-10-27 §6.5). The next delivery is not recorded: the notice
+                      reads the card's own answer when it is sent (`SubscriptionService.notice_next_delivery`)
 
 The customer's own skip also writes a `delivery_skipped` row (`skipped_by="customer"`). It owes no notice:
 the customer asked for it and the response tells them. So a notice is chosen by the action AND, for a skip,
@@ -40,7 +42,8 @@ TIME_CHANGED = "time_changed"  # its slot keeps it, at new times
 DAY_MOVED = "day_moved"  # its weekly or biweekly day stopped being a delivery day
 DATE_MOVED = "date_moved"  # its next delivery fell on a day that stopped being a delivery day
 DAYS_ADDED = "days_added"  # a daily subscription now delivers on more days
-SCHEDULE_CHANGES = (TIME_CLEARED, TIME_CHANGED, DAY_MOVED, DATE_MOVED, DAYS_ADDED)
+DAYS_REMOVED = "days_removed"  # a daily subscription no longer delivers on some days (it names them; not DATE_MOVED)
+SCHEDULE_CHANGES = (TIME_CLEARED, TIME_CHANGED, DAY_MOVED, DATE_MOVED, DAYS_ADDED, DAYS_REMOVED)
 
 # Why the system could not create a scheduled order (§2.8). Each is also a seeded label,
 # `api.subscriptions.skip_reason.<code>`, which the notice quotes.

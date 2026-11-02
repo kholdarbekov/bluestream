@@ -83,9 +83,11 @@
                 ? '<small class="text-muted">' + escapeHtml(PAGE_DATA.i18n.tracking) + ': ' + escapeHtml(order.tracking_number) + '</small>'
                 : '';
 
-            var reorderBtn = order.status === 'delivered'
+            // Reorder is the backend's `customer_actions.reorder` (the one reorder rule), with its label.
+            var reorder = (order.customer_actions && order.customer_actions.reorder) || {};
+            var reorderBtn = reorder.allowed
                 ? '<button class="btn btn-sm btn-primary ml-2" data-action="reorder" data-id="' + order.id + '">' +
-                  escapeHtml(PAGE_DATA.i18n.reorder) + '</button>'
+                  escapeHtml(reorder.label) + '</button>'
                 : '';
 
             return '<div class="order-card" data-action="show-order-detail" data-id="' + order.id + '">' +
@@ -223,22 +225,8 @@
         loadOrders(currentPage);
     }
 
-    async function reorderItems(orderId) {
-        try {
-            var response = await apiRequest('/orders/' + orderId + '/reorder', { method: 'POST' });
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                showNotification(PAGE_DATA.i18n.reorder_success, 'success');
-                if (typeof updateCartCount === 'function') updateCartCount();
-                $('#orderDetailModal').modal('hide');
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.reorder_failed, 'error');
-            }
-        } catch (error) {
-            console.error('Failed to reorder items:', error);
-            showNotification(PAGE_DATA.i18n.reorder_failed, 'error');
-        }
+    function reorderItems(orderId) {
+        return window.OrderActions.reorder(orderId, { cartUrl: PAGE_DATA.cart_url, words: PAGE_DATA.order_actions });
     }
 
     // An order's details open in the shared order modal (partials/order_detail_modal.html), the one detail

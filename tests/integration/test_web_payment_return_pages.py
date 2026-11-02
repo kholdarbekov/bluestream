@@ -26,6 +26,7 @@ from unittest.mock import patch
 
 import pytest
 from bs4 import BeautifulSoup
+from flask_jwt_extended import create_access_token
 
 from business_app.models.order import Order
 from business_app.models.translation import Translation
@@ -33,7 +34,7 @@ from business_app.utils.exceptions import TaxCommitteeUnavailableError
 from business_app.utils.local_windows import local_date
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
-from tests.integration.customer_action_matrix import ROW, seed
+from tests.integration.customer_action_matrix import ROW, Row, seed
 from tests.integration.test_customer_order_actions_fixtures import (  # noqa: F401  (fixtures)
     CLICK_URL,
     _answer,
@@ -310,6 +311,21 @@ def test_the_pending_page_polls_with_the_cookie(world, unpaid_click_order, monke
     )
 
 
+def test_the_pending_page_names_the_payment_method_as_every_order_page_does(world):
+    """One payment-method label: `display_labels.payment_method`, the one the tracking and confirmation pages show
+    (`payment_method_label`), here for a legacy card order still in flight, read in Russian."""
+    card = Row("card_pending", OrderStatus.PENDING, PaymentMethod.CARD, PaymentStatus.PENDING, cancel_via="cancel")
+    order = seed(world.db, world.user, card, now=world.now.astimezone(UTC))
+
+    resp = world.web._client.get(f"/payment/success?order_id={order.id}&lang=ru", headers=SAME)
+
+    assert resp.status_code == 200
+    rows = _soup(resp).select("section.payment-pending-section .order-info .info-row .info-value")
+    assert [value.get_text(strip=True) for value in rows][-1] == (
+        BACKEND_TRANSLATIONS["web.display_labels.payment_method.card"]["ru"]
+    )
+
+
 # --------------------------------------------------------------------------- checkout
 
 
@@ -459,3 +475,27 @@ def test_the_cash_rescue_is_refused_over_the_limit(world):
     assert resp.get_json()["message"]
     assert Order.query.filter_by(payment_method=PaymentMethod.CASH).filter(Order.status == OrderStatus.PENDING).count() == 0
     _save("rescue_cod_limit", {"case": "rescue_cod_limit", "exchange": _rescue_exchange(world, cancelled_id, resp)})
+
+
+def test_a_second_cash_rescue_of_the_same_order_places_nothing_more(world):
+    """The cash rescue is offered on the website and in the bot, so the same cancelled order can be rescued twice: the
+    other surface, a second tab, or a back/forward return to the checkout. The first places the cash order; every later
+    one answers 409 with the sentence both clients show as it is (the website in place, under the rescue; the bot as
+    its alert), and places nothing the driver would then deliver and collect."""
+    outage = _outage(world)
+    cancelled_id = outage.get_json()["data"]["cancelled_order_id"]
+    path = f"/api/v1/orders/{cancelled_id}/retry-with-cash"
+    first = world.web.post(path, {})
+    assert first.status_code == 201, first.get_json()
+    with world.app.app_context():
+        token = create_access_token(identity=str(world.user.id))
+
+    from_the_bot = world.app.test_client().post(path, headers={"Authorization": f"Bearer {token}"}, json={})
+    again = world.web.post(path, {})
+
+    assert (from_the_bot.status_code, again.status_code) == (409, 409), (from_the_bot.get_json(), again.get_json())
+    sentence = BACKEND_TRANSLATIONS["api.orders.cash_rescue.already_placed"]["en"]
+    assert from_the_bot.get_json() == again.get_json() == {"success": False, "message": sentence}
+    cash_orders = Order.query.filter_by(payment_method=PaymentMethod.CASH).all()
+    assert [order.id for order in cash_orders] == [first.get_json()["data"]["order"]["id"]]
+    _save("rescue_already_placed", {"case": "rescue_already_placed", "exchange": _rescue_exchange(world, cancelled_id, again)})

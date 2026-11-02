@@ -17,6 +17,7 @@
     "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
     "reason_prompt": "Want to tell us why? (optional)",
     "reason_text": "In a few words (optional)",
+    "reorder_dropped": "Some items from this order are no longer available and were left out.",
     "switch_to_cash": "Pay with cash",
     "try_again": "Try again",
     "working": "One moment…"

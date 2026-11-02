@@ -390,7 +390,11 @@ def _cadence(subscription) -> str:
     frequency = subscription.frequency
     frequency = frequency if isinstance(frequency, SubscriptionFrequency) else SubscriptionFrequency(frequency)
     if frequency == SubscriptionFrequency.DAILY:
-        return _page("cadence.daily")
+        # "Every day" only when it delivers all week; otherwise its days are named ("Every day (Mon–Sat)").
+        weekdays = subscription_schedule.daily_weekdays(subscription.delivery_time_slot)
+        if len(weekdays) == 7:
+            return _page("cadence.daily")
+        return _page("cadence.daily_on_days", days=display_labels.weekday_span(weekdays))
     if frequency == SubscriptionFrequency.MONTHLY:
         day = subscription.delivery_day_of_month
         return _page("cadence.monthly", day=day) if day else _page("cadence.monthly_no_day")
@@ -414,12 +418,14 @@ def summary_sentence(subscription, start: Optional[date]) -> str:
     return _page("summary", schedule=schedule, since=_page("since", date=display_labels.day_month(start)))
 
 
-def kept_order_note(order) -> Optional[str]:
+def kept_order_note(order, language: Optional[str] = None) -> Optional[str]:
     """A schedule, items or payment-method change leaves a placed order alone: "Your order for 30 October
-    stays as it is."."""
+    stays as it is."; in `language` (the request's when None)."""
     if order is None or order.delivery_date is None:
         return None
-    return _page("kept_order_note", date=display_labels.day_month(order.delivery_date))
+    return get_translation(
+        f"{PAGE}.kept_order_note", language, date=display_labels.day_month(order.delivery_date, language)
+    )
 
 
 def preview_sentence(first_new_label: str, paused: bool, kept_note: Optional[str], per_month, amount_label: str) -> str:

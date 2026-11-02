@@ -63,7 +63,6 @@
      "items": [
       {
        "amount_label": null,
-       "can_pay": false,
        "customer_actions": null,
        "date": "2026-10-29",
        "date_label": "Thu 29 Oct",

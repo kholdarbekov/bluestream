@@ -18,6 +18,7 @@ import os
 from config import config
 from database import db_manager
 from shared.bot_token_recovery import sign_in_again
+from shared.http_retry_safety import IDEMPOTENT_METHODS, may_retry_automatically
 
 logger = logging.getLogger('api_client')
 
@@ -425,6 +426,12 @@ class BusinessAPIClient:
 
             except httpx.TimeoutException as e:
                 logger.error(f"Request timeout (attempt {attempt + 1}): {e}")
+                if not may_retry_automatically(e, method, IDEMPOTENT_METHODS):
+                    # A read/write-phase timeout on a write: the request may already be applied,
+                    # so the retrier never sends it again (RFC 9110 section 9.2.2).
+                    self._circuit_breaker.record_failure()
+                    logger.warning(f"Not retrying {method.upper()} {endpoint} after an ambiguous timeout")
+                    return APIResponse(success=False, error="Request timed out; it may already have been applied")
                 if attempt < self.max_retries:
                     retry_delay = self.retry_delay * (attempt + 1)
                     logger.info(f"Retrying after timeout in {retry_delay} seconds...")
@@ -442,6 +449,11 @@ class BusinessAPIClient:
                 logger.error(f"Exception type: {type(e)}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
+
+                if not may_retry_automatically(e, method, IDEMPOTENT_METHODS):
+                    # Any other failure on a write that may have reached the server: same rule as the timeout above.
+                    self._circuit_breaker.record_failure()
+                    return APIResponse(success=False, error=str(e))
 
                 if attempt < self.max_retries:
                     retry_delay = self.retry_delay * (attempt + 1)

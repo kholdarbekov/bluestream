@@ -149,6 +149,19 @@ PLACEHOLDER_EMAIL_DOMAIN_LOCAL = "bluestream.local"
 PLACEHOLDER_EMAIL_DOMAIN_BOT = "bot.internal"
 PLACEHOLDER_EMAIL_DOMAINS = (PLACEHOLDER_EMAIL_DOMAIN_LOCAL, PLACEHOLDER_EMAIL_DOMAIN_BOT)
 
+_MERGE_TOMBSTONE_EMAIL = re.compile(r"deleted_[0-9]+@" + re.escape(PLACEHOLDER_EMAIL_DOMAIN_LOCAL))
+
+
+def merge_tombstone_email(user_id: int) -> str:
+    """The address an account merge leaves on the account it emptied, so its own address can move (unique)."""
+    return f"deleted_{user_id}@{PLACEHOLDER_EMAIL_DOMAIN_LOCAL}"
+
+
+def is_merge_tombstone_email(email: Optional[str]) -> bool:
+    """True for an address `merge_tombstone_email` wrote: that account was merged into another and is no one's."""
+    return bool(email) and _MERGE_TOMBSTONE_EMAIL.fullmatch(str(email).strip().lower()) is not None
+
+
 # Top-level labels reserved for local networks (`.local`, RFC 6762) or private use (`.internal`):
 # mail sent there never arrives.
 _UNDELIVERABLE_TLDS = ("local", "internal")

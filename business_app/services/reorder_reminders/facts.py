@@ -37,7 +37,6 @@ from business_app.utils.order_timing import delivered_order_instants_select
 from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES
 from business_app.utils.timezone_utils import ensure_utc
 from shared.enums import LIVE_SUBSCRIPTION_STATUSES
-from shared.user_names import greeting_name
 
 logger = logging.getLogger(__name__)
 
@@ -265,12 +264,7 @@ def _member(user: User) -> MemberFacts:
         email=user.email,
         created_at=_aware(user.created_at),
         preferred_language=user.preferred_language,
-        greeting_name=greeting_name(
-            first_name=user.first_name,
-            full_name=user.full_name,
-            company_name=user.company_name,
-            is_entity=bool(user.is_entity_user),
-        ),
+        greeting_name=user.greeting_name,
     )
 
 

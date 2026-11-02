@@ -1,5 +1,9 @@
 """Runtime regressions for backend translation seed helpers."""
 
+import re
+
+import pytest
+
 from scripts.seed_backend_translations import _category_for, _resolve_seed_value, _ui_tr
 
 
@@ -45,3 +49,32 @@ def test_english_seed_value_is_always_authoritative():
 
     assert value == "Archive"
     assert preserve_existing is False
+
+
+def test_aqua_club_is_the_loyalty_label():
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    assert BACKEND_TRANSLATIONS["landing.account.loyalty"] == {"en": "Aqua Club", "uz": "Aqua Club", "ru": "Aqua Club"}
+
+
+@pytest.mark.parametrize(
+    "key, category",
+    [
+        ("ui.orders.reschedule_error.ORDER_NOT_RESCHEDULABLE", "ui"),
+        ("landing.account.loyalty", "landing"),
+        ("Code expired.", "general"),
+        ("Calculating...", "general"),
+    ],
+)
+def test_category_for_files_english_text_under_general(key, category):
+    assert _category_for(key) == category
+
+
+def test_no_dotted_seed_key_changes_category():
+    """A key shaped like ``prefix.rest`` keeps its first segment as category (the old rule)."""
+    from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+
+    dotted = re.compile(r"^[a-z][a-z0-9_]*\.\S+$")
+    for key in BACKEND_TRANSLATIONS:
+        if dotted.match(key):
+            assert _category_for(key) == key.split(".")[0][:50], key

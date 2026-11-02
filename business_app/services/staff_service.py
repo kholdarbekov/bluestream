@@ -1286,7 +1286,9 @@ class StaffService:
         Reschedule, or the operator's redispatch_failed_delivery), never pooled.
         The work itself is ``_pull_back_delivery`` with a SCHEDULED
         target, the same core the admin reschedule runs. This wrapper adds only
-        what an immediate return needs: the lock, two refusals, and the commit.
+        what an immediate return needs: the lock, two refusals, an unpaid online
+        order's fresh payment window (``PaymentService.reopen_click_payment_window``,
+        as the reschedule opens one), and the commit.
 
         Refuses with 409 (``ConflictError``):
         - ``STAFF_DELIVERY_NOT_POOLABLE`` unless the delivery is in
@@ -1341,6 +1343,12 @@ class StaffService:
             reason=reason,
             notes=notes or "Returned to delivery pool for re-dispatch",
         )
+        if delivery.order is not None:
+            # Back in the pool, an unpaid online order gets a fresh payment window from now (owner ruling 2026-11-02):
+            # no deadline bound it while the driver held it, and the one it had has passed.
+            from business_app.services.payment_service import PaymentService
+
+            PaymentService.reopen_click_payment_window(delivery.order)
         db.session.commit()
 
         current_app.logger.info(

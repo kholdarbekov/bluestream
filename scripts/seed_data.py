@@ -20,7 +20,6 @@ def seed_essential_translations():
 
     # Essential translations
     ESSENTIAL_TRANSLATIONS = {
-        "Home": {"en": "Home", "uz": "Bosh sahifa", "ru": "Главная"},
         "Shop": {"en": "Shop", "uz": "Do'kon", "ru": "Магазин"},
         "Services": {"en": "Services", "uz": "Xizmatlar", "ru": "Услуги"},
         "About Us": {"en": "About Us", "uz": "Biz haqimizda", "ru": "О нас"},
@@ -115,8 +114,6 @@ def seed_essential_translations():
         "Delivery": {"en": "Delivery", "uz": "Yetkazib berish", "ru": "Доставка"},
 
         # Contact & Support
-        "Phone Number": {"en": "Phone Number", "uz": "Telefon raqami", "ru": "Номер телефона"},
-        "Email Address": {"en": "Email Address", "uz": "Elektron pochta manzili", "ru": "Адрес электронной почты"},
         "Password": {"en": "Password", "uz": "Parol", "ru": "Пароль"},
         "Address": {"en": "Address", "uz": "Manzil", "ru": "Адрес"},
         "First Name": {"en": "First Name", "uz": "Ism", "ru": "Имя"},
@@ -250,40 +247,10 @@ def seed_essential_translations():
             "uz": "Biz haqimizda",
             "ru": "О нас"
         },
-        "Account Activity": {
-            "en": "Account Activity",
-            "uz": "Hisob faoliyati",
-            "ru": "Активность аккаунта"
-        },
-        "Account Created": {
-            "en": "Account Created",
-            "uz": "Hisob yaratildi",
-            "ru": "Аккаунт создан"
-        },
-        "Account Security": {
-            "en": "Account Security",
-            "uz": "Hisob xavfsizligi",
-            "ru": "Безопасность аккаунта"
-        },
-        "Account Status": {
-            "en": "Account Status",
-            "uz": "Hisob holati",
-            "ru": "Статус аккаунта"
-        },
         "Account created successfully! Please check your email to verify your account.": {
             "en": "Account created successfully! Please check your email to verify your account.",
             "uz": "Hisob muvaffaqiyatli yaratildi! Hisobingizni tasdiqlash uchun emailingizni tekshiring.",
             "ru": "Аккаунт успешно создан! Проверьте вашу почту, чтобы подтвердить аккаунт."
-        },
-        "Account data downloaded successfully!": {
-            "en": "Account data downloaded successfully!",
-            "uz": "Hisob ma'lumotlari muvaffaqiyatli yuklab olindi!",
-            "ru": "Данные аккаунта успешно загружены!"
-        },
-        "Account was successfully created": {
-            "en": "Account was successfully created",
-            "uz": "Hisob muvaffaqiyatli yaratildi",
-            "ru": "Аккаунт был успешно создан"
         },
         "Actions": {
             "en": "Actions",
@@ -295,26 +262,6 @@ def seed_essential_translations():
             "uz": "Faol",
             "ru": "Активный"
         },
-        "Active Subscriptions": {
-            "en": "Active Subscriptions",
-            "uz": "Faol obunalar",
-            "ru": "Активные подписки"
-        },
-        "Add New Address": {
-            "en": "Add New Address",
-            "uz": "Yangi manzil qo'shish",
-            "ru": "Добавить новый адрес"
-        },
-        "Add Your First Address": {
-            "en": "Add Your First Address",
-            "uz": "Birinchi manzilingizni qo'shing",
-            "ru": "Добавьте свой первый адрес"
-        },
-        "Add an extra layer of security by requiring SMS verification for login.": {
-            "en": "Add an extra layer of security by requiring SMS verification for login.",
-            "uz": "Kirish uchun SMS tasdiqlashni talab qilib, qo'shimcha xavfsizlik qatlamini qo'shing.",
-            "ru": "Добавьте дополнительный уровень безопасности, требуя SMS-подтверждение для входа."
-        },
         "Add some products to your cart to see them here": {
             "en": "Add some products to your cart to see them here",
             "uz": "Mahsulotlarni savatchangizga qo'shing va ularni bu yerda ko'rasiz",
@@ -325,25 +272,10 @@ def seed_essential_translations():
             "uz": "Savatchaga qo'shish",
             "ru": "Добавить в корзину"
         },
-        "Add your delivery addresses to make ordering easier": {
-            "en": "Add your delivery addresses to make ordering easier",
-            "uz": "Buyurtmani osonlashtirish uchun yetkazib berish manzillaringizni qo'shing",
-            "ru": "Добавьте адреса доставки, чтобы упростить заказ"
-        },
         "Address": {
             "en": "Address",
             "uz": "Manzil",
             "ru": "Адрес"
-        },
-        "Address Title": {
-            "en": "Address Title",
-            "uz": "Manzil nomi",
-            "ru": "Название адреса"
-        },
-        "Address deleted successfully!": {
-            "en": "Address deleted successfully!",
-            "uz": "Manzil muvaffaqiyatli o'chirildi!",
-            "ru": "Адрес успешно удалён!"
         },
         "Address saved successfully!": {
             "en": "Address saved successfully!",
@@ -389,16 +321,6 @@ def seed_essential_translations():
             "uz": "Hammasi",
             "ru": "Все"
         },
-        "All Activity": {
-            "en": "All Activity",
-            "uz": "Barcha faoliyat",
-            "ru": "Вся активность"
-        },
-        "All Orders": {
-            "en": "All Orders",
-            "uz": "Barcha buyurtmalar",
-            "ru": "Все заказы"
-        },
         "All Products": {
             "en": "All Products",
             "uz": "Barcha mahsulotlar",
@@ -408,11 +330,6 @@ def seed_essential_translations():
             "en": "All Rights Reserved",
             "uz": "Barcha huquqlar himoyalangan",
             "ru": "Все права защищены"
-        },
-        "All Time": {
-            "en": "All Time",
-            "uz": "Har doim",
-            "ru": "Все время"
         },
         "Already have an account?": {
             "en": "Already have an account?",
@@ -433,11 +350,6 @@ def seed_essential_translations():
             "en": "An error occurred. Please try again later.",
             "uz": "Xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.",
             "ru": "Произошла ошибка. Пожалуйста, попробуйте позже."
-        },
-        "Apartment/Floor": {
-            "en": "Apartment/Floor",
-            "uz": "Kvartira/Qavat",
-            "ru": "Квартира/Этаж"
         },
         "Apply Coupon": {
             "en": "Apply Coupon",
@@ -469,11 +381,6 @@ def seed_essential_translations():
             "uz": "Savatingizni bo'shatmoqchimisiz?",
             "ru": "Вы уверены, что хотите очистить корзину?"
         },
-        "Are you sure you want to delete this address?": {
-            "en": "Are you sure you want to delete this address?",
-            "uz": "Ushbu manzilni o'chirib tashlamoqchimisiz?",
-            "ru": "Вы уверены, что хотите удалить этот адрес?"
-        },
         "Are you sure you want to pause this subscription?": {
             "en": "Are you sure you want to pause this subscription?",
             "uz": "Ushbu obunani to'xtatib turmoqchimisiz?",
@@ -483,11 +390,6 @@ def seed_essential_translations():
             "en": "Automatic billing and payment",
             "uz": "Avtomatik hisob-kitob va to'lov",
             "ru": "Автоматическое выставление счетов и оплата"
-        },
-        "Available Rewards": {
-            "en": "Available Rewards",
-            "uz": "Mavjud mukofotlar",
-            "ru": "Доступные награды"
         },
         "Back to Login": {
             "en": "Back to Login",
@@ -528,11 +430,6 @@ def seed_essential_translations():
             "en": "Bi-weekly delivery schedule",
             "uz": "Haftada ikki marta yetkazib berish jadvali",
             "ru": "График доставки дважды в неделю"
-        },
-        "Birthday Bonus": {
-            "en": "Birthday Bonus",
-            "uz": "Tug'ilgan kun bonusi",
-            "ru": "Бонус на день рождения"
         },
         "Blue Stream": {
             "en": "Blue Stream",
@@ -583,11 +480,6 @@ def seed_essential_translations():
             "en": "Browse Plans",
             "uz": "Rejalarni ko'rish",
             "ru": "Просмотреть планы"
-        },
-        "Business": {
-            "en": "Business",
-            "uz": "Biznes",
-            "ru": "Бизнес"
         },
         "Business Owner": {
             "en": "Business Owner",
@@ -666,11 +558,6 @@ def seed_essential_translations():
             "en": "Categories",
             "uz": "Kategoriyalar",
             "ru": "Категории"
-        },
-        "Change Password": {
-            "en": "Change Password",
-            "uz": "Parolni o'zgartirish",
-            "ru": "Изменить пароль"
         },
         "Change Phone Number": {
             "en": "Change Phone Number",
@@ -782,40 +669,15 @@ def seed_essential_translations():
             "uz": "Keng qamrovli suv tahlili",
             "ru": "Комплексный анализ воды"
         },
-        "Confirm New Password": {
-            "en": "Confirm New Password",
-            "uz": "Yangi parolni tasdiqlash",
-            "ru": "Подтвердите новый пароль"
-        },
         "Confirm Password": {
             "en": "Confirm Password",
             "uz": "Parolni tasdiqlash",
             "ru": "Подтвердите пароль"
         },
-        "Confirm new password": {
-            "en": "Confirm new password",
-            "uz": "Yangi parolni tasdiqlang",
-            "ru": "Подтвердите новый пароль"
-        },
         "Confirmed": {
             "en": "Confirmed",
             "uz": "Tasdiqlandi",
             "ru": "Подтверждено"
-        },
-        "Connect": {
-            "en": "Connect",
-            "uz": "Ulanish",
-            "ru": "Подключить"
-        },
-        "Connected": {
-            "en": "Connected",
-            "uz": "Ulandi",
-            "ru": "Подключено"
-        },
-        "Connected platforms": {
-            "en": "Connected platforms",
-            "uz": "Ulangan platformalar",
-            "ru": "Подключенные платформы"
         },
         "Contact": {
             "en": "Contact",
@@ -827,20 +689,10 @@ def seed_essential_translations():
             "uz": "Aloqa ma'lumotlari",
             "ru": "Контактная информация"
         },
-        "Contact Information": {
-            "en": "Contact Information",
-            "uz": "Aloqa ma'lumotlari",
-            "ru": "Контактная информация"
-        },
         "Contact Us": {
             "en": "Contact Us",
             "uz": "Biz bilan bog'laning",
             "ru": "Свяжитесь с нами"
-        },
-        "Contact information updated successfully!": {
-            "en": "Contact information updated successfully!",
-            "uz": "Aloqa ma'lumotlari muvaffaqiyatli yangilandi!",
-            "ru": "Контактная информация успешно обновлена!"
         },
         "Continue": {
             "en": "Continue",
@@ -867,11 +719,6 @@ def seed_essential_translations():
             "uz": "Suv sovutgichni o'rnatish",
             "ru": "Установка кулера"
         },
-        "Copy Code": {
-            "en": "Copy Code",
-            "uz": "Kod nusxalash",
-            "ru": "Скопировать код"
-        },
         "Cost-effective compared to one-time purchases": {
             "en": "Cost-effective compared to one-time purchases",
             "uz": "Bir martalik xaridlarga nisbatan tejamkor",
@@ -894,11 +741,6 @@ def seed_essential_translations():
             "en": "Create New Password",
             "ru": "Создать новый пароль",
             "uz": "Yangi parol yaratish"
-        },
-        "Current Password": {
-            "en": "Current Password",
-            "ru": "Текущий пароль",
-            "uz": "Joriy parol"
         },
         "Current Points": {
             "en": "Current AquaCoins",
@@ -940,11 +782,6 @@ def seed_essential_translations():
             "ru": "Дата",
             "uz": "Sana"
         },
-        "Date of Birth": {
-            "en": "Date of Birth",
-            "ru": "Дата рождения",
-            "uz": "Tug'ilgan sana"
-        },
         "Dec 20, 2023": {
             "en": "Dec 20, 2023",
             "ru": "20 декабря 2023",
@@ -959,16 +796,6 @@ def seed_essential_translations():
             "en": "Dedicated water specialists",
             "ru": "Специалисты по воде",
             "uz": "Suv bo'yicha mutaxassislar"
-        },
-        "Default": {
-            "en": "Default",
-            "ru": "По умолчанию",
-            "uz": "Standart"
-        },
-        "Default address updated!": {
-            "en": "Default address updated!",
-            "ru": "Адрес по умолчанию обновлен!",
-            "uz": "Standart manzil yangilandi!"
         },
         "Delete": {
             "en": "Delete",
@@ -990,11 +817,6 @@ def seed_essential_translations():
             "ru": "Доставка",
             "uz": "Yetkazib berish"
         },
-        "Delivery Address": {
-            "en": "Delivery Address",
-            "ru": "Адрес доставки",
-            "uz": "Yetkazib berish manzili"
-        },
         "Delivery Fee": {
             "en": "Delivery Fee",
             "ru": "Плата за доставку",
@@ -1009,11 +831,6 @@ def seed_essential_translations():
             "en": "Delivery Information",
             "ru": "Информация о доставке",
             "uz": "Yetkazib berish ma'lumotlari"
-        },
-        "Delivery Instructions": {
-            "en": "Delivery Instructions",
-            "ru": "Инструкции по доставке",
-            "uz": "Yetkazib berish bo'yicha ko'rsatmalar"
         },
         "Delivery Window": {
             "en": "Delivery Window",
@@ -1039,11 +856,6 @@ def seed_essential_translations():
             "en": "Delivery: 24/7",
             "ru": "Доставка: 24/7",
             "uz": "Yetkazib berish: 24/7"
-        },
-        "Discount": {
-            "en": "Discount",
-            "ru": "Скидка",
-            "uz": "Chegirma"
         },
         "Discover": {
             "en": "Discover",
@@ -1110,20 +922,10 @@ def seed_essential_translations():
             "ru": "Редактировать адрес",
             "uz": "Manzilni tahrirlash"
         },
-        "Edit Profile": {
-            "en": "Edit Profile",
-            "ru": "Редактировать профиль",
-            "uz": "Profilni tahrirlash"
-        },
         "Email": {
             "en": "Email",
             "ru": "Электронная почта",
             "uz": "Elektron pochta"
-        },
-        "Email Address": {
-            "en": "Email Address",
-            "ru": "Адрес электронной почты",
-            "uz": "Elektron pochta manzili"
         },
         "Email Address or Phone Number": {
             "en": "Email Address or Phone Number",
@@ -1139,20 +941,10 @@ def seed_essential_translations():
 
 
 
-        "Email Verification": {
-            "en": "Email Verification",
-            "ru": "Подтверждение электронной почты",
-            "uz": "Elektron pochtani tasdiqlash"
-        },
         "Email Verified": {
             "en": "Email Verified",
             "ru": "Электронная почта подтверждена",
             "uz": "Elektron pochta tasdiqlandi"
-        },
-        "Email address cannot be changed. Contact support if needed.": {
-            "en": "Email address cannot be changed. Contact support if needed.",
-            "ru": "Адрес электронной почты нельзя изменить. Свяжитесь с поддержкой, если необходимо.",
-            "uz": "Elektron pochta manzilini o'zgartirib bo'lmaydi. Kerak bo'lsa, yordam xizmati bilan bog'laning."
         },
         "Email address verified successfully! Your account is now fully activated.": {
             "en": "Email address verified successfully! Your account is now fully activated.",
@@ -1184,11 +976,6 @@ def seed_essential_translations():
             "ru": "Аварийное водоснабжение",
             "uz": "Favqulodda suv ta'minoti"
         },
-        "Enable 2FA": {
-            "en": "Enable 2FA",
-            "ru": "Включить двухфакторную аутентификацию",
-            "uz": "Ikki bosqichli autentifikatsiyani yoqish"
-        },
         "Enjoy unified access across web and Telegram!": {
             "en": "Enjoy unified access across web and Telegram!",
             "ru": "Наслаждайтесь единым доступом через веб и Telegram!",
@@ -1208,26 +995,6 @@ def seed_essential_translations():
             "en": "Enter coupon code",
             "ru": "Введите код купона",
             "uz": "Kupon kodini kiriting"
-        },
-        "Enter current password": {
-            "en": "Enter current password",
-            "ru": "Введите текущий пароль",
-            "uz": "Joriy parolni kiriting"
-        },
-        "Enter first name": {
-            "en": "Enter first name",
-            "ru": "Введите имя",
-            "uz": "Ismni kiriting"
-        },
-        "Enter last name": {
-            "en": "Enter last name",
-            "ru": "Введите фамилию",
-            "uz": "Familiyani kiriting"
-        },
-        "Enter new password": {
-            "en": "Enter new password",
-            "ru": "Введите новый пароль",
-            "uz": "Yangi parolni kiriting"
         },
         "Enter the email address or phone number associated with your account": {
             "en": "Enter the email address or phone number associated with your account",
@@ -1259,11 +1026,6 @@ def seed_essential_translations():
             "ru": "Сохранены необходимые минералы для вашего здоровья и благополучия.",
             "uz": "Sizning sog'lig'ingiz va farovonligingiz uchun zarur minerallar saqlangan."
         },
-        "Est. delivery": {
-            "en": "Est. delivery",
-            "ru": "Ориентировочная доставка",
-            "uz": "Taxminiy yetkazib berish"
-        },
         "Excellent service! The water quality is outstanding and delivery is always on time. Blue Stream has become an essential part of our daily routine for healthy living.": {
             "en": "Excellent service! The water quality is outstanding and delivery is always on time. Blue Stream has become an essential part of our daily routine for healthy living.",
             "ru": "Отличный сервис! Качество воды превосходное, доставка всегда вовремя. Blue Stream стал важной частью нашего ежедневного здорового образа жизни.",
@@ -1284,20 +1046,10 @@ def seed_essential_translations():
             "ru": "Ощутите удобство премиального сервиса доставки воды с нашими надежными и экологичными решениями для дома и офиса.",
             "uz": "Ishonchli, ekologik toza yechimlarimiz bilan uy va ofisingiz uchun premium suv yetkazib berish xizmatining qulayligini his eting."
         },
-        "Expires": {
-            "en": "Expires",
-            "ru": "Истекает",
-            "uz": "Muddati tugaydi"
-        },
         "Explore Our World": {
             "en": "Explore Our World",
             "ru": "Исследуйте наш мир",
             "uz": "Bizning dunyomizni o'rganing"
-        },
-        "Export Data": {
-            "en": "Export Data",
-            "ru": "Экспорт данных",
-            "uz": "Ma'lumotlarni eksport qilish"
         },
         "Facilities": {
             "en": "Facilities",
@@ -1314,35 +1066,10 @@ def seed_essential_translations():
             "ru": "Не удалось отменить подписку",
             "uz": "Obunani bekor qilib bo'lmadi"
         },
-        "Failed to change password": {
-            "en": "Failed to change password",
-            "ru": "Не удалось изменить пароль",
-            "uz": "Parolni o'zgartirib bo'lmadi"
-        },
-        "Failed to copy referral code": {
-            "en": "Failed to copy referral code",
-            "ru": "Не удалось скопировать реферальный код",
-            "uz": "Referal kodni nusxalab bo'lmadi"
-        },
         "Failed to create subscription. Please try again.": {
             "en": "Failed to create subscription. Please try again.",
             "ru": "Не удалось создать подписку. Пожалуйста, попробуйте снова.",
             "uz": "Obunani yaratib bo'lmadi. Iltimos, qaytadan urinib ko'ring."
-        },
-        "Failed to delete address": {
-            "en": "Failed to delete address",
-            "ru": "Не удалось удалить адрес",
-            "uz": "Manzilni o'chirib bo'lmadi"
-        },
-        "Failed to download account data. Please try again.": {
-            "en": "Failed to download account data. Please try again.",
-            "ru": "Не удалось загрузить данные учетной записи. Пожалуйста, попробуйте снова.",
-            "uz": "Hisob ma'lumotlarini yuklab bo'lmadi. Iltimos, qaytadan urinib ko'ring."
-        },
-        "Failed to generate referral code": {
-            "en": "Failed to generate referral code",
-            "ru": "Не удалось сгенерировать реферальный код",
-            "uz": "Referal kodni yaratib bo'lmadi"
         },
         "Failed to load deliveries": {
             "en": "Failed to load deliveries",
@@ -1354,35 +1081,10 @@ def seed_essential_translations():
             "ru": "Не удалось загрузить неактивные подписки",
             "uz": "Faol bo'lmagan obunalarni yuklab bo'lmadi"
         },
-        "Failed to load order details": {
-            "en": "Failed to load order details",
-            "ru": "Не удалось загрузить детали заказа",
-            "uz": "Buyurtma tafsilotlarini yuklab bo'lmadi"
-        },
-        "Failed to load orders": {
-            "en": "Failed to load orders",
-            "ru": "Не удалось загрузить заказы",
-            "uz": "Buyurtmalarni yuklab bo'lmadi"
-        },
-        "Failed to load orders. Please try again.": {
-            "en": "Failed to load orders. Please try again.",
-            "ru": "Не удалось загрузить заказы. Пожалуйста, попробуйте снова.",
-            "uz": "Buyurtmalarni yuklab bo'lmadi. Iltimos, qaytadan urinib ko'ring."
-        },
         "Failed to load points history": {
             "en": "Failed to load AquaCoins history",
             "ru": "Не удалось загрузить историю AquaCoins",
             "uz": "AquaCoins tarixini yuklab bo'lmadi"
-        },
-        "Failed to load reward details": {
-            "en": "Failed to load reward details",
-            "ru": "Не удалось загрузить детали награды",
-            "uz": "Mukofot tafsilotlarini yuklab bo'lmadi"
-        },
-        "Failed to load rewards": {
-            "en": "Failed to load rewards",
-            "ru": "Не удалось загрузить награды",
-            "uz": "Mukofotlarni yuklab bo'lmadi"
         },
         "Failed to load subscription details": {
             "en": "Failed to load subscription details",
@@ -1401,16 +1103,6 @@ def seed_essential_translations():
             "en": "Failed to pause subscription",
             "ru": "Не удалось приостановить подписку",
             "uz": "Obunani to'xtatib bo'lmadi"
-        },
-        "Failed to redeem reward": {
-            "en": "Failed to redeem reward",
-            "ru": "Не удалось использовать награду",
-            "uz": "Mukofotni olish amalga oshmadi"
-        },
-        "Failed to reorder items": {
-            "en": "Failed to reorder items",
-            "ru": "Не удалось повторно заказать товары",
-            "uz": "Buyurtmani qayta berish amalga oshmadi"
         },
         "Failed to resend code": {
             "en": "Failed to resend code",
@@ -1447,50 +1139,15 @@ def seed_essential_translations():
             "ru": "Не удалось отправить код подтверждения",
             "uz": "Tasdiqlash kodi yuborilmadi"
         },
-        "Failed to send verification email": {
-            "en": "Failed to send verification email",
-            "ru": "Не удалось отправить письмо для подтверждения",
-            "uz": "Tasdiqlash xati yuborilmadi"
-        },
-        "Failed to set default address": {
-            "en": "Failed to set default address",
-            "ru": "Не удалось установить адрес по умолчанию",
-            "uz": "Asosiy manzilni belgilab bo'lmadi"
-        },
-        "Failed to update contact information": {
-            "en": "Failed to update contact information",
-            "ru": "Не удалось обновить контактную информацию",
-            "uz": "Kontakt ma'lumotlarini yangilab bo'lmadi"
-        },
-        "Failed to update personal information": {
-            "en": "Failed to update personal information",
-            "ru": "Не удалось обновить личные данные",
-            "uz": "Shaxsiy ma'lumotlarni yangilab bo'lmadi"
-        },
         "Failed to update subscription": {
             "en": "Failed to update subscription",
             "ru": "Не удалось обновить подписку",
             "uz": "Obunani yangilab bo'lmadi"
         },
-        "Fair": {
-            "en": "Fair",
-            "ru": "Удовлетворительно",
-            "uz": "O'rtacha"
-        },
         "Fast and reliable water delivery to your doorstep with flexible scheduling options.": {
             "en": "Fast and reliable water delivery to your doorstep with flexible scheduling options.",
             "ru": "Быстрая и надежная доставка воды к вашей двери с гибкими вариантами расписания.",
             "uz": "Moslashuvchan jadval bilan tez va ishonchli suv yetkazib berish xizmati."
-        },
-        "Female": {
-            "en": "Female",
-            "ru": "Женский",
-            "uz": "Ayol"
-        },
-        "Filter": {
-            "en": "Filter",
-            "ru": "Фильтр",
-            "uz": "Filtr"
         },
         "First Name": {
             "en": "First Name",
@@ -1577,11 +1234,6 @@ def seed_essential_translations():
             "ru": "Пятница",
             "uz": "Juma"
         },
-        "Friends Referred": {
-            "en": "Friends Referred",
-            "ru": "Привлеченные друзья",
-            "uz": "Taklif qilingan do'stlar"
-        },
         "From bottles to dispensers": {
             "en": "From bottles to dispensers",
             "ru": "От бутылок до диспенсеров",
@@ -1602,11 +1254,6 @@ def seed_essential_translations():
             "ru": "Галерея -",
             "uz": "Galereya -"
         },
-        "Gender": {
-            "en": "Gender",
-            "ru": "Пол",
-            "uz": "Jins"
-        },
         "Get 200 bonus points on your birthday every year": {
             "en": "Get 200 bonus AquaCoins on your birthday every year",
             "ru": "Получайте 200 бонусных AquaCoins в день рождения каждый год",
@@ -1621,11 +1268,6 @@ def seed_essential_translations():
             "en": "Get In Touch",
             "ru": "Свяжитесь с нами",
             "uz": "Biz bilan bog'laning"
-        },
-        "Get My Referral Code": {
-            "en": "Get My Referral Code",
-            "ru": "Получить мой реферальный код",
-            "uz": "Referal kodimni oling"
         },
         "Go to Login": {
             "en": "Go to Login",
@@ -1645,11 +1287,6 @@ def seed_essential_translations():
 
 
 
-        "Good": {
-            "en": "Good",
-            "ru": "Хорошо",
-            "uz": "Yaxshi"
-        },
         "Got Questions?": {
             "en": "Got Questions?",
             "ru": "Есть вопросы?",
@@ -1674,11 +1311,6 @@ def seed_essential_translations():
             "en": "Healthy Water",
             "ru": "Здоровая вода",
             "uz": "Sogʻlom suv"
-        },
-        "Home": {
-            "en": "Home",
-            "ru": "Главная",
-            "uz": "Bosh sahifa"
         },
         "Home Delivery": {
             "en": "Home Delivery",
@@ -1710,11 +1342,6 @@ def seed_essential_translations():
             "ru": "Идеально для офисов и бизнеса",
             "uz": "Ofis va biznes uchun ideal"
         },
-        "Instructions": {
-            "en": "Instructions",
-            "ru": "Инструкции",
-            "uz": "Ko'rsatmalar"
-        },
         "Invalid coupon code": {
             "en": "Invalid coupon code",
             "ru": "Недействительный код купона",
@@ -1745,11 +1372,6 @@ def seed_essential_translations():
             "ru": "Варианты оплаты по счету",
             "uz": "Hisob-faktura bo'yicha to'lov variantlari"
         },
-        "Items added to cart successfully!": {
-            "en": "Items added to cart successfully!",
-            "ru": "Товары успешно добавлены в корзину!",
-            "uz": "Mahsulotlar savatchaga muvaffaqiyatli qo'shildi!"
-        },
         "Jan 15, 2024": {
             "en": "Jan 15, 2024",
             "ru": "15 янв. 2024",
@@ -1770,45 +1392,10 @@ def seed_essential_translations():
             "ru": "Присоединяйтесь к нам сегодня и наслаждайтесь премиальной доставкой воды",
             "uz": "Bugun bizga qo'shiling va premium suv yetkazib berish xizmatlaridan bahramand bo'ling"
         },
-        "Landmark": {
-            "en": "Landmark",
-            "ru": "Ориентир",
-            "uz": "Mo'ljal"
-        },
-        "Last 3 Months": {
-            "en": "Last 3 Months",
-            "ru": "Последние 3 месяца",
-            "uz": "Oxirgi 3 oy"
-        },
-        "Last 30 Days": {
-            "en": "Last 30 Days",
-            "ru": "Последние 30 дней",
-            "uz": "Oxirgi 30 kun"
-        },
-        "Last 7 Days": {
-            "en": "Last 7 Days",
-            "ru": "Последние 7 дней",
-            "uz": "Oxirgi 7 kun"
-        },
-        "Last Login": {
-            "en": "Last Login",
-            "ru": "Последний вход",
-            "uz": "Oxirgi kirish"
-        },
         "Last Name": {
             "en": "Last Name",
             "ru": "Фамилия",
             "uz": "Familiya"
-        },
-        "Last Year": {
-            "en": "Last Year",
-            "ru": "Прошлый год",
-            "uz": "O'tgan yil"
-        },
-        "Last login": {
-            "en": "Last login",
-            "ru": "Последний вход",
-            "uz": "Oxirgi kirish"
         },
         "Last order": {
             "en": "Last order",
@@ -1855,20 +1442,10 @@ def seed_essential_translations():
             "ru": "Загрузка истории AquaCoins...",
             "uz": "AquaCoins tarixi yuklanmoqda..."
         },
-        "Loading rewards...": {
-            "en": "Loading rewards...",
-            "ru": "Загрузка наград...",
-            "uz": "Mukofotlar yuklanmoqda..."
-        },
         "Loading upcoming deliveries...": {
             "en": "Loading upcoming deliveries...",
             "ru": "Загрузка предстоящих доставок...",
             "uz": "Kelgusi yetkazib berishlar yuklanmoqda..."
-        },
-        "Loading your orders...": {
-            "en": "Loading your orders...",
-            "ru": "Загрузка ваших заказов...",
-            "uz": "Buyurtmalaringiz yuklanmoqda..."
         },
         "Loading your subscriptions...": {
             "en": "Loading your subscriptions...",
@@ -1930,16 +1507,6 @@ def seed_essential_translations():
             "ru": "Программа бонусов лояльности",
             "uz": "Sodiqlik mukofotlari dasturi"
         },
-        "Make Purchases": {
-            "en": "Make Purchases",
-            "ru": "Совершать покупки",
-            "uz": "Xarid qilish"
-        },
-        "Male": {
-            "en": "Male",
-            "ru": "Мужчина",
-            "uz": "Erkak"
-        },
         "Manage": {
             "en": "Manage",
             "ru": "Управлять",
@@ -1950,35 +1517,15 @@ def seed_essential_translations():
             "ru": "Управлять адресами",
             "uz": "Manzillarni boshqarish"
         },
-        "Manage All": {
-            "en": "Manage All",
-            "ru": "Управлять всем",
-            "uz": "Hammasini boshqarish"
-        },
         "Manage Subscription": {
             "en": "Manage Subscription",
             "ru": "Управлять подпиской",
             "uz": "Obunani boshqarish"
         },
-        "Manage your account, orders, and preferences from your unified dashboard.": {
-            "en": "Manage your account, orders, and preferences from your unified dashboard.",
-            "ru": "Управляйте аккаунтом, заказами и настройками из единой панели.",
-            "uz": "Hisobingiz, buyurtmalaringiz va sozlamalaringizni yagona boshqaruv panelidan boshqaring."
-        },
         "Maximum Purity": {
             "en": "Maximum Purity",
             "ru": "Максимальная чистота",
             "uz": "Maksimal tozalik"
-        },
-        "Member Since": {
-            "en": "Member Since",
-            "ru": "Участник с",
-            "uz": "Aʼzo bo'lgan vaqtidan"
-        },
-        "Membership Tiers": {
-            "en": "Membership Tiers",
-            "ru": "Уровни членства",
-            "uz": "Aʼzolik darajalari"
         },
         "Message sent successfully!": {
             "en": "Message sent successfully!",
@@ -2065,16 +1612,6 @@ def seed_essential_translations():
             "ru": "Имя: A–Я",
             "uz": "Nomi: A dan Z gacha"
         },
-        "Nearby landmark": {
-            "en": "Nearby landmark",
-            "ru": "Ближайший ориентир",
-            "uz": "Yaqin mo'ljal"
-        },
-        "Network error. Please try again.": {
-            "en": "Network error. Please try again.",
-            "ru": "Ошибка сети. Пожалуйста, попробуйте снова.",
-            "uz": "Tarmoq xatosi. Qayta urinib ko'ring."
-        },
 
 
         "Never run out of pure, clean water": {
@@ -2082,20 +1619,10 @@ def seed_essential_translations():
             "ru": "Никогда не оставайтесь без чистой и свежей воды",
             "uz": "Hech qachon toza va sof suvdan qolasiz"
         },
-        "New Password": {
-            "en": "New Password",
-            "ru": "Новый пароль",
-            "uz": "Yangi parol"
-        },
         "New Quality Standards and Certification Achieved": {
             "en": "New Quality Standards and Certification Achieved",
             "ru": "Достигнуты новые стандарты качества и сертификация",
             "uz": "Yangi sifat standartlari va sertifikatlashga erishildi"
-        },
-        "New passwords do not match": {
-            "en": "New passwords do not match",
-            "ru": "Новые пароли не совпадают",
-            "uz": "Yangi parollar mos kelmayapti"
         },
         "Next Delivery": {
             "en": "Next Delivery",
@@ -2117,25 +1644,10 @@ def seed_essential_translations():
             "ru": "Нет активных подписок",
             "uz": "Faol obunalar mavjud emas"
         },
-        "No addresses saved yet": {
-            "en": "No addresses saved yet",
-            "ru": "Адреса еще не сохранены",
-            "uz": "Hali manzillar saqlanmagan"
-        },
         "No contracts - cancel or modify anytime": {
             "en": "No contracts - cancel or modify anytime",
             "ru": "Без контрактов — отменяйте или изменяйте в любое время",
             "uz": "Hech qanday shartnoma yo'q — istalgan vaqtda bekor qiling yoki o'zgartiring"
-        },
-        "No orders found": {
-            "en": "No orders found",
-            "ru": "Заказы не найдены",
-            "uz": "Buyurtmalar topilmadi"
-        },
-        "No orders yet": {
-            "en": "No orders yet",
-            "ru": "Пока нет заказов",
-            "uz": "Hali buyurtmalar yo'q"
         },
         "No paused or cancelled subscriptions": {
             "en": "No paused or cancelled subscriptions",
@@ -2151,11 +1663,6 @@ def seed_essential_translations():
             "en": "No AquaCoins history found",
             "ru": "История AquaCoins не найдена",
             "uz": "AquaCoins tarixi topilmadi"
-        },
-        "No rewards available": {
-            "en": "No rewards available",
-            "ru": "Нет доступных наград",
-            "uz": "Mukofotlar mavjud emas"
         },
         "No setup fees and no long-term contracts required. You can cancel your subscription at any time with 30 days notice. Water cooler rental is included in all plans at no extra cost.": {
             "en": "No setup fees and no long-term contracts required. You can cancel your subscription at any time with 30 days notice. Water cooler rental is included in all plans at no extra cost.",
@@ -2222,40 +1729,10 @@ def seed_essential_translations():
             "ru": "Заказ №",
             "uz": "Buyurtma №"
         },
-        "Order Details": {
-            "en": "Order Details",
-            "ru": "Детали заказа",
-            "uz": "Buyurtma tafsilotlari"
-        },
-        "Order Items": {
-            "en": "Order Items",
-            "ru": "Товары в заказе",
-            "uz": "Buyurtmadagi mahsulotlar"
-        },
-        "Order Status": {
-            "en": "Order Status",
-            "ru": "Статус заказа",
-            "uz": "Buyurtma holati"
-        },
-        "Order Summary": {
-            "en": "Order Summary",
-            "ru": "Сводка заказа",
-            "uz": "Buyurtma xulosasi"
-        },
-        "Order Tracking": {
-            "en": "Order Tracking",
-            "ru": "Отслеживание заказа",
-            "uz": "Buyurtma kuzatuvi"
-        },
         "Order cancelled successfully": {
             "en": "Order cancelled successfully",
             "ru": "Заказ успешно отменён",
             "uz": "Buyurtma muvaffaqiyatli bekor qilindi"
-        },
-        "Order number, product name...": {
-            "en": "Order number, product name...",
-            "ru": "Номер заказа, название товара...",
-            "uz": "Buyurtma raqami, mahsulot nomi..."
         },
         "Orders": {
             "en": "Orders",
@@ -2302,26 +1779,6 @@ def seed_essential_translations():
             "ru": "Пароль",
             "uz": "Parol"
         },
-        "Password Protection": {
-            "en": "Password Protection",
-            "ru": "Защита паролем",
-            "uz": "Parol bilan himoya"
-        },
-        "Password changed successfully!": {
-            "en": "Password changed successfully!",
-            "ru": "Пароль успешно изменён!",
-            "uz": "Parol muvaffaqiyatli o'zgartirildi!"
-        },
-        "Password is too weak. Please choose a stronger password.": {
-            "en": "Password is too weak. Please choose a stronger password.",
-            "ru": "Пароль слишком слабый. Пожалуйста, выберите более надежный пароль.",
-            "uz": "Parol juda zaif. Iltimos, kuchliroq parol tanlang."
-        },
-        "Password must be at least 8 characters long": {
-            "en": "Password must be at least 8 characters long",
-            "ru": "Пароль должен содержать не менее 8 символов",
-            "uz": "Parol kamida 8 ta belgidan iborat bo'lishi kerak"
-        },
         "Password reset instructions have been sent to your email address. Please check your inbox and follow the instructions.": {
             "en": "Password reset instructions have been sent to your email address. Please check your inbox and follow the instructions.",
             "ru": "Инструкции по сбросу пароля были отправлены на вашу электронную почту. Пожалуйста, проверьте почту и следуйте инструкциям.",
@@ -2331,11 +1788,6 @@ def seed_essential_translations():
             "en": "Password reset successfully!",
             "ru": "Пароль успешно сброшен!",
             "uz": "Parol muvaffaqiyatli tiklandi!"
-        },
-        "Password strength": {
-            "en": "Password strength",
-            "ru": "Надежность пароля",
-            "uz": "Parol kuchi"
         },
         "Passwords do not match": {
             "en": "Passwords do not match",
@@ -2372,21 +1824,6 @@ def seed_essential_translations():
             "ru": "Идеально для небольших семей",
             "uz": "Kichik oilalar uchun ideal"
         },
-        "Personal Information": {
-            "en": "Personal Information",
-            "ru": "Личная информация",
-            "uz": "Shaxsiy ma'lumotlar"
-        },
-        "Personal information updated successfully!": {
-            "en": "Personal information updated successfully!",
-            "ru": "Личная информация успешно обновлена!",
-            "uz": "Shaxsiy ma'lumotlar muvaffaqiyatli yangilandi!"
-        },
-        "Personal information was updated": {
-            "en": "Personal information was updated",
-            "ru": "Личная информация обновлена",
-            "uz": "Shaxsiy ma'lumotlar yangilandi"
-        },
         "Phone": {
             "en": "Phone",
             "ru": "Телефон",
@@ -2394,11 +1831,6 @@ def seed_essential_translations():
         },
 
 
-        "Phone Number": {
-            "en": "Phone Number",
-            "ru": "Номер телефона",
-            "uz": "Telefon raqami"
-        },
         "Phone Number (+998XXXXXXXXX)": {
             "en": "Phone Number (+998XXXXXXXXX)",
             "ru": "Номер телефона (+998XXXXXXXXX)",
@@ -2408,11 +1840,6 @@ def seed_essential_translations():
             "en": "Phone Pending",
             "ru": "Телефон в ожидании",
             "uz": "Telefon kutilmoqda"
-        },
-        "Phone Verification": {
-            "en": "Phone Verification",
-            "ru": "Подтверждение телефона",
-            "uz": "Telefonni tasdiqlash"
         },
         "Phone Verified": {
             "en": "Phone Verified",
@@ -2429,16 +1856,6 @@ def seed_essential_translations():
             "ru": "Номер телефона успешно подтвержден! Теперь вы можете использовать все функции.",
             "uz": "Telefon raqami muvaffaqiyatli tasdiqlandi! Endi barcha funksiyalardan foydalanishingiz mumkin."
         },
-        "Place New Order": {
-            "en": "Place New Order",
-            "ru": "Сделать новый заказ",
-            "uz": "Yangi buyurtma berish"
-        },
-        "Placed on": {
-            "en": "Placed on",
-            "ru": "Размещено",
-            "uz": "Joylashtirilgan"
-        },
         "Plan": {
             "en": "Plan",
             "ru": "План",
@@ -2448,11 +1865,6 @@ def seed_essential_translations():
             "en": "Plan Benefits",
             "ru": "Преимущества плана",
             "uz": "Reja afzalliklari"
-        },
-        "Platform Usage": {
-            "en": "Platform Usage",
-            "ru": "Использование платформы",
-            "uz": "Platformadan foydalanish"
         },
         "Platinum": {
             "en": "Platinum",
@@ -2519,16 +1931,6 @@ def seed_essential_translations():
             "ru": "Пожалуйста, укажите причину отмены (необязательно)",
             "uz": "Iltimos, bekor qilish sababini kiriting (ixtiyoriy)"
         },
-        "Please verify your email address to access all features": {
-            "en": "Please verify your email address to access all features",
-            "ru": "Пожалуйста, подтвердите свой адрес электронной почты, чтобы получить доступ ко всем функциям",
-            "uz": "Iltimos, barcha funksiyalardan foydalanish uchun emailingizni tasdiqlang"
-        },
-        "Please verify your phone number for enhanced security": {
-            "en": "Please verify your phone number for enhanced security",
-            "ru": "Пожалуйста, подтвердите номер телефона для повышения безопасности",
-            "uz": "Iltimos, xavfsizlikni oshirish uchun telefon raqamingizni tasdiqlang"
-        },
         "Points": {
             "en": "AquaCoins",
             "ru": "AquaCoins",
@@ -2569,25 +1971,10 @@ def seed_essential_translations():
             "ru": "Почтовый индекс",
             "uz": "Pochta indeksi"
         },
-        "Preferences": {
-            "en": "Preferences",
-            "ru": "Настройки",
-            "uz": "Sozlamalar"
-        },
-        "Preferences saved successfully!": {
-            "en": "Preferences saved successfully!",
-            "ru": "Настройки успешно сохранены!",
-            "uz": "Sozlamalar muvaffaqiyatli saqlandi!"
-        },
         "Preferred Delivery Day": {
             "en": "Preferred Delivery Day",
             "ru": "Предпочтительный день доставки",
             "uz": "Afzal ko'rilgan yetkazib berish kuni"
-        },
-        "Preferred Language": {
-            "en": "Preferred Language",
-            "ru": "Предпочтительный язык",
-            "uz": "Afzal ko'rilgan til"
         },
         "Preferred Time": {
             "en": "Preferred Time",
@@ -2646,11 +2033,6 @@ def seed_essential_translations():
         },
 
 
-        "Preparing your account data for download...": {
-            "en": "Preparing your account data for download...",
-            "ru": "Подготавливаем данные вашего аккаунта для скачивания...",
-            "uz": "Hisob ma'lumotlaringizni yuklab olish uchun tayyorlanmoqda..."
-        },
         "Price": {
             "en": "Price",
             "ru": "Цена",
@@ -2751,16 +2133,6 @@ def seed_essential_translations():
             "ru": "Настройки профиля",
             "uz": "Profil sozlamalari"
         },
-        "Profile Updated": {
-            "en": "Profile Updated",
-            "ru": "Профиль обновлен",
-            "uz": "Profil yangilandi"
-        },
-        "Profile updated": {
-            "en": "Profile updated",
-            "ru": "Профиль обновлен",
-            "uz": "Profil yangilandi"
-        },
         "Pure Water Delivery To Your Doorstep": {
             "en": "Pure Water Delivery To Your Doorstep",
             "ru": "Доставка чистой воды прямо к вашему порогу",
@@ -2816,11 +2188,6 @@ def seed_essential_translations():
             "ru": "Количество за доставку",
             "uz": "Har bir yetkazib berishda miqdor"
         },
-        "Quick Actions": {
-            "en": "Quick Actions",
-            "ru": "Быстрые действия",
-            "uz": "Tezkor amallar"
-        },
         "Read More": {
             "en": "Read More",
             "ru": "Читать далее",
@@ -2830,31 +2197,6 @@ def seed_essential_translations():
             "en": "Ready To Get Our Premium Water Delivery Service",
             "ru": "Готовы воспользоваться нашей премиальной доставкой воды?",
             "uz": "Bizning premium suv yetkazib berish xizmatimizga tayyormisiz?"
-        },
-        "Receive SMS notifications about deliveries": {
-            "en": "Receive SMS notifications about deliveries",
-            "ru": "Получать SMS-уведомления о доставках",
-            "uz": "Yetkazib berish haqida SMS xabarnomalarini oling"
-        },
-        "Receive email notifications about orders": {
-            "en": "Receive email notifications about orders",
-            "ru": "Получать email-уведомления о заказах",
-            "uz": "Buyurtmalar haqida email xabarnomalarini oling"
-        },
-        "Receive promotional emails and offers": {
-            "en": "Receive promotional emails and offers",
-            "ru": "Получать рекламные письма и предложения",
-            "uz": "Reklama email va takliflarni oling"
-        },
-        "Recent Account Activity": {
-            "en": "Recent Account Activity",
-            "ru": "Последняя активность аккаунта",
-            "uz": "Hisobdagi so'nggi faoliyat"
-        },
-        "Recent Activity": {
-            "en": "Recent Activity",
-            "ru": "Последняя активность",
-            "uz": "So'nggi faoliyat"
         },
         "Recent Billing History": {
             "en": "Recent Billing History",
@@ -2866,30 +2208,15 @@ def seed_essential_translations():
             "ru": "Последние заказы",
             "uz": "So'nggi buyurtmalar"
         },
-        "Redeem": {
-            "en": "Redeem",
-            "ru": "Использовать",
-            "uz": "Foydalanish"
-        },
         "Redeem Reward": {
             "en": "Redeem Reward",
             "ru": "Использовать награду",
             "uz": "Mukofotdan foydalanish"
         },
-        "Refer Friends": {
-            "en": "Refer Friends",
-            "ru": "Пригласить друзей",
-            "uz": "Do'stlarni taklif qilish"
-        },
         "Referral Code (Optional)": {
             "en": "Referral Code (Optional)",
             "ru": "Реферальный код (необязательно)",
             "uz": "Referal kod (ixtiyoriy)"
-        },
-        "Referral code copied to clipboard!": {
-            "en": "Referral code copied to clipboard!",
-            "ru": "Реферальный код скопирован в буфер обмена!",
-            "uz": "Referal kod xotiraga nusxalandi!"
         },
         "Register": {
             "en": "Register",
@@ -2900,11 +2227,6 @@ def seed_essential_translations():
             "en": "Register Here",
             "ru": "Зарегистрируйтесь здесь",
             "uz": "Bu yerda ro'yxatdan o'ting"
-        },
-        "Registration Source": {
-            "en": "Registration Source",
-            "ru": "Источник регистрации",
-            "uz": "Ro'yxatdan o'tish manbai"
         },
         "Registration failed": {
             "en": "Registration failed",
@@ -2920,16 +2242,6 @@ def seed_essential_translations():
             "en": "Remember your password?",
             "ru": "Помните свой пароль?",
             "uz": "Parolingizni eslaysizmi?"
-        },
-        "Reorder": {
-            "en": "Reorder",
-            "ru": "Повторить заказ",
-            "uz": "Qayta buyurtma berish"
-        },
-        "Reorder Items": {
-            "en": "Reorder Items",
-            "ru": "Повторить товары",
-            "uz": "Buyurtmalarni qayta berish"
         },
         "Request New Reset Link": {
             "en": "Request New Reset Link",
@@ -2981,16 +2293,6 @@ def seed_essential_translations():
             "ru": "Возобновить подписку",
             "uz": "Obunani davom ettirish"
         },
-        "Reward redeemed successfully!": {
-            "en": "Reward redeemed successfully!",
-            "ru": "Награда успешно использована!",
-            "uz": "Mukofot muvaffaqiyatli foydalanildi!"
-        },
-        "SMS Authentication": {
-            "en": "SMS Authentication",
-            "ru": "SMS-аутентификация",
-            "uz": "SMS autentifikatsiya"
-        },
         "Same-day emergency delivery": {
             "en": "Same-day emergency delivery",
             "ru": "Экстренная доставка в тот же день",
@@ -3005,26 +2307,6 @@ def seed_essential_translations():
             "en": "Saturday",
             "ru": "Суббота",
             "uz": "Shanba"
-        },
-        "Save Address": {
-            "en": "Save Address",
-            "ru": "Сохранить адрес",
-            "uz": "Manzilni saqlash"
-        },
-        "Save Changes": {
-            "en": "Save Changes",
-            "ru": "Сохранить изменения",
-            "uz": "O'zgarishlarni saqlash"
-        },
-        "Save Preferences": {
-            "en": "Save Preferences",
-            "ru": "Сохранить предпочтения",
-            "uz": "Afzalliklarni saqlash"
-        },
-        "Save Security Settings": {
-            "en": "Save Security Settings",
-            "ru": "Сохранить настройки безопасности",
-            "uz": "Xavfsizlik sozlamalarini saqlash"
         },
         "Save money and enjoy convenient water delivery with our flexible subscription plans. Choose between monthly and yearly billing cycles to fit your needs.": {
             "en": "Save money and enjoy convenient water delivery with our flexible subscription plans. Choose between monthly and yearly billing cycles to fit your needs.",
@@ -3041,20 +2323,10 @@ def seed_essential_translations():
             "ru": "Сохраните этот код, чтобы привязать свой аккаунт Telegram",
             "uz": "Telegram hisobingizni ulash uchun ushbu kodni saqlang"
         },
-        "Saved Addresses": {
-            "en": "Saved Addresses",
-            "ru": "Сохраненные адреса",
-            "uz": "Saqlangan manzillar"
-        },
         "Scheduled": {
             "en": "Scheduled",
             "ru": "Запланировано",
             "uz": "Rejalashtirilgan"
-        },
-        "Search Orders": {
-            "en": "Search Orders",
-            "ru": "Поиск заказов",
-            "uz": "Buyurtmalarni qidirish"
         },
         "Search Products": {
             "en": "Search Products",
@@ -3076,33 +2348,13 @@ def seed_essential_translations():
             "ru": "Безопасность",
             "uz": "Xavfsizlik"
         },
-        "Security Overview": {
-            "en": "Security Overview",
-            "ru": "Обзор безопасности",
-            "uz": "Xavfsizlikga umumiy nazar"
-        },
-        "Security Settings": {
-            "en": "Security Settings",
-            "ru": "Настройки безопасности",
-            "uz": "Xavfsizlik sozlamalari"
-        },
 
 
 
-        "Security settings saved successfully!": {
-            "en": "Security settings saved successfully!",
-            "uz": "Xavfsizlik sozlamalari muvaffaqiyatli saqlandi!",
-            "ru": "Настройки безопасности успешно сохранены!"
-        },
         "Select Day": {
             "en": "Select Day",
             "uz": "Kunni tanlang",
             "ru": "Выберите день"
-        },
-        "Select Gender": {
-            "en": "Select Gender",
-            "uz": "Jinsni tanlang",
-            "ru": "Выберите пол"
         },
         "Select New Plan": {
             "en": "Select New Plan",
@@ -3134,16 +2386,6 @@ def seed_essential_translations():
             "uz": "Tasdiqlash kodini yuborish",
             "ru": "Отправить код подтверждения"
         },
-        "Send email notifications for new logins": {
-            "en": "Send email notifications for new logins",
-            "uz": "Yangi kirishlar uchun email xabarnoma yuborish",
-            "ru": "Отправлять уведомления по email о новых входах"
-        },
-        "Send email notifications for password changes": {
-            "en": "Send email notifications for password changes",
-            "uz": "Parol o'zgarishlari uchun email xabarnoma yuborish",
-            "ru": "Отправлять уведомления по email об изменении пароля"
-        },
         "Send the command": {
             "en": "Send the command",
             "uz": "Buyruqni yuboring",
@@ -3164,25 +2406,10 @@ def seed_essential_translations():
             "uz": "Xizmatlar",
             "ru": "Услуги"
         },
-        "Set Default": {
-            "en": "Set Default",
-            "uz": "Standart qilib belgilash",
-            "ru": "Установить по умолчанию"
-        },
-        "Set as default address": {
-            "en": "Set as default address",
-            "uz": "Standart manzil sifatida belgilash",
-            "ru": "Установить как адрес по умолчанию"
-        },
         "Share": {
             "en": "Share",
             "uz": "Ulashish",
             "ru": "Поделиться"
-        },
-        "Share this code with friends": {
-            "en": "Share this code with friends",
-            "uz": "Ushbu kodni do'stlaringiz bilan ulashing",
-            "ru": "Поделитесь этим кодом с друзьями"
         },
         "Shipped": {
             "en": "Shipped",
@@ -3199,11 +2426,6 @@ def seed_essential_translations():
             "uz": "Hozir xarid qilish",
             "ru": "Купить сейчас"
         },
-        "Shop Products": {
-            "en": "Shop Products",
-            "uz": "Mahsulotlarni xarid qilish",
-            "ru": "Товары магазина"
-        },
         "Shopping Cart": {
             "en": "Shopping Cart",
             "uz": "Savat",
@@ -3213,11 +2435,6 @@ def seed_essential_translations():
             "en": "Show Password",
             "uz": "Parolni ko'rsatish",
             "ru": "Показать пароль"
-        },
-        "Show passwords": {
-            "en": "Show passwords",
-            "uz": "Parollarni ko'rsatish",
-            "ru": "Показать пароли"
         },
         "Silver": {
             "en": "Silver",
@@ -3248,16 +2465,6 @@ def seed_essential_translations():
             "en": "Standard shipping",
             "uz": "Standart yetkazib berish",
             "ru": "Стандартная доставка"
-        },
-        "Start Shopping": {
-            "en": "Start Shopping",
-            "uz": "Xarid qilishni boshlang",
-            "ru": "Начать покупки"
-        },
-        "Start shopping to see your orders here": {
-            "en": "Start shopping to see your orders here",
-            "uz": "Buyurtmalaringizni bu yerda ko'rish uchun xarid qilishni boshlang",
-            "ru": "Начните покупки, чтобы увидеть свои заказы здесь"
         },
         "Started": {
             "en": "Started",
@@ -3298,11 +2505,6 @@ def seed_essential_translations():
             "en": "Street address",
             "uz": "Ko'cha manzili",
             "ru": "Адрес улицы"
-        },
-        "Strong": {
-            "en": "Strong",
-            "uz": "Kuchli",
-            "ru": "Сильный"
         },
         "Subject": {
             "en": "Subject",
@@ -3402,45 +2604,15 @@ def seed_essential_translations():
 
 
 
-        "Successful login from web browser": {
-            "en": "Successful login from web browser",
-            "ru": "Успешный вход через веб-браузер",
-            "uz": "Veb-brauzer orqali muvaffaqiyatli kirildi"
-        },
-        "Sync Error": {
-            "en": "Sync Error",
-            "ru": "Ошибка синхронизации",
-            "uz": "Sinxronizatsiya xatosi"
-        },
-        "Synchronized": {
-            "en": "Synchronized",
-            "ru": "Синхронизировано",
-            "uz": "Sinxronlashtirildi"
-        },
-        "Syncing...": {
-            "en": "Syncing...",
-            "ru": "Синхронизация...",
-            "uz": "Sinxronizatsiya qilinmoqda..."
-        },
         "Tashkent, Uzbekistan": {
             "en": "Tashkent, Uzbekistan",
             "ru": "Ташкент, Узбекистан",
             "uz": "Toshkent, O'zbekiston"
         },
-        "Tax": {
-            "en": "Tax",
-            "ru": "Налог",
-            "uz": "Soliq"
-        },
         "Telegram Account Linking": {
             "en": "Telegram Account Linking",
             "ru": "Привязка аккаунта Telegram",
             "uz": "Telegram hisobini bog'lash"
-        },
-        "Telegram Bot": {
-            "en": "Telegram Bot",
-            "ru": "Телеграм-бот",
-            "uz": "Telegram bot"
         },
         "Telegram Linking Code": {
             "en": "Telegram Linking Code",
@@ -3472,11 +2644,6 @@ def seed_essential_translations():
             "ru": "Код подтверждения в вашей электронной почте",
             "uz": "Tasdiqlash kodi emailingizda"
         },
-        "This is a business address": {
-            "en": "This is a business address",
-            "ru": "Это рабочий адрес",
-            "uz": "Bu ish manzili"
-        },
         "Thursday": {
             "en": "Thursday",
             "ru": "Четверг",
@@ -3486,11 +2653,6 @@ def seed_essential_translations():
             "en": "Tier",
             "ru": "Уровень",
             "uz": "Daraja"
-        },
-        "Time Period": {
-            "en": "Time Period",
-            "ru": "Период времени",
-            "uz": "Vaqt oralig'i"
         },
         "To link your Telegram account": {
             "en": "To link your Telegram account",
@@ -3502,25 +2664,10 @@ def seed_essential_translations():
             "ru": "Итого",
             "uz": "Jami"
         },
-        "Total Orders": {
-            "en": "Total Orders",
-            "ru": "Всего заказов",
-            "uz": "Jami buyurtmalar"
-        },
-        "Track Package": {
-            "en": "Track Package",
-            "ru": "Отслеживать посылку",
-            "uz": "Posilkani kuzatish"
-        },
         "Tracking": {
             "en": "Tracking",
             "ru": "Отслеживание",
             "uz": "Kuzatuv"
-        },
-        "Tracking Number": {
-            "en": "Tracking Number",
-            "ru": "Номер отслеживания",
-            "uz": "Kuzatuv raqami"
         },
         "Treatment Facility": {
             "en": "Treatment Facility",
@@ -3536,16 +2683,6 @@ def seed_essential_translations():
             "en": "Tuesday",
             "ru": "Вторник",
             "uz": "Seshanba"
-        },
-        "Two-Factor Authentication": {
-            "en": "Two-Factor Authentication",
-            "ru": "Двухфакторная аутентификация",
-            "uz": "Ikki bosqichli autentifikatsiya"
-        },
-        "Two-factor authentication setup coming soon!": {
-            "en": "Two-factor authentication setup coming soon!",
-            "ru": "Настройка двухфакторной аутентификации скоро появится!",
-            "uz": "Ikki bosqichli autentifikatsiya sozlamasi tez orada qo'shiladi!"
         },
         "Understanding water purity standards and what makes Blue Stream water exceptional for your health.": {
             "en": "Understanding water purity standards and what makes Blue Stream water exceptional for your health.",
@@ -3565,11 +2702,6 @@ def seed_essential_translations():
 
 
 
-        "Update Contact Info": {
-            "en": "Update Contact Info",
-            "ru": "Обновить контактную информацию",
-            "uz": "Aloqa ma'lumotlarini yangilash"
-        },
         "Update Subscription": {
             "en": "Update Subscription",
             "ru": "Обновить подписку",
@@ -3584,11 +2716,6 @@ def seed_essential_translations():
             "en": "Urgent",
             "ru": "Срочно",
             "uz": "Shoshilinch"
-        },
-        "Use my referral code": {
-            "en": "Use my referral code",
-            "ru": "Используйте мой реферальный код",
-            "uz": "Mening referal kodimdan foydalaning"
         },
         "Use the linking code that will be provided": {
             "en": "Use the linking code that will be provided",
@@ -3635,20 +2762,10 @@ def seed_essential_translations():
             "ru": "Письмо с подтверждением успешно отправлено! Пожалуйста, проверьте вашу почту.",
             "uz": "Tasdiqlash xati muvaffaqiyatli yuborildi! Iltimos, pochtangizni tekshiring."
         },
-        "Verification email sent! Please check your inbox.": {
-            "en": "Verification email sent! Please check your inbox.",
-            "ru": "Письмо с подтверждением отправлено! Пожалуйста, проверьте вашу почту.",
-            "uz": "Tasdiqlash xati yuborildi! Iltimos, pochtangizni tekshiring."
-        },
         "Verified": {
             "en": "Verified",
             "ru": "Подтверждено",
             "uz": "Tasdiqlangan"
-        },
-        "Verify": {
-            "en": "Verify",
-            "ru": "Подтвердить",
-            "uz": "Tasdiqlash"
         },
         "Verify Code": {
             "en": "Verify Code",
@@ -3673,11 +2790,6 @@ def seed_essential_translations():
             "ru": "Подтвердить телефон",
             "uz": "Telefonni tasdiqlash"
         },
-        "Verify Phone First": {
-            "en": "Verify Phone First",
-            "ru": "Сначала подтвердите телефон",
-            "uz": "Avval telefonni tasdiqlang"
-        },
         "Verify Phone Number": {
             "en": "Verify Phone Number",
             "ru": "Подтвердить номер телефона",
@@ -3692,11 +2804,6 @@ def seed_essential_translations():
             "en": "Verify Your Phone Number",
             "ru": "Подтвердите ваш номер телефона",
             "uz": "Telefon raqamingizni tasdiqlang"
-        },
-        "Very Strong": {
-            "en": "Very Strong",
-            "ru": "Очень сильный",
-            "uz": "Juda kuchli"
         },
         "View": {
             "en": "View",
@@ -3866,16 +2973,6 @@ def seed_essential_translations():
             "ru": "Мы попытаемся перенести вашу доставку в течение 24-48 часов без дополнительной платы. Наши водители оставят уведомление, если вы будете недоступны. Вы также можете перенести доставку через свой онлайн-аккаунт.",
             "uz": "Biz sizning yetkazib berishingizni 24-48 soat ichida bepul qayta rejalashtirishga harakat qilamiz. Agar siz mavjud bo'lmasangiz, haydovchilarimiz eslatma qoldirishadi. Yetkazib berishni onlayn akkauntingiz orqali ham qayta rejalashtirishingiz mumkin."
         },
-        "Weak": {
-            "en": "Weak",
-            "ru": "Слабый",
-            "uz": "Kuchsiz"
-        },
-        "Web App": {
-            "en": "Web App",
-            "ru": "Веб-приложение",
-            "uz": "Veb ilova"
-        },
         "Wednesday": {
             "en": "Wednesday",
             "ru": "Среда",
@@ -3893,11 +2990,6 @@ def seed_essential_translations():
         },
         "Welcome Back": {
             "en": "Welcome Back",
-            "ru": "С возвращением",
-            "uz": "Xush kelibsiz"
-        },
-        "Welcome back": {
-            "en": "Welcome back",
             "ru": "С возвращением",
             "uz": "Xush kelibsiz"
         },
@@ -3943,16 +3035,6 @@ def seed_essential_translations():
             "ru": "Благодаря современным технологиям фильтрации и клиентоориентированному подходу мы стали надежным выбором для тысяч семей и компаний, ищущих надежные решения для воды.",
             "uz": "Zamonaviy filtrlash texnologiyalari va mijozlarga yo'naltirilgan yondashuvimiz tufayli biz minglab oilalar va bizneslar uchun ishonchli suv yechimlarida ishonchli tanlovga aylandik."
         },
-        "Would you like to verify your new phone number now?": {
-            "en": "Would you like to verify your new phone number now?",
-            "ru": "Хотите подтвердить свой новый номер телефона сейчас?",
-            "uz": "Yangi telefon raqamingizni hozir tasdiqlamoqchimisiz?"
-        },
-        "Write Reviews": {
-            "en": "Write Reviews",
-            "ru": "Написать отзывы",
-            "uz": "Sharh yozish"
-        },
         "Yearly": {
             "en": "Yearly",
             "ru": "Ежегодно",
@@ -3977,16 +3059,6 @@ def seed_essential_translations():
             "en": "You don't have any active subscriptions",
             "ru": "У вас нет активных подписок",
             "uz": "Sizda faol obunalar mavjud emas"
-        },
-        "You havent placed any orders yet or no orders match your filters": {
-            "en": "You haven't placed any orders yet or no orders match your filters",
-            "ru": "Вы еще не сделали заказ или ни один заказ не соответствует вашим фильтрам",
-            "uz": "Siz hali buyurtma qilmagansiz yoki hech qanday buyurtma filtrlaringizga mos kelmaydi"
-        },
-        "You need to verify your phone number before enabling 2FA. Go to phone verification?": {
-            "en": "You need to verify your phone number before enabling 2FA. Go to phone verification?",
-            "ru": "Вам нужно подтвердить свой номер телефона, прежде чем включить двухфакторную аутентификацию. Перейти к подтверждению номера?",
-            "uz": "Ikki faktorli autentifikatsiyani yoqishdan oldin telefon raqamingizni tasdiqlashingiz kerak. Telefonni tasdiqlashga o'tasizmi?"
         },
         "Your Email": {
             "en": "Your Email",
@@ -4013,11 +3085,6 @@ def seed_essential_translations():
             "ru": "Ваши AquaCoins",
             "uz": "Sizning AquaCoins"
         },
-        "Your Referral Code": {
-            "en": "Your Referral Code",
-            "ru": "Ваш реферальный код",
-            "uz": "Sizning referal kodingiz"
-        },
         "Your account has been created successfully!": {
             "en": "Your account has been created successfully!",
             "ru": "Ваш аккаунт успешно создан!",
@@ -4038,30 +3105,15 @@ def seed_essential_translations():
             "ru": "Ваша сессия истекла. Пожалуйста, войдите снова.",
             "uz": "Sessiyangiz tugadi. Iltimos, qayta kiring."
         },
-        "and": {
-            "en": "and",
-            "ru": "и",
-            "uz": "va"
-        },
         "bottles": {
             "en": "bottles",
             "ru": "бутылки",
             "uz": "butilkalar"
         },
-        "e.g., Home, Office, etc.": {
-            "en": "e.g., Home, Office, etc.",
-            "ru": "например, Дом, Офис и т.д.",
-            "uz": "masalan, Uy, Ofis va boshqalar"
-        },
         "month": {
             "en": "month",
             "ru": "месяц",
             "uz": "oy"
-        },
-        "more items": {
-            "en": "more items",
-            "ru": "больше товаров",
-            "uz": "ko'proq mahsulot"
         },
         "points": {
             "en": "AquaCoins",
@@ -4077,11 +3129,6 @@ def seed_essential_translations():
             "en": "AquaCoins",
             "ru": "AquaCoins",
             "uz": "AquaCoins"
-        },
-        "this month": {
-            "en": "this month",
-            "ru": "этот месяц",
-            "uz": "shu oy"
         },
         "to Take an Extraordinary Service": {
             "en": "to Take an Extraordinary Service",
@@ -4169,7 +3216,7 @@ def verify_seeded_data():
         print(f"  {language}: {count} translations")
 
     # Test critical translations
-    critical_tests = ['Home', 'Shop', 'Login', 'My Account']
+    critical_tests = ['landing.nav.home', 'Shop', 'Login', 'My Account']
     print("\\nTesting critical translations:")
 
     all_good = True

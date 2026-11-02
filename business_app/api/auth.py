@@ -12,7 +12,6 @@ from flask_jwt_extended import (
     get_jwt_identity,
     get_jwt,
     set_access_cookies,
-    set_refresh_cookies,
     unset_jwt_cookies,
     verify_jwt_in_request,
 )
@@ -20,6 +19,7 @@ from flask_jwt_extended.exceptions import JWTExtendedException
 from jwt.exceptions import PyJWTError
 from flasgger import swag_from
 
+from business_app.utils.auth_cookies import set_login_cookies
 from business_app.utils.service_factory import get_auth_service
 from business_app.utils.decorators import (
     validate_json,
@@ -177,8 +177,7 @@ def register():
         )
 
         # Set JWT cookies for frontend navigation (same as login)
-        set_access_cookies(response_data, tokens["access_token"])
-        set_refresh_cookies(response_data, tokens["refresh_token"])
+        set_login_cookies(response_data, tokens)
 
         return response_data, status_code
 
@@ -272,8 +271,7 @@ def login():
         )
 
         # Set JWT cookies for frontend navigation
-        set_access_cookies(response_data, tokens["access_token"])
-        set_refresh_cookies(response_data, tokens["refresh_token"])
+        set_login_cookies(response_data, tokens)
 
         return response_data, status_code
 
@@ -516,8 +514,7 @@ def phone_register_verify():
         )
 
         # Set JWT cookies
-        set_access_cookies(response_data, tokens["access_token"])
-        set_refresh_cookies(response_data, tokens["refresh_token"])
+        set_login_cookies(response_data, tokens)
 
         return response_data, status_code
 

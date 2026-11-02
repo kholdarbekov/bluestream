@@ -21,7 +21,6 @@
   "response": {
    "data": {
     "order": {
-     "can_customer_cancel": true,
      "confirmed_at": null,
      "created_at": "<wall-clock>",
      "customer_actions": {
@@ -31,6 +30,7 @@
        "label": "Cancel order",
        "reasons": [],
        "refusal": null,
+       "refusal_copy": null,
        "subscription_id": null,
        "via": "cancel"
       },
@@ -45,9 +45,12 @@
        "expected_amount": "30000.00",
        "label": "Pay 30 000 so'm",
        "refusal": null
+      },
+      "reorder": {
+       "allowed": false,
+       "label": null
       }
      },
-     "customer_cancel_via": "order",
      "delivered_at": null,
      "delivery_address": {
       "apartment_number": null,
@@ -107,12 +110,10 @@
       "fiscalization": null,
       "fiscalization_status": null,
       "id": 1,
-      "is_payable": true,
       "last_collected_at": null,
       "net_outstanding_amount": 30000.0,
       "outstanding_amount": 30000.0,
       "paid_at": null,
-      "payable_payment_link": null,
       "payment_link": null,
       "payment_method": "click",
       "payment_provider": "click",
@@ -134,10 +135,8 @@
     "payment_link": {
      "payment_url": "http://localhost/my-orders#click-checkout"
     },
-    "payment_ready_at": "<wall-clock>",
     "payment_ready_in_seconds": 0,
-    "payment_url": "http://localhost/my-orders#click-checkout",
-    "pre_utilization_at": "<wall-clock>"
+    "payment_url": "http://localhost/my-orders#click-checkout"
    },
    "message": "Order created successfully",
    "success": true

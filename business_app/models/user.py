@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
@@ -19,8 +20,8 @@ from shared.enums import UserRole, UserStatus, UserGender, UserType
 from business_app.utils.user_types import is_entity_user_type, is_staff_user_type, normalize_user_type
 from shared.enums import EntitySubtype
 from shared.constants import DISPLAY_TIMEZONE
-from shared.validators import validate_email, sanitize_user_input, validate_uzbekistan_phone
-from shared.user_names import joined_name
+from shared.validators import is_deliverable_email, validate_email, sanitize_user_input, validate_uzbekistan_phone
+from shared.user_names import greeting_name as _greeting_name, joined_name
 
 
 class User(db.Model, TimestampMixin):
@@ -145,6 +146,21 @@ class User(db.Model, TimestampMixin):
     def full_name(self) -> str:
         """First and last name, the missing parts dropped (`shared.user_names.joined_name`)."""
         return joined_name(self.first_name, self.last_name)
+
+    @property
+    def greeting_name(self) -> Optional[str]:
+        """The name to greet with, or None (`shared.user_names.greeting_name`)."""
+        return _greeting_name(
+            first_name=self.first_name,
+            full_name=self.full_name,
+            company_name=self.company_name,
+            is_entity=bool(self.is_entity_user),
+        )
+
+    @property
+    def contact_email(self) -> Optional[str]:
+        """The email to show a person: None for a missing one or a sign-up placeholder."""
+        return self.email if is_deliverable_email(self.email) else None
 
     @property
     def email_verified(self) -> bool:
@@ -292,7 +308,7 @@ class User(db.Model, TimestampMixin):
             "email": self.email,
             "first_name": self.first_name,
             "last_name": self.last_name,
-            "full_name": f"{self.first_name} {self.last_name}".strip() or "",
+            "full_name": self.full_name,
             "role": self.role.value if isinstance(self.role, UserRole) else self.role,
             "status": self.status.value if isinstance(self.status, UserStatus) else self.status,
             "is_verified": self.is_verified,

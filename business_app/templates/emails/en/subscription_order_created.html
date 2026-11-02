@@ -47,13 +47,18 @@
 <p>Charged to your company account.</p>
 {% elif payment == "online_unpaid" %}
 <p>Please pay by {{ deadline }}. An order not paid by then is cancelled.</p>
-{% if pay_url %}
-<p style="text-align: center;">
-    <a href="{{ pay_url }}" class="btn-primary">Pay now</a>
-</p>
-{% endif %}
 {% elif payment == "online_paid" %}
 <p>Paid.</p>
+{% endif %}
+
+{% if pay_url %}
+<p style="text-align: center;"><a href="{{ pay_url }}" class="btn-primary">Pay now</a></p>
+{% endif %}
+{% if order_url %}
+<p style="text-align: center;"><a href="{{ order_url }}">View order</a></p>
+{% endif %}
+{% if subscription_url %}
+<p style="text-align: center;"><a href="{{ subscription_url }}">Open the subscription</a></p>
 {% endif %}
 
 <hr class="divider">

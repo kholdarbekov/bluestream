@@ -129,6 +129,15 @@ def _slot_weekdays(slot) -> Optional[frozenset]:
     return None if slot is None else SlotState.of(slot).weekdays
 
 
+def daily_weekdays(slot, *, delivery_days: Optional[frozenset] = None) -> frozenset:
+    """The weekdays a daily delivery on `slot` lands on (§6.4): the slot's own, or the delivery days when it gives
+    none (`_slot_weekdays`). The delivery days are read only then, unless a caller over many rows hands them in."""
+    weekdays = _slot_weekdays(slot)
+    if weekdays is not None:
+        return weekdays
+    return delivery_weekdays() if delivery_days is None else delivery_days
+
+
 def next_delivery_weekday(weekday: int, delivery_days: frozenset) -> int:
     """The delivery day a weekly or biweekly day moves to when it stops being one (spec 2026-10-27 §6.5): the first
     of the following seven weekdays that is a delivery day."""
@@ -443,10 +452,7 @@ def deliveries_per_month(frequency, slot=None, *, delivery_days: Optional[frozen
     frequency = _frequency(frequency)
     if frequency != SubscriptionFrequency.DAILY:
         return _DELIVERIES_PER_MONTH[frequency]
-    weekdays = _slot_weekdays(slot)
-    if weekdays is None:
-        weekdays = delivery_weekdays() if delivery_days is None else delivery_days
-    return Decimal(365 * len(weekdays)) / Decimal(84)
+    return Decimal(365 * len(daily_weekdays(slot, delivery_days=delivery_days))) / Decimal(84)
 
 
 def order_placed_on(day: date, today: date) -> date:

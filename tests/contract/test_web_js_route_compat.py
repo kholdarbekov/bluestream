@@ -39,10 +39,6 @@ KNOWN_DEAD_WEB_CALLS: Set[Tuple[str, str, str]] = {
     ("pages/contact.js", "POST", "/contact"),
     # my-account.js reads /api/v1/orders/summary; the backend serves /api/v1/auth/orders/summary.
     ("pages/my-account.js", "GET", "/orders/summary"),
-    # "Reorder" in the order modal and on /my-orders posts /orders/<id>/reorder; the backend has
-    # /orders/quick-reorder and /orders/reorder-info only.
-    ("pages/order-detail-modal.js", "POST", "/orders/<var>/reorder"),
-    ("pages/orders.js", "POST", "/orders/<var>/reorder"),
 }
 
 _CALL = re.compile(r"\bapiRequest\s*\(")

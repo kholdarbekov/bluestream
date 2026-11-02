@@ -3,7 +3,7 @@
  "language": "en",
  "order_id": 1,
  "page": {
-  "html": "<section class=\"payment-pending-section\">\n<div class=\"auto-container\">\n<div class=\"pending-content\">\n<div class=\"pending-icon\">\n<i class=\"far fa-hourglass-half\"></i>\n</div>\n<h2>Payment Processing</h2>\n<p>Your payment is being processed. This may take a few moments.</p>\n<div class=\"order-info\">\n<div class=\"info-row\">\n<span class=\"info-label\">Order Number:</span>\n<span class=\"info-value\">TG_000001_26</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Total Amount:</span>\n<span class=\"info-value\">30,000 UZS</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Payment Method:</span>\n<span class=\"info-value\">\n                        \n                            Click\n                        \n                    </span>\n</div>\n</div>\n<div class=\"refresh-notice\">\n<i class=\"far fa-info-circle\"></i>\n                This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.\n            </div>\n<div class=\"action-buttons\">\n<button class=\"theme-btn btn-one\" data-action=\"check-payment-status\">\n<i class=\"far fa-sync\"></i> Check Status\n                </button>\n<a class=\"theme-btn btn-three\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "html": "<section class=\"payment-pending-section\">\n<div class=\"auto-container\">\n<div class=\"pending-content\">\n<div class=\"pending-icon\">\n<i class=\"far fa-hourglass-half\"></i>\n</div>\n<h2>Payment Processing</h2>\n<p>Your payment is being processed. This may take a few moments.</p>\n<div class=\"order-info\">\n<div class=\"info-row\">\n<span class=\"info-label\">Order Number:</span>\n<span class=\"info-value\">TG_000001_26</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Total Amount:</span>\n<span class=\"info-value\">30,000 UZS</span>\n</div>\n<div class=\"info-row\">\n<span class=\"info-label\">Payment Method:</span>\n<span class=\"info-value\">Click</span>\n</div>\n</div>\n<div class=\"refresh-notice\">\n<i class=\"far fa-info-circle\"></i>\n                This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.\n            </div>\n<div class=\"action-buttons\">\n<button class=\"theme-btn btn-one\" data-action=\"check-payment-status\">\n<i class=\"far fa-sync\"></i> Check Status\n                </button>\n<a class=\"theme-btn btn-three\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n</div>\n</div>\n</div>\n</section>",
   "island": {
    "cancel_url": "/payment/cancel?order_id=1",
    "i18n": {
@@ -18,6 +18,7 @@
     "preparing_payment": "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
     "reason_prompt": "Want to tell us why? (optional)",
     "reason_text": "In a few words (optional)",
+    "reorder_dropped": "Some items from this order are no longer available and were left out.",
     "switch_to_cash": "Pay with cash",
     "try_again": "Try again",
     "working": "One moment…"

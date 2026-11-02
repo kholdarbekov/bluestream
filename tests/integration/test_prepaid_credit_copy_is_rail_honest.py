@@ -22,8 +22,8 @@ read "Будет зачтено в следующий заказ" / "Keyingi buy
 qo'llaniladi" — "will be credited to your NEXT ORDER", with no rail qualifier at
 all, to a customer one tap away from choosing Click.
 
-The category assertion is the one whose absence let
-`telegram.payment.marking_codes_unavailable` ship unreachable: the customer bot
+The category assertion is the one whose absence once let a bot key (the
+marking-code refusal, since retired) ship unreachable: the customer bot
 loads ONLY `category = 'telegram'` (telegram_bot/i18n.py::load_translations), and
 a key seeded anywhere else renders as a humanised English fallback. The expected
 category is READ OUT OF THE BOT'S OWN QUERY, never written here — copied from
@@ -91,7 +91,7 @@ class TestPrepaidCreditCopyIsRailHonest:
             )
 
         # And the invariant, for EVERY bot-namespace key the canonical seeder
-        # owns — not just B4b's. `telegram.payment.marking_codes_unavailable`
+        # owns — not just B4b's. The bot's marking-code refusal (since retired)
         # shipped under category "telegram_bot" and was unreachable for months
         # because nothing swept the whole namespace.
         offenders = [

@@ -146,15 +146,7 @@
                 </div>
                 <div class="info-row">
                     <span class="info-label">{{ 'Payment Method'|t }}:</span>
-                    <span class="info-value">
-                        {% if order.payment_method.value == 'payme' %}
-                            Payme
-                        {% elif order.payment_method.value == 'click' %}
-                            Click
-                        {% else %}
-                            {{ order.payment_method.value|title }}
-                        {% endif %}
-                    </span>
+                    <span class="info-value">{{ payment_method_label }}</span>
                 </div>
             </div>
 

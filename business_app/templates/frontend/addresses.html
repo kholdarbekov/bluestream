@@ -1,10 +1,10 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'addresses' %}
 
-{% block cabinet_title %}{{ 'My Addresses'|t }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.account.addresses'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'Addresses'|t }}</li>
+<li>{{ 'landing.account.addresses'|t }}</li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
@@ -355,7 +355,7 @@
 <!-- Add New Address Button -->
 <div class="add-address-section mb-4">
     <div class="d-flex justify-content-between align-items-center">
-        <h3>{{ 'My Addresses'|t }}</h3>
+        <h3>{{ 'landing.account.addresses'|t }}</h3>
         <button class="btn btn-primary" data-action="show-add-address">
             <i class="far fa-plus"></i> {{ 'Add New Address'|t }}
         </button>
@@ -392,7 +392,7 @@
                     <div class="step-connector"></div>
                     <div class="step-indicator">
                         <span class="step-number">3</span>
-                        <span class="step-label">{{ 'Confirm'|t }}</span>
+                        <span class="step-label">{{ 'cabinet.addresses.confirm'|t }}</span>
                     </div>
                 </div>
 
@@ -443,14 +443,14 @@
                         <div class="form-group">
                             <label>{{ 'Quick Select Title'|t }}</label>
                             <div class="quick-titles">
-                                <button type="button" class="quick-title-btn" data-title="{{ 'Home'|t }}">
-                                    <i class="fas fa-home"></i> {{ 'Home'|t }}
+                                <button type="button" class="quick-title-btn" data-title="{{ 'cabinet.addresses.home'|t }}">
+                                    <i class="fas fa-home"></i> {{ 'cabinet.addresses.home'|t }}
                                 </button>
                                 <button type="button" class="quick-title-btn" data-title="{{ 'Work'|t }}">
                                     <i class="fas fa-briefcase"></i> {{ 'Work'|t }}
                                 </button>
-                                <button type="button" class="quick-title-btn" data-title="{{ 'Other'|t }}">
-                                    <i class="fas fa-map-pin"></i> {{ 'Other'|t }}
+                                <button type="button" class="quick-title-btn" data-title="{{ 'cabinet.addresses.other'|t }}">
+                                    <i class="fas fa-map-pin"></i> {{ 'cabinet.addresses.other'|t }}
                                 </button>
                             </div>
                         </div>
@@ -463,13 +463,13 @@
                             </div>
 
                             <div class="col-md-12 form-group">
-                                <label for="fullAddress">{{ 'Full Address'|t }}</label>
+                                <label for="fullAddress">{{ 'cabinet.addresses.full_address'|t }}</label>
                                 <textarea id="fullAddress" class="form-control" rows="2"
                                           placeholder="{{ 'Auto-filled from map selection'|t }}"></textarea>
                             </div>
 
                             <div class="col-md-6 form-group">
-                                <label for="districtSelect">{{ 'District'|t }}</label>
+                                <label for="districtSelect">{{ 'cabinet.addresses.district'|t }}</label>
                                 <select id="districtSelect" class="form-control">
                                     <option value="">-- {{ 'Select District'|t }} --</option>
                                 </select>
@@ -494,7 +494,7 @@
                             </div>
 
                             <div class="col-md-4 form-group">
-                                <label for="floorNumber">{{ 'Floor'|t }}</label>
+                                <label for="floorNumber">{{ 'cabinet.addresses.floor'|t }}</label>
                                 <input type="text" id="floorNumber" class="form-control"
                                        placeholder="{{ 'Floor #'|t }}">
                             </div>
@@ -554,14 +554,14 @@
             </div>
             <div class="modal-footer wizard-navigation">
                 <button type="button" id="wizardPrevBtn" class="btn btn-secondary" style="display: none;">
-                    <i class="fas fa-arrow-left"></i> {{ 'Back'|t }}
+                    <i class="fas fa-arrow-left"></i> {{ 'cabinet.addresses.back'|t }}
                 </button>
                 <div>
                     <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">
-                        {{ 'Cancel'|t }}
+                        {{ 'cabinet.addresses.cancel'|t }}
                     </button>
                     <button type="button" id="wizardNextBtn" class="btn btn-primary" disabled>
-                        {{ 'Next'|t }} <i class="fas fa-arrow-right"></i>
+                        {{ 'cabinet.addresses.next'|t }} <i class="fas fa-arrow-right"></i>
                     </button>
                     <button type="button" id="wizardSaveBtn" class="btn btn-success" style="display: none;">
                         <i class="fas fa-check"></i> {{ 'Save Address'|t }}
@@ -587,11 +587,11 @@
         'add_first_button': 'Add Your First Address' | t,
         'default_badge': 'Default' | t,
         'business_badge': 'Business' | t,
-        'edit': 'Edit' | t,
+        'edit': 'cabinet.addresses.edit' | t,
         'set_default': 'Set Default' | t,
-        'delete': 'Delete' | t,
+        'delete': 'cabinet.addresses.delete' | t,
         'address_label': 'landing.contact.info.address' | t,
-        'city': 'City' | t,
+        'city': 'cabinet.addresses.city' | t,
         'apartment': 'Apartment/Floor' | t,
         'landmark': 'Landmark' | t,
         'instructions': 'Instructions' | t,

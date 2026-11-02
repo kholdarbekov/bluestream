@@ -31,7 +31,6 @@ from business_app.utils.transactions import atomic_transaction
 from business_app.utils.translations import get_translation
 from shared.constants import WEB_LINK_START_PREFIX
 from shared.redis_keyspace import RedisKeyspace
-from shared.user_names import greeting_name
 from shared.validators import mask_phone_number
 
 logger = logging.getLogger(__name__)
@@ -212,12 +211,7 @@ class CustomerTelegramLinkService:
         return {
             "tokens": tokens,
             "language": user.preferred_language,
-            "greeting_name": greeting_name(
-                first_name=user.first_name,
-                full_name=user.full_name,
-                company_name=user.company_name,
-                is_entity=bool(user.is_entity_user),
-            ),
+            "greeting_name": user.greeting_name,
             "phone_status": (
                 PHONE_MISSING if not user.phone else (PHONE_VERIFIED if user.phone_verified else PHONE_UNVERIFIED)
             ),

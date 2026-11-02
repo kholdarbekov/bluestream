@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+{#- "Open on website" could not sign the customer in (business_app/frontend/routes.py `telegram_login_page`, spec
+    2026-10-27 §9). This page's URL carries the customer's Telegram identity and a signed hash, so it is standalone
+    on purpose: no analytics (which would report the full URL), no Referer, never indexed. Its one way on is the bot.
+    `message_key` is the refusal's sentence. -#}
+<html lang="{{ current_language }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ 'web.telegram_login.title'|t }} - {{ company_name }}</title>
+    <style>
+        body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1b2a3a; background: #f4f8fb; }
+        main { max-width: 28rem; margin: 12vh auto 0; padding: 2rem 1.5rem; background: #fff; border-radius: 12px; text-align: center; }
+        h1 { font-size: 1.35rem; margin: 0 0 1rem; }
+        p { line-height: 1.5; margin: 0 0 1.5rem; }
+        a.open-bot { display: inline-block; padding: 0.75rem 1.5rem; border-radius: 8px; background: #2aabee; color: #fff; text-decoration: none; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>{{ 'web.telegram_login.title'|t }}</h1>
+        <p>{{ message_key|t }}</p>
+        <a class="open-bot" href="{{ company_telegram_bot_url }}" rel="noopener noreferrer">{{ 'Open the bot'|t }}</a>
+    </main>
+</body>
+</html>

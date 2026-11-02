@@ -76,38 +76,9 @@ class TestNotificationTasks:
         assert result["success"] is False
         assert result["error"] == "No phone number available"
 
-    def test_send_password_reset_sms_task_returns_error_when_user_has_no_phone(self, app, db):
-        user = User(
-            email="reset-no-phone@example.com",
-            phone=None,
-            password_hash=hash_password("StrongPass123!"),
-            first_name="Reset",
-        )
-        db.session.add(user)
-        db.session.commit()
-
-        with app.app_context():
-            result = notification_tasks.send_password_reset_sms_task.run(user.id, "778899")
-
-        assert result["success"] is False
-        assert result["error"] == "No phone number"
-
-    def test_send_password_reset_sms_task_uses_expected_template(self, app, sample_user):
-        with (
-            app.app_context(),
-            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
-        ):
-            app.config["COMPANY_NAME"] = "Bluestream"
-            mock_service = mock_service_cls.return_value
-            mock_service.send_sms_to_phone.return_value = {"success": True}
-
-            result = notification_tasks.send_password_reset_sms_task.run(sample_user.id, "889900")
-
-        assert result["success"] is True
-        mock_service.send_sms_to_phone.assert_called_once()
-        kwargs = mock_service.send_sms_to_phone.call_args.kwargs
-        assert kwargs["template_key"] == "sms.password_reset.otp"
-        assert kwargs["notification_type"] == NotificationType.PASSWORD_RESET
+    def test_password_reset_sms_task_no_longer_exists(self):
+        """A bot customer has no password to reset and SMS is OTP-only, so the task is gone."""
+        assert not hasattr(notification_tasks, "send_password_reset_sms_task")
 
     def test_welcome_sms_task_no_longer_exists(self):
         """SMS is OTP-only and a welcome message is not a passcode, so the

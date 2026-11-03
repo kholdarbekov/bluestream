@@ -107,6 +107,20 @@ class TestGroceryFlagFlipFence:
         updated = _flip_to_grocery(db, u1)
         assert updated.is_grocery_store is True
 
+    def test_allowed_for_the_member_left_behind_by_unlink(self, db):
+        """Unlinking the OTHER account of a pair leaves this one linked to no one,
+        so it must be convertible too."""
+        u1 = _user(db, "a@example.com", "+998900000001")
+        u2 = _user(db, "b@example.com", "+998900000002")
+        admin = _user(db, "admin@example.com", "+998900000009")
+        svc = CustomerLinkService()
+        svc.link_accounts(u1.id, u2.id, actor_admin_id=admin.id, reason="r")
+
+        svc.unlink_account(u2.id, actor_admin_id=admin.id, reason="fix")
+
+        updated = _flip_to_grocery(db, u1)
+        assert updated.is_grocery_store is True
+
     def test_non_type_update_of_linked_user_is_unaffected(self, db):
         u1 = _user(db, "a@example.com", "+998900000001")
         u2 = _user(db, "b@example.com", "+998900000002")

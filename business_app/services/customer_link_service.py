@@ -385,7 +385,8 @@ class CustomerLinkService:
         admin-chosen `bottles_leaving` split on `remove_address_from_group`
         (spec §7.1). Keeps: primary promotion, non-terminal
         cluster-order snapshot for admin acknowledgment, canonical tombstone
-        retention (row kept even at 0 members), audit event. Releases
+        retention (row kept even at 0 members), audit event. A cluster left
+        with a single member is dissolved (that member is detached too). Releases
         now-out-of-scope money reservations via the
         _release_out_of_scope_reservations hook (spec §5.7). Does not unwind any
         money history — applied allocations are immutable. No-ops (empty shape,
@@ -427,16 +428,26 @@ class CustomerLinkService:
         remaining = sorted(
             r[0] for r in db.session.query(User.id).filter(User.canonical_customer_id == canonical_id).all()
         )
-        new_primary = self._refresh_primary(canonical_id)  # canonical retained even at 0 members
 
+        # Reservation scope is decided on the split itself, before any dissolve.
         self._release_out_of_scope_reservations([user_id], remaining)
+
+        # A one-member cluster links to no one: detach the last member too, so it
+        # reads as unlinked everywhere (entity fence, merge block, customer_key).
+        detached = [user_id]
+        if len(remaining) == 1:
+            User.query.get(remaining[0]).canonical_customer_id = None
+            db.session.flush()
+            detached = sorted([user_id, remaining[0]])
+            remaining = []
+        new_primary = self._refresh_primary(canonical_id)  # canonical retained even at 0 members
 
         db.session.add(
             CustomerLinkEvent(
                 event_type="unlink",
                 canonical_customer_id=canonical_id,
                 acting_admin_id=actor_admin_id,
-                member_user_ids=[user_id],
+                member_user_ids=detached,
                 reason=reason or "",
             )
         )

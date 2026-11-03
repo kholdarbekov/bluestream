@@ -46,9 +46,43 @@ class TestUnlink:
         db.session.refresh(u1); db.session.refresh(a1)
         assert u1.canonical_customer_id is None
         assert a1.address_group_id == group.id            # membership SURVIVES unlink
-        assert result["remaining_member_ids"] == [u2.id]
-        assert result["new_primary_user_id"] == u2.id
+        assert result["remaining_member_ids"] == []       # a pair dissolves (see below)
         assert CustomerLinkEvent.query.filter_by(event_type="unlink").count() == 1
+
+    def test_unlinking_one_of_a_pair_dissolves_the_cluster(self, db):
+        """A one-member cluster links to no one; the survivor must not keep the
+        canonical pointer (it blocks entity conversion and phone-link merges)."""
+        u1 = _user(db, "a@example.com", "+998900000001", created=datetime.now(UTC) - timedelta(days=5))
+        u2 = _user(db, "b@example.com", "+998900000002")
+        admin = _user(db, "admin@example.com", "+998900000009")
+        svc = CustomerLinkService()
+        canonical_id = svc.link_accounts(u1.id, u2.id, actor_admin_id=admin.id, reason="r")["canonical_customer_id"]
+
+        result = svc.unlink_account(u2.id, actor_admin_id=admin.id, reason="mislink")
+
+        db.session.refresh(u1); db.session.refresh(u2)
+        assert u1.canonical_customer_id is None
+        assert u2.canonical_customer_id is None
+        assert result["canonical_customer_id"] == canonical_id
+        assert result["remaining_member_ids"] == []
+        assert result["new_primary_user_id"] is None
+        event = CustomerLinkEvent.query.filter_by(event_type="unlink").one()
+        assert sorted(event.member_user_ids) == sorted([u1.id, u2.id])
+
+    def test_unlinking_one_of_three_keeps_the_other_two_linked(self, db):
+        u1 = _user(db, "a@example.com", "+998900000001", created=datetime.now(UTC) - timedelta(days=5))
+        u2 = _user(db, "b@example.com", "+998900000002")
+        u3 = _user(db, "c@example.com", "+998900000003")
+        admin = _user(db, "admin@example.com", "+998900000009")
+        svc = CustomerLinkService()
+        svc.link_accounts(u1.id, u2.id, actor_admin_id=admin.id, reason="r")
+        svc.link_accounts(u1.id, u3.id, actor_admin_id=admin.id, reason="r")
+
+        result = svc.unlink_account(u3.id, actor_admin_id=admin.id, reason="mislink")
+
+        assert result["remaining_member_ids"] == [u1.id, u2.id]
+        assert result["new_primary_user_id"] == u1.id
+        assert CustomerLinkEvent.query.filter_by(event_type="unlink").one().member_user_ids == [u3.id]
 
     def test_unlink_lists_non_terminal_orders(self, db):
         u1 = _user(db, "a@example.com", "+998900000001")

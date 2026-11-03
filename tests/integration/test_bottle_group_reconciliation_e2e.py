@@ -320,8 +320,9 @@ class TestUnlinkGroupIndependenceInvariant:
         db.session.refresh(a1); db.session.refresh(u1)
         assert u2.canonical_customer_id is None
         assert a2.address_group_id == group.id        # NOT ejected — geography survives
-        assert u1.canonical_customer_id == canonical_id
+        assert u1.canonical_customer_id is None       # a pair dissolves on unlink
         assert a1.address_group_id == group.id
+        assert CanonicalCustomer.query.get(canonical_id) is not None  # tombstone kept
 
         # Cross-customer membership after unlink is sanctioned; reconcile clean.
         _assert_completely_clean(reconcile_customer_link_invariants())

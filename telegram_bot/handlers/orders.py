@@ -925,7 +925,9 @@ class OrderHandlers(BaseHandler):
 
             # Build tracking message header
             tracking_text = f"📍 *{i18n.get('telegram.orders.tracking_title', language)}*\n\n"
-            tracking_text += f"🔢 {i18n.get('telegram.order.number', language, order.get('order_number', order_id))}\n\n"
+            # Legacy Markdown, like this whole screen: an order number's two underscores would turn its middle italic.
+            order_number = escape_markdown(str(order.get('order_number', order_id)), version=1)
+            tracking_text += f"🔢 {i18n.get('telegram.order.number', language, order_number)}\n\n"
 
             # Build visual timeline
             tracking_text += f"━━━ {i18n.get('telegram.orders.timeline', language)} ━━━\n"
@@ -959,11 +961,8 @@ class OrderHandlers(BaseHandler):
                     else:
                         tracking_text += f"✅ {formatted_time} - {label}\n"
 
-                    # Add notes if present (escape markdown special chars)
                     if notes:
-                        # Escape markdown special characters
-                        safe_notes = str(notes).replace('*', '').replace('_', '').replace('`', '')
-                        tracking_text += f"   ({safe_notes})\n"
+                        tracking_text += f"   ({escape_markdown(str(notes), version=1)})\n"
             else:
                 # Fallback if no timeline data
                 current_status = order.get('status', 'pending')

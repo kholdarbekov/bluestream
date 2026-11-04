@@ -27,12 +27,14 @@ import pytest
 from tests.telegram_bot.ptb_harness import FakeDatabase, build_bot_harness, menu_already_installed
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
 from business_app.services import order_service
-from business_app.services.delivery_eta_service import SOURCE_STALE_POSITION, DeliveryEtaService
+from business_app.services.delivery_eta_service import SOURCE_STALE_ESTIMATE, DeliveryEtaService
 from shared import constants as shared_constants
 from shared import eta_copy
 from shared.constants import ETA_ATTRIBUTION_GOOGLE, ETA_STAGE_ARRIVED, ETA_STAGE_ON_THE_WAY
 from shared.enums import DeliveryStatus
+from business_app.utils.timezone_utils import ensure_utc
 from shared.i18n_rendering import render_translation
+from tests.bot_dispatcher_harness import render_legacy_markdown
 from tests.integration.test_track_publishes_honest_eta import _delivery
 from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google, matrix and spec_tunables are fixtures
     TAP,
@@ -176,6 +178,37 @@ async def served(monkeypatch, language: str, body: dict):
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
+async def test_the_order_number_reads_whole_and_only_the_title_is_bold(monkeypatch, language):
+    """Every order number holds two underscores, which legacy Markdown reads as italics around its middle: TG00095926
+    instead of TG_000959_26. Telegram accepts that, so only what the customer reads can tell."""
+    shown = await served(monkeypatch, language, track_payload(None))
+
+    visible, entities = render_legacy_markdown(shown.text)
+
+    number_line = render_translation(
+        "telegram.order.number", BACKEND_TRANSLATIONS["telegram.order.number"][language], (ORDER_NUMBER,), {}
+    )
+    assert number_line in visible
+    assert ORDER_NUMBER in number_line
+    assert entities == [("*", copy("telegram.orders.tracking_title", language))]
+
+
+async def test_a_note_reads_whole_on_the_timeline(monkeypatch):
+    """A step's note is free text. It is shown as written, and a bracket in it neither turns it into a link nor gets
+    the screen refused, which would print the order number's escapes on the plain-text retry."""
+    note = "tax_committee [gate 2](http://example.com) *closed"
+    body = track_payload(None)
+    body["data"]["timeline"][0]["notes"] = note
+
+    shown = await served(monkeypatch, "en", body)
+
+    visible, entities = render_legacy_markdown(shown.text)
+    assert f"({note})" in visible
+    assert f"#{ORDER_NUMBER}" in visible
+    assert entities == [("*", copy("telegram.orders.tracking_title", "en"))]
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
 async def test_on_the_way_shows_minutes_by_time_and_attribution(monkeypatch, language):
     shown = await served(
         monkeypatch,
@@ -261,8 +294,8 @@ async def test_a_passed_time_shows_arriving_any_minute(monkeypatch, language):
     ],
 )
 async def test_on_the_way_without_minutes_shows_on_the_way(monkeypatch, language, published):
-    """Review Focus #2: a driver whose last known position was more than 10 minutes old at the tap gets no Google call
-    and no minutes. Track says the driver is on the way, with no time and no attribution line."""
+    """No minutes were promised (Google was down, say). Track says the driver is on the way, with no time and no
+    attribution line."""
     shown = await served(monkeypatch, language, track_payload(published))
 
     assert arrival_block(shown) == [ON_THE_WAY_MARK + copy(KEY_NO_TIME, language)]
@@ -396,13 +429,14 @@ def google_promised(db, delivery, driver) -> None:
 
 def position_was_stale(db, delivery, driver) -> None:
     """The driver's tap, made while their last known position was 20 minutes old. Recorded by the real recorder, as the
-    notification worker runs it: a shown promise with no time, and no call to Google or to our own engine."""
+    notification worker runs it: our own engine's 11 minutes plus the 30-minute allowance, and no call to Google."""
     _driver_last_seen(db, driver, at=TAP - timedelta(minutes=20))
     tap = _tap(db, delivery, driver, at=TAP)
 
     shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-    assert (shown.source, shown.expected_at, shown.window_end, shown.shown) == (SOURCE_STALE_POSITION, None, None, True)
+    assert (shown.source, shown.expected_at, shown.shown) == (SOURCE_STALE_ESTIMATE, None, True)
+    assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=41)
 
 
 def driver_arrived(db, delivery, driver) -> None:
@@ -432,8 +466,8 @@ def driver_arrived(db, delivery, driver) -> None:
         pytest.param(
             DeliveryStatus.IN_TRANSIT,
             position_was_stale,
-            {"eta_stage": ON_THE_WAY, "eta_minutes_left": None, "eta_by_time": None, "eta_attribution": None},
-            ["🚚 On the way"],
+            {"eta_stage": ON_THE_WAY, "eta_minutes_left": 37, "eta_by_time": "14:41", "eta_attribution": None},
+            ["🚚 Arriving within about 37 min (by 14:41)"],
             id="stale-position",
         ),
         pytest.param(
@@ -467,6 +501,7 @@ async def test_the_real_track_endpoint_feeds_the_screen(
     publishes the fields and the real bot says them. Google is faked, to be counted: nothing here may ask it."""
     delivery = _delivery(db, sample_user, delivery_driver, delivery_status)
     record(db, delivery, delivery_driver)
+    matrix.asks.clear()  # what the recorder asked: Track, which only reads, asks nothing
     monkeypatch.setattr(order_service, "get_utc_now", lambda: READ_AT)
 
     harness = await customer_bot(monkeypatch, "en")
@@ -488,6 +523,6 @@ async def test_the_real_track_endpoint_feeds_the_screen(
     assert "estimated_time_remaining" not in track
     assert arrival_block(shown) == lines
     assert "⏰" not in shown.text and "Estimated remaining" not in shown.text
-    # Review Focus #2: a stale position gets no Google call, and Track, which only reads, never makes one.
+    # A stale position gets no Google call, and Track, which only reads, never makes one.
     assert google.requests == [] and google.calls_counted == 0
     assert matrix.asks == []

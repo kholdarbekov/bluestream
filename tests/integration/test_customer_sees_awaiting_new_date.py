@@ -134,7 +134,8 @@ SHAPES = [
 ]
 
 # Failed, re-dated, then failed again (plan Review Focus 4). The first re-date took the order
-# back to confirmed (R6), and the pickup sync wrote no history on the way out again.
+# back to confirmed (R6), and the pickup sync wrote no history on the way out again, as
+# orders picked up before 2026-11 still show.
 FAILED_TWICE = Shape(
     "failed-twice",
     OS.OUT_FOR_DELIVERY,

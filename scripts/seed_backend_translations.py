@@ -13156,8 +13156,8 @@ BACKEND_TRANSLATIONS.update(ORDER_SKIP_REFUSAL_TRANSLATIONS)
 # once the "by" time has passed, then where the minutes came from when Google's traffic gave them. `shared/eta_copy.py`
 # is the one place that picks which of these lines is said. The backend's in-transit message ends with them
 # (`eta_line`); the delivery-update email and the customer bot's Track say the same lines. Two lines are
-# the Track screen's alone (`track_lines`): "On the way" while the driver is out and nothing is promised (a stale
-# position gives no minutes), and "Arrived at your address" once the driver tapped arrived. They carry no emoji (the
+# the Track screen's alone (`track_lines`): "On the way" while the driver is out and nothing is promised (Google is
+# down, say), and "Arrived at your address" once the driver tapped arrived. They carry no emoji (the
 # bot puts the stage's marker before the first line) and none of the characters legacy Markdown reads. No line names
 # the driver, so `_strip_driver_info_from_delivery_message` keeps every one.
 HONEST_ETA_TRANSLATIONS = {

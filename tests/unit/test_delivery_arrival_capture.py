@@ -4,8 +4,9 @@ implicit driver-location refresh on ARRIVED transitions.
 These exercise the behavior wired into `mark_delivery_arrived`:
   - The destination coords are stamped onto DeliveryStatusHistory.location_*
     so the route-optimizer's `last_completed` fallback finds them.
-  - DeliveryPerson.current_location_* is refreshed when the live GPS is
-    stale or missing, but preserved when it's still fresh.
+  - The delivery's own driver's tap moves DeliveryPerson.current_location_* to
+    the door, whatever the age of the position on record. Anyone else's tap
+    leaves it: a mark from the office says nothing of where the driver is.
   - optimize_driver_route_task.delay is NOT enqueued on ARRIVED (route-UX
     plan 2026-08-11, spec §5.3): the driver is at the door and a re-solve
     from that doorstep only churns the plan. DELIVERED keeps its trigger.
@@ -203,21 +204,19 @@ class TestArrivalPositionCapture:
                 last_update = last_update.replace(tzinfo=UTC)
             assert last_update is not None and last_update >= before
 
-    def test_mark_arrived_preserves_fresh_gps(
+    def test_mark_arrived_moves_the_driver_from_a_recent_position(
         self, app, db, driver_user, customer_user, driver_with_fresh_location
     ):
-        """Fresh GPS is more accurate than the address centroid; don't overwrite it.
-
-        History row is still stamped to the destination — that's the canonical
-        record of where this delivery happened.
-        """
+        """The driver is at this door now, whatever was on record five minutes ago: another door, the depot's stamp or
+        a pin. The tap moves them, and the radius the old reading measured no longer describes where they are."""
         with app.app_context():
-            original_lat = driver_with_fresh_location.current_location_lat
-            original_lng = driver_with_fresh_location.current_location_lng
+            driver_with_fresh_location.location_accuracy_m = 12.0
+            db.session.commit()
 
             dest_lat, dest_lng = 41.3700, 69.3000
             addr = _make_address(db, customer_user.id, dest_lat, dest_lng)
             delivery = _make_in_transit_delivery(db, customer_user.id, driver_user.id, addr)
+            before = datetime.now(UTC)
             with patch(
                 "business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"
             ):
@@ -227,10 +226,53 @@ class TestArrivalPositionCapture:
 
             db.session.expire_all()
             person = DeliveryPerson.query.filter_by(user_id=driver_user.id).first()
-            # Live GPS preserved
-            assert person.current_location_lat == pytest.approx(original_lat)
-            assert person.current_location_lng == pytest.approx(original_lng)
-            # History still stamped to the destination
+            assert person.current_location_lat == pytest.approx(dest_lat)
+            assert person.current_location_lng == pytest.approx(dest_lng)
+            assert person.location_accuracy_m is None
+            last_update = person.last_location_update
+            if last_update.tzinfo is None:
+                last_update = last_update.replace(tzinfo=UTC)
+            assert last_update >= before
+
+    @pytest.mark.parametrize("actor", ["an admin", "nobody, as the automatic arrival"])
+    def test_a_tap_the_driver_did_not_make_stamps_the_door_and_leaves_the_driver(
+        self, app, db, driver_user, customer_user, driver_with_stale_location, actor
+    ):
+        """The row records where the delivery happened. Who was at the door is another matter: an admin marks it from
+        the office, however old the driver's position is."""
+        with app.app_context():
+            actor_id = None
+            if actor == "an admin":
+                admin = User(
+                    email="arrival-admin@example.com",
+                    phone="+998901112266",
+                    password_hash="x",
+                    first_name="Arrival",
+                    last_name="Admin",
+                    user_type=UserType.STAFF,
+                    role=UserRole.ADMIN,
+                    is_verified=True,
+                )
+                db.session.add(admin)
+                db.session.commit()
+                actor_id = admin.id
+            original = (driver_with_stale_location.current_location_lat, driver_with_stale_location.current_location_lng)
+            original_update = driver_with_stale_location.last_location_update
+
+            dest_lat, dest_lng = 41.3700, 69.3000
+            addr = _make_address(db, customer_user.id, dest_lat, dest_lng)
+            delivery = _make_in_transit_delivery(db, customer_user.id, driver_user.id, addr)
+            with patch(
+                "business_app.tasks.delivery_tasks.optimize_driver_route_task.delay"
+            ):
+                DeliveryService().mark_delivery_arrived(
+                    delivery.id, actor_user_id=actor_id, automatic=actor_id is None
+                )
+
+            db.session.expire_all()
+            person = DeliveryPerson.query.filter_by(user_id=driver_user.id).first()
+            assert (person.current_location_lat, person.current_location_lng) == original
+            assert person.last_location_update == original_update
             history = (
                 DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id)
                 .order_by(DeliveryStatusHistory.changed_at.desc())

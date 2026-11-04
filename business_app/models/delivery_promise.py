@@ -9,17 +9,20 @@ tests/integration/test_delivery_promise_pg_constraints.py.
 
 - Append-only, like `ReorderReminderEvent`: a row is written once and never updated, so it has no
   `updated_at` and does not use TimestampMixin. `computed_at` is its one clock.
-- One "in transit" tap writes two rows. The SHOWN row (`google_tap_v1`) is what the customer was told,
-  from Google's drive time. The HIDDEN shadow row (`osrm_shadow_v1`) is our own engine's time for the
-  same tap, kept to measure Google against (§4.12a, "Accuracy data"). `shown` tells them apart.
+- One "in transit" tap writes two rows. The SHOWN row (`google_tap_v1`) is what the customer was told:
+  from Google's drive time, or from our own engine's when the driver's position was too old for Google.
+  The HIDDEN shadow row (`osrm_shadow_v1`) is our own engine's time for the same tap, kept to measure the
+  shown promise against (§4.12a, "Accuracy data"). `shown` tells them apart.
 - `(delivery_status_history_id, model_version)` is unique wherever the tap is known, so the notification
   worker re-running a tap cannot record it twice. A row that belongs to no tap is outside the index.
 - `source` says where the minutes came from, or why there are none (the SOURCE_* constants of
   business_app/services/delivery_eta_service.py). A SHOWN row: `google_traffic` (minutes from Google's
-  live traffic), `google_unavailable` (Google was asked and gave nothing: no key, the day's cap spent, or
-  Google failed), `stale_position` (no driver position fresh enough at the tap), `not_driver_tap` (someone
-  other than the delivery's driver made the tap) or `no_destination` (the address has no coordinates). Only
-  `google_traffic` comes with minutes. A HIDDEN shadow row: the distance matrix's own tier label
+  live traffic), `stale_estimate` (position too old for Google: our own engine's minutes plus an allowance),
+  `google_unavailable` (Google was asked and gave nothing: no key, the day's cap spent, or Google failed),
+  `stale_position` (position too old for Google, and our own engine had no real answer), `not_driver_tap`
+  (someone other than the delivery's driver made the tap) or `no_destination` (the address has no
+  coordinates). `google_traffic` and `stale_estimate` come with minutes (`window_end`), and only
+  `google_traffic` has `expected_at`, which is Google's time. A HIDDEN shadow row: the distance matrix's own tier label
   (`osrm_selfhosted`, `cache`, ...), the straight-line label (`distance_matrix.STRAIGHT_LINE_SOURCE`,
   recorded with no time), or `error` (the matrix lookup failed). Free text, not a CHECKed vocabulary: the
   matrix owns its labels.

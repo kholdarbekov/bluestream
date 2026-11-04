@@ -120,9 +120,8 @@ GOOGLE_ROUTES_DAILY_CAP = _int("GOOGLE_ROUTES_DAILY_CAP", 150)
 # Spec 2026-11-03 §4.8 S2. Read only by DeliveryEtaService. When the driver taps `in_transit` to a stop, the
 # customer is promised "by tap + ETA_OFF_ROAD_MINUTES + headroom x G", G being Google's live-traffic drive time
 # from the driver's position.
-# The leg starts at the driver's live position or at the stop they just finished, whichever is newer, and only if it
-# was at most this old at the tap. An older one is not where the driver is: Google is not asked, and the customer
-# sees "On the way" with no minutes.
+# Google's live traffic is asked only from a driver position at most this old at the tap. An older one is not where
+# the driver is: no call is spent, and the time comes from our own engine instead (ETA_STALE_*_ALLOWANCE_MINUTES).
 ETA_POSITION_MAX_AGE_SECONDS = _int("ETA_POSITION_MAX_AGE_SECONDS", 600)
 # The minutes off the road at the door end: parking, the walk, the stairs.
 ETA_OFF_ROAD_MINUTES = _int("ETA_OFF_ROAD_MINUTES", 5)
@@ -133,6 +132,14 @@ ETA_OFF_ROAD_MINUTES = _int("ETA_OFF_ROAD_MINUTES", 5)
 ETA_HEADROOM_SEED = _float("ETA_HEADROOM_SEED", 1.3)
 ETA_HEADROOM_MIN_LEGS = _int("ETA_HEADROOM_MIN_LEGS", 30)
 ETA_HEADROOM_PRIOR_LEGS = _int("ETA_HEADROOM_PRIOR_LEGS", 20)
+# From a position older than ETA_POSITION_MAX_AGE_SECONDS at the tap: "by tap + our own engine's minutes from it + an
+# allowance". Such a position is wrong by an amount of time, not by a share of the route, so it takes an allowance and
+# not a headroom. Backtested on 274 real stale legs (2026-05 to 2026-11): about 87% of these promises are kept.
+# The last position is a door or a pin from the tap's Tashkent day:
+ETA_STALE_DOOR_ALLOWANCE_MINUTES = _int("ETA_STALE_DOOR_ALLOWANCE_MINUTES", 30)
+# The leg starts at the depot: its stamp is the last position, or none is from that day. Less, as drivers mostly tap
+# after they have left:
+ETA_STALE_DEPOT_ALLOWANCE_MINUTES = _int("ETA_STALE_DEPOT_ALLOWANCE_MINUTES", 20)
 
 # ─── Loyalty ────────────────────────────────────────────────────────────
 # Earning rate / bonus amounts / tier thresholds / expiry are all DB-driven

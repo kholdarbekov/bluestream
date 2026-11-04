@@ -165,8 +165,8 @@ def test_on_the_way_at_zero_minutes_says_any_minute():
 
 @pytest.mark.parametrize("attribution", [None, ETA_ATTRIBUTION_GOOGLE])
 def test_on_the_way_with_no_minutes_says_on_the_way(attribution):
-    """Review Focus #2: a driver whose position was stale at the tap gets no minutes. They are on the way, and that is
-    all that is promised. Google's attribution goes with a time; with no time it is not said."""
+    """No minutes were promised (Google was down, say). The driver is on the way, and that is all that is promised.
+    Google's attribution goes with a time; with no time it is not said."""
     assert _track(ETA_STAGE_ON_THE_WAY, attribution=attribution) == ["On the way"]
 
 

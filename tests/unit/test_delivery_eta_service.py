@@ -1,15 +1,14 @@
 """DeliveryEtaService: the customer's "on the way" promise (honest-ETA Phase 1; spec §4.8 S2 and S3, §4.10, §4.12a).
 
-The driver taps `in_transit` to a stop. The notification worker then calls `record_on_the_way(history_id)`: one Google
-Routes TRAFFIC_AWARE call from the driver's position (their live position or the stop they just finished, whichever is
-newer), made only when that position was at most 10 minutes old at the tap, gives the drive time G, and the customer is
-promised "by tap + 5 off-road minutes + headroom x G" (the SHOWN `google_tap_v1` row). Our own engine's time for the
-same leg is written beside it as a HIDDEN `osrm_shadow_v1` row. `customer_eta(order, now=)` reads the promise of the
-latest real tap back as the fields Track and the message publish.
+The driver taps `in_transit` to a stop. The notification worker then calls `record_on_the_way(history_id)`. From a
+driver position at most 10 minutes old at the tap, one Google Routes TRAFFIC_AWARE call gives the drive time G, and the
+customer is promised "by tap + 5 off-road minutes + headroom x G". From an older position no call is made, and the
+promise is "by tap + our own engine's minutes + an allowance". Both go in the SHOWN `google_tap_v1` row. Our own engine's
+time for the same leg is written beside it as a HIDDEN `osrm_shadow_v1` row. `customer_eta(order, now=)` reads the
+promise of the latest real tap back as the fields Track and the message publish.
 
-Real rows throughout: the delivery, its order's address, the tap's history row, the driver's DeliveryPerson with its
-position stamped relative to the tap, and the history rows of stops the driver finished, each carrying its door as the
-arrival path stamps it. Faked, as external I/O only: Google's HTTP request
+Real rows throughout: the delivery, its order's address, the tap's history row and the driver's DeliveryPerson with its
+position stamped relative to the tap. Faked, as external I/O only: Google's HTTP request
 (`google_routes.request_with_retry`, an 18-minute drive), the cap's Redis counter (`FakeCallCounterRedis`, so no test
 writes to the Redis DBs the suite shares) and the distance matrix (`MapsService.get_distance_matrix`: self-hosted
 OSRM, 11 minutes).
@@ -29,9 +28,11 @@ from business_app.models.delivery_promise import MODEL_GOOGLE_TAP, MODEL_OSRM_SH
 from business_app.models.order import Order
 from business_app.models.user import UserAddress
 from business_app.services.delivery_assignment_service import DeliveryAssignmentService
+from business_app.services.delivery_service import DeliveryService
 from business_app.services.delivery_eta_service import CustomerEta, DeliveryEtaService
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.utils import google_routes
+from business_app.utils.distance_matrix import STRAIGHT_LINE_SOURCE
 from business_app.utils.timezone_utils import ensure_utc
 from shared import business_config
 from shared.enums import AssignmentSource, DeliveryStatus, OrderStatus
@@ -43,8 +44,10 @@ TAP = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)  # the driver taps "in transit": 1
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)  # the headroom and reading clock: 17:00 in Tashkent
 DRIVER_AT = (41.300, 69.250)
 DOOR_AT = (41.3111, 69.2797)
-# The door of another stop the driver finished: its history row places the driver there (spec §4.8 S2).
+# The door of another stop of the driver.
 FINISHED_AT = (41.3250, 69.2560)
+# The warehouse, for tests that use the `depot` fixture.
+DEPOT_AT = (41.0504, 69.1393)
 
 # Days back, clear of the 29 hourly legs. `_recorded_legs` taps one driver's legs at NOW-1h ... NOW-29h. A long leg
 # placed among them is interrupted by that driver's next hourly tap (spec §4.8 S2), and the rule a test pins is then
@@ -64,6 +67,8 @@ SPEC_TUNABLES = {
     "ETA_HEADROOM_SEED": 1.3,
     "ETA_HEADROOM_MIN_LEGS": 30,
     "ETA_HEADROOM_PRIOR_LEGS": 20,
+    "ETA_STALE_DOOR_ALLOWANCE_MINUTES": 30,
+    "ETA_STALE_DEPOT_ALLOWANCE_MINUTES": 20,
 }
 
 
@@ -121,6 +126,14 @@ class OurEngine:
 def spec_tunables(app, monkeypatch):
     for name, value in SPEC_TUNABLES.items():
         monkeypatch.setitem(app.config, name, value)
+
+
+@pytest.fixture
+def depot(app, monkeypatch):
+    """The warehouse at DEPOT_AT, which `StaffService.anchor_driver_at_warehouse` stamps on a driver who loads up."""
+    monkeypatch.setitem(app.config, "WAREHOUSE_LATITUDE", DEPOT_AT[0])
+    monkeypatch.setitem(app.config, "WAREHOUSE_LONGITUDE", DEPOT_AT[1])
+    return DEPOT_AT
 
 
 @pytest.fixture
@@ -197,11 +210,11 @@ def _order_on_its_way(
     return delivery
 
 
-def _driver_last_seen(db, driver, at):
-    """The driver's DeliveryPerson, last placed at DRIVER_AT at `at`; a driver who never shared a position at None."""
+def _driver_last_seen(db, driver, at, position=DRIVER_AT):
+    """The driver's DeliveryPerson, last placed at `position` at `at`; a driver who never shared a position at None."""
     person = DeliveryPerson(user_id=driver.id, full_name="Eta Driver", phone=driver.phone, is_active=True)
     if at is not None:
-        person.current_location_lat, person.current_location_lng = DRIVER_AT
+        person.current_location_lat, person.current_location_lng = position
         person.last_location_update = at
     db.session.add(person)
     db.session.commit()
@@ -328,130 +341,189 @@ class TestRecordingTheOnTheWayTap:
         )
         assert matrix.asks == [([DRIVER_AT, DOOR_AT], True)]
 
+    def test_a_position_ten_minutes_old_is_still_fresh(self, db, sample_user, delivery_driver, google, matrix):
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=10))
+        tap = _tap(db, delivery, delivery_driver)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert shown.source == "google_traffic"
+        assert _origin(google.requests[0]) == _lat_lng(DRIVER_AT)
+
+    def test_a_stale_position_is_priced_by_our_own_engine_with_no_google_call(
+        self, db, sample_user, delivery_driver, google, matrix
+    ):
+        """Over 10 minutes old at the tap, the position is not where the driver is, so Google's live traffic from there
+        is not this leg, and no call is spent. The customer is told a time all the same: our own engine's 11 minutes
+        from that position plus the 30-minute allowance. A stale position is wrong by an amount of time, not by a share
+        of the route, so it takes an allowance and not a headroom. `expected_at` stays empty: it is Google's time."""
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=11))
+        tap = _tap(db, delivery, delivery_driver)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert (shown.source, shown.expected_at, shown.shown) == ("stale_estimate", None, True)
+        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=41)
+        assert google.requests == []
+        assert google.calls_counted == 0  # not even counted against the day's cap
+        assert matrix.asks == [([DRIVER_AT, DOOR_AT], True)]  # asked once: the shadow row below is the same answer
+
+    def test_the_engines_own_time_is_kept_in_the_hidden_shadow(self, db, sample_user, delivery_driver, google, matrix):
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=11))
+        tap = _tap(db, delivery, delivery_driver)
+
+        DeliveryEtaService().record_on_the_way(tap.id)
+
+        [shadow] = _promises(MODEL_OSRM_SHADOW)
+        assert (shadow.shown, shadow.source, shadow.window_end) == (False, "osrm_selfhosted", None)
+        assert ensure_utc(shadow.expected_at) == TAP + timedelta(minutes=11)
+
+    def test_a_stale_depot_stamp_takes_the_depot_allowance(
+        self, db, sample_user, delivery_driver, google, matrix, depot
+    ):
+        """Loaded up 40 minutes ago: drivers mostly tap after they have already left, so a depot position needs less
+        than a door does. 11 + 20."""
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=40), position=DEPOT_AT)
+        tap = _tap(db, delivery, delivery_driver)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert shown.source == "stale_estimate"
+        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=31)
+        assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
+
     @pytest.mark.parametrize(
         "last_seen",
         [
-            pytest.param(TAP - timedelta(minutes=11), id="eleven-minutes-old"),
+            pytest.param(TAP - timedelta(days=1), id="a-door-from-yesterday"),
             pytest.param(None, id="never-shared"),
         ],
     )
-    def test_a_stale_position_gives_no_minutes_and_no_google_call(
-        self, db, sample_user, delivery_driver, google, matrix, last_seen
+    def test_no_position_from_today_starts_the_leg_at_the_depot(
+        self, db, sample_user, delivery_driver, google, matrix, depot, last_seen
     ):
-        """Review Focus #2: a position more than 10 minutes old at the tap is not where the driver is. Google is
-        not asked, so no call is spent, and the customer is told "On the way" with no minutes."""
+        """Yesterday's last door says nothing of today: a driver's day starts at the warehouse."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
         _driver_last_seen(db, delivery_driver, at=last_seen)
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert (shown.source, shown.expected_at, shown.window_end, shown.shown) == ("stale_position", None, None, True)
+        assert shown.source == "stale_estimate"
+        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=31)
+        assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
         assert google.requests == []
-        assert google.calls_counted == 0  # not even counted against the day's cap
-        assert matrix.asks == []
-        assert _promises(MODEL_OSRM_SHADOW) == []  # no start, so nothing to measure our own engine on
 
-    def test_the_stop_just_finished_is_a_fresh_start(self, db, sample_user, delivery_driver, google, matrix):
-        """Spec §4.8 S2: the position is the "live location, or the stop they just finished". Drivers rarely share a
-        live position, so the door of the stop they delivered a minute before the tap, which that delivered row
-        carries, is where this leg starts. Their live position is 22 minutes old."""
-        delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=22))
-        _finished_stop(db, sample_user, delivery_driver, at=TAP - timedelta(minutes=1))
-        tap = _tap(db, delivery, delivery_driver)
-
-        shown = DeliveryEtaService().record_on_the_way(tap.id)
-
-        assert shown.source == "google_traffic"
-        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=29)
-        [request] = google.requests
-        assert _origin(request) == _lat_lng(FINISHED_AT)
-        assert request["json"]["destination"]["location"]["latLng"] == _lat_lng(DOOR_AT)
-        assert matrix.asks == [([FINISHED_AT, DOOR_AT], True)]  # our own engine is measured on the same leg
-
-    def test_a_stop_finished_too_long_ago_is_stale(self, db, sample_user, delivery_driver, google, matrix):
-        """Finished 11 minutes before the tap, and the live position is older still: neither is where the driver is,
-        so Google is not asked."""
-        delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=22))
-        _finished_stop(db, sample_user, delivery_driver, at=TAP - timedelta(minutes=11))
-        tap = _tap(db, delivery, delivery_driver)
-
-        shown = DeliveryEtaService().record_on_the_way(tap.id)
-
-        assert (shown.source, shown.window_end) == ("stale_position", None)
-        assert google.requests == [] and google.calls_counted == 0
-        assert matrix.asks == []
-
-    @pytest.mark.parametrize("whose", ["another driver's stop", "an admin's mark on its driver's stop"])
-    def test_another_drivers_finished_stop_never_counts(
-        self, db, sample_user, delivery_driver, second_delivery_driver, admin_user, google, matrix, whose
+    def test_a_driver_with_no_profile_starts_the_leg_at_the_depot(
+        self, db, sample_user, delivery_driver, google, matrix, depot
     ):
-        """Only the driver's own move places the driver. Another driver finishing a stop a minute before the tap says
-        where that driver is. An admin marking this driver's stop delivered, from the office, says nothing of where
-        the driver is."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=22))
-        at = TAP - timedelta(minutes=1)
-        finished_by = {  # an unknown key raises: a typo cannot quietly build some other row
-            "another driver's stop": lambda: _finished_stop(db, sample_user, second_delivery_driver, at=at),
-            "an admin's mark on its driver's stop": lambda: _finished_stop(
-                db, sample_user, delivery_driver, at=at, by=admin_user
+        tap = _tap(db, delivery, delivery_driver)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=31)
+        assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
+
+    @pytest.mark.parametrize(
+        "tap_at, last_seen, minutes, start",
+        [
+            # 01:30 on the 4th in Tashkent; the position is from 23:30 on the 3rd, the same UTC date.
+            pytest.param(
+                datetime(2026, 11, 3, 20, 30, tzinfo=UTC),
+                datetime(2026, 11, 3, 18, 30, tzinfo=UTC),
+                31,
+                DEPOT_AT,
+                id="same-utc-date-but-yesterday-in-tashkent",
             ),
-        }
-        finished_by[whose]()
+            # 23:30 on the 3rd in Tashkent; the position is from 00:30 on the 3rd, the UTC date before.
+            pytest.param(
+                datetime(2026, 11, 3, 18, 30, tzinfo=UTC),
+                datetime(2026, 11, 2, 19, 30, tzinfo=UTC),
+                41,
+                DRIVER_AT,
+                id="another-utc-date-but-today-in-tashkent",
+            ),
+        ],
+    )
+    def test_today_is_the_tashkent_day(
+        self, db, sample_user, delivery_driver, google, matrix, depot, tap_at, last_seen, minutes, start
+    ):
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=last_seen)
+        tap = _tap(db, delivery, delivery_driver, at=tap_at)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert ensure_utc(shown.window_end) == tap_at + timedelta(minutes=minutes)
+        assert matrix.asks == [([start, DOOR_AT], True)]
+
+    @pytest.mark.parametrize(
+        "source, error",
+        [
+            pytest.param(STRAIGHT_LINE_SOURCE, None, id="a-straight-line-guess"),
+            pytest.param("osrm_selfhosted", RuntimeError("matrix down"), id="the-lookup-failed"),
+        ],
+    )
+    def test_a_stale_position_our_engine_cannot_price_gets_no_time(
+        self, db, sample_user, delivery_driver, google, matrix, source, error
+    ):
+        """A straight line is not a drive time: it never becomes a promise. The customer sees "On the way"."""
+        matrix.source, matrix.error = source, error
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=11))
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert (shown.source, shown.window_end) == ("stale_position", None)
+        assert (shown.source, shown.expected_at, shown.window_end) == ("stale_position", None, None)
         assert google.requests == []
+        [shadow] = _promises(MODEL_OSRM_SHADOW)
+        assert shadow.expected_at is None
 
-    @pytest.mark.parametrize(
-        "row",
-        [
-            # A reassign keeps the status (arrived -> arrived): not a move, even stamped and made by the driver.
-            pytest.param({"old": DeliveryStatus.ARRIVED, "new": DeliveryStatus.ARRIVED}, id="a-reassign-row"),
-            pytest.param({"stamped": False}, id="no-door-on-the-row"),
-            pytest.param({"at": TAP + timedelta(minutes=1)}, id="finished-after-the-tap"),
-        ],
-    )
-    def test_a_finished_stop_counts_only_as_a_real_move_with_its_door_before_the_tap(
-        self, db, sample_user, delivery_driver, google, matrix, row
+    def test_an_engine_answer_without_the_leg_counts_as_no_answer(
+        self, db, sample_user, delivery_driver, google, matrix, monkeypatch
     ):
+        monkeypatch.setattr(matrix, "answer", lambda points, traffic: ({}, "osrm_selfhosted"))
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=2))
+        tap = _tap(db, delivery, delivery_driver)
+
+        shown = DeliveryEtaService().record_on_the_way(tap.id)
+
+        assert shown.source == "google_traffic"  # the fresh promise stands
+        [shadow] = _promises(MODEL_OSRM_SHADOW)
+        assert (shadow.source, shadow.expected_at) == ("error", None)
+
+    def test_an_admins_mark_never_places_the_driver(self, db, sample_user, delivery_driver, admin_user, google, matrix):
+        """An admin marks this driver's other stop arrived, through the real path, from the office. That says nothing of
+        where the driver is, so the leg still goes by their position on record, 22 minutes old."""
+        other_stop = _order_on_its_way(db, sample_user, delivery_driver, door=FINISHED_AT, number="ETA-OTHER")
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
         _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=22))
-        _finished_stop(db, sample_user, delivery_driver, **{"at": TAP - timedelta(minutes=1), **row})
+        DeliveryService().mark_delivery_arrived(other_stop.id, actor_user_id=admin_user.id)
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert (shown.source, shown.window_end) == ("stale_position", None)
+        assert shown.source == "stale_estimate"
         assert google.requests == []
+        assert matrix.asks == [([DRIVER_AT, DOOR_AT], True)]
 
-    @pytest.mark.parametrize(
-        "live_minutes_ago, finished_minutes_ago, start",
-        [
-            pytest.param(8, 2, FINISHED_AT, id="the-finished-stop-is-newer"),
-            pytest.param(2, 8, DRIVER_AT, id="the-live-position-is-newer"),
-        ],
-    )
-    def test_the_newer_of_live_and_finished_wins(
-        self, db, sample_user, delivery_driver, google, matrix, live_minutes_ago, finished_minutes_ago, start
-    ):
-        """Both are fresh, and the leg starts at the newer one: a live position from before the stop was finished is
-        where the driver was on the way to it, and one from after is where they went next."""
+    def test_a_position_stamped_since_the_tap_counts_as_fresh(self, db, sample_user, delivery_driver, google, matrix):
+        """The driver sends a pin right after the tap, before the worker runs. It is where they are."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=live_minutes_ago))
-        _finished_stop(db, sample_user, delivery_driver, at=TAP - timedelta(minutes=finished_minutes_ago))
+        _driver_last_seen(db, delivery_driver, at=TAP + timedelta(seconds=30))
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
         assert shown.source == "google_traffic"
-        [request] = google.requests
-        assert _origin(request) == _lat_lng(start)
+        assert _origin(google.requests[0]) == _lat_lng(DRIVER_AT)
 
     def test_google_down_gives_no_minutes(self, db, sample_user, delivery_driver, google, matrix):
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
@@ -716,6 +788,27 @@ class TestHeadroom:
 
         assert DeliveryEtaService().headroom(now=NOW) == 1.0
 
+    def test_a_stale_estimate_does_not_teach_headroom(self, db, sample_user, delivery_driver, google, matrix):
+        """Thirty stale legs, recorded by the real writer, each a real 23-minute drive that an hour's gap leaves whole.
+        Headroom is the factor on Google's time, and a stale leg has none: our own engine priced it, from a position that
+        was no longer the driver's. Taught from the engine's 11 minutes, headroom would rise to 1.5."""
+        _driver_last_seen(db, delivery_driver, at=NOW - timedelta(days=3))
+        for i in range(30):
+            delivery = _order_on_its_way(db, sample_user, delivery_driver, number=f"STALE-{i:04d}")
+            tapped_at = NOW - timedelta(hours=i + 1)
+            shown = DeliveryEtaService().record_on_the_way(_tap(db, delivery, delivery_driver, at=tapped_at).id)
+            assert shown.source == "stale_estimate"
+            _moved(
+                db,
+                delivery,
+                DeliveryStatus.IN_TRANSIT,
+                DeliveryStatus.ARRIVED,
+                at=tapped_at + timedelta(minutes=23),
+                by=delivery_driver,
+            )
+
+        assert DeliveryEtaService().headroom(now=NOW) == SEED
+
     def test_taps_pressed_together_do_not_teach_headroom(self, db, sample_user, delivery_driver):
         """`arrived` tapped half a minute after `in_transit` is not a drive: it would have been the 30th leg."""
         _recorded_legs(db, sample_user, delivery_driver, 29)
@@ -946,6 +1039,23 @@ class TestWhatTheCustomerIsTold:
             by_time="14:29",
             minutes_left=25,
             attribution="google_maps",
+        )
+
+    def test_a_stale_estimate_counts_down_with_no_google_credit(self, db, sample_user, delivery_driver, google, matrix):
+        """Recorded by the real writer, read four minutes after the tap: by = tap + 41 = now + 37 minutes. Google gave
+        none of it, so nothing credits Google."""
+        delivery = _order_on_its_way(db, sample_user, delivery_driver)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=20))
+        DeliveryEtaService().record_on_the_way(_tap(db, delivery, delivery_driver).id)
+
+        eta = DeliveryEtaService().customer_eta(delivery.order, now=TAP + timedelta(minutes=4))
+
+        assert eta == CustomerEta(
+            stage="on_the_way",
+            by=TAP + timedelta(minutes=41),
+            by_time="14:41",
+            minutes_left=37,
+            attribution=None,
         )
 
     def test_a_passed_by_time_reads_zero_minutes(self, db, sample_user, delivery_driver, google, matrix):

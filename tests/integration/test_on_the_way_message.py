@@ -26,7 +26,7 @@ would show it.
 import logging
 import re
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from string import Formatter
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
@@ -39,7 +39,7 @@ from business_app.models.delivery import DeliveryPerson, DeliveryStatusHistory
 from business_app.models.delivery_promise import MODEL_GOOGLE_TAP, MODEL_OSRM_SHADOW, DeliveryPromise
 from business_app.models.notification import Notification, NotificationTemplate
 from business_app.models.translation import Translation
-from business_app.services import notification_service
+from business_app.services import delivery_eta_service, notification_service
 from business_app.services.notification_service import DEFAULT_TEMPLATES, NotificationService
 from business_app.tasks.notification_tasks import send_delivery_update_task
 from business_app.utils import translations
@@ -324,11 +324,14 @@ def test_a_regional_language_code_gets_the_whole_message_in_its_language(
     assert text.splitlines() == [*russian.splitlines(), "", *_promised_lines("ru", tap)]
 
 
-def test_a_stale_position_sends_the_message_without_a_time(
-    app, client, db, sample_user, live_send, google, matrix, worker  # noqa: F811
+def test_a_stale_position_still_says_when_it_arrives_on_our_own_engines_time(
+    app, client, db, sample_user, live_send, google, matrix, worker, monkeypatch  # noqa: F811
 ):
-    """Review Focus #2: a position more than 10 minutes old at the tap is not where the driver is. Google is not
-    asked, and the message goes out with no time in it."""
+    """A position more than 10 minutes old at the tap is not where the driver is, so Google is not asked. The customer
+    is told a time all the same: our own engine's 11 minutes from that position, plus the 30-minute allowance, so the
+    tap + 41. No "Live traffic: Google Maps" under it, as Google gave none of it."""
+    # The position is from the tap's own Tashkent day, also when this runs in the minutes after local midnight.
+    monkeypatch.setattr(delivery_eta_service, "local_date", lambda _at: date(2026, 11, 4))
     _connect_telegram(db, sample_user, language="en")
     driver, delivery = _stop(db, sample_user, number="ORD-ETA-STALE")
     _position_shared(db, driver, minutes_ago=11)
@@ -337,20 +340,55 @@ def test_a_stale_position_sends_the_message_without_a_time(
     worker(tap)
 
     [text] = _telegram_texts(live_send)
-    _went_out_without_a_time(text)
+    assert text.splitlines()[-1] == get_translation(ON_THE_WAY, "en", minutes=41, time=_by_time(tap, 41))
+    assert get_translation(ATTRIBUTION, "en") not in text
     assert google.requests == [] and google.calls_counted == 0
+    door = delivery.order.delivery_address
+    assert matrix.asks == [([DRIVER_AT, (door.latitude, door.longitude)], True)]
     [shown] = _promises(MODEL_GOOGLE_TAP)
-    assert (shown.source, shown.window_end) == ("stale_position", None)
+    assert (shown.source, shown.expected_at) == ("stale_estimate", None)
+    assert ensure_utc(shown.window_end) == ensure_utc(tap.changed_at) + timedelta(minutes=41)
+
+
+@pytest.mark.parametrize(
+    "from_status, to_status, metadata",
+    [
+        (DeliveryStatus.IN_TRANSIT, "arrived", None),
+        (DeliveryStatus.ARRIVED, "delivered", {"cash_collected": 150000.0}),
+    ],
+    ids=["arrived", "delivered"],
+)
+def test_the_drivers_tap_through_the_real_route_moves_them_to_the_door(
+    app, client, db, sample_user, enqueued, from_status, to_status, metadata  # noqa: F811
+):
+    """The owner's rule: a driver who taps Arrived or Delivered is at that order's address, so that is where they are
+    now, though their last position is only five minutes old. Through the bot's own route, whose JWT identity reaches
+    the history row as a string."""
+    driver = _driver(db, phone="+998901350002", first_name="Door")
+    delivery = _delivery(db, sample_user, driver, status=from_status, number=f"ORD-DOOR-{to_status}")
+    _position_shared(db, driver, minutes_ago=5)
+    door = delivery.order.delivery_address
+    door_at = (door.latitude, door.longitude)
+    assert door_at != DRIVER_AT
+
+    response = client.put(
+        STATUS.format(delivery.id),
+        json=StaffAPIClient.delivery_status_body(to_status, metadata),
+        headers=_bearer(app, driver),
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    db.session.expire_all()
+    profile = DeliveryPerson.query.filter_by(user_id=driver.id).one()
+    assert (profile.current_location_lat, profile.current_location_lng) == door_at
 
 
 def test_the_stop_just_finished_starts_the_next_leg(
     app, client, db, sample_user, live_send, google, matrix, worker  # noqa: F811
 ):
-    """Spec §4.8 S2: the leg starts at the driver's live position or at the stop they just finished, whichever is
-    newer, if at most 10 minutes old. The live position is 22 minutes old. The driver's arrival at stop A, through the
-    real route, stamps A's door on its history row, and leaves the live position as it is: it is under half an hour
-    old (`DeliveryService._capture_arrival_position`, a rule route optimisation relies on). The driver then sets off
-    to stop B. B's leg starts at A's door, and B's message says when the water arrives."""
+    """Spec §4.8 S2: the leg starts where the driver was at the tap. Their last position is 22 minutes old, and their
+    arrival at stop A, through the real route, moves it to A's door. The driver then sets off to stop B. B's leg starts
+    at A's door, and B's message says when the water arrives."""
     _connect_telegram(db, sample_user, language="en")
     driver, stop_a = _stop(db, sample_user, number="ORD-ETA-STOP-A")
     _, stop_b = _stop(db, sample_user, number="ORD-ETA-STOP-B", driver=driver)
@@ -366,7 +404,7 @@ def test_the_stop_just_finished_starts_the_next_leg(
 
     assert (arrival.location_lat, arrival.location_lng) == DOOR_AT
     profile = DeliveryPerson.query.filter_by(user_id=driver.id).one()
-    assert (profile.current_location_lat, profile.current_location_lng) == DRIVER_AT  # not refreshed by the arrival
+    assert (profile.current_location_lat, profile.current_location_lng) == DOOR_AT
     [route] = [request["json"] for request in google.requests]
     assert route["origin"]["location"]["latLng"] == {"latitude": DOOR_AT[0], "longitude": DOOR_AT[1]}
     b_door = stop_b.order.delivery_address

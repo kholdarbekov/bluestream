@@ -149,8 +149,10 @@ ROUTE_SERVICE_TIME_MINUTES=4
 WAREHOUSE_LATITUDE=<real warehouse lat>
 WAREHOUSE_LONGITUDE=<real warehouse lng>
 # Optional (the customer's "on the way" arrival time only; never the route
-# card). Leave unset and customers see "On the way" with no minutes. Every
-# call passes the daily cap GOOGLE_ROUTES_DAILY_CAP (default 150):
+# card). Leave unset and a tap from a fresh driver position shows customers
+# "On the way" with no minutes; a tap from an older one is priced by our own
+# engine either way. Every call passes the daily cap GOOGLE_ROUTES_DAILY_CAP
+# (default 150):
 GOOGLE_ROUTES_API_KEY=<key entitled to Routes API>
 ```
 
@@ -370,8 +372,9 @@ applies to every lever below that recreates `business_app` (all but lever 3).
    OSRM the real ladder is now: Yandex (flag) → public demo (flag) →
    Haversine.
 3. **Google ETA misbehaving:** unset `GOOGLE_ROUTES_API_KEY` — no Google call
-   is made and customers see "On the way" with no minutes (Google serves only
-   the customer's "on the way" step, behind the daily cap). The driver's route
+   is made and a tap from a fresh position shows customers "On the way" with no
+   minutes; one from an older position keeps our own engine's estimate (Google
+   serves only the customer's "on the way" step, behind the daily cap). The driver's route
    card is not affected: it uses our own engine only. Unlike the other levers,
    this one needs only `up -d --no-deps --force-recreate celery_worker` (with
    the same two `-f` compose files as above): `celery_worker` is the only

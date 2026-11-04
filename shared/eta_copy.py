@@ -82,8 +82,8 @@ def track_lines(
     `stage`, `minutes_left`, `by_time` and `attribution` (the `eta_by` instant is not needed).
 
     On the way (`ETA_STAGE_ON_THE_WAY`): the promised time (`promised_time_lines`) when there is one, else the single
-    line "On the way". No minutes were promised (the driver's position was too old at the tap, Google was down), or the
-    promise cannot be said (its copy, or the time it is due by, is missing), but the driver is out all the same.
+    line "On the way". No minutes were promised (Google was down, or our own engine could not price a stale position),
+    or the promise cannot be said (its copy, or the time it is due by, is missing), but the driver is out all the same.
     Arrived (`ETA_STAGE_ARRIVED`): the single line "Arrived at your address", whatever minutes a body still carries.
     Any other stage, or none: no line. `[]` also when `render` cannot say the one line a stage needs.
     """

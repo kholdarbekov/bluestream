@@ -362,13 +362,17 @@ class DeliveryService:
         history: DeliveryStatusHistory,
     ) -> Optional[Tuple[float, float]]:
         """Stamp the delivery's destination coords onto the status-history row
-        and refresh the driver's live location *if it's stale or missing*.
+        and, on the delivery's own driver's tap, move the driver there.
 
-        Called from ARRIVED/DELIVERED transitions. The delivery address is the
-        best available proxy for where the driver physically is at this
-        moment. Fresh GPS readings (within ``DRIVER_LOCATION_FRESH_SECONDS``)
-        are NOT overwritten — real GPS is more precise than an address
-        centroid.
+        Called from ARRIVED/DELIVERED transitions. A driver who taps either is at
+        this door, so it is where they are, whatever position is on record and
+        however recent: a previous door, the depot's stamp or a shared pin. The
+        next pin or live-location update overwrites it. Someone else's tap (an
+        admin's, from the office) or an automatic one stamps the row and leaves
+        the driver where they are.
+
+        `history.changed_by` is still the bot route's raw JWT identity here, a
+        string, until the row is flushed.
 
         Returns the (lat, lng) it stamped, or None if no destination coords
         are available on the delivery's order address.
@@ -386,21 +390,10 @@ class DeliveryService:
         history.location_lat = lat
         history.location_lng = lng
 
-        # Refresh DeliveryPerson live location only if not already fresh.
-        if delivery.delivery_person_id is None:
+        if self._normalize_actor_id(history.changed_by) != delivery.delivery_person_id:
             return (lat, lng)
         person = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-        if person is None:
-            return (lat, lng)
-
-        fresh_seconds = current_app.config.get("DRIVER_LOCATION_FRESH_SECONDS", 1800)
-        last_update = person.last_location_update
-        if last_update is not None and last_update.tzinfo is None:
-            last_update = last_update.replace(tzinfo=timezone.utc)
-        is_fresh = last_update is not None and last_update >= datetime.now(timezone.utc) - timedelta(
-            seconds=fresh_seconds
-        )
-        if not is_fresh:
+        if person is not None:
             person.update_location(lat, lng)
         return (lat, lng)
 
@@ -446,8 +439,8 @@ class DeliveryService:
             automatic=automatic,
         )
         db.session.add(history)
-        # Stamp the arrival position onto the history row and (if stale) the
-        # driver's live location, before flush so it's persisted atomically.
+        # Stamp the door onto the history row and, on the driver's own tap, move
+        # the driver there, before flush so it's persisted atomically.
         self._capture_arrival_position(delivery, history)
         db.session.flush()
         db.session.commit()

@@ -1983,9 +1983,8 @@ class StaffService:
             )
             db.session.add(history)
             # On ARRIVED / DELIVERED, stamp the destination coords onto the
-            # history row and (if the driver's live location is stale)
-            # refresh DeliveryPerson.current_location_*. Same helper is
-            # used by DeliveryService.mark_delivery_arrived; we call it via
+            # history row and, on the driver's own tap, move the driver there.
+            # Same helper is used by DeliveryService.mark_delivery_arrived; we call it via
             # an instance because this method is a @staticmethod.
             if new_status in ("arrived", "delivered"):
                 from business_app.services.delivery_service import DeliveryService
@@ -2049,6 +2048,18 @@ class StaffService:
                             commit=False,
                         )
                 else:
+                    from business_app.services.order_service import OrderService
+
+                    # Its own history row, so the customer's timeline moves on with the status. Not through
+                    # update_order_status, which refuses CONFIRMED -> OUT_FOR_DELIVERY: that is no admin transition.
+                    # No notes: the customer reads them on Track.
+                    if delivery.order.status != OrderStatus(order_status_str):
+                        OrderService.record_status_history(
+                            delivery.order_id,
+                            delivery.order.status,
+                            OrderStatus(order_status_str),
+                            updated_by=staff_user_id,
+                        )
                     delivery.order.status = OrderStatus(order_status_str)
                     delivery.order.updated_at = now
 

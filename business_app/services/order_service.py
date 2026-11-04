@@ -669,8 +669,7 @@ class OrderService:
         No entry above it is current, and a final `awaiting_new_date` entry
         carries when the delivery last failed. A failure writes no order
         history, so without this the last row would read as current beside
-        the awaiting label. That row is usually `confirmed`, because the pickup
-        sync writes none. The entry is derived, never stored, so a reschedule
+        the awaiting label. The entry is derived, never stored, so a reschedule
         takes it away.
         """
         from business_app.services.order_schedule_service import OrderScheduleService
@@ -2344,7 +2343,8 @@ class OrderService:
         """Create order status history record.
 
         Public because a writer that sets `order.status` directly records its
-        row here too (`AdminDeliveryService._apply_status_update`'s return).
+        row here too (`AdminDeliveryService._apply_status_update`'s return, the
+        pickup sync of `StaffService.update_delivery_status`).
         `notes` is shown to the customer; `history_reason` is staff-only (F6)."""
         history = OrderStatusHistory(
             order_id=order_id,

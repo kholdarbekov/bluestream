@@ -131,6 +131,35 @@ def _legacy_markdown_error(data: bytes) -> Optional[str]:
     return None
 
 
+def render_legacy_markdown(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """What the customer reads for a legacy Markdown `text`: the visible text, and each entity as (its opening mark,
+    its text). The same rules as `_legacy_markdown_error`, which only accepts or refuses, so two underscores in an order
+    number pass it while they eat themselves on the screen. Raises ValueError where Telegram would refuse the text."""
+    visible, entities, i = [], [], 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and text[i + 1 : i + 2] and text[i + 1].encode() in _LEGACY_OPENERS:
+            visible.append(text[i + 1])
+            i += 2
+            continue
+        if c.encode() not in _LEGACY_OPENERS:
+            visible.append(c)
+            i += 1
+            continue
+        closer = "```" if text.startswith("```", i) else ("]" if c == "[" else c)
+        start = i + (3 if closer == "```" else 1)
+        end = text.find(closer, start)
+        if end == -1:
+            raise ValueError(f"Can't find end of the entity starting at offset {i}")
+        visible.append(text[start:end])
+        entities.append((c, text[start:end]))
+        i = end + len(closer)
+        if c == "[" and text.startswith("(", i):
+            close = text.find(")", i)
+            i = len(text) if close == -1 else close + 1
+    return "".join(visible), entities
+
+
 def _markdown_v2_error(data: bytes) -> Optional[str]:
     stack: list[tuple[str, int]] = []  # open entities: (type, opener byte offset)
     i, size = 0, len(data)

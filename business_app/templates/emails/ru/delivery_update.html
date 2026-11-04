@@ -30,10 +30,9 @@
         <td>{{ tracking_code }}</td>
     </tr>
     {% endif %}
-    {% if estimated_delivery %}
+    {% if eta_line %}
     <tr>
-        <th>Ожидаемая доставка</th>
-        <td>{{ estimated_delivery }}</td>
+        <td colspan="2">{{ eta_line | replace("\n", "<br>"|safe) }}</td>
     </tr>
     {% endif %}
 </table>
@@ -41,6 +40,6 @@
 <hr class="divider">
 
 <div class="info-box">
-    <p>Если у вас есть вопросы по доставке, свяжитесь с нами по телефону <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.</p>
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
 </div>
 {% endblock %}

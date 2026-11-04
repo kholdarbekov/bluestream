@@ -265,11 +265,22 @@ class BaseConfig:
     # it billed us; self-hosted OSRM replaced it. Only the two map credentials
     # above may exist — `TestNoUnapprovedMatrixProviders` asserts the set.
     # Google Routes computeRoutes — the ONE traffic-aware number in the
-    # product (next-leg ETA, spec 8.2). Bills per REQUEST; the matrix
-    # endpoint bills per ELEMENT and is never used. Unset = tier skipped.
-    # Deliberately a NEW, separate key — NOT GOOGLE_MAPS_API_KEY — after
-    # Plan 1 found the legacy matrix keys silently un-entitled for months.
+    # product: the customer's "driver is on the way" estimate (owner rule
+    # 2026-11-03; the driver's route card never calls it). Bills per
+    # REQUEST; the matrix endpoint bills per ELEMENT and is never used.
+    # Unset = no Google call. Deliberately a NEW, separate key — NOT
+    # GOOGLE_MAPS_API_KEY — after Plan 1 found the legacy matrix keys
+    # silently un-entitled for months.
     GOOGLE_ROUTES_API_KEY = get_secret("google_routes_api_key", "GOOGLE_ROUTES_API_KEY", required=False)
+    # Calls allowed per Tashkent day (single default in shared.business_config).
+    GOOGLE_ROUTES_DAILY_CAP = business_config.GOOGLE_ROUTES_DAILY_CAP
+    # The customer's "on the way" promise, read by DeliveryEtaService (spec
+    # 2026-11-03 §4.8 S2; single defaults in shared.business_config).
+    ETA_POSITION_MAX_AGE_SECONDS = business_config.ETA_POSITION_MAX_AGE_SECONDS
+    ETA_OFF_ROAD_MINUTES = business_config.ETA_OFF_ROAD_MINUTES
+    ETA_HEADROOM_SEED = business_config.ETA_HEADROOM_SEED
+    ETA_HEADROOM_MIN_LEGS = business_config.ETA_HEADROOM_MIN_LEGS
+    ETA_HEADROOM_PRIOR_LEGS = business_config.ETA_HEADROOM_PRIOR_LEGS
 
     # Route Optimization Configuration
     MATRIX_CACHE_TTL_TRAFFIC_SECONDS = int(os.environ.get("MATRIX_CACHE_TTL_TRAFFIC_SECONDS", 1800))

@@ -35,6 +35,7 @@ so callers can decide *how* to react when Redis is unreachable:
 """
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 
 
@@ -249,6 +250,15 @@ class RedisKeyspace:
     def telegram_login_attempts(telegram_id: int | str) -> str:
         return f"bs:telegram_login_rate:{telegram_id}"
 
+    # Tier: CACHE. The Google Routes calls made on one Tashkent day (`INCR`, expiring two days after the first), the
+    # cap `GOOGLE_ROUTES_DAILY_CAP` is checked against (`google_routes.get_traffic_aware_leg`). A bill guard, never a
+    # gate, like `sales_pay_fresh`: it fails OPEN, so without Redis the call goes ahead. An operator reads a day's count
+    # with `GET google_routes:calls:<YYYY-MM-DD>`; the count includes the calls the cap refused. `day` is a local
+    # (Tashkent) date, never a UTC one: the budget turns over at local midnight.
+    @staticmethod
+    def google_routes_calls(day: date) -> str:
+        return f"google_routes:calls:{day.isoformat()}"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -301,6 +311,7 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'tokens_valid_after':                RedisUsageTier.TIER_SECURITY,
     'telegram_login_hash':               RedisUsageTier.TIER_SECURITY,
     'telegram_login_attempts':           RedisUsageTier.TIER_SECURITY,
+    'google_routes_calls':               RedisUsageTier.TIER_CACHE,
 }
 
 

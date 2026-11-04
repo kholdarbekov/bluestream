@@ -4157,11 +4157,6 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Yangi yetkazib berish sanasi kutilmoqda',
         'ru': 'Ожидает новой даты доставки'
     },
-    'telegram.orders.estimated_remaining': {
-        'en': 'Estimated remaining',
-        'uz': 'Taxminiy qolgan vaqt',
-        'ru': 'Примерное оставшееся время'
-    },
     'telegram.orders.driver': {
         'en': 'Driver',
         'uz': 'Kuryer',
@@ -8700,13 +8695,13 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.tier.0.benefit2': _ui_tr('Standard delivery, always free', 'Standart yetkazib berish, doim bepul', 'Стандартная доставка, всегда бесплатно'),
 
     'loyalty_guide.tier.1.tagline': _ui_tr('For our regulars', 'Doimiy mijozlarimiz uchun', 'Для постоянных клиентов'),
-    'loyalty_guide.tier.1.benefit1': _ui_tr('Priority support & faster delivery', 'Ustuvor qo‘llab-quvvatlash va tezroq yetkazish', 'Приоритетная поддержка и быстрая доставка'),
+    'loyalty_guide.tier.1.benefit1': _ui_tr('Priority support', 'Ustuvor qo‘llab-quvvatlash', 'Приоритетная поддержка'),
 
     'loyalty_guide.tier.2.tagline': _ui_tr('For true water lovers', 'Haqiqiy suv ixlosmandlari uchun', 'Для настоящих ценителей воды'),
     'loyalty_guide.tier.2.benefit1': _ui_tr('VIP support & early access to promos', 'VIP qo‘llab-quvvatlash va aksiyalarga erta kirish', 'VIP-поддержка и ранний доступ к акциям'),
 
     'loyalty_guide.tier.3.tagline': _ui_tr('Our most valued members', "Eng qadrli a'zolarimiz", 'Самые ценные участники'),
-    'loyalty_guide.tier.3.benefit1': _ui_tr('Dedicated manager & free express delivery', 'Shaxsiy menejer va bepul ekspress yetkazish', 'Персональный менеджер и бесплатная экспресс-доставка'),
+    'loyalty_guide.tier.3.benefit1': _ui_tr('Dedicated manager', 'Shaxsiy menejer', 'Персональный менеджер'),
 
     'loyalty_guide.promo.title': _ui_tr('How tier promotion works', 'Daraja oshirish qanday ishlaydi', 'Как происходит повышение уровня'),
     'loyalty_guide.promo.s1_title': _ui_tr('Cross a threshold', "Chegaradan o'ting", 'Преодолейте порог'),
@@ -13154,6 +13149,75 @@ ORDER_SKIP_REFUSAL_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(ORDER_SKIP_REFUSAL_TRANSLATIONS)
+
+
+# Honest-ETA Phase 1 (spec 2026-11-03 §4.8). What the customer is told once the driver is on the way, for the fields
+# `DeliveryEtaService.customer_eta` finishes: the minutes left and the "by" time on the Tashkent clock, or "any minute"
+# once the "by" time has passed, then where the minutes came from when Google's traffic gave them. `shared/eta_copy.py`
+# is the one place that picks which of these lines is said. The backend's in-transit message ends with them
+# (`eta_line`); the delivery-update email and the customer bot's Track say the same lines. Two lines are
+# the Track screen's alone (`track_lines`): "On the way" while the driver is out and nothing is promised (a stale
+# position gives no minutes), and "Arrived at your address" once the driver tapped arrived. They carry no emoji (the
+# bot puts the stage's marker before the first line) and none of the characters legacy Markdown reads. No line names
+# the driver, so `_strip_driver_info_from_delivery_message` keeps every one.
+HONEST_ETA_TRANSLATIONS = {
+    'telegram.orders.eta_on_the_way': {
+        'en': 'Arriving within about {minutes} min (by {time})',
+        'uz': 'Taxminan {minutes} daqiqa ichida yetib keladi ({time} gacha)',  # NATIVE-READ
+        'ru': 'Прибудет в течение примерно {minutes} мин (до {time})',  # NATIVE-READ
+    },
+    'telegram.orders.eta_arriving_now': {
+        'en': 'Arriving any minute',
+        'uz': 'Bir necha daqiqada yetib keladi',  # NATIVE-READ
+        'ru': 'Прибудет с минуты на минуту',  # NATIVE-READ
+    },
+    'telegram.orders.eta_google_attribution': {
+        'en': 'Live traffic: Google Maps',
+        'uz': 'Jonli tirbandlik: Google Maps',  # NATIVE-READ
+        'ru': 'Пробки: Google Maps',  # NATIVE-READ
+    },
+    'telegram.orders.eta_on_the_way_no_time': {
+        'en': 'On the way',
+        'uz': "Yo'lda",  # NATIVE-READ
+        'ru': 'В пути',  # NATIVE-READ
+    },
+    'telegram.orders.eta_arrived': {
+        'en': 'Arrived at your address',
+        'uz': 'Manzilingizga yetib keldi',  # NATIVE-READ
+        'ru': 'Доставка прибыла по вашему адресу',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(HONEST_ETA_TRANSLATIONS)
+
+
+# Honest-ETA Phase 1 (spec 2026-11-03 §4.13, §5). The landing page promised what the business does not offer. Dev's
+# call to action said delivery arrives "within 2 hours anywhere in the city", and prod's promised service "designed to
+# fit your schedule" (uz "kafolatlaymiz", ru "без лишних ожиданий"). The footer said "Delivery: 24/7". Both keys lived
+# only in the database until now, so no seed run could ever replace them; they ship from here. The call to action keeps
+# prod's first sentence, the owner's own wording (Tashkent and the region, their own fleet), and not the dev one
+# ("delivery partners across Uzbekistan"), which is less true. The sentence after it replaces both timing promises with
+# what is true for every customer: the delivery can be followed in the Telegram bot or on the website. It promises no
+# message either: the on-the-way message reaches only a customer with a linked bot or a real email, and a phone-only
+# website customer has neither (SMS is OTP-only). The "see your time before you order" claim waits for Phase 3. The
+# footer says "every day" and names no hours. The loyalty perks are not here: `loyalty_guide.tier.1.benefit1` and
+# `loyalty_guide.tier.3.benefit1` are edited in place in LOYALTY_GUIDE_TRANSLATIONS, each keeping its true half.
+HONEST_ETA_PUBLIC_COPY = {
+    'landing.cta.description': {
+        'en': 'We proudly serve Tashkent and the surrounding region with our own dedicated delivery fleet. '
+              'Order in a few taps and follow your delivery in our Telegram bot or on the website.',
+        'uz': 'Biz Toshkent shahri va viloyati bo‘ylab o‘zimizning maxsus transport xizmatimizni taklif etamiz. '
+              'Bir necha bosishda buyurtma bering va yetkazib berishni Telegram botimizda yoki saytda '
+              'kuzatib boring.',  # NATIVE-READ
+        'ru': 'Мы обслуживаем Ташкент и область, используя собственный профессиональный автопарк. '
+              'Закажите в несколько касаний и следите за доставкой в нашем Telegram-боте или на сайте.',  # NATIVE-READ
+    },
+    'landing.footer.delivery_hours': {
+        'en': 'Delivery: every day',
+        'uz': 'Yetkazib berish: har kuni',  # NATIVE-READ
+        'ru': 'Доставка: каждый день',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(HONEST_ETA_PUBLIC_COPY)
 
 
 def main():

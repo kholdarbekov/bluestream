@@ -2,8 +2,12 @@
 
 Spec 8.2: TRAFFIC_AWARE, ONE number (the next-leg ETA), bills per REQUEST.
 computeRouteMatrix bills per ELEMENT and must never be called. The module
-degrades silently — any failure returns None and the caller falls back to
-the OSRM duration.
+degrades silently — any failure returns None, and the caller then shows the
+customer no minutes ("On the way").
+
+Every request is first counted against the day's cap in Redis; the cap itself
+is pinned in test_google_routes_daily_cap.py. Here the counter is a fake, so
+none of these tests writes to the Redis DBs the suite shares.
 """
 
 from unittest.mock import MagicMock
@@ -11,6 +15,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from business_app.utils import google_routes as gr
+from tests.unit.test_google_routes_daily_cap import FakeCallCounterRedis
+
+
+@pytest.fixture(autouse=True)
+def counter_not_in_shared_redis(monkeypatch):
+    monkeypatch.setattr(gr, "redis_client", FakeCallCounterRedis())
 
 
 def _fake_response(status, body):

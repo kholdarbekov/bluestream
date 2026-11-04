@@ -144,6 +144,7 @@ class TimezoneMiddleware:
             "scheduled_at",
             "delivery_time",
             "estimated_delivery_time",
+            "eta_by",  # Track's promised "by" instant (honest-ETA spec 2026-11-03 §4.8)
             "expires_at",
             "valid_until",
             "last_login",

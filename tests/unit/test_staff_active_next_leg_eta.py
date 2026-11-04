@@ -1,13 +1,14 @@
-"""GET /api/v1/staff/delivery/active — next-leg ETA tiering (spec 8.2/8.4).
+"""GET /api/v1/staff/delivery/active — the next-leg ETA (spec 8.4) and its honesty states.
 
 Drives the real endpoint with a driver JWT. External I/O only is mocked:
 the distance matrix via MapsService.get_distance_matrix (established
-pattern) and Google via request_with_retry inside google_routes.
+pattern), and Google via request_with_retry inside google_routes only to
+prove it is never reached (owner rule 2026-11-03: the route card reads the
+matrix alone; Google serves the customer's "on the way" estimate).
 """
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock
 
 import pytest
 from flask_jwt_extended import create_access_token
@@ -124,31 +125,88 @@ def _real_source_matrix(self, points, traffic=True, use_cache=True):
 @pytest.mark.unit
 @pytest.mark.delivery
 class TestNextLegEtaTiering:
-    def test_google_traffic_wins_when_configured(
+    def test_the_route_card_never_calls_google(
         self, app, client, db, driver, driver_person, customer, monkeypatch
     ):
+        """Owner rule 2026-11-03: Google's paid Routes API serves the customer's "on the way" estimate and nothing
+        else. The route card is rebuilt on every driver location update, so one Google call here is a bill per
+        update. With a key configured and a driver whose position is fresh (the case that used to ask Google
+        first), the card still publishes the matrix leg and `request_with_retry` is never reached."""
         _make_assigned_delivery(db, customer.id, driver.id, 41.310, 69.270, "ORD-G1")
         monkeypatch.setattr(
             "business_app.services.maps_service.MapsService.get_distance_matrix",
             _real_source_matrix,
         )
 
-        def fake_google(**kw):
-            resp = MagicMock()
-            resp.status_code = 200
-            resp.json.return_value = {"routes": [{"duration": "540s", "distanceMeters": 4200}]}
-            resp.text = "ok"
-            return resp
+        def google_is_off_limits(*args, **kw):
+            # pytest.fail is a BaseException, so no `except Exception` on the card's path can swallow it.
+            pytest.fail("the route card called Google Routes")
 
-        monkeypatch.setattr("business_app.utils.google_routes.request_with_retry", fake_google)
+        # Both doors: the HTTP request itself, and the capped client in front of it. A card call that the cap
+        # happened to refuse never reaches the request, yet it would still count against the day's budget.
+        monkeypatch.setattr("business_app.utils.google_routes.request_with_retry", google_is_off_limits)
+        monkeypatch.setattr("business_app.utils.google_routes.get_traffic_aware_leg", google_is_off_limits)
         monkeypatch.setitem(app.config, "GOOGLE_ROUTES_API_KEY", "g-key")
 
         response = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
         assert response.status_code == 200
         top = response.get_json()["data"]["items"][0]
-        assert top["eta_minutes_from_current_location"] == 9
-        assert top["distance_km_to_next"] == 4.2
-        assert top["eta_source"] == "google_traffic"
+        assert top["eta_minutes_from_current_location"] == 7
+        assert top["distance_km_to_next"] == 3.0
+        assert top["eta_source"] == "osrm_selfhosted"
+        assert top["eta_suppressed"] is False
+
+    @pytest.mark.parametrize(
+        "position, location_status",
+        [
+            pytest.param(
+                {
+                    "current_location_lat": 41.300,
+                    "current_location_lng": 69.250,
+                    "last_location_update": datetime.now(UTC) - timedelta(hours=2),
+                },
+                "stale",
+                id="old-position",
+            ),
+            pytest.param({}, "missing", id="never-shared"),
+        ],
+    )
+    def test_without_a_fresh_position_nothing_is_attempted(
+        self, app, client, db, driver, customer, monkeypatch, position, location_status
+    ):
+        """State 1 of the card's next-leg block ("not attempted"), unchanged: a driver with no fresh position gets
+        no minutes, no km, no provenance and no suppression flag, and neither the matrix nor Google is asked."""
+        db.session.add(
+            DeliveryPerson(
+                user_id=driver.id,
+                full_name="Eta Driver",
+                phone="+998900000077",
+                is_active=True,
+                is_available=True,
+                **position,
+            )
+        )
+        db.session.commit()
+        _make_assigned_delivery(db, customer.id, driver.id, 41.310, 69.270, "ORD-N1")
+
+        def nobody_is_asked(*args, **kw):
+            pytest.fail("the card asked for an ETA without a fresh driver position")
+
+        monkeypatch.setattr("business_app.services.maps_service.MapsService.get_distance_matrix", nobody_is_asked)
+        monkeypatch.setattr("business_app.utils.google_routes.request_with_retry", nobody_is_asked)
+        monkeypatch.setitem(app.config, "GOOGLE_ROUTES_API_KEY", "g-key")
+
+        response = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
+        assert response.status_code == 200
+        data = response.get_json()["data"]
+        top = data["items"][0]
+        assert data["location_status"] == location_status
+        assert (
+            top["eta_minutes_from_current_location"],
+            top["distance_km_to_next"],
+            top["eta_source"],
+            top["eta_suppressed"],
+        ) == (None, None, None, False)
 
     def test_falls_back_to_matrix_duration_when_google_unconfigured(
         self, app, client, db, driver, driver_person, customer, monkeypatch
@@ -165,31 +223,6 @@ class TestNextLegEtaTiering:
         top = response.get_json()["data"]["items"][0]
         assert top["eta_minutes_from_current_location"] == 7
         assert top["distance_km_to_next"] == 3.0
-        assert top["eta_source"] == "osrm_selfhosted"
-
-    def test_google_failure_falls_back_to_matrix_duration(
-        self, app, client, db, driver, driver_person, customer, monkeypatch
-    ):
-        _make_assigned_delivery(db, customer.id, driver.id, 41.310, 69.270, "ORD-G3")
-        monkeypatch.setattr(
-            "business_app.services.maps_service.MapsService.get_distance_matrix",
-            _real_source_matrix,
-        )
-
-        def google_500(**kw):
-            resp = MagicMock()
-            resp.status_code = 500
-            resp.json.return_value = {}
-            resp.text = "boom"
-            return resp
-
-        monkeypatch.setattr("business_app.utils.google_routes.request_with_retry", google_500)
-        monkeypatch.setitem(app.config, "GOOGLE_ROUTES_API_KEY", "g-key")
-
-        response = client.get("/api/v1/staff/delivery/active", headers=_auth_headers(app, driver.id))
-        assert response.status_code == 200
-        top = response.get_json()["data"]["items"][0]
-        assert top["eta_minutes_from_current_location"] == 7
         assert top["eta_source"] == "osrm_selfhosted"
 
 

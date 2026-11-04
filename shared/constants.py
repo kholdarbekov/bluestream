@@ -18,6 +18,15 @@ DISPLAY_TIMEZONE_OFFSET = os.environ.get("DISPLAY_TIMEZONE_OFFSET", "+05:00")
 # with this.
 ORDER_DISPLAY_AWAITING_NEW_DATE = "awaiting_new_date"
 
+# The arrival stage a customer is shown (`eta_stage`, honest-ETA spec 2026-11-03 §4.8): "on_the_way" once the
+# driver tapped `in_transit` to this stop (S2), "arrived" once they tapped `arrived` (S3). Decided only by
+# `DeliveryEtaService.customer_eta`; the bot and the website format it and never work it out again.
+ETA_STAGE_ON_THE_WAY = "on_the_way"
+ETA_STAGE_ARRIVED = "arrived"
+# `eta_attribution` when the minutes came from Google's live traffic. Google's terms want "Google Maps" shown next
+# to the time (§4.12a).
+ETA_ATTRIBUTION_GOOGLE = "google_maps"
+
 # ─── Customer bot deep links ────────────────────────────────────────────
 
 # `/start web_<token>`: the one-time link /my-account issues to connect a web-only customer's

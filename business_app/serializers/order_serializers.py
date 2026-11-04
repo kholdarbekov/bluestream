@@ -55,7 +55,6 @@ class OrderDeliverySchema(BaseModel):
     id: int
     tracking_number: str
     status: str
-    estimated_delivery_time: Optional[datetime] = None
     actual_delivery_time: Optional[datetime] = None
     delivery_attempts: int = Field(default=0)
     failed_delivery_reason: Optional[str] = None
@@ -578,15 +577,16 @@ def serialize_reorder_info(candidate: Optional[Order], open_order: Optional[Orde
 
 
 def serialize_order_delivery(delivery) -> Dict[str, Any]:
-    """Serialize delivery information"""
+    """Serialize delivery information for the customer's order reads.
+
+    It does not carry `estimated_delivery_time`: that is the dispatcher's formula, which the customer is no longer
+    shown (honest-ETA spec 2026-11-03 §4.8). The arrival time is Track's `eta_*` fields.
+    """
     try:
         return {
             "id": delivery.id,
             "tracking_number": delivery.tracking_number,
             "status": delivery.status.value if hasattr(delivery.status, "value") else str(delivery.status),
-            "estimated_delivery_time": (
-                delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
-            ),
             "actual_delivery_time": (
                 delivery.actual_delivery_time.isoformat() if delivery.actual_delivery_time else None
             ),

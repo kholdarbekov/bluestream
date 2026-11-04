@@ -1103,36 +1103,20 @@ class OrderService:
 
     def get_order_tracking_for_user(self, order_id: int, user_id: int) -> Dict[str, Any]:
         """Get tracking payload for a user-owned order."""
+        from business_app.services.delivery_eta_service import DeliveryEtaService
         from business_app.services.order_schedule_service import OrderScheduleService
 
         order = self.get_order(order_id, user_id=user_id)
         timeline = self.get_order_timeline(order_id)
 
-        time_remaining = None
-        # F15: a failed tap leaves the attempt's ETA on the row. Nothing is on its
-        # way until staff pick a new date, so there is nothing to count down to.
-        if (
-            order.delivery
-            and order.delivery.estimated_delivery_time
-            and not OrderScheduleService.awaiting_new_date(order)
-        ):
-            estimated_time = order.delivery.estimated_delivery_time
-            if estimated_time.tzinfo is None:
-                estimated_time = estimated_time.replace(tzinfo=timezone.utc)
-            remaining = estimated_time - datetime.now(timezone.utc)
-            if remaining.total_seconds() > 0:
-                total_minutes = int(remaining.total_seconds() // 60)
-                time_remaining = {
-                    "hours": total_minutes // 60,
-                    "minutes": total_minutes % 60,
-                    "total_minutes": total_minutes,
-                }
-
         return {
             "order": order,
             "delivery": order.delivery,
             "timeline": timeline,
-            "estimated_time_remaining": time_remaining,
+            # What the customer is told about the arrival, as finished fields (honest-ETA spec 2026-11-03 §4.8).
+            # `track_order` publishes the five `eta_*` keys as they are. The formula ETA on the delivery row is
+            # never read here, and F15's "nothing while a failed delivery awaits a new date" is `customer_eta`'s.
+            "eta": DeliveryEtaService().customer_eta(order, now=get_utc_now()).as_payload(),
             # F15: what the customer is shown. `track_order` publishes it on its
             # hand-built order dict, so no client works out the wait itself.
             "display_status": OrderScheduleService.customer_display_status(order),

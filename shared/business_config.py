@@ -107,6 +107,33 @@ MAX_SCHEDULE_HORIZON_DAYS = _int("MAX_SCHEDULE_HORIZON_DAYS", 15)
 DEFAULT_DISPATCH_OPEN_TIME = os.environ.get("DEFAULT_DISPATCH_OPEN_TIME") or "09:00"
 SCHEDULED_RELEASE_SWEEP_MINUTES = _int("SCHEDULED_RELEASE_SWEEP_MINUTES", 5)
 
+# ─── Delivery ETA: the Google Routes budget ─────────────────────────────
+# The most Google Routes `computeRoutes` calls one Tashkent day may make (owner rule 2026-11-03: Google serves the
+# customer's "driver is on the way" estimate and nothing else). Google's free allowance is 5,000 calls a month;
+# 150 x 31 days = 4,650 stays inside it, so the bill stays at zero. Once the day's count is over this number,
+# `google_routes.get_traffic_aware_leg` sends no request and returns None: that tap gets no minutes, and the customer
+# sees "On the way" (our own engine's time is still recorded, in the hidden shadow row only). 0 switches Google off.
+# Counted in Redis per Tashkent day (RedisKeyspace.google_routes_calls).
+GOOGLE_ROUTES_DAILY_CAP = _int("GOOGLE_ROUTES_DAILY_CAP", 150)
+
+# ─── Delivery ETA: the "on the way" promise ─────────────────────────────
+# Spec 2026-11-03 §4.8 S2. Read only by DeliveryEtaService. When the driver taps `in_transit` to a stop, the
+# customer is promised "by tap + ETA_OFF_ROAD_MINUTES + headroom x G", G being Google's live-traffic drive time
+# from the driver's position.
+# The leg starts at the driver's live position or at the stop they just finished, whichever is newer, and only if it
+# was at most this old at the tap. An older one is not where the driver is: Google is not asked, and the customer
+# sees "On the way" with no minutes.
+ETA_POSITION_MAX_AGE_SECONDS = _int("ETA_POSITION_MAX_AGE_SECONDS", 600)
+# The minutes off the road at the door end: parking, the walk, the stairs.
+ETA_OFF_ROAD_MINUTES = _int("ETA_OFF_ROAD_MINUTES", 5)
+# Headroom, the factor on G. The seed stands until ETA_HEADROOM_MIN_LEGS legs are recorded. From then on it is
+# learned from the last four weeks of legs: the 90th percentile of (actual drive - off-road minutes) / G, blended
+# with the seed as if the seed were ETA_HEADROOM_PRIOR_LEGS more legs, so a few odd days cannot swing it. Never
+# below 1.0.
+ETA_HEADROOM_SEED = _float("ETA_HEADROOM_SEED", 1.3)
+ETA_HEADROOM_MIN_LEGS = _int("ETA_HEADROOM_MIN_LEGS", 30)
+ETA_HEADROOM_PRIOR_LEGS = _int("ETA_HEADROOM_PRIOR_LEGS", 20)
+
 # ─── Loyalty ────────────────────────────────────────────────────────────
 # Earning rate / bonus amounts / tier thresholds / expiry are all DB-driven
 # (LoyaltyProgram + LoyaltyTierConfig). LOYALTY_POINTS_RATIO is only the

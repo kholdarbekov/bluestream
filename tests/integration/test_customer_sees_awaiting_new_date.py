@@ -7,7 +7,7 @@ A failure never changes the order's status (F1). So every customer read publishe
 label it. While the order waits:
 - the timeline's current step is the wait, dated as the operator's failed list dates it
   (spec §3.5): the latest FAILED history row, else the delivery's last update;
-- the countdown to the failed attempt's ETA goes.
+- no arrival time is published: Track's `eta_*` fields are all None.
 
 None of it is stored, so a reschedule takes all of it away.
 
@@ -240,8 +240,8 @@ def test_the_customer_sees_the_wait_until_staff_pick_a_new_date(
     for published in (listed, detail["order"], track["order"]):
         assert "error" not in published, f"the degraded fallback answered: {published}"
         assert (published["status"], published["display_status"]) == ("out_for_delivery", AWAITING)
-    # The ETA was stamped for the attempt that failed, and nothing is on its way now.
-    assert track["estimated_time_remaining"] is None
+    # The formula ETA was stamped for the attempt that failed, and nothing is on its way now.
+    assert track["eta_stage"] is None
     # One current step, the wait. It is stamped with the second failure, not the first and
     # not the row's later last update, and it is the whole entry: no `reason`, no staff text.
     for timeline in (detail["timeline"], track["timeline"]):
@@ -304,21 +304,22 @@ def test_the_wait_is_the_current_step_only_while_the_order_awaits_a_new_date(
 
 
 @pytest.mark.parametrize(
-    "shape, counts_down",
-    [(FAILED_BEFORE_PICKUP, False), (ACCEPTED_BY_A_DRIVER, True)],
+    "shape",
+    [FAILED_BEFORE_PICKUP, ACCEPTED_BY_A_DRIVER],
     ids=["awaiting-a-new-date", "accepted-by-a-driver"],
 )
-def test_only_the_wait_hides_the_countdown(
-    client, db, auth_headers, sample_user, user_address, delivery_driver, shape, counts_down
+def test_no_order_shows_a_time_before_the_driver_sets_off(
+    client, db, auth_headers, sample_user, user_address, delivery_driver, shape
 ):
-    """Both deliveries carry the same ETA, two hours out. A failed tap leaves it on the row,
-    so the Track screen would count down to an attempt that has already ended."""
+    """Both deliveries carry the same formula ETA, two hours out, and neither driver has set off. A failed tap
+    leaves it on the row, and an accepted delivery has no promise yet, so Track shows no time for either."""
     now = datetime.now(timezone.utc).replace(microsecond=0)
     order_id = _seed(db, sample_user, user_address, delivery_driver, shape, now)
 
-    remaining = _get(client, TRACK_URL.format(order_id=order_id), auth_headers)["estimated_time_remaining"]
+    track = _get(client, TRACK_URL.format(order_id=order_id), auth_headers)
 
-    assert (remaining is not None) is counts_down, remaining
+    for key in ("eta_stage", "eta_by", "eta_by_time", "eta_minutes_left", "eta_attribution"):
+        assert track[key] is None, key
 
 
 @pytest.mark.parametrize(

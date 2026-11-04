@@ -152,9 +152,9 @@ AWAITING_NEW_DATE_ORDER = _order(
 def _track_awaiting() -> dict:
     """What `GET /api/v1/orders/<id>/track` returns while the order awaits a new date.
 
-    The order keeps its status and publishes `display_status`. There is no ETA, and the
-    timeline's one current entry is the synthetic awaiting step, stamped with the
-    failure time (spec §4.2).
+    The order keeps its status and publishes `display_status`. There is no ETA (the five
+    `eta_*` keys are published empty), and the timeline's one current entry is the
+    synthetic awaiting step, stamped with the failure time (spec §4.2).
     """
     return {
         "data": {
@@ -178,7 +178,11 @@ def _track_awaiting() -> dict:
                     "is_current": True,
                 },
             ],
-            "estimated_time_remaining": None,
+            "eta_stage": None,
+            "eta_by": None,
+            "eta_by_time": None,
+            "eta_minutes_left": None,
+            "eta_attribution": None,
             "payment_timeline": [],
         }
     }
@@ -467,7 +471,10 @@ class TestTheAwaitingLabel:
         assert any(
             line.startswith("✅") and _copy(CONFIRMED_LABEL_KEY, language) in line for line in lines
         ), "the steps already passed stay listed"
-        assert not any("⏰" in line for line in lines), "no ETA while the order waits for a new date"
+        # The title carries the screen's only 📍. An arrival line would add a 🚚 (on the way) or a second 📍 (arrived),
+        # and the countdown was a ⏰.
+        assert sum("📍" in line for line in lines) == 1, "no arrival line while the order waits for a new date"
+        assert not any("🚚" in line or "⏰" in line for line in lines), "no ETA while the order waits for a new date"
 
 
 class TestTheNewCopyIsRealCopy:

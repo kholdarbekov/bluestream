@@ -5,7 +5,8 @@ The customer's Pay and Cancel are the published `customer_actions` (§4.2, §5.1
 no client reads them. The admin Orders drawer still opens the stored link only while it is payable
 (`payable_payment_link`, B3), so the admin payloads keep it. The routes nothing calls any more are gone:
 `POST /payments/create` (Pay is `retry-payment`), the activity log, and the per-item subscription writes (the
-website and the bot save the whole list with `PUT /subscriptions/<id>/items`).
+website and the bot save the whole list with `PUT /subscriptions/<id>/items`). The Track countdown
+(`estimated_time_remaining`) went the same way with the honest-ETA Phase 1: the bot says the published `eta_*` fields.
 """
 
 import re
@@ -20,7 +21,15 @@ from business_app.models.payment import Payment
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
 ROOT = Path(__file__).resolve().parents[2]
-RETIRED = ("can_customer_cancel", "customer_cancel_via", "is_payable", "payable_payment_link")
+# `estimated_time_remaining` went with honest-ETA Phase 1 (spec 2026-11-03 §4.8): Track publishes the five `eta_*`
+# keys instead, and no client counts down to the formula ETA any more.
+RETIRED = (
+    "can_customer_cancel",
+    "customer_cancel_via",
+    "is_payable",
+    "payable_payment_link",
+    "estimated_time_remaining",
+)
 CLIENTS = ["telegram_bot/**/*.py", "business_app/static/js/**/*.js", "business_app/templates/frontend/**/*.html"]
 CLICK_LINK = "https://my.click.uz/services/pay?id=1&t=RETIRED"
 

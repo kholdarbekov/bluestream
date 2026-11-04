@@ -15,6 +15,7 @@ from business_app.models import corporate  # noqa: F401, E402
 from business_app.models import order  # noqa: F401, E402
 from business_app.models import order_sequence  # noqa: F401, E402
 from business_app.models import delivery  # noqa: F401, E402
+from business_app.models import delivery_promise  # noqa: F401, E402
 from business_app.models import payment  # noqa: F401, E402
 from business_app.models import subscription  # noqa: F401, E402
 from business_app.models import review  # noqa: F401, E402

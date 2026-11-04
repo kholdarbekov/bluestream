@@ -133,6 +133,11 @@ _AVG_CITY_SPEED_KMH = 25.0  # Tashkent baseline for Haversine fallback
 # hours rather than a day (task-4 review fix 4).
 _TRAFFIC_AWARE_SOURCES = frozenset({"yandex_matrix", "yandex_pairwise"})
 
+# The source label of the last-resort straight-line (Haversine) tier: a guess from the crow-flies distance, never a
+# measured drive time. Callers compare against this one constant: the route card suppresses its ETA, the route
+# summary flags a fallback, and the "on the way" shadow row records no time.
+STRAIGHT_LINE_SOURCE = "haversine"
+
 _ZERO_CELL = {"distance_km": 0.0, "duration_minutes": 0.0}
 
 # Shared "is this result honestly real-road data" guard (final review round,
@@ -722,8 +727,8 @@ def get_distance_matrix(
 
     Returns:
         (matrix, source) where source ∈ {"cache", "osrm_selfhosted",
-        "yandex_matrix", "yandex_pairwise", "osrm_table", "haversine",
-        "empty", "trivial"}.
+        "yandex_matrix", "yandex_pairwise", "osrm_table", "haversine"
+        (STRAIGHT_LINE_SOURCE), "empty", "trivial"}.
     """
     if not points:
         return {}, "empty"
@@ -785,7 +790,7 @@ def get_distance_matrix(
     demo_enabled = bool(current_app.config.get("OSRM_PUBLIC_FALLBACK_ENABLED", False))
 
     matrix: Optional[Matrix] = None
-    source = "haversine"
+    source = STRAIGHT_LINE_SOURCE
     # Populated when an OSRM tier wins, so the fall-through log below can
     # report how many cells were real vs per-cell Haversine backfill even on
     # a result that cleared the `_MIN_REAL_CELL_RATIO` guard (final review
@@ -920,9 +925,9 @@ def get_distance_matrix(
             len(points),
         )
         matrix = _haversine_matrix(points)
-        source = "haversine"
+        source = STRAIGHT_LINE_SOURCE
 
-    if source != "haversine":
+    if source != STRAIGHT_LINE_SOURCE:
         # Never cache the Haversine fallback — retry real providers next time.
         _store_split_cache(points, traffic, matrix, source)
 

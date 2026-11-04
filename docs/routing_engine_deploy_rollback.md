@@ -1,8 +1,18 @@
 # Routing Engine (Phase 2) — Deploy & Rollback Runbook
 
-Scope: self-hosted OSRM primary matrix provider, cache split, Google
-next-leg ETA, warehouse anchor. Spec:
+Scope: self-hosted OSRM primary matrix provider, cache split, warehouse
+anchor and (superseded, see the correction below) a Google next-leg ETA.
+Spec:
 `docs/superpowers/specs/2026-08-11-driver-route-optimization-ux-design.md` §8.
+
+**Correction (2026-11-03): Google is no longer a route-card tier.** This
+release first shipped Google Routes as the driver route card's next-leg ETA.
+It no longer is: the route card reads our own engine (the OSRM distance
+matrix) only and never calls Google. Google Routes `TRAFFIC_AWARE` is called
+only when a driver taps "on the way", to work out the customer's arrival time,
+and every call passes a daily cap (`GOOGLE_ROUTES_DAILY_CAP`, default 150 per
+Tashkent day). The Google lines in §4, §6 and §7 (lever 3) are corrected to
+match.
 
 This release also carries Plan 1 (staff bot push-notification fixes). The
 two are staged together and deploy together — §4 below gives the combined,
@@ -138,7 +148,9 @@ MATRIX_LIVE_ORIGIN_TTL_SECONDS=120
 ROUTE_SERVICE_TIME_MINUTES=4
 WAREHOUSE_LATITUDE=<real warehouse lat>
 WAREHOUSE_LONGITUDE=<real warehouse lng>
-# Optional (traffic-aware next-leg ETA). Leave unset to skip the tier:
+# Optional (the customer's "on the way" arrival time only; never the route
+# card). Leave unset and customers see "On the way" with no minutes. Every
+# call passes the daily cap GOOGLE_ROUTES_DAILY_CAP (default 150):
 GOOGLE_ROUTES_API_KEY=<key entitled to Routes API>
 ```
 
@@ -283,6 +295,16 @@ Also useful (throttled, ≤1/300s per process — don't expect a line per call):
   (silent, not logged at all, if `GOOGLE_ROUTES_API_KEY` is simply unset —
   that's a deliberate skip, not a failure).
 
+Two more Google lines are NOT throttled (one line per call). All the Google
+lines come from `celery_worker` only, on a driver's "on the way" tap: the
+route card never calls Google.
+- **`google_routes_daily_cap_reached`** — the daily cap
+  (`GOOGLE_ROUTES_DAILY_CAP`) refused a call. Logged on EVERY refused call, so
+  expect one per tap once the day's cap is spent, or with the cap set to 0.
+  Not a failure.
+- **`google_routes_cap_unavailable`** — the cap's Redis counter failed; the
+  call went through uncapped (the cap fails open).
+
 **Failure signal — must stay rare:** any `source=haversine` means every
 real provider failed for that call (self-hosted OSRM down AND the public
 demo flag is off) — straight-line distance is used, sequencing/ETA degrade.
@@ -296,7 +318,7 @@ lever 2).
 
 ## 7. Rollback levers (fastest first — no code revert, no migration)
 
-All levers are `.env` edits followed by:
+All levers but lever 3 are `.env` edits followed by:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.production.yml \
   up -d --force-recreate business_app celery_worker
@@ -311,7 +333,7 @@ reason `scripts/deploy.sh` restarts nginx unconditionally after every
 `up -d`, build or no-build — see its own header comment). Skip this and
 every request 502s until nginx is separately recreated — i.e. reaching for
 a rollback during an incident would produce a second, worse outage. This
-applies to every lever below that recreates `business_app` (all of them).
+applies to every lever below that recreates `business_app` (all but lever 3).
 
 1. **OSRM misbehaving (bad ETAs, crashes, OOM):** set `OSRM_BASE_URL=`
    (empty disables the tier) and `OSRM_PUBLIC_FALLBACK_ENABLED=true`. This
@@ -347,8 +369,15 @@ applies to every lever below that recreates `business_app` (all of them).
    ungated from 2026-05-05 to 2026-08-13 and billed us. Below self-hosted
    OSRM the real ladder is now: Yandex (flag) → public demo (flag) →
    Haversine.
-3. **Google ETA misbehaving:** unset `GOOGLE_ROUTES_API_KEY` — the tier
-   skips silently; matrix durations take over.
+3. **Google ETA misbehaving:** unset `GOOGLE_ROUTES_API_KEY` — no Google call
+   is made and customers see "On the way" with no minutes (Google serves only
+   the customer's "on the way" step, behind the daily cap). The driver's route
+   card is not affected: it uses our own engine only. Unlike the other levers,
+   this one needs only `up -d --no-deps --force-recreate celery_worker` (with
+   the same two `-f` compose files as above): `celery_worker` is the only
+   process that calls Google, so no `business_app` recreate and no nginx
+   restart. Deliveries already on the way keep the time they were promised;
+   only new taps are affected.
 4. **Do NOT touch the `osrm` service's `command:` in `docker-compose.yml`
    as a rollback edit** — in particular, never drop `--max-table-size 1000`
    to "revert to the default." Because `--mmap` is a boost implicit-value

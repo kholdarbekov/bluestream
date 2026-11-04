@@ -26,7 +26,7 @@ from sqlalchemy import func
 from business_app import db
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryStatusHistory
 from business_app.services.maps_service import MapsService
-from business_app.utils import google_routes
+from business_app.utils.distance_matrix import STRAIGHT_LINE_SOURCE
 from business_app.utils.exceptions import ExternalServiceError
 from shared.constants import DISPLAY_TIMEZONE
 from shared.enums import DeliveryStatus
@@ -311,10 +311,11 @@ class RouteOptimizationService:
         # the driver actually is: `start_location_*` stays the driver's own
         # position (never the committed stop's), and the persisted totals are
         # the tail metrics PLUS the driver -> committed-stop leg, priced with
-        # its own small 2-point matrix call below (mirrors
-        # `annotate_active_items`'s next-leg ETA) rather than folded into the
-        # tail matrix — folding it in would put the moving driver point back
-        # into the tail's cache key and defeat the anchor's whole point.
+        # its own small 2-point matrix call below (the matrix-only call
+        # `annotate_active_items` makes for its next-leg ETA; neither asks
+        # Google) rather than folded into the tail matrix — folding it in
+        # would put the moving driver point back into the tail's cache key
+        # and defeat the anchor's whole point.
         committed, committed_point, is_anchored = self._resolve_anchor(driver_id, deliveries)
         driver_point, driver_source = self._resolve_start_point(driver_id, deliveries)
         if is_anchored:
@@ -405,10 +406,10 @@ class RouteOptimizationService:
             # (that's the anchor's whole point — see the comment above), so
             # the persisted total is missing the leg the driver is actually
             # driving right now. Price it with one small, separate 2-point
-            # call — same pattern `annotate_active_items` uses for the
-            # next-leg ETA — and degrade to tail-only metrics if it fails
-            # rather than raise: a missing leg cost is better than a broken
-            # route.
+            # call — the same matrix-only pattern `annotate_active_items`
+            # uses for the next-leg ETA, never Google — and degrade to
+            # tail-only metrics if it fails rather than raise: a missing leg
+            # cost is better than a broken route.
             try:
                 leg_matrix, _leg_source = self.maps.get_distance_matrix(
                     [driver_point, committed_point], traffic=traffic
@@ -451,7 +452,7 @@ class RouteOptimizationService:
                 "start_source": start_source,
                 "trigger": trigger,
                 "traffic": traffic,
-                "fallback": source == "haversine",
+                "fallback": source == STRAIGHT_LINE_SOURCE,
                 "committed_delivery_id": committed.id if committed is not None else None,
                 "materiality": materiality,
                 "last_driver_location": last_driver_location,
@@ -1363,6 +1364,12 @@ class RouteOptimizationService:
         Mutates and returns the same list (item shape from the existing
         /delivery/active builder — must contain `delivery_id`,
         `destination_latitude`, `destination_longitude`).
+
+        The first item also carries the next-leg ETA, read from the distance
+        matrix ONLY. This never calls Google Routes (owner rule 2026-11-03):
+        it runs on every driver location update and Google is paid. Google
+        serves the customer's "on the way" estimate alone, under a daily cap
+        (`google_routes.get_traffic_aware_leg`).
         """
         # TODAY's route only (§10 fix): the unfiltered newest-row read could
         # render yesterday's sequence as today's plan. current_route is the
@@ -1395,46 +1402,38 @@ class RouteOptimizationService:
             if dest_lat is not None and dest_lng is not None and self._location_status(int(driver_id)) == "fresh":
                 try:
                     start_point, _ = self._resolve_start_point(int(driver_id), [])
-                    # Tier 1: Google Routes TRAFFIC_AWARE — the single
-                    # traffic-aware number in the product (spec 8.2).
-                    # Silent None on any failure or when unconfigured.
-                    leg = google_routes.get_traffic_aware_leg(start_point, (dest_lat, dest_lng))
-                    if leg is not None:
-                        top["eta_minutes_from_current_location"] = round(leg["duration_minutes"])
-                        top["distance_km_to_next"] = round(leg["distance_km"], 1)
-                        top["eta_source"] = "google_traffic"
+                    # The distance matrix ONLY, never Google Routes (owner
+                    # rule 2026-11-03): this block runs on every driver
+                    # location update and Google is paid. Google's one job is
+                    # the customer's "on the way" estimate
+                    # (`google_routes.get_traffic_aware_leg`, daily-capped).
+                    matrix, source = self.maps.get_distance_matrix([start_point, (dest_lat, dest_lng)], traffic=True)
+                    if source == STRAIGHT_LINE_SOURCE:
+                        # Honest-ETA rule (spec 8.4): a straight-line
+                        # estimate must never render as a measured ETA.
+                        # The decision is DECIDED HERE and published as a
+                        # field; values stay None so no client can show
+                        # them. The bot reads `eta_suppressed`, it never
+                        # re-derives the rule (SSOT).
+                        top["eta_suppressed"] = True
                     else:
-                        matrix, source = self.maps.get_distance_matrix(
-                            [start_point, (dest_lat, dest_lng)], traffic=True
-                        )
-                        if source == "haversine":
-                            # Honest-ETA rule (spec 8.4): a straight-line
-                            # estimate must never render as a measured ETA.
-                            # The decision is DECIDED HERE and published as a
-                            # field; values stay None so no client can show
-                            # them. The bot reads `eta_suppressed`, it never
-                            # re-derives the rule (SSOT).
-                            top["eta_suppressed"] = True
+                        top["eta_minutes_from_current_location"] = round(matrix[(0, 1)]["duration_minutes"])
+                        top["distance_km_to_next"] = round(matrix[(0, 1)]["distance_km"], 1)
+                        # `eta_source` is a PROVENANCE field (final
+                        # review round, I3) — "cache" is a tier label,
+                        # not a provider, so it must never leak through
+                        # here. Recover the provider that actually
+                        # produced the cached data; if that isn't
+                        # possible (entry predates this fix, or expired
+                        # between the two lookups), say so explicitly
+                        # rather than publish the tier name.
+                        if source == "cache":
+                            top["eta_source"] = (
+                                self.maps.get_cached_matrix_source([start_point, (dest_lat, dest_lng)], traffic=True)
+                                or "cache_unknown_provider"
+                            )
                         else:
-                            top["eta_minutes_from_current_location"] = round(matrix[(0, 1)]["duration_minutes"])
-                            top["distance_km_to_next"] = round(matrix[(0, 1)]["distance_km"], 1)
-                            # `eta_source` is a PROVENANCE field (final
-                            # review round, I3) — "cache" is a tier label,
-                            # not a provider, so it must never leak through
-                            # here. Recover the provider that actually
-                            # produced the cached data; if that isn't
-                            # possible (entry predates this fix, or expired
-                            # between the two lookups), say so explicitly
-                            # rather than publish the tier name.
-                            if source == "cache":
-                                top["eta_source"] = (
-                                    self.maps.get_cached_matrix_source(
-                                        [start_point, (dest_lat, dest_lng)], traffic=True
-                                    )
-                                    or "cache_unknown_provider"
-                                )
-                            else:
-                                top["eta_source"] = source
+                            top["eta_source"] = source
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("next-leg ETA failed driver=%s: %s", driver_id, exc)
                     # Distinguish "computed then errored" from "nothing

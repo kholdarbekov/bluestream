@@ -51,11 +51,14 @@ from shared.enums import (
     DeliveryStatus,
     UserRole,
 )
-from business_app.utils.translations import get_translation
+from business_app.utils.translations import get_translation, renderer
 from business_app.utils.helpers import scrub_bot_token
+from business_app.utils.timezone_utils import get_utc_now
+from shared import eta_copy
 from shared.validators import is_deliverable_email
 from business_app.services.customer_link_service import CustomerLinkService
 from business_app.services.customer_links import tracking_url
+from business_app.services.delivery_eta_service import DeliveryEtaService
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.bottle_tracking_service import (
     BottleTrackingService,
@@ -470,9 +473,13 @@ class NotificationService:
         reorder reminder's List-Unsubscribe / List-Unsubscribe-Post). No other type uses them.
 
         `language` is the language a caller already resolved for this send; None reads the user's
-        stored `preferred_language`, as before. The reorder reminder passes THE reminder language
-        (`shared.i18n_rendering.reminder_language`), so its template and subject are in the
-        language its pre-rendered copy is written in, never the email service's own default.
+        stored `preferred_language`, as before. Either is read as its base code
+        (`_normalize_language_code`), the code the delivery-status label and arrival lines are
+        rendered in, so a stored "ru-RU" gets the Russian template on every channel, never the
+        Uzbek default a template falls back to for a code it does not know. The reorder reminder
+        passes THE reminder language (`shared.i18n_rendering.reminder_language`), so its template
+        and subject are in the language its pre-rendered copy is written in, never the email
+        service's own default.
 
         Args:
             user_id: User ID
@@ -492,8 +499,10 @@ class NotificationService:
         if channels is None:
             channels = self._get_user_preferred_channels(user_id, notification_type)
 
-        # The caller's resolved language, else the user's language preference
-        user_language = language or getattr(user, "preferred_language", "en")
+        # The caller's resolved language, else the user's language preference, as its base code ("ru-RU" is ru): the
+        # code the callers render their own copy in (the status label, the arrival lines), so every channel's template
+        # around that copy is looked up in the same language. One language per message.
+        user_language = self._normalize_language_code(language or getattr(user, "preferred_language", "en"))
 
         template_data = template_data or {}
         results = {}
@@ -634,7 +643,12 @@ class NotificationService:
         return self.send_notification(delivery.order.user_id, NotificationType.DELIVERY_UPDATE, None, template_data)
 
     def send_delivery_status_change_notification(self, history_id: int) -> Dict[str, Any]:
-        """Send delivery-status notification from a committed history event snapshot."""
+        """Send delivery-status notification from a committed history event snapshot.
+
+        For the driver's in-transit tap it also records the arrival promise (`DeliveryEtaService.record_on_the_way`),
+        and that COMMITS the session. Call it only from the notification worker (`send_delivery_update_task`), never
+        with uncommitted work in the session.
+        """
         history = DeliveryStatusHistory.query.get(history_id)
         if not history:
             logger.warning("Delivery status history %s not found; skipping notification", history_id)
@@ -684,6 +698,18 @@ class NotificationService:
         # three DELIVERED code paths (design §2/§3.2).
         if history_status == DeliveryStatus.DELIVERED.value:
             return self._dispatch_bottle_delivery_summary(history, delivery, order, user)
+
+        # The driver's "on the way" tap: record the arrival promise first, so the message can say it (honest-ETA spec
+        # 2026-11-03 §4.8 S2). Only while the delivery is still in transit: a run that comes after the driver moved
+        # on spends no Google call on a leg that has ended. Only reads came before, so its commit carries nothing
+        # else. Best-effort: when it fails, the session is rolled back for the reads below, and the message goes out
+        # without a time.
+        if history_status == live_status == DeliveryStatus.IN_TRANSIT.value:
+            try:
+                DeliveryEtaService().record_on_the_way(history.id)
+            except Exception:
+                logger.warning("Arrival promise not recorded for history %s", history_id, exc_info=True)
+                db.session.rollback()
 
         language = getattr(user, "preferred_language", "en") or "en"
         template_data = self._build_delivery_status_template_data(
@@ -3432,9 +3458,8 @@ class NotificationService:
             "order_number": delivery.order.order_number if delivery.order else "",
             "delivery_status": self._get_localized_delivery_status_label(status_value, language),
             "delivery_status_code": status_value,
-            "estimated_delivery": (
-                delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
-            ),
+            # The arrival lines, finished. The formula ETA on the delivery row is not put in this message.
+            "eta_line": self._delivery_eta_line(delivery, status_value, language),
             "event_type": status_value,
             "delivery_id": delivery.id,
             "order_id": delivery.order.id if delivery.order else None,
@@ -3445,6 +3470,37 @@ class NotificationService:
             "company_phone": self.company_phone,
             "company_email": self.company_email,
         }
+
+    def _delivery_eta_line(self, delivery: Delivery, status_value: str, language: str) -> str:
+        """The arrival lines of an in-transit message, joined (honest-ETA spec 2026-11-03 §4.8): what `shared.eta_copy`
+        says for `DeliveryEtaService.customer_eta`, in the language of the status label beside them (the same
+        `_normalize_language_code`, so a stored "ru-RU" reads Russian). "" for any other status, when nothing is
+        promised, and when the copy cannot be rendered (the backend `renderer` says why, as "Arrival" copy). The
+        Telegram send appends it to whatever template rendered the message (`_telegram_arrival_lines`), and the
+        delivery-update email prints it too (`eta_line`).
+
+        Best-effort, like recording the promise: when reading the promise or rendering it fails, a warning says so,
+        the session is rolled back for the send path's reads after it, and the message goes out without a time.
+        """
+        if status_value != DeliveryStatus.IN_TRANSIT.value:
+            return ""
+        delivery_id = delivery.id
+        try:
+            order = delivery.order
+            if order is None:
+                return ""
+            eta = DeliveryEtaService().customer_eta(order, now=get_utc_now())
+            lines = eta_copy.promised_time_lines(
+                renderer(self._normalize_language_code(language), copy_name="Arrival"),
+                minutes_left=eta.minutes_left,
+                by_time=eta.by_time,
+                attribution=eta.attribution,
+            )
+        except Exception:
+            logger.warning("Arrival line not built for delivery %s", delivery_id, exc_info=True)
+            db.session.rollback()
+            return ""
+        return "\n".join(lines)
 
     def _is_payment_order_delivered(self, payment: Payment) -> bool:
         """Return True when payment is attached to an order already marked as delivered."""
@@ -4175,8 +4231,20 @@ class NotificationService:
         )
 
         # Render template
+        is_delivery_update = notification_type_value == NotificationType.DELIVERY_UPDATE.value
+        arrival_lines = ""
+        if is_delivery_update and (template_data or {}).get("eta_line"):
+            # The arrival lines as this message carries them (`_telegram_arrival_lines`), wherever they land: a
+            # template that prints `{eta_line}` places them itself.
+            arrival_lines = self._telegram_arrival_lines(template_data["eta_line"])
+            template_data = {**template_data, "eta_line": arrival_lines}
         content = self._render_template(template_content, template_data, language)
-        if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
+        if is_delivery_update:
+            # The arrival lines end the message whichever template rendered it: the bundled default, or a
+            # `notification_templates` row whose copy predates them. Before the sanitiser, which keeps them all: none
+            # names the driver.
+            if arrival_lines and arrival_lines not in content:
+                content = f"{content}\n{arrival_lines}"
             content = self._strip_driver_info_from_delivery_message(content)
 
         skip = self._guard_unrendered_placeholders(
@@ -4226,32 +4294,47 @@ class NotificationService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def _strip_driver_info_from_delivery_message(content: str) -> str:
-        """Remove any driver-identifying lines from delivery Telegram messages."""
+    def _names_the_driver(line: str) -> bool:
+        """Whether one line of a delivery Telegram message identifies the driver, so the message must not carry it: a
+        driver placeholder, the word for driver in en, uz or ru, or a phone line. Tags are ignored. The one rule of
+        `_strip_driver_info_from_delivery_message` and `_telegram_arrival_lines`."""
+        normalized_line = re.sub(r"<[^>]+>", "", line.strip()).lower()
+        return (
+            "{driver_name}" in normalized_line
+            or "{driver_phone}" in normalized_line
+            or any(token in normalized_line for token in ("driver", "haydovchi", "водитель"))
+            or normalized_line.startswith("📞")
+            or re.match(r"^(phone|telefon|телефон)\s*[:\-]", normalized_line) is not None
+        )
+
+    @classmethod
+    def _strip_driver_info_from_delivery_message(cls, content: str) -> str:
+        """Remove any driver-identifying lines (`_names_the_driver`) from delivery Telegram messages."""
         if not content:
             return content
 
-        cleaned_lines: List[str] = []
-        for line in content.splitlines():
-            stripped_line = line.strip()
-            normalized_line = re.sub(r"<[^>]+>", "", stripped_line).lower()
-            remove_line = False
-
-            if "{driver_name}" in normalized_line or "{driver_phone}" in normalized_line:
-                remove_line = True
-            elif any(token in normalized_line for token in ("driver", "haydovchi", "водитель")):
-                remove_line = True
-            elif normalized_line.startswith("📞"):
-                remove_line = True
-            elif re.match(r"^(phone|telefon|телефон)\s*[:\-]", normalized_line):
-                remove_line = True
-
-            if not remove_line:
-                cleaned_lines.append(line)
+        cleaned_lines: List[str] = [line for line in content.splitlines() if not cls._names_the_driver(line)]
 
         cleaned_content = "\n".join(cleaned_lines)
         cleaned_content = re.sub(r"\n{3,}", "\n\n", cleaned_content).strip()
         return cleaned_content
+
+    @classmethod
+    def _telegram_arrival_lines(cls, eta_line: str) -> str:
+        """`eta_line` as the in-transit Telegram message carries it: HTML-escaped, all or nothing.
+
+        Escaped, because the message is sent with parse_mode=HTML and the lines are admin-editable copy: an "<" in one
+        would make Telegram refuse the whole message, and an "&" would be read as markup. Only here: the email
+        autoescapes `eta_line` itself, so the template data keeps it as the copy says it.
+
+        All or nothing, as `shared.eta_copy` says them: the driver-info sanitiser drops a line that names the driver
+        (`_names_the_driver`), so when it would drop any one of them, "" is returned and none is said. Judged on the
+        escaped lines, which are what the sanitiser reads.
+        """
+        lines = [html.escape(line, quote=False) for line in eta_line.splitlines()]
+        if any(cls._names_the_driver(line) for line in lines):
+            return ""
+        return "\n".join(lines)
 
     def _send_push_notification(
         self,

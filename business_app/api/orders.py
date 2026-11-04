@@ -937,7 +937,9 @@ def track_order(order_id):
                 },
                 "delivery": delivery_info,
                 "timeline": tracking["timeline"],
-                "estimated_time_remaining": tracking["estimated_time_remaining"],
+                # The arrival fields, finished by the service (honest-ETA spec 2026-11-03 §4.8): eta_stage, eta_by,
+                # eta_by_time, eta_minutes_left and eta_attribution. The clients only format them.
+                **tracking["eta"],
                 "payment_timeline": cash_collection_service.get_order_payment_timeline(
                     order.id, viewer_user_id=int(current_user_id)
                 ),

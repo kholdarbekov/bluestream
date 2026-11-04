@@ -330,7 +330,11 @@ class TestOrderHandlerDeepFlows:
                 "order": {"status": "pending", "order_number": "ORD-8"},
                 "delivery": {},
                 "timeline": [],
-                "estimated_time_remaining": {},
+                "eta_stage": None,
+                "eta_by": None,
+                "eta_by_time": None,
+                "eta_minutes_left": None,
+                "eta_attribution": None,
             }
         }
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
@@ -366,7 +370,11 @@ class TestOrderHandlerDeepFlows:
                         "notes": "",
                     }
                 ],
-                "estimated_time_remaining": {"total_minutes": 25, "hours": 0},
+                "eta_stage": "on_the_way",
+                "eta_by": "2026-03-05T15:25:00+05:00",
+                "eta_by_time": "15:25",
+                "eta_minutes_left": 25,
+                "eta_attribution": "google_maps",
             }
         }
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))

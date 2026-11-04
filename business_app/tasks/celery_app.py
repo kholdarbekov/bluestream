@@ -141,13 +141,8 @@ def make_celery(app=None):
             "task": "business_app.tasks.loyalty_tasks.process_daily_surprise_rewards",
             "schedule": crontab(hour=0, minute=20),
         },
-        # Send delivery reminders every 30 minutes
-        "delivery-reminders": {
-            "task": "business_app.tasks.delivery_tasks.send_delivery_reminders",
-            "schedule": crontab(minute="*/30"),
-        },
         # Alert admins on ETA-overdue in-flight deliveries (>12 hours late)
-        # every ~12 hours, offset from delivery-reminders.
+        # every ~12 hours.
         "monitor-delivery-delays": {
             "task": "business_app.tasks.delivery_tasks.monitor_delivery_delays",
             "schedule": crontab(hour="*/12", minute=0),

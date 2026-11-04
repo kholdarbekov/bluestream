@@ -24,7 +24,10 @@ from utils import (
     user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request,
     ORDER_STATUS_LABEL_KEYS,
 )
-from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
+from shared import eta_copy
+from shared.constants import (
+    ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE, ETA_STAGE_ARRIVED, ETA_STAGE_ON_THE_WAY,
+)
 from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
 from handlers.products import cart_is_empty, min_order_shortfall, product_handlers
@@ -42,6 +45,10 @@ ORDERS_PAGE_SIZE = 10
 # The page My orders last showed, for an order's Back button. The Application has no
 # persistence, so after a deploy Back opens page 1.
 _ORDERS_PAGE_KEY = 'orders_page'
+
+# The marker the Track screen puts before the first arrival line, by the `eta_stage` the backend publishes. It is all
+# the bot adds to `shared.eta_copy.track_lines`, which says the lines (honest-ETA spec 2026-11-03 §4.8).
+_ETA_STAGE_ICONS = {ETA_STAGE_ON_THE_WAY: '🚚', ETA_STAGE_ARRIVED: '📍'}
 
 
 def _orders_page_to_show(query_data, user_data) -> int:
@@ -906,7 +913,6 @@ class OrderHandlers(BaseHandler):
                 order = tracking_data.get('order', {})
                 delivery = tracking_data.get('delivery', {})
                 timeline = tracking_data.get('timeline', [])
-                time_remaining = tracking_data.get('estimated_time_remaining', {})
 
             status_icons = ORDER_STATUS_ICONS
 
@@ -967,14 +973,21 @@ class OrderHandlers(BaseHandler):
 
             tracking_text += "\n"
 
-            # Add estimated time remaining
-            if time_remaining and time_remaining.get('total_minutes'):
-                mins = time_remaining.get('total_minutes', 0)
-                hours = time_remaining.get('hours', 0)
-                if hours > 0:
-                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {hours}h {mins % 60}m\n"
-                else:
-                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {mins}m\n"
+            # What the customer is told about the arrival: the `eta_*` fields the backend published, said by
+            # `eta_copy.track_lines`. The bot adds only the stage's marker, before the first line.
+            eta_stage = tracking_data.get('eta_stage')
+            eta_lines = eta_copy.track_lines(
+                i18n.renderer(language),
+                stage=eta_stage,
+                minutes_left=tracking_data.get('eta_minutes_left'),
+                by_time=tracking_data.get('eta_by_time'),
+                attribution=tracking_data.get('eta_attribution'),
+            )
+            if eta_lines:
+                # A stage `track_lines` speaks for before the bot has a marker for it shows its lines unmarked.
+                icon = _ETA_STAGE_ICONS.get(eta_stage)
+                marked = [f"{icon} {eta_lines[0]}" if icon else eta_lines[0], *eta_lines[1:]]
+                tracking_text += "\n".join(marked) + "\n"
 
             # Create back button (use order_tracking keyboard for tracking view)
             keyboard = OrderKeyboards.order_tracking(order_id, language)

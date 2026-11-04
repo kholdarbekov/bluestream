@@ -16,8 +16,9 @@ language:
 
 * in the customer bot, `Translation.renderer(language)` (telegram_bot/i18n.py), which routes
   through the bot's `Translation.get`;
-* in the backend (the email), `_renderer(language)` in
-  business_app/services/reorder_reminders/messaging.py, over `get_translation`.
+* in the backend (the email), `business_app.utils.translations.renderer(language,
+  copy_name="Reorder-reminder")`, over `get_translation`, which
+  business_app/services/reorder_reminders/messaging.py passes.
 
 Neither raises nor emits a `{placeholder}`, so nothing here does either. Values arrive ready to
 print: the bot HTML-escapes names first (it sends with parse_mode='HTML'), the email lets

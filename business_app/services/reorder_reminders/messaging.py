@@ -54,9 +54,9 @@ from business_app.utils.bot_webhook import trigger_bot_webhook
 from business_app.utils.constants import NotificationChannel, NotificationType
 from business_app.utils.local_windows import local_date
 from business_app.utils.timezone_utils import ensure_utc, get_utc_now
-from business_app.utils.translations import get_translation
+from business_app.utils.translations import renderer
 from shared import reorder_reminder_copy
-from shared.i18n_rendering import humanise_key, neutralise_braces, reminder_language, render_translation
+from shared.i18n_rendering import neutralise_braces, reminder_language
 from shared.redis_keyspace import REORDER_REMINDER_CLAIM_TTL_SECONDS, RedisKeyspace
 
 logger = logging.getLogger(__name__)
@@ -372,28 +372,6 @@ def _send_telegram(
 _SHOP_PATH = "/shop"
 
 
-def _renderer(language: str) -> reorder_reminder_copy.Render:
-    """`render(key, **values)` over the backend's DB translations, degrading exactly as the bot
-    does (shared.i18n_rendering): a key with no row in any language, or a template its values
-    cannot fill, reads as the humanised key. It never shows raw braces and never raises.
-
-    The backend twin of the bot's `Translation.renderer` (telegram_bot/i18n.py): `key` is
-    POSITIONAL-ONLY there too, so a copy placeholder named `{key}` fills through `**values`."""
-
-    def render(key: str, /, **values) -> str:
-        try:
-            template = get_translation(key, language)
-        except Exception:  # noqa: BLE001  (a broken row must cost one phrase, not the email)
-            logger.exception("Reorder-reminder copy %s could not be read", key)
-            return humanise_key(key)
-        if template == key:
-            logger.warning("Reorder-reminder copy %s has no row in any language", key)
-            return humanise_key(key)
-        return render_translation(key, template, (), values)
-
-    return render
-
-
 def email_template_data(
     episode: ReorderReminderEpisode,
     customer: ReminderCustomer,
@@ -421,7 +399,7 @@ def email_template_data(
     language = reminder_language(recipient.preferred_language)
     _, items = _recipient_order_lines(recipient.user_id)
     parts = reorder_reminder_copy.email_parts(
-        _renderer(language),
+        renderer(language, copy_name="Reorder-reminder"),
         language,
         step=step,
         # The email type is placeholder-strict: a `{x}` typed into a name would make the guard skip

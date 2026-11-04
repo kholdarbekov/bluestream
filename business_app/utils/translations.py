@@ -3,12 +3,12 @@ Database-backed multi-language translation utilities for the Water Business Plat
 Supports: English (en), Uzbek (uz), Russian (ru)
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Callable, Optional
 from flask import current_app, g
 import redis
 from business_app.models.translation import Translation
 from business_app import db
-from shared.i18n_rendering import plural_category
+from shared.i18n_rendering import humanise_key, plural_category, render_translation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -405,6 +405,33 @@ def get_translation(key: str, language: str = None, **kwargs) -> str:
 def translate(key: str, language: str = None, **kwargs) -> str:
     """Alias for get_translation"""
     return get_translation(key, language, **kwargs)
+
+
+def renderer(language: str, *, copy_name: str) -> Callable[..., str]:
+    """`render(key, /, **values)` over the backend's DB translations in `language`: the callable the shared copy
+    modules (`shared.eta_copy`, `shared.reorder_reminder_copy`) assemble the backend's copy through. The backend twin
+    of the bot's `Translation.renderer` (telegram_bot/i18n.py): `key` is POSITIONAL-ONLY there too, so a copy
+    placeholder named `{key}` fills through `**values`.
+
+    It never raises and never shows raw braces. Copy it cannot render comes back as the humanised key, the way
+    `shared.i18n_rendering.render_translation` degrades it; what that means is the copy module's call (`shared.eta_copy`
+    then says no arrival line at all). A lookup that fails (copy with a positional placeholder makes `get_translation`
+    itself raise) and a key with no row in any language are logged here, as a warning naming the copy: `copy_name`
+    ("Arrival", "Reorder-reminder"). A template its values cannot fill is logged by `render_translation`.
+    """
+
+    def render(key: str, /, **values) -> str:
+        try:
+            template = get_translation(key, language)
+        except Exception:  # noqa: BLE001 — a broken row must cost one phrase, not the message
+            logger.warning("%s copy %s could not be read", copy_name, key, exc_info=True)
+            return humanise_key(key)
+        if template == key:
+            logger.warning("%s copy %s has no row in any language", copy_name, key)
+            return humanise_key(key)
+        return render_translation(key, template, (), values)
+
+    return render
 
 
 def set_translation(key: str, language: str, value: str, category: str = "general", description: str = None) -> bool:

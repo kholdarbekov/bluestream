@@ -158,8 +158,8 @@ class Translation:
         return render_translation(key, translation, args, kwargs)
 
     def renderer(self, language: str) -> Callable[..., str]:
-        """`render(key, **values)` bound to one language: the callable
-        `shared.reorder_reminder_copy` assembles copy through.
+        """`render(key, **values)` bound to one language: the callable `shared.reorder_reminder_copy`
+        and `shared.eta_copy` assemble copy through.
 
         Resolves `self.get` at CALL time, so a test that patches `get` on this instance is
         honoured, and the copy keeps get()'s rendering rule (never raises, never a raw

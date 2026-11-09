@@ -25,7 +25,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.utils.prometheus_metrics import set_stranded_deliveries
 from business_app.utils.state_validators import DELIVERY_DRIVERLESS_STATES
-from shared.enums import DeliveryStatus, OrderStatus
+from shared.enums import DeliveryStatus
 
 logger = get_task_logger(__name__)
 
@@ -90,6 +90,7 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
     any driver's shift, or while auto-assign wrongly saw no on-shift driver)
     stays invisibly stuck in the pool indefinitely.
     """
+    from business_app.services.staff_service import StaffService
     from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 
     threshold_minutes = int(
@@ -103,7 +104,7 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
         .filter(
             Delivery.status == DeliveryStatus.SCHEDULED,
             Delivery.delivery_person_id.is_(None),
-            Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
+            StaffService.pool_order_gate(),
             Delivery.created_at < cutoff,
         )
         .order_by(Delivery.created_at.asc())

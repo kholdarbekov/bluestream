@@ -11,6 +11,7 @@ import Products from './pages/Products';
 import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
 import DeliveryReports from './pages/DeliveryReports';
+import EtaAccuracy from './pages/EtaAccuracy';
 import Dispatch from './pages/Dispatch';
 import Tryouts from './pages/Tryouts';
 import BottleTracking from './pages/BottleTracking';
@@ -78,6 +79,15 @@ function App() {
                   <Route path="/product-categories" element={<ProductCategories />} />
                   <Route path="/delivery" element={<Delivery />} />
                   <Route path="/delivery/reports" element={<DeliveryReports />} />
+                  {/* Honest-ETA Phase 2 (R16): admins and managers (`can_view_eta_accuracy`). */}
+                  <Route
+                    path="/delivery/eta-accuracy"
+                    element={(
+                      <PermissionGuard permission="can_view_eta_accuracy" fallback={<Navigate to="/dashboard" replace />}>
+                        <EtaAccuracy />
+                      </PermissionGuard>
+                    )}
+                  />
                   <Route path="/delivery/dispatch" element={<Dispatch />} />
                   <Route path="/tryouts" element={<Tryouts />} />
                   <Route path="/delivery/bottles" element={<BottleTracking />} />

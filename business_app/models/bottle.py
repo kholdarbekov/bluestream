@@ -354,24 +354,30 @@ class DriverBottleSession(db.Model, TimestampMixin):
             self.session_ref = str(uuid.uuid4())
 
     @property
-    def current_inventory(self) -> int:
-        """Bottles currently on truck (real-time; valid while session is OPEN)."""
+    def full_bottles_on_board(self) -> int:
+        """Full bottles on the truck: loaded + transferred in - delivered - transferred out.
+
+        The base term `current_inventory` and `compute_discrepancy` share. Unclamped, so a session whose tallies
+        disagree (more delivered than loaded) keeps its true sign in both. The ETA plan clamps it at 0 (R6).
+        """
         return (
             (self.bottles_loaded or 0)
             + (self.bottles_transferred_in or 0)
             - (self.bottles_delivered or 0)
-            + (self.bottles_collected_from_customers or 0)
             - (self.bottles_transferred_out or 0)
         )
+
+    @property
+    def current_inventory(self) -> int:
+        """Bottles currently on truck (real-time; valid while session is OPEN): the full ones and the empties
+        collected from customers."""
+        return self.full_bottles_on_board + (self.bottles_collected_from_customers or 0)
 
     def compute_discrepancy(self) -> None:
         """Compute and store discrepancy on session close."""
         self.discrepancy = (
-            (self.bottles_loaded or 0)
-            + (self.bottles_transferred_in or 0)
-            - (self.bottles_delivered or 0)
+            self.full_bottles_on_board
             + (self.bottles_collected_from_customers or 0)
-            - (self.bottles_transferred_out or 0)
             - (self.bottles_returned_to_warehouse or 0)
         )
 

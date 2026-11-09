@@ -1531,6 +1531,9 @@ class AuthService:
             # badge, route guard and Analytics cards read this; `manager_or_higher_required` on every
             # /admin/reorder-reminders route states the same rule.
             "can_manage_lapsed_customers": False,
+            # The delivery-time accuracy report (honest-ETA Phase 2, R16): the admin UI's nav item and route guard
+            # read this; `manager_or_higher_required` on GET /admin/eta/accuracy states the same rule.
+            "can_view_eta_accuracy": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1553,6 +1556,7 @@ class AuthService:
                     "can_manage_sales_pay": role_value == UserRole.ADMIN.value,
                     "can_review_agent_orders": True,
                     "can_manage_lapsed_customers": True,
+                    "can_view_eta_accuracy": True,
                 }
             )
         elif role_value == UserRole.OPERATOR.value:

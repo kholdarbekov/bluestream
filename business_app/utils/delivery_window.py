@@ -14,7 +14,7 @@ The window is ADVISORY (spec D5): it orders the driver pool and is displayed
 everywhere, but nothing blocks a delivery outside it.
 """
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -183,6 +183,16 @@ def local_now() -> datetime:
     midnight — long enough for the horizon to move under an operator mid-shift.
     """
     return datetime.now(ZoneInfo(DISPLAY_TIMEZONE))
+
+
+def window_edge_utc(day: date, local_time: time) -> datetime:
+    """The UTC instant of a window edge: `local_time` on the local calendar date `day`.
+
+    A customer's window is wall-clock time on their date (`Order.delivery_date`, `delivery_window_start`/`end`), so
+    `day` is that LOCAL date, not a UTC one, and not a plan day. The ETA engine compares these edges with its
+    expected arrivals. Tashkent has no DST, so the wall clock names one instant.
+    """
+    return datetime.combine(day, local_time, tzinfo=ZoneInfo(DISPLAY_TIMEZONE)).astimezone(timezone.utc)
 
 
 def _coerce_date(raw: Any) -> Optional[date]:

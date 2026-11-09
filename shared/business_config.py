@@ -121,7 +121,8 @@ GOOGLE_ROUTES_DAILY_CAP = _int("GOOGLE_ROUTES_DAILY_CAP", 150)
 # customer is promised "by tap + ETA_OFF_ROAD_MINUTES + headroom x G", G being Google's live-traffic drive time
 # from the driver's position.
 # Google's live traffic is asked only from a driver position at most this old at the tap. An older one is not where
-# the driver is: no call is spent, and the time comes from our own engine instead (ETA_STALE_*_ALLOWANCE_MINUTES).
+# the driver is: no call is spent, and the time comes from our own engine instead (ETA_STALE_*_ALLOWANCE_MINUTES), up
+# to DRIVER_LOCATION_FRESH_SECONDS (30 minutes) old. Older still, or none, and the customer is told no time.
 ETA_POSITION_MAX_AGE_SECONDS = _int("ETA_POSITION_MAX_AGE_SECONDS", 600)
 # The minutes off the road at the door end: parking, the walk, the stairs.
 ETA_OFF_ROAD_MINUTES = _int("ETA_OFF_ROAD_MINUTES", 5)
@@ -135,11 +136,127 @@ ETA_HEADROOM_PRIOR_LEGS = _int("ETA_HEADROOM_PRIOR_LEGS", 20)
 # From a position older than ETA_POSITION_MAX_AGE_SECONDS at the tap: "by tap + our own engine's minutes from it + an
 # allowance". Such a position is wrong by an amount of time, not by a share of the route, so it takes an allowance and
 # not a headroom. Backtested on 274 real stale legs (2026-05 to 2026-11): about 87% of these promises are kept.
-# The last position is a door or a pin from the tap's Tashkent day:
+# Only a position at most DRIVER_LOCATION_FRESH_SECONDS old is priced so (owner rule 2026-11-09). The last position
+# is a door or a pin:
 ETA_STALE_DOOR_ALLOWANCE_MINUTES = _int("ETA_STALE_DOOR_ALLOWANCE_MINUTES", 30)
-# The leg starts at the depot: its stamp is the last position, or none is from that day. Less, as drivers mostly tap
-# after they have left:
+# The last position is the depot's stamp of a load or a return. Less, as drivers mostly tap after they have left:
 ETA_STALE_DEPOT_ALLOWANCE_MINUTES = _int("ETA_STALE_DEPOT_ALLOWANCE_MINUTES", 20)
+
+# ─── Delivery ETA: the capacity-aware plan ──────────────────────────────
+# Spec 2026-11-03 §4 and the Phase 2 plan of 2026-11-04 (rulings R1-R19): the engine that plans every waiting order onto
+# the day's cars and records the window it expects, hidden from customers. Read by `eta_plan`, `eta_recompute_dispatch`,
+# `delivery_eta_tasks` and the accuracy report. Plan days run 05:00 to 05:00 local (spec §6,
+# `local_windows.work_day_of`) and are not a tunable. Not defined here, because the route optimiser already owns them:
+# COMMITTED_STOP_MAX_AGE_HOURS and DRIVER_LOCATION_FRESH_SECONDS.
+#
+# Which cars work today (R1). An OPEN session counts only if it was active within this many hours: the latest of its
+# start, its orders' real delivered taps, and its transfers' sent, confirmed or resolved times.
+ETA_SESSION_ACTIVITY_HOURS = _int("ETA_SESSION_ACTIVITY_HOURS", 24)
+
+# A driver's typical start and end (R3), in minutes past the plan day's local midnight. They come from the driver's last
+# ETA_HISTORY_WORK_DAYS plan days with delivered taps, looked for within ETA_HISTORY_LOOKBACK_DAYS: the median start,
+# and the p75 end capped at that day's roster end.
+ETA_HISTORY_WORK_DAYS = _int("ETA_HISTORY_WORK_DAYS", 14)
+ETA_HISTORY_LOOKBACK_DAYS = _int("ETA_HISTORY_LOOKBACK_DAYS", 60)
+# With fewer such days than this, the fleet's typical start and end over all drivers' days stand in.
+ETA_MIN_DRIVER_DAYS = _int("ETA_MIN_DRIVER_DAYS", 5)
+# With no history at all (spec §2): the fleet's start seed, 700 = 11:40...
+ETA_FLEET_START_SEED_MINUTES = _int("ETA_FLEET_START_SEED_MINUTES", 700)
+# ...and its end seed, 1200 = 20:00.
+ETA_FLEET_END_SEED_MINUTES = _int("ETA_FLEET_END_SEED_MINUTES", 1200)
+# A car with no load or pickup by its typical start plus this many minutes has not set off when it should have...
+ETA_START_GRACE_MINUTES = _int("ETA_START_GRACE_MINUTES", 30)
+# ...so its start is rolled forward to now plus this many minutes.
+ETA_START_ROLL_MINUTES = _int("ETA_START_ROLL_MINUTES", 15)
+
+# Minutes a car spends loading at the depot: after a load it leaves this long later, to its first stop (R4). Nothing is
+# added after the typical first pickup, which is already measured after loading.
+ETA_LOADING_ALLOWANCE_MINUTES = _int("ETA_LOADING_ALLOWANCE_MINUTES", 10)
+# A full load (R6) is the driver's median bottles_loaded over their last this-many closed sessions that had a load, else
+# the fleet's median, else ETA_RELOAD_FULL_BOTTLES_DEFAULT. A car reloads at most once a day, back to full.
+ETA_FULL_LOAD_SESSIONS = _int("ETA_FULL_LOAD_SESSIONS", 10)
+ETA_RELOAD_FULL_BOTTLES_DEFAULT = _int("ETA_RELOAD_FULL_BOTTLES_DEFAULT", 30)
+# A stop without coordinates (R7) is placed this many straight-line km after the previous point in its car's sequence.
+# A float: read through `_int`, `ETA_UNKNOWN_LEG_KM=2.5` would raise at import.
+ETA_UNKNOWN_LEG_KM = _float("ETA_UNKNOWN_LEG_KM", 2.3)
+
+# A stop no car can take within this many plan days is "unconfirmed" (R10, spec §4.7): it has no time and no window. A
+# stop the customer dated beyond today keeps its date.
+ETA_UNCONFIRMED_HORIZON_DAYS = _int("ETA_UNCONFIRMED_HORIZON_DAYS", 3)
+# Extra minutes on hi of a window whose car has not started (spec §4.6), when lo and hi come from the seeds. A fitted
+# not-started bucket already holds that spread.
+ETA_NOT_STARTED_EXTRA_HI_MINUTES = _int("ETA_NOT_STARTED_EXTRA_HI_MINUTES", 60)
+# An engine row is recorded (R12) when the window end has moved by this many minutes or more, and on any change of
+# stage, of promised day, or of whether there is a window at all.
+ETA_RECORD_MOVE_MINUTES = _int("ETA_RECORD_MOVE_MINUTES", 15)
+
+# The trigger (R15). A commit that touches the plan's inputs requests a recompute: the "already queued" marker
+# (RedisKeyspace.eta_recompute_scheduled) lives this many seconds, so a burst of commits queues one run, and a queued
+# run expires this long after its countdown.
+ETA_RECOMPUTE_SCHEDULED_TTL_SECONDS = _int("ETA_RECOMPUTE_SCHEDULED_TTL_SECONDS", 30)
+# The delay between a commit that requests a recompute and its run, so the commits of one action land first.
+ETA_RECOMPUTE_COUNTDOWN_SECONDS = _int("ETA_RECOMPUTE_COUNTDOWN_SECONDS", 5)
+# How long a recompute holds its run lock (RedisKeyspace.eta_recompute_lock). The recompute task's time limit is this
+# same number, so a run that dies frees the lock by itself.
+ETA_RECOMPUTE_LOCK_SECONDS = _int("ETA_RECOMPUTE_LOCK_SECONDS", 120)
+# The kill switch of the whole shadow engine: with it off, the commit detector requests nothing, the beat run does
+# nothing and the weekly fit does not run. Off in the tests' config.
+ETA_SHADOW_ENGINE_ENABLED = _bool("ETA_SHADOW_ENGINE_ENABLED", True)
+
+# When a moved promise is worth a message to the customer (spec §4.9). Phase 2 only counts such moves, in shadow.
+# A message when the window end moves later by this many minutes or more...
+ETA_CHANGE_LATER_MINUTES = _int("ETA_CHANGE_LATER_MINUTES", 30)
+# ...or earlier by this many (good news).
+ETA_CHANGE_EARLIER_MINUTES = _int("ETA_CHANGE_EARLIER_MINUTES", 60)
+# At most one message per this many minutes...
+ETA_CHANGE_MIN_GAP_MINUTES = _int("ETA_CHANGE_MIN_GAP_MINUTES", 60)
+# ...and this many per order.
+ETA_CHANGE_MAX_PER_ORDER = _int("ETA_CHANGE_MAX_PER_ORDER", 3)
+# None in the quiet hours, in minutes past local midnight (1320 = 22:00 to 480 = 08:00): a pending change goes out when
+# they end, if it still holds.
+ETA_QUIET_START_MINUTES = _int("ETA_QUIET_START_MINUTES", 1320)
+ETA_QUIET_END_MINUTES = _int("ETA_QUIET_END_MINUTES", 480)
+
+# The weekly fit (spec §4.10, R5, R13). It reads the last this-many plan days...
+ETA_FIT_WINDOW_DAYS = _int("ETA_FIT_WINDOW_DAYS", 28)
+# ...keeps the previous point of a stop-curve bin that has fewer legs than this...
+ETA_FIT_MIN_LEGS_PER_BIN = _int("ETA_FIT_MIN_LEGS_PER_BIN", 30)
+# ...and keeps the previous depot line when fewer (first pickup, first delivery) pairs than this fit it.
+ETA_FIT_MIN_DEPOT_PAIRS = _int("ETA_FIT_MIN_DEPOT_PAIRS", 15)
+# A leg of 1 km or more faster than this many km/h straight-line is an unreliable tap and is left out; a fitted curve
+# whose last segment is faster than this is rejected, since that slope prices every leg beyond the last point.
+ETA_FIT_MAX_KMH = _int("ETA_FIT_MAX_KMH", 60)
+# A stop whose pickup and delivered taps are under this many minutes apart is an unreliable tap and is left out.
+ETA_FIT_MIN_PICKUP_TO_DELIVERED_MINUTES = _int("ETA_FIT_MIN_PICKUP_TO_DELIVERED_MINUTES", 2)
+
+# The accuracy report. The gate (spec §5) wants at least this share of delivered orders to arrive by the end of the
+# first window the engine recorded for them. A float: it is a share, not a count.
+ETA_GATE_KEPT_SHARE = _float("ETA_GATE_KEPT_SHARE", 0.90)
+# The report's range when none is asked for, in local days ending today (the gate is judged over a rolling two weeks).
+ETA_REPORT_DEFAULT_DAYS = _int("ETA_REPORT_DEFAULT_DAYS", 14)
+
+# Windows (spec §4.6, R11). A (stops ahead, started) bucket with fewer fitted promises than this borrows the next band
+# up.
+ETA_WINDOW_MIN_PROMISES = _int("ETA_WINDOW_MIN_PROMISES", 30)
+# A window is shown rounded outward to this many minutes (the half hour).
+ETA_WINDOW_ROUND_MINUTES = _int("ETA_WINDOW_ROUND_MINUTES", 30)
+# A window wider than this many hours is shown as "by HH:MM", its end only.
+ETA_WINDOW_BY_ONLY_HOURS = _int("ETA_WINDOW_BY_ONLY_HOURS", 4)
+
+# The structured seeds. Plain constants, not env-read: a weekly fit moves them, not an operator.
+# The stop curve (R5, spec §4.5): minutes from one stop to the next, piecewise linear in the straight-line km between
+# them, through these (km, minutes) points (the production medians of spec §2). Below the first point it is that point's
+# value; beyond the last it continues the last segment's slope.
+ETA_CYCLE_SEED_POINTS = ((0.1, 13.0), (0.8, 16.0), (2.3, 24.0), (4.6, 32.0), (7.7, 44.0), (13.2, 67.0))
+# The fit bins by straight-line km, [0, 0.2) [0.2, 1) [1, 3) [3, 6) [6, 10) [10, ∞): one seed point sits in each, and a
+# bin's fitted (median km, median minutes) replaces it.
+ETA_CYCLE_BIN_EDGES_KM = (0.2, 1.0, 3.0, 6.0, 10.0)
+# The depot line (R4), (a, b): every leg that leaves the depot costs a + b x km minutes, never the stop curve, which was
+# fitted to legs of 13.2 km or less and says about 133 minutes at the depot's 29 km from the centre.
+ETA_DEPOT_LEG_SEED = (10.0, 1.5)
+# The window seeds (spec §4.6): (lo, hi) minutes around the expected arrival, by the stops ahead of the stop in its
+# car's plan, before a fit has enough promises of its own.
+ETA_WINDOW_SEEDS = {"0": (-20, 45), "1-2": (-40, 90), "3-4": (-60, 120), "5-7": (-75, 150), "8+": (-90, 180)}
 
 # ─── Loyalty ────────────────────────────────────────────────────────────
 # Earning rate / bonus amounts / tier thresholds / expiry are all DB-driven

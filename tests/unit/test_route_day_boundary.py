@@ -107,10 +107,12 @@ class TestDayBoundaryHasOneDefinition:
         wrong. Pin it: the module must derive the day boundary in exactly one
         place, so a fourth copy cannot drift back to UTC."""
         import inspect
+        import re
 
         source = inspect.getsource(ros)
 
         assert 'datetime.now(timezone.utc).replace(hour=0' not in source
         assert source.count("def _driver_day_start_utc") == 1
-        # Every consumer goes through the helper.
-        assert source.count("_driver_day_start_utc()") >= 4
+        # Every consumer goes through the helper: a call that reads the wall clock, or one handed a `now` (the ETA
+        # plan's `current_route(driver_id, now=...)` passes its own).
+        assert len(re.findall(r"(?<!def )_driver_day_start_utc\(", source)) >= 4

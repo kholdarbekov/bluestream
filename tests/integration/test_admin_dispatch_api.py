@@ -393,7 +393,7 @@ def _make_geocoded_delivery(db, user, *, order_number, lat, lng, driver_id):
 
     `driver_id` is mandatory and must match the route's `delivery_person_id`.
     The stop set is derived from OWNERSHIP (`DispatchService.route_stop_points`
-    → `_sequence_active_stops`), not from `optimized_order`, so an ownerless
+    → `sequence_active_stops`), not from `optimized_order`, so an ownerless
     delivery listed on a driver's route is not a shortcut — it is the very
     inconsistency the read model now refuses to render, and the endpoint
     correctly short-circuits to `_no_geometry` for it.

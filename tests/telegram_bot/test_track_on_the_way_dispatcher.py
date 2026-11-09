@@ -36,7 +36,7 @@ from business_app.utils.timezone_utils import ensure_utc
 from shared.i18n_rendering import render_translation
 from tests.bot_dispatcher_harness import render_legacy_markdown
 from tests.integration.test_track_publishes_honest_eta import _delivery
-from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google, matrix and spec_tunables are fixtures
+from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google and matrix are fixtures
     TAP,
     _driver_last_seen,
     _moved,
@@ -44,7 +44,6 @@ from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google, matr
     _tap,
     google,
     matrix,
-    spec_tunables,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -489,7 +488,7 @@ async def test_the_real_track_endpoint_feeds_the_screen(
     delivery_driver,
     google,  # noqa: F811 -- the fixture
     matrix,  # noqa: F811 -- the fixture
-    spec_tunables,  # noqa: F811 -- the fixture
+    spec_tunables,
     delivery_status,
     record,
     published,

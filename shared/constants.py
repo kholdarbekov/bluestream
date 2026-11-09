@@ -23,6 +23,9 @@ ORDER_DISPLAY_AWAITING_NEW_DATE = "awaiting_new_date"
 # `DeliveryEtaService.customer_eta`; the bot and the website format it and never work it out again.
 ETA_STAGE_ON_THE_WAY = "on_the_way"
 ETA_STAGE_ARRIVED = "arrived"
+# The stage of the capacity-aware engine's S1 rows (spec §4.8: placed, waiting for the driver to set off). Written only
+# by the engine (`engine_s1_v1`), hidden from customers until Phase 3.
+ETA_STAGE_WAITING = "waiting"
 # `eta_attribution` when the minutes came from Google's live traffic. Google's terms want "Google Maps" shown next
 # to the time (§4.12a).
 ETA_ATTRIBUTION_GOOGLE = "google_maps"

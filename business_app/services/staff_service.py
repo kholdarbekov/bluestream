@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import TYPE_CHECKING, Dict, Any, Optional, List, Tuple
 from flask import current_app
 import redis
-from sqlalchemy import or_, func
+from sqlalchemy import and_, or_, func
 from sqlalchemy.orm import joinedload
 from decimal import Decimal
 
@@ -89,6 +89,11 @@ class StaffService:
     # built on, never listed again; sorted only so the tuple is stable (every
     # reader uses `in`).
     CLAIMABLE_DELIVERY_STATUSES = tuple(sorted(DELIVERY_POOL_UNASSIGNED_STATES, key=lambda s: s.value))
+
+    # The orders the drivers' pool lists: confirmed or preparing. Every mode of `get_delivery_pool` applies this gate
+    # (`pool_order_gate`), `pool_filters` carries it for the ETA engine's demand, the stale-pool re-enqueue reads it,
+    # and a pull-back restores an order into it.
+    POOL_ORDER_STATUSES = (OrderStatus.CONFIRMED, OrderStatus.PREPARING)
 
     @staticmethod
     def is_delivery_claimable(delivery: Delivery) -> bool:
@@ -1145,6 +1150,41 @@ class StaffService:
         }
 
     @staticmethod
+    def pool_order_gate():
+        """The pool's order gate as a bare SQL clause: the order in `POOL_ORDER_STATUSES`. Every mode of
+        `get_delivery_pool` applies it, through `pool_filters` or alone; the caller has `orders` in FROM."""
+        return Order.status.in_(StaffService.POOL_ORDER_STATUSES)
+
+    @staticmethod
+    def pool_filters():
+        """The drivers' pool as a bare SQL clause: the order gate (`pool_order_gate`), a delivery with no driver, in
+        `CLAIMABLE_DELIVERY_STATUSES`. The default branch of `get_delivery_pool`, and the ETA engine's pool demand.
+
+        The caller must already have `orders` AND `deliveries` in FROM through an explicit join, as
+        `get_delivery_pool` has. The `delivery_id`/`order_id` lookups of `get_delivery_pool` keep the order gate alone.
+        """
+        return and_(
+            StaffService.pool_order_gate(),
+            Delivery.delivery_person_id.is_(None),
+            Delivery.status.in_(StaffService.CLAIMABLE_DELIVERY_STATUSES),
+        )
+
+    @staticmethod
+    def pool_order_by():
+        """The order drivers see the pool in. Deadline first: an order with an explicit "until HH:MM" is a promise with
+        a clock on it, so it outranks the open-ended ones regardless of age. NULLS LAST keeps anytime/after orders (no
+        end time) behind the deadlines; created_at then preserves the old FIFO among equals, and the delivery id makes
+        an exact tie stable, for the driver and for the ETA engine that ranks the pool the same way (R18).
+
+        The same columns as `pool_filters`: `orders` and `deliveries` are joined by the caller.
+        """
+        return (
+            Order.delivery_window_end.asc().nullslast(),
+            Order.created_at.asc(),
+            Delivery.id.asc(),
+        )
+
+    @staticmethod
     def get_delivery_pool(filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Get deliveries available for pickup in staff order pool.
@@ -1170,42 +1210,26 @@ class StaffService:
         delivery_id = filters.get("delivery_id")
         include_assigned = bool(filters.get("include_assigned", False))
 
-        query = (
-            Delivery.query.join(Order, Delivery.order_id == Order.id)
-            .filter(
-                Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
-            )
-            .options(
-                joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
-                joinedload(Delivery.order).joinedload(Order.delivery_address),
-                joinedload(Delivery.order).joinedload(Order.user),
-                joinedload(Delivery.order).joinedload(Order.payment),
-                joinedload(Delivery.delivery_person),
-            )
+        query = Delivery.query.join(Order, Delivery.order_id == Order.id).options(
+            joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Delivery.order).joinedload(Order.delivery_address),
+            joinedload(Delivery.order).joinedload(Order.user),
+            joinedload(Delivery.order).joinedload(Order.payment),
+            joinedload(Delivery.delivery_person),
         )
 
         if delivery_id is not None:
-            query = query.filter(Delivery.id == delivery_id)
+            query = query.filter(StaffService.pool_order_gate(), Delivery.id == delivery_id)
             if not include_assigned:
                 query = query.filter(Delivery.delivery_person_id.is_(None))
         elif order_id is not None:
-            query = query.filter(Order.id == order_id)
+            query = query.filter(StaffService.pool_order_gate(), Order.id == order_id)
             if not include_assigned:
                 query = query.filter(Delivery.delivery_person_id.is_(None))
         else:
-            query = query.filter(
-                Delivery.delivery_person_id.is_(None),
-                Delivery.status.in_(StaffService.CLAIMABLE_DELIVERY_STATUSES),
-            )
+            query = query.filter(StaffService.pool_filters())
 
-        # Deadline first: an order with an explicit "until HH:MM" is a promise
-        # with a clock on it, so it outranks the open-ended ones regardless of
-        # age. NULLS LAST keeps anytime/after orders (no end time) behind the
-        # deadlines; created_at then preserves the old FIFO among equals.
-        query = query.order_by(
-            Order.delivery_window_end.asc().nullslast(),
-            Order.created_at.asc(),
-        )
+        query = query.order_by(*StaffService.pool_order_by())
 
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
@@ -1418,7 +1442,7 @@ class StaffService:
         # out-for-delivery order would keep the delivery hidden once released.
         # The caller decides whether the order may move at all (R23).
         order = delivery.order
-        if restore_order and order is not None and order.status not in (OrderStatus.CONFIRMED, OrderStatus.PREPARING):
+        if restore_order and order is not None and order.status not in StaffService.POOL_ORDER_STATUSES:
             StaffService._restore_order_to_pool_eligible(order, actor_id, notes=None)
 
         if old_status != target_status:

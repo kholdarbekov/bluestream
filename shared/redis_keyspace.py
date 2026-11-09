@@ -259,6 +259,20 @@ class RedisKeyspace:
     def google_routes_calls(day: date) -> str:
         return f"google_routes:calls:{day.isoformat()}"
 
+    # Tier: CACHE. The capacity-aware ETA engine's "a recompute is already queued" marker (`SET NX EX`
+    # ETA_RECOMPUTE_SCHEDULED_TTL_SECONDS, deleted by the run as it starts, and by a request whose publish failed). It
+    # debounces a burst of commits into one recompute; losing it costs one extra recompute, never a missed one.
+    @staticmethod
+    def eta_recompute_scheduled() -> str:
+        return "bs:eta_recompute:scheduled"
+
+    # Tier: RELIABILITY. The ETA recompute's run lock (`SET NX EX` ETA_RECOMPUTE_LOCK_SECONDS, an owner token, deleted
+    # by its holder only). It keeps two recomputes from interleaving; a run that finds it held re-requests itself for
+    # the lock's remaining TTL instead of waiting.
+    @staticmethod
+    def eta_recompute_lock() -> str:
+        return "bs:eta_recompute:lock"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -312,6 +326,8 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'telegram_login_hash':               RedisUsageTier.TIER_SECURITY,
     'telegram_login_attempts':           RedisUsageTier.TIER_SECURITY,
     'google_routes_calls':               RedisUsageTier.TIER_CACHE,
+    'eta_recompute_scheduled':           RedisUsageTier.TIER_CACHE,
+    'eta_recompute_lock':                RedisUsageTier.TIER_RELIABILITY,
 }
 
 

@@ -8,7 +8,6 @@ from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from flask import current_app
-from sqlalchemy import or_
 
 from business_app.models.order import Order
 from business_app.models.user import User
@@ -17,7 +16,7 @@ from business_app.services.order_service import PAYMENT_DEADLINE_STATUSES, Order
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import NotificationChannel
 from business_app.utils.payment_projection import is_online_rail
-from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus, UserRole, UserStatus
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app.utils.timezone_utils import get_utc_now
 from business_app import db
@@ -582,11 +581,7 @@ def release_due_scheduled_orders():
     tick instead of stranding orders forever.
     """
     from business_app.models.delivery import Delivery
-    from business_app.services.order_schedule_service import (
-        RELEASABLE_ORDER_STATUSES,
-        OrderScheduleService,
-        get_utc_now,
-    )
+    from business_app.services.order_schedule_service import OrderScheduleService, get_utc_now
     from business_app.utils.timezone_utils import utc_to_local
     from shared.constants import DISPLAY_TIMEZONE
 
@@ -599,10 +594,8 @@ def release_due_scheduled_orders():
     candidates = (
         Order.query.outerjoin(Delivery, Delivery.order_id == Order.id)
         .filter(
-            or_(Delivery.id.is_(None), Delivery.status == DeliveryStatus.RESCHEDULED),
-            Order.delivery_date.isnot(None),
+            OrderScheduleService.held_order_candidates_filter(),
             Order.delivery_date <= local_today,
-            Order.status.in_(RELEASABLE_ORDER_STATUSES),
         )
         .all()
     )

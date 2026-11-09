@@ -614,10 +614,13 @@ class RouteOptimizationService:
             .all()
         )
 
-    def current_route(self, driver_id: int) -> Optional[DeliveryRoute]:
+    def current_route(self, driver_id: int, *, now: Optional[datetime] = None) -> Optional[DeliveryRoute]:
         """Today's route row for this driver, newest first. Public: the dispatch
-        read/write services need the same row this service upserts into."""
-        today_start = _driver_day_start_utc()
+        read/write services need the same row this service upserts into.
+
+        `now` is the instant "today" is read at (default: the wall clock); the
+        ETA engine passes the one it plans for."""
+        today_start = _driver_day_start_utc(now)
         return (
             DeliveryRoute.query.filter(
                 DeliveryRoute.delivery_person_id == driver_id,
@@ -637,7 +640,7 @@ class RouteOptimizationService:
         """
         return self._load_active_deliveries(driver_id)
 
-    def get_committed_stop(self, driver_id: int) -> Optional[Delivery]:
+    def get_committed_stop(self, driver_id: int, *, now: Optional[datetime] = None) -> Optional[Delivery]:
         """The driver's committed stop (spec 2026-08-11 §4.1), or None.
 
         Among active deliveries whose status is IN_TRANSIT or ARRIVED, the one
@@ -653,9 +656,13 @@ class RouteOptimizationService:
         not pin itself to position 0 forever). Applied identically in the
         primary path and the defensive fallback below so the two never
         disagree.
+
+        `now` is the instant the age bound counts back from (default: the wall
+        clock); the ETA engine passes the one it plans for.
         """
         max_age_hours = current_app.config.get("COMMITTED_STOP_MAX_AGE_HOURS", 12)
-        threshold = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        reference = _ensure_aware(now) if now is not None else datetime.now(timezone.utc)
+        threshold = reference - timedelta(hours=max_age_hours)
 
         row = (
             db.session.query(
@@ -1466,7 +1473,7 @@ class RouteOptimizationService:
         return self.location_status_for_person(person)
 
     @staticmethod
-    def location_status_for_person(person: Optional[DeliveryPerson]) -> str:
+    def location_status_for_person(person: Optional[DeliveryPerson], *, now: Optional[datetime] = None) -> str:
         """Freshness status for an ALREADY-LOADED `DeliveryPerson` row.
 
         Same rule as `_location_status`/`location_status` — factored out so a
@@ -1476,11 +1483,16 @@ class RouteOptimizationService:
         delegates here too, so there is exactly one implementation of this rule;
         if it ever drifted, the dispatch map would silently disagree with what
         the driver's own bot shows.
+
+        `now` defaults to the wall clock. The ETA plan's supply passes the one
+        instant its whole recompute answers for, so a fix is judged fresh as of
+        that instant and not as of whenever this line happens to run.
         """
         if not person or person.current_location_lat is None or person.last_location_update is None:
             return "missing"
         fresh_seconds = current_app.config.get("DRIVER_LOCATION_FRESH_SECONDS", LOCATION_FRESH_DEFAULT_SECONDS)
-        threshold = datetime.now(timezone.utc) - timedelta(seconds=fresh_seconds)
+        reference = _ensure_aware(now) if now is not None else datetime.now(timezone.utc)
+        threshold = reference - timedelta(seconds=fresh_seconds)
         return "fresh" if _ensure_aware(person.last_location_update) >= threshold else "stale"
 
     def build_route_summary(self, driver_id: int, remaining_count: int) -> Dict[str, Any]:

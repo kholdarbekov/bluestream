@@ -637,6 +637,13 @@
     "rule": "/api/v1/admin/dispatch/stops/<int:delivery_id>/unassign"
   },
   {
+    "endpoint": "admin_eta.get_eta_accuracy",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/eta/accuracy"
+  },
+  {
     "endpoint": "admin.adjust_inventory",
     "methods": [
       "POST"

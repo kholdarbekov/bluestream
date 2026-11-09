@@ -75,6 +75,7 @@ def register_blueprints(app: Flask):
     from business_app.api.support import support_bp
     from business_app.api.reorder_reminders import reorder_reminders_bp
     from business_app.api.admin_reorder_reminders import admin_reorder_reminders_bp
+    from business_app.api.admin_eta import admin_eta_bp
     from business_app.frontend import frontend_bp
 
     # API blueprints
@@ -106,6 +107,7 @@ def register_blueprints(app: Flask):
     app.register_blueprint(support_bp, url_prefix=f"{api_prefix}/support")
     app.register_blueprint(reorder_reminders_bp, url_prefix=f"{api_prefix}/reorder-reminders")
     app.register_blueprint(admin_reorder_reminders_bp, url_prefix=f"{api_prefix}/admin")
+    app.register_blueprint(admin_eta_bp, url_prefix=f"{api_prefix}/admin")
     app.register_blueprint(frontend_bp)
 
 
@@ -640,6 +642,7 @@ def create_app(config_class=None):
 
     # Initialize extensions with app
     db.init_app(app)
+    from business_app.utils.eta_recompute_dispatch import register_eta_recompute_dispatch
     from business_app.utils.loyalty_award_dispatch import register_loyalty_award_dispatch
     from business_app.utils.payment_confirmation_dispatch import (
         register_payment_confirmation_dispatch,
@@ -651,6 +654,7 @@ def create_app(config_class=None):
     register_payment_confirmation_dispatch(db)
     register_reorder_reminder_dispatch(db)
     register_route_card_refresh_dispatch(db)
+    register_eta_recompute_dispatch(db)
     migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
     cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)

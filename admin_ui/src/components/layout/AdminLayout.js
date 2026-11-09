@@ -81,6 +81,7 @@ const AdminLayout = ({ children }) => {
   });
   const pendingApprovals = orderApprovalsBadge?.pending_count || 0;
   const canManageLapsedCustomers = hasPermission('can_manage_lapsed_customers');
+  const canViewEtaAccuracy = hasPermission('can_view_eta_accuracy');
   // Reorder-reminders spec §9.1: the badge is `summary.counts.follow_up`. It shares the page's
   // summary query key, so an outcome recorded there refreshes the badge too; polled every minute.
   const { data: lapsedSummary } = useQuery({
@@ -174,6 +175,10 @@ const AdminLayout = ({ children }) => {
           key: '/delivery/reports',
           label: t('ui.nav.delivery_reports', 'Reports')
         },
+        ...(canViewEtaAccuracy ? [{
+          key: '/delivery/eta-accuracy',
+          label: t('ui.nav.eta_accuracy', 'Delivery time accuracy')
+        }] : []),
         {
           key: '/delivery/dispatch',
           label: t('ui.nav.dispatch', 'Dispatch')

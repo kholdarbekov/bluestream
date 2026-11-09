@@ -8281,6 +8281,11 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.nav.delivery': _ui_tr('Delivery', 'Yetkazib berish', 'Доставка'),
     'ui.nav.delivery_persons': _ui_tr('Delivery Persons', 'Yetkazib beruvchilar', 'Курьеры'),
     'ui.nav.delivery_reports': _ui_tr('Delivery Reports', 'Yetkazib berish hisobotlari', 'Отчёты по доставкам'),
+    'ui.nav.eta_accuracy': _ui_tr(
+        'Delivery time accuracy',
+        'Yetkazib berish vaqti aniqligi',  # NATIVE-READ
+        'Точность времени доставки',  # NATIVE-READ
+    ),
     'ui.nav.notifications': _ui_tr('Notifications', 'Bildirishnomalar', 'Уведомления'),
     'ui.nav.operators': _ui_tr('Operators', 'Operatorlar', 'Операторы'),
     'ui.nav.orders': _ui_tr('Orders', 'Buyurtmalar', 'Заказы'),

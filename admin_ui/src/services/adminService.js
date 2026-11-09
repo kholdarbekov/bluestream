@@ -333,6 +333,12 @@ class AdminService {
     return response.data;
   }
 
+  // Delivery time accuracy report (honest-ETA Phase 2, spec §9); no dates asks for the backend's default window
+  async getEtaAccuracy({ start_date, end_date } = {}) {
+    const response = await api.get('/admin/eta/accuracy', { params: { start_date, end_date } });
+    return response.data?.data;
+  }
+
   // Lapsed customers worklist (reorder-reminders spec §9.1)
   async getReorderReminderSummary() {
     const response = await api.get('/admin/reorder-reminders/summary');

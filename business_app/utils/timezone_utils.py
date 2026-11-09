@@ -211,6 +211,11 @@ def ensure_utc(dt: datetime) -> datetime:
         return dt
 
 
+def ensure_utc_or_none(dt: Optional[datetime]) -> Optional[datetime]:
+    """`ensure_utc` for a value that may be missing: None stays None."""
+    return ensure_utc(dt) if dt is not None else None
+
+
 def is_aware(dt: datetime) -> bool:
     """
     Check if datetime is timezone-aware

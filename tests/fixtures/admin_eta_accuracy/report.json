@@ -1,0 +1,113 @@
+{
+ "by_bucket": [
+  {
+   "kept_share": 0.6666666666666666,
+   "median_window_minutes": 120.0,
+   "n": 3,
+   "started": true,
+   "stops_ahead_band": "0"
+  },
+  {
+   "kept_share": 1.0,
+   "median_window_minutes": 180.0,
+   "n": 1,
+   "started": false,
+   "stops_ahead_band": "3-4"
+  }
+ ],
+ "by_drivers_working": {
+  "one": {
+   "kept_share": 0.6666666666666666,
+   "median_window_minutes": 120.0,
+   "n": 3
+  },
+  "two_or_more": {
+   "kept_share": 1.0,
+   "median_window_minutes": 120.0,
+   "n": 1
+  }
+ },
+ "change_messages": {
+  "at_most_one_share": 1.0,
+  "n": 4,
+  "none_share": 0.75
+ },
+ "definitions": {
+  "daytime_from": "07:00",
+  "daytime_to": "15:00",
+  "morning_ends": "11:00",
+  "s2_tolerance_minutes": 15
+ },
+ "early_share": 0.6666666666666666,
+ "end_date": "2026-11-03",
+ "gate": {
+  "before_eleven": {
+   "kept": 3,
+   "kept_share": 0.75,
+   "n": 4
+  },
+  "excluded": {
+   "cancelled": 1,
+   "dated": 1,
+   "no_window": 1,
+   "non_driver_close": 1,
+   "open": 1,
+   "returned": 1
+  },
+  "kept": 3,
+  "kept_share": 0.75,
+  "n": 4,
+  "passes": false,
+  "sample": 10,
+  "target": 0.9
+ },
+ "latest_fit": {
+  "data_from": "2026-10-05T00:00:00+00:00",
+  "data_to": "2026-11-02T00:00:00+00:00",
+  "fitted_at": "2026-11-02T00:30:00+00:00",
+  "monitoring": {
+   "by_bottles_band": {
+    "0-5": {
+     "n": 52,
+     "ratio": 0.94
+    },
+    "6-10": {
+     "n": 19,
+     "ratio": 1.32
+    }
+   },
+   "by_hour_band": {
+    "11-13": {
+     "n": 41,
+     "ratio": 1.08
+    },
+    "13-15": {
+     "n": 37,
+     "ratio": 1.21
+    }
+   }
+  }
+ },
+ "median_minutes_early": 562.5,
+ "median_window_minutes": {
+  "overall": 120.0,
+  "placed_7_to_15": 120.0
+ },
+ "s2": {
+  "engine_median_error_minutes": 12.0,
+  "engine_n": 1,
+  "google_median_error_minutes": 18.5,
+  "kept_share": 0.5,
+  "n": 2,
+  "within_15_share": 0.5
+ },
+ "s2_stale_estimate": {
+  "engine_median_error_minutes": 10.0,
+  "kept_share": 1.0,
+  "n": 1,
+  "within_15_share": 0.0
+ },
+ "start_date": "2026-11-03",
+ "today_delivered_today_share": 0.6666666666666666,
+ "tomorrow_delivered_same_day_share": 1.0
+}

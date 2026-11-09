@@ -36,6 +36,7 @@ from business_app.utils.distance_matrix import STRAIGHT_LINE_SOURCE
 from business_app.utils.timezone_utils import ensure_utc
 from shared import business_config
 from shared.enums import AssignmentSource, DeliveryStatus, OrderStatus
+from tests.conftest import SPEC_TUNABLES
 from tests.unit.test_google_routes_daily_cap import FakeCallCounterRedis
 
 pytestmark = pytest.mark.unit
@@ -58,18 +59,6 @@ CLEAR_OF_THE_HOURLY_LEGS = 2
 # inclusive p90 of 29 x 1.0 and one 4.33 is 1.0. Without it, 29 legs leave the seed: 1.3.
 THIRTY_LEGS = (30 * 1.0 + 20 * 1.3) / 50
 SEED = 1.3
-
-# The values the spec's worked numbers are stated in (§4.8 S2). Pinned per test so a deployed override cannot move
-# them; the shipped defaults are pinned against these by the last test of the file.
-SPEC_TUNABLES = {
-    "ETA_POSITION_MAX_AGE_SECONDS": 600,
-    "ETA_OFF_ROAD_MINUTES": 5,
-    "ETA_HEADROOM_SEED": 1.3,
-    "ETA_HEADROOM_MIN_LEGS": 30,
-    "ETA_HEADROOM_PRIOR_LEGS": 20,
-    "ETA_STALE_DOOR_ALLOWANCE_MINUTES": 30,
-    "ETA_STALE_DEPOT_ALLOWANCE_MINUTES": 20,
-}
 
 
 class FakeGoogle:
@@ -120,12 +109,6 @@ class OurEngine:
         zero = {"distance_km": 0.0, "duration_minutes": 0.0}
         leg = {"distance_km": 6.4, "duration_minutes": 11.0}
         return {(0, 0): zero, (0, 1): leg, (1, 0): leg, (1, 1): zero}, self.source
-
-
-@pytest.fixture
-def spec_tunables(app, monkeypatch):
-    for name, value in SPEC_TUNABLES.items():
-        monkeypatch.setitem(app.config, name, value)
 
 
 @pytest.fixture
@@ -384,10 +367,10 @@ class TestRecordingTheOnTheWayTap:
     def test_a_stale_depot_stamp_takes_the_depot_allowance(
         self, db, sample_user, delivery_driver, google, matrix, depot
     ):
-        """Loaded up 40 minutes ago: drivers mostly tap after they have already left, so a depot position needs less
+        """Loaded up 20 minutes ago: drivers mostly tap after they have already left, so a depot position needs less
         than a door does. 11 + 20."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=40), position=DEPOT_AT)
+        _driver_last_seen(db, delivery_driver, at=TAP - timedelta(minutes=20), position=DEPOT_AT)
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
@@ -397,70 +380,64 @@ class TestRecordingTheOnTheWayTap:
         assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
 
     @pytest.mark.parametrize(
-        "last_seen",
+        "last_seen, position",
         [
-            pytest.param(TAP - timedelta(days=1), id="a-door-from-yesterday"),
-            pytest.param(None, id="never-shared"),
+            pytest.param(TAP - timedelta(minutes=31), DRIVER_AT, id="31-minutes-old"),
+            pytest.param(TAP - timedelta(minutes=40), DEPOT_AT, id="a-load-40-minutes-ago"),
+            pytest.param(TAP - timedelta(days=1), DRIVER_AT, id="a-door-from-yesterday"),
+            pytest.param(None, DRIVER_AT, id="never-shared"),
         ],
     )
-    def test_no_position_from_today_starts_the_leg_at_the_depot(
-        self, db, sample_user, delivery_driver, google, matrix, depot, last_seen
+    def test_no_position_from_the_last_thirty_minutes_gets_no_time(
+        self, db, sample_user, delivery_driver, google, matrix, depot, last_seen, position
     ):
-        """Yesterday's last door says nothing of today: a driver's day starts at the warehouse."""
+        """Owner rule 2026-11-09: a position more than 30 minutes old (DRIVER_LOCATION_FRESH_SECONDS), or none at all,
+        says too little of where the driver is: the customer is told "On the way" with no time. Neither Google nor our
+        engine is asked, and no shadow is kept."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
-        _driver_last_seen(db, delivery_driver, at=last_seen)
+        _driver_last_seen(db, delivery_driver, at=last_seen, position=position)
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert shown.source == "stale_estimate"
-        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=31)
-        assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
-        assert google.requests == []
+        assert (shown.source, shown.expected_at, shown.window_end) == ("stale_position", None, None)
+        assert google.requests == [] and matrix.asks == []
+        assert _promises(MODEL_OSRM_SHADOW) == []
 
-    def test_a_driver_with_no_profile_starts_the_leg_at_the_depot(
-        self, db, sample_user, delivery_driver, google, matrix, depot
-    ):
+    def test_a_driver_with_no_profile_gets_no_time(self, db, sample_user, delivery_driver, google, matrix, depot):
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
         tap = _tap(db, delivery, delivery_driver)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert ensure_utc(shown.window_end) == TAP + timedelta(minutes=31)
-        assert matrix.asks == [([DEPOT_AT, DOOR_AT], True)]
+        assert (shown.source, shown.window_end) == ("stale_position", None)
+        assert matrix.asks == []
 
     @pytest.mark.parametrize(
-        "tap_at, last_seen, minutes, start",
+        "tap_at, last_seen",
         [
-            # 01:30 on the 4th in Tashkent; the position is from 23:30 on the 3rd, the same UTC date.
+            pytest.param(TAP, TAP - timedelta(minutes=30), id="30-minutes-old"),
+            # 00:10 on the 4th in Tashkent; the position is from 23:50 on the 3rd: 20 minutes old, across midnight.
             pytest.param(
-                datetime(2026, 11, 3, 20, 30, tzinfo=UTC),
-                datetime(2026, 11, 3, 18, 30, tzinfo=UTC),
-                31,
-                DEPOT_AT,
-                id="same-utc-date-but-yesterday-in-tashkent",
-            ),
-            # 23:30 on the 3rd in Tashkent; the position is from 00:30 on the 3rd, the UTC date before.
-            pytest.param(
-                datetime(2026, 11, 3, 18, 30, tzinfo=UTC),
-                datetime(2026, 11, 2, 19, 30, tzinfo=UTC),
-                41,
-                DRIVER_AT,
-                id="another-utc-date-but-today-in-tashkent",
+                datetime(2026, 11, 3, 19, 10, tzinfo=UTC),
+                datetime(2026, 11, 3, 18, 50, tzinfo=UTC),
+                id="across-midnight",
             ),
         ],
     )
-    def test_today_is_the_tashkent_day(
-        self, db, sample_user, delivery_driver, google, matrix, depot, tap_at, last_seen, minutes, start
+    def test_a_position_up_to_thirty_minutes_old_is_priced_from_where_it_is(
+        self, db, sample_user, delivery_driver, google, matrix, depot, tap_at, last_seen
     ):
+        """At most 30 minutes old, the position stands, whatever the calendar day: our engine's 11 minutes from it, plus
+        the 30-minute allowance from a door."""
         delivery = _order_on_its_way(db, sample_user, delivery_driver)
         _driver_last_seen(db, delivery_driver, at=last_seen)
         tap = _tap(db, delivery, delivery_driver, at=tap_at)
 
         shown = DeliveryEtaService().record_on_the_way(tap.id)
 
-        assert ensure_utc(shown.window_end) == tap_at + timedelta(minutes=minutes)
-        assert matrix.asks == [([start, DOOR_AT], True)]
+        assert (shown.source, ensure_utc(shown.window_end)) == ("stale_estimate", tap_at + timedelta(minutes=41))
+        assert matrix.asks == [([DRIVER_AT, DOOR_AT], True)]
 
     @pytest.mark.parametrize(
         "source, error",
@@ -791,11 +768,15 @@ class TestHeadroom:
     def test_a_stale_estimate_does_not_teach_headroom(self, db, sample_user, delivery_driver, google, matrix):
         """Thirty stale legs, recorded by the real writer, each a real 23-minute drive that an hour's gap leaves whole.
         Headroom is the factor on Google's time, and a stale leg has none: our own engine priced it, from a position that
-        was no longer the driver's. Taught from the engine's 11 minutes, headroom would rise to 1.5."""
-        _driver_last_seen(db, delivery_driver, at=NOW - timedelta(days=3))
+        was no longer the driver's. Taught from the engine's 11 minutes, headroom would rise to 1.5. Each tap finds a
+        position 20 minutes old: stale, but recent enough to be priced from (30 minutes at most)."""
+        person = _driver_last_seen(db, delivery_driver, at=None)
         for i in range(30):
             delivery = _order_on_its_way(db, sample_user, delivery_driver, number=f"STALE-{i:04d}")
             tapped_at = NOW - timedelta(hours=i + 1)
+            person.current_location_lat, person.current_location_lng = DRIVER_AT
+            person.last_location_update = tapped_at - timedelta(minutes=20)
+            db.session.commit()
             shown = DeliveryEtaService().record_on_the_way(_tap(db, delivery, delivery_driver, at=tapped_at).id)
             assert shown.source == "stale_estimate"
             _moved(
@@ -1417,7 +1398,7 @@ class TestThePostgresPlanShape:
         select_list = _outside_parentheses(latest_tap.removeprefix("SELECT "), " FROM ")[0]
         [column] = [item for item in _outside_parentheses(select_list, ", ") if item.endswith(" AS uninterrupted")]
         rule_on_track = _outside_parentheses(column.removesuffix(" AS uninterrupted"), " AND ")
-        # _leg_ratios: the rule's two conjuncts stand at the top of the legs query's WHERE, beside its own filters.
+        # s2_leg_rows: the rule's two conjuncts stand at the top of the legs query's WHERE, beside its own filters.
         [_, where] = _outside_parentheses(legs, " WHERE ")
         rule_in_headroom = [part for part in _outside_parentheses(where, " AND ") if part.startswith("NOT (EXISTS")]
         for rule, statement in ((rule_on_track, latest_tap), (rule_in_headroom, legs)):

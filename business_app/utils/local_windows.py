@@ -80,6 +80,48 @@ def window_bounds(start_date: date, end_date: date) -> Tuple[datetime, datetime]
     return local_day_bounds(start_date)[0], local_day_bounds(end_date)[1]
 
 
+# The delivery plan's day (honest-ETA spec §6) is not the calendar day: capacity runs 05:00 to 05:00 local, because a
+# driver's evening drop at 00:40 still closes the day it started in. These three are that one definition. The calendar
+# day stays for what a customer is told ("today", the promised date, a window edge) and for today's stored route
+# (`_driver_day_start_utc`).
+WORK_DAY_START_HOUR = 5
+
+
+def work_day_of(instant: datetime) -> date:
+    """The plan day `instant` belongs to: the local date of `instant` less five hours.
+
+    04:59 local on the 4th is still the 3rd's plan day, and 05:00 opens the 4th's. A naive `instant` is UTC.
+    """
+    return local_date(instant - timedelta(hours=WORK_DAY_START_HOUR))
+
+
+def work_day_bounds(day: date) -> Tuple[datetime, datetime]:
+    """`[start, end)` in UTC for one plan day: 05:00 local on `day` to 05:00 local on the next.
+
+    The inverse of `work_day_of`: an instant is in `work_day_bounds(day)` exactly when `work_day_of` says `day`.
+    """
+    start, end = local_day_bounds(day)
+    shift = timedelta(hours=WORK_DAY_START_HOUR)
+    return start + shift, end + shift
+
+
+def minutes_past_local_midnight(instant: datetime, day: date) -> int:
+    """Whole minutes from `day`'s local midnight to `instant`, the seconds dropped.
+
+    Past 1440 for the small hours of the next calendar day, which still belong to the plan day of `day`: 00:40 on the
+    5th is 1480 measured from the 4th. So a plan day's start and end sit on one scale. A naive `instant` is UTC.
+    """
+    return int((ensure_utc(instant) - local_day_bounds(day)[0]).total_seconds() // 60)
+
+
+def local_instant_at_minutes(day: date, minutes: float) -> datetime:
+    """The UTC instant `minutes` past `day`'s local midnight: the inverse of `minutes_past_local_midnight`.
+
+    Past 1440 is the small hours of the next calendar day, as there: 1480 measured from the 4th is 00:40 on the 5th.
+    """
+    return local_day_bounds(day)[0] + timedelta(minutes=minutes)
+
+
 def days_inclusive(start_date: date, end_date: date) -> int:
     """How many local calendar days the inclusive range covers — never below 1.
 

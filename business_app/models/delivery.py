@@ -1,11 +1,33 @@
-from datetime import datetime, UTC
+from datetime import date, datetime, time, timedelta, UTC
 from decimal import Decimal
+from typing import Optional, Tuple
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric
 from sqlalchemy.orm import relationship
 import uuid
 from business_app import db
+from business_app.utils.delivery_window import window_edge_utc
 from shared.enums import DeliveryStatus
 from business_app.models import TimestampMixin
+
+
+def shift_window_on(
+    day: date, start_hhmm: Optional[str], end_hhmm: Optional[str]
+) -> Optional[Tuple[datetime, datetime]]:
+    """The roster shift that starts on the local calendar date `day`, as a UTC (start, end) pair.
+
+    `working_hours_start` / `working_hours_end` are "HH:MM" on the business's wall clock (DISPLAY_TIMEZONE), so each
+    edge goes through `window_edge_utc`. An end before the start is an overnight shift: it ends on `day + 1`. An end
+    equal to the start is an empty shift, which is no shift (None), as is a NULL or unparseable roster: never a guess.
+    Auto-assign (`is_working_now`) and the ETA plan's supply (`eta_plan.supply`) both read a shift through here.
+    """
+    try:
+        start, end = time.fromisoformat(start_hhmm), time.fromisoformat(end_hhmm)
+    except (TypeError, ValueError):
+        return None
+    if end == start:
+        return None
+    end_day = day + timedelta(days=1) if end < start else day
+    return window_edge_utc(day, start), window_edge_utc(end_day, end)
 
 
 class Delivery(db.Model, TimestampMixin):
@@ -388,28 +410,29 @@ class DeliveryPerson(db.Model, TimestampMixin):
 
     @property
     def is_working_now(self):
-        """Check if delivery person is currently working"""
+        """Check if delivery person is currently working: inside the roster shift of today's or yesterday's local
+        date (`shift_window_on`), both ends inclusive.
+
+        Yesterday's counts too, so a 22:00-06:00 roster still works at 01:00. A NULL, unparseable or empty roster is
+        no shift, so the driver is not working rather than raising inside auto-assign.
+        """
         if not self.is_active or not self.is_available:
             return False
-
-        from datetime import time
 
         from business_app.utils.timezone_utils import get_utc_now, utc_to_local
         from shared.constants import DISPLAY_TIMEZONE
 
         # working_hours_start/end are authored in the business's local
-        # (DISPLAY_TIMEZONE) wall clock, so "now" must be compared in that same
-        # zone — not UTC, which shifted the whole shift window by the offset and
+        # (DISPLAY_TIMEZONE) wall clock, so "today" must be the local date —
+        # not UTC's, which shifted the whole shift window by the offset and
         # made drivers look off-shift during their real morning hours.
-        now = utc_to_local(get_utc_now(), DISPLAY_TIMEZONE).time()
-        start_time = time.fromisoformat(self.working_hours_start)
-        end_time = time.fromisoformat(self.working_hours_end)
-
-        # Check if current time is within working hours
-        if start_time <= end_time:
-            return start_time <= now <= end_time
-        else:  # Night shift (crosses midnight)
-            return now >= start_time or now <= end_time
+        now = get_utc_now()
+        today = utc_to_local(now, DISPLAY_TIMEZONE).date()
+        for day in (today - timedelta(days=1), today):
+            shift = shift_window_on(day, self.working_hours_start, self.working_hours_end)
+            if shift is not None and shift[0] <= now <= shift[1]:
+                return True
+        return False
 
     def update_location(self, lat: float, lng: float, accuracy_m: float = None):
         """Update current location.

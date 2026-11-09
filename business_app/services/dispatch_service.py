@@ -248,7 +248,7 @@ class DispatchService:
         that have an ungeocoded stop.
 
         Membership comes from ownership, not from `optimized_order` — see
-        `_sequence_active_stops`. Without that, the polyline, `distance_km`,
+        `sequence_active_stops`. Without that, the polyline, `distance_km`,
         `duration_minutes` and every per-leg figure were measured over stops
         the driver no longer had.
         """
@@ -261,14 +261,14 @@ class DispatchService:
             .all()
         )
         stops: List[Tuple[int, Tuple[float, float]]] = []
-        for delivery in cls._sequence_active_stops(deliveries, route.optimized_order):
+        for delivery in cls.sequence_active_stops(deliveries, route.optimized_order):
             address = delivery.order.delivery_address if delivery.order else None
             if address and address.latitude is not None and address.longitude is not None:
                 stops.append((delivery.id, (float(address.latitude), float(address.longitude))))
         return stops
 
     @staticmethod
-    def _sequence_active_stops(
+    def sequence_active_stops(
         deliveries: List[Delivery], optimized_order, *, include_unsequenced: bool = True
     ) -> List[Delivery]:
         """Order a driver's ACTIVE deliveries by their slot in `optimized_order`.
@@ -298,6 +298,9 @@ class DispatchService:
         the board refreshes every 30 seconds and rows must not shuffle.
         `include_unsequenced=False` drops that tail instead, for a route row
         that is not describing the plan currently being executed.
+
+        Public: the ETA engine's demand (`eta_plan.demand`) reads a driver's
+        stops in the stored route's order through this same call.
         """
         position_of = {}
         for index, raw_id in enumerate(optimized_order or []):
@@ -578,7 +581,7 @@ class DispatchService:
             pinned = {str(k): int(v) for k, v in ((row.pinned_stops if row else None) or {}).items()}
             stops = []
             for position, delivery in enumerate(
-                cls._sequence_active_stops(
+                cls.sequence_active_stops(
                     by_driver.get(driver_id, []),
                     row.optimized_order if row else None,
                     # Appending an owned-but-unsequenced stop is a statement

@@ -1,22 +1,24 @@
 """The customer's arrival promise once the driver is on the way.
 
-Honest-ETA spec 2026-11-03 §4.8 (S2 and S3), §4.10 and §4.12a. This is the ONE code that writes or reads
-`delivery_promises`:
+Honest-ETA spec 2026-11-03 §4.8 (S2 and S3), §4.10 and §4.12a. This is the one code for S2 tap promises, the
+`delivery_promises` rows of an `in_transit` tap, written and read here; the S1 engine rows live in `eta_plan`:
 
 - `record_on_the_way(history_id)` runs in the in-transit notification worker. For the driver's `in_transit` tap, from
   a position at most `ETA_POSITION_MAX_AGE_SECONDS` old (`_start_of_leg`), it makes one Google Routes TRAFFIC_AWARE
   call (`google_routes.get_traffic_aware_leg`, under the daily cap) and promises "by tap + ETA_OFF_ROAD_MINUTES +
-  headroom x G", G being Google's drive time, in the SHOWN row (`google_tap_v1`). From an older position it makes no
-  call and promises "by tap + our own engine's minutes + an allowance" in the same row. Beside it goes our own engine's
+  headroom x G", G being Google's drive time, in the SHOWN row (`google_tap_v1`). From an older position, up to 30
+  minutes old, it makes no call and promises "by tap + our own engine's minutes + an allowance" in the same row; from
+  one older still, or none, it promises no time at all. Beside it goes our own engine's
   time for the same leg, a HIDDEN row (`osrm_shadow_v1`): the yardstick, never shown on its own. Only the delivery's own
   driver's tap earns minutes (§4.8 S2): a mark someone else made (an admin's, from the Deliveries page or a bulk
   action) gets a shown row without minutes, no Google call and no shadow.
-- `headroom(now=)` learns the factor on G from the legs of the last four weeks.
+- `headroom(now=)` learns the factor on G from the legs of the last four weeks. `s2_leg_rows(start=, end=)` is the
+  one query of those legs; the admin accuracy report (`eta_plan.report`) judges the same legs.
 - `customer_eta(order, now=)` reads the promise back as finished fields (`CustomerEta.as_payload`). The Track payload
   and the delivery message publish them; the bot, the website and the email only format them.
 
 Only the shown promise of the delivery's LATEST real tap is ever read, so a delivery that failed and went out again
-never shows its earlier trip's minutes. A real move into a status is one whose old status differs (`_moved_into`):
+never shows its earlier trip's minutes. A real move into a status is one whose old status differs (`moved_into`):
 a reassign row (in_transit -> in_transit, arrived -> arrived) is neither a tap nor an arrival. A promise ends when its
 leg is interrupted (`_leg_uninterrupted`, §4.8 S2): the delivery is handed to another driver while on its way (an
 in_transit -> in_transit row), or its driver taps in_transit on another stop. From then on the customer is told "on
@@ -27,10 +29,9 @@ from __future__ import annotations
 
 import logging
 import math
-import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from flask import current_app
 from sqlalchemy import and_, func, select
@@ -41,14 +42,14 @@ from business_app import db
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.delivery_promise import MODEL_GOOGLE_TAP, MODEL_OSRM_SHADOW, DeliveryPromise
 from business_app.models.order import Order
+from business_app.services.eta_plan.common import minutes_between, moved_into, percentile
 from business_app.services.maps_service import MapsService
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.route_optimization_service import RouteOptimizationService
 from business_app.utils import google_routes
 from business_app.utils.distance_matrix import STRAIGHT_LINE_SOURCE
 from business_app.utils.helpers import get_warehouse_coordinates
-from business_app.utils.local_windows import local_date
-from business_app.utils.timezone_utils import ensure_utc, get_utc_now, utc_to_local
+from business_app.utils.timezone_utils import ensure_utc, ensure_utc_or_none, get_utc_now, utc_to_local
 from shared.constants import DISPLAY_TIMEZONE, ETA_ATTRIBUTION_GOOGLE, ETA_STAGE_ARRIVED, ETA_STAGE_ON_THE_WAY
 from shared.enums import DeliveryStatus
 
@@ -61,7 +62,7 @@ Point = Tuple[float, float]
 SOURCE_GOOGLE_TRAFFIC = "google_traffic"
 SOURCE_STALE_ESTIMATE = "stale_estimate"  # position too old for Google: our own engine's minutes plus an allowance
 SOURCE_GOOGLE_UNAVAILABLE = "google_unavailable"  # asked, no answer: no key, the day's cap spent, or Google failed
-SOURCE_STALE_POSITION = "stale_position"  # position too old for Google, and our own engine had no real answer either
+SOURCE_STALE_POSITION = "stale_position"  # no position from the last 30 minutes, or our engine had no real answer
 SOURCE_NOT_DRIVER_TAP = "not_driver_tap"  # someone other than the delivery's driver tapped it, so Google was not asked
 SOURCE_NO_DESTINATION = "no_destination"  # the order's address has no coordinates
 SOURCE_ERROR = "error"  # the shadow's matrix lookup failed
@@ -110,9 +111,24 @@ class _LegStart:
     from_depot: bool = False  # stale, and the point is the depot
 
 
-def _moved_into(history, status: DeliveryStatus):
-    """A real move into `status` on `DeliveryStatusHistory` (or an alias of it). A reassign row keeps old == new."""
-    return and_(history.new_status == status, history.old_status != status)
+class S2Leg(NamedTuple):
+    """One leg of a shown S2 promise, as `DeliveryEtaService.s2_leg_rows` reads it. Every instant is aware UTC."""
+
+    tapped_at: datetime  # the driver's real in_transit tap
+    source: str  # SOURCE_GOOGLE_TRAFFIC, or SOURCE_STALE_ESTIMATE: the position was too old for Google
+    expected_at: Optional[datetime]  # the tap plus Google's raw drive time; None for a stale estimate
+    window_end: Optional[datetime]  # the "by" time the customer was told
+    arrived_at: Optional[datetime]  # the delivery's first real arrival after the tap by its own driver
+    next_tap_at: Optional[datetime]  # the delivery's next real in_transit tap, by anyone
+    shadow_expected_at: Optional[datetime]  # our own engine's time for the same leg (the hidden shadow row)
+
+    @property
+    def arrival(self) -> Optional[datetime]:
+        """The arrival that ended this tap's own trip: `arrived_at` when it came before the delivery's next tap, else
+        None. An arrival after a later tap (failed, then out again) ended that later trip, never this one."""
+        if self.arrived_at is None or (self.next_tap_at is not None and self.arrived_at >= self.next_tap_at):
+            return None
+        return self.arrived_at
 
 
 def _leg_uninterrupted(tap, delivery, *, before=None):
@@ -124,7 +140,7 @@ def _leg_uninterrupted(tap, delivery, *, before=None):
     after the tap's `changed_at` (and strictly before `before`, when it is given) that is either
     - (a) a hand-over: the tapped delivery gets an in_transit -> in_transit row, an admin reassign while it is on its
       way. The tap's promise came from the previous driver's position;
-    - (b) its driver setting off elsewhere: a real move into in_transit (`_moved_into`, so a reassign row never
+    - (b) its driver setting off elsewhere: a real move into in_transit (`moved_into`, so a reassign row never
       counts) on ANOTHER delivery, made by the tapped delivery's driver: the row's `changed_by` is the tapped
       delivery's current `delivery_person_id`, as `first_arrival_at` pairs an arrival. The driver reaches the newer
       stop first, so the earlier stop's leg is no longer one drive. History rows never change, so an ended promise
@@ -132,7 +148,7 @@ def _leg_uninterrupted(tap, delivery, *, before=None):
       marking it in transit) does not count, and a delivery with no driver is interrupted by (a) alone.
 
     Built as NOT EXISTS (a) AND NOT EXISTS (b), each keyed on one column (the tapped delivery; the driver), so that in
-    the WHERE of `_leg_ratios` Postgres plans them as two hash anti-joins. A NOT over one EXISTS of (a) OR (b), or over
+    the WHERE of `s2_leg_rows` Postgres plans them as two hash anti-joins. A NOT over one EXISTS of (a) OR (b), or over
     an OR of two EXISTS, is instead checked leg by leg against in-transit rows; TestThePostgresPlanShape guards the
     shape. Keyed on the driver, (b) still checks each leg against all of that driver's real in_transit rows ever. In
     `customer_eta` the clause is a select-list SubPlan, which an index on `changed_at` would bound; the anti-join would
@@ -163,24 +179,15 @@ def _leg_uninterrupted(tap, delivery, *, before=None):
         .where(
             elsewhere.changed_by == delivery.delivery_person_id,
             # Mirrors the rule's "another stop"; redundant for both readers (a latest tap has no later tap on its own
-            # delivery, and `_leg_ratios`' next-tap check already voids a leg re-tapped before its arrival).
+            # delivery, and `S2Leg.arrival`'s next-tap check already voids a leg re-tapped before its arrival).
             elsewhere.delivery_id != tap.delivery_id,
-            _moved_into(elsewhere, DeliveryStatus.IN_TRANSIT),
+            moved_into(elsewhere, DeliveryStatus.IN_TRANSIT),
             *within_the_leg(elsewhere),
         )
         .correlate(tap, delivery)
         .exists()
     )
     return and_(~handed_over, ~set_off_elsewhere)
-
-
-def _minutes(start: datetime, end: datetime) -> float:
-    return (end - start).total_seconds() / 60.0
-
-
-def _p90(values: List[float]) -> float:
-    """The 90th percentile, interpolated as Postgres's percentile_cont(0.9) is (the ETA analysis SQL's own)."""
-    return statistics.quantiles(values, n=10, method="inclusive")[-1]
 
 
 class DeliveryEtaService:
@@ -195,15 +202,16 @@ class DeliveryEtaService:
         shadow is kept. The leg starts where `_start_of_leg` places the driver. From a fresh position Google is asked,
         and the shown row carries its time. From a stale one Google is not asked: the row says SOURCE_STALE_ESTIMATE,
         with a promise of our own engine's minutes plus an allowance and no `expected_at`, which is Google's time and
-        teaches headroom, or SOURCE_STALE_POSITION with no minutes when our engine has no real answer. Idempotent: a tap
-        already recorded returns its row with no provider call, so the notification worker re-running the tap (Celery
-        acks_late) neither asks Google again nor writes a second row. Commits. When a concurrent run of the same tap
-        commits first, the unique (tap, model) index refuses these rows; the session is rolled back and the other run's
-        shown row is returned.
+        teaches headroom, or SOURCE_STALE_POSITION with no minutes when our engine has no real answer. With no position
+        from the last 30 minutes the row says SOURCE_STALE_POSITION and nothing is asked, so no shadow is kept.
+        Idempotent: a tap already recorded returns its row with no provider call, so the notification worker re-running
+        the tap (Celery acks_late) neither asks Google again nor writes a second row. Commits. When a concurrent run of
+        the same tap commits first, the unique (tap, model) index refuses these rows; the session is rolled back and the
+        other run's shown row is returned.
         """
         tap = DeliveryStatusHistory.query.filter(
             DeliveryStatusHistory.id == history_id,
-            _moved_into(DeliveryStatusHistory, DeliveryStatus.IN_TRANSIT),
+            moved_into(DeliveryStatusHistory, DeliveryStatus.IN_TRANSIT),
         ).first()
         if tap is None:
             return None
@@ -224,12 +232,15 @@ class DeliveryEtaService:
             shown.source = SOURCE_NO_DESTINATION
         else:
             start = self._start_of_leg(tap.delivery, tap_at)
-            engine_minutes, engine_source = self._engine_time(tap, start.point, destination)
-            if start.fresh:
-                self._promise_google_time(shown, now, tap_at, start.point, destination)
+            if start is None:
+                shown.source = SOURCE_STALE_POSITION  # no position from the last 30 minutes: "On the way", no time
             else:
-                self._promise_engine_time(shown, tap_at, start, engine_minutes)
-            rows.append(self._shadow_row(tap, now, tap_at, engine_minutes, engine_source))
+                engine_minutes, engine_source = self._engine_time(tap, start.point, destination)
+                if start.fresh:
+                    self._promise_google_time(shown, now, tap_at, start.point, destination)
+                else:
+                    self._promise_engine_time(shown, tap_at, start, engine_minutes)
+                rows.append(self._shadow_row(tap, now, tap_at, engine_minutes, engine_source))
 
         delivery_id, source, window_end = shown.delivery_id, shown.source, shown.window_end
         db.session.add_all(rows)
@@ -293,7 +304,7 @@ class DeliveryEtaService:
             headroom = seed
         else:
             prior = config["ETA_HEADROOM_PRIOR_LEGS"]
-            headroom = (legs * _p90(ratios) + prior * seed) / (legs + prior)
+            headroom = (legs * percentile(ratios, 0.9) + prior * seed) / (legs + prior)
         return max(_HEADROOM_FLOOR, headroom)
 
     def customer_eta(self, order: Order, *, now: datetime) -> CustomerEta:
@@ -320,7 +331,7 @@ class DeliveryEtaService:
         latest_tap = (
             db.session.query(tap.id, _leg_uninterrupted(tap, Delivery).label("uninterrupted"))
             .join(Delivery, Delivery.id == tap.delivery_id)
-            .filter(tap.delivery_id == delivery.id, _moved_into(tap, DeliveryStatus.IN_TRANSIT))
+            .filter(tap.delivery_id == delivery.id, moved_into(tap, DeliveryStatus.IN_TRANSIT))
             .order_by(tap.changed_at.desc(), tap.id.desc())
             .first()
         )
@@ -387,55 +398,55 @@ class DeliveryEtaService:
         )
 
     @staticmethod
-    def _start_of_leg(delivery: Delivery, tap_at: datetime) -> _LegStart:
+    def _start_of_leg(delivery: Delivery, tap_at: datetime) -> Optional[_LegStart]:
         """Where the leg of the driver's tap starts, from their position on record: every own Arrived or Delivered tap
         moves it to that door (`DeliveryService._capture_arrival_position`), loading or returning bottles to the depot
         (`StaffService.anchor_driver_at_warehouse`) and a shared location to where they are.
 
         - At most ETA_POSITION_MAX_AGE_SECONDS old at the tap: fresh, that position.
-        - Older, from the tap's Tashkent day: stale, that position, `from_depot` when it is the depot's stamp.
-        - None from that day: stale, from the depot, where a driver's day starts.
+        - At most DRIVER_LOCATION_FRESH_SECONDS (30 minutes) old, the rule route optimisation and the ETA plan read:
+          stale, that position, `from_depot` when it is the depot's stamp.
+        - Older, or none: None. It says too little of where the driver is to promise a time from it (owner rule
+          2026-11-09).
 
         Read as the worker finds it: the row holds one value, so a position stamped since the tap counts as fresh. The
         worker runs within a second of the tap.
         """
         person = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-        depot = get_warehouse_coordinates()
-        if (
-            person is None
-            or person.current_location_lat is None
-            or person.current_location_lng is None
-            or person.last_location_update is None
-        ):
-            return _LegStart(depot, fresh=False, from_depot=True)
+        if RouteOptimizationService.location_status_for_person(person, now=tap_at) != "fresh":
+            return None
         seen_at = ensure_utc(person.last_location_update)
         position = (person.current_location_lat, person.current_location_lng)
         if seen_at >= tap_at - timedelta(seconds=current_app.config["ETA_POSITION_MAX_AGE_SECONDS"]):
             return _LegStart(position, fresh=True)
-        if local_date(seen_at) != local_date(tap_at):
-            return _LegStart(depot, fresh=False, from_depot=True)
-        return _LegStart(position, fresh=False, from_depot=position == depot)
+        return _LegStart(position, fresh=False, from_depot=position == get_warehouse_coordinates())
 
     @staticmethod
-    def _leg_ratios(*, now: datetime, off_road: float) -> List[float]:
-        """(actual drive - off-road minutes) / Google's drive time, for each leg headroom learns from.
+    def s2_leg_rows(*, start: datetime, end: datetime) -> List[S2Leg]:
+        """The legs of the S2 promises recorded from `start` to `end`, both inclusive: what headroom learns from and
+        what the accuracy report judges, read by this one query.
 
-        A leg is a shown `google_tap_v1` promise with a Google time, recorded in the four weeks before `now`. Its
-        drive ends at the delivery's first real `arrived` after the tap, tapped by the delivery's own driver, and
-        before the delivery's next real tap: an arrival that ended a later trip (failed, then out again) never
-        pairs with an earlier tap. A leg without such an arrival, with a drive outside 1-180 minutes, or with a
-        Google time under a minute teaches nothing. Nor does a leg interrupted strictly between its tap and that
-        arrival (`_leg_uninterrupted`, spec §4.8 S2): handed to another driver, or its driver set off to another stop,
-        so it was not one drive. An interruption after the arrival does not matter.
+        A leg is a shown `google_tap_v1` promise that named minutes: from Google (SOURCE_GOOGLE_TRAFFIC, with Google's
+        time in `expected_at`, the only legs headroom learns from) or, from a position too old for Google, from our
+        engine plus an allowance (SOURCE_STALE_ESTIMATE, no `expected_at`). Its `arrived_at` is the delivery's
+        first real `arrived` after the tap, tapped by the delivery's own driver; `next_tap_at` the delivery's next real
+        tap, by anyone (`S2Leg.arrival` keeps an arrival only when it came before that); `shadow_expected_at` our own
+        engine's time for the same tap, from its hidden `osrm_shadow_v1` row, when there is one (a LEFT join: a leg
+        without a shadow stays). A leg interrupted strictly between its tap and that arrival (`_leg_uninterrupted`,
+        spec §4.8 S2) is left out: handed to another driver, or its driver set off to another stop, so it was not one
+        drive, and its customer was told no minutes from then on. An interruption after the arrival does not matter.
+
+        `end` is inclusive so that headroom's "up to now" keeps a leg recorded at its own `now`, as it always has.
         """
         tap = aliased(DeliveryStatusHistory, name="tap")
         arrival = aliased(DeliveryStatusHistory, name="arrival")
         next_tap = aliased(DeliveryStatusHistory, name="next_tap")
+        shadow = aliased(DeliveryPromise, name="shadow")
         first_arrival_at = (
             select(func.min(arrival.changed_at))
             .where(
                 arrival.delivery_id == tap.delivery_id,
-                _moved_into(arrival, DeliveryStatus.ARRIVED),
+                moved_into(arrival, DeliveryStatus.ARRIVED),
                 arrival.changed_by == Delivery.delivery_person_id,
                 arrival.changed_at > tap.changed_at,
             )
@@ -446,37 +457,68 @@ class DeliveryEtaService:
             select(func.min(next_tap.changed_at))
             .where(
                 next_tap.delivery_id == tap.delivery_id,
-                _moved_into(next_tap, DeliveryStatus.IN_TRANSIT),
+                moved_into(next_tap, DeliveryStatus.IN_TRANSIT),
                 next_tap.changed_at > tap.changed_at,
             )
             .correlate(tap)
             .scalar_subquery()
         )
-        legs = (
-            db.session.query(tap.changed_at, DeliveryPromise.expected_at, first_arrival_at, next_tap_at)
+        rows = (
+            db.session.query(
+                tap.changed_at,
+                DeliveryPromise.source,
+                DeliveryPromise.expected_at,
+                DeliveryPromise.window_end,
+                first_arrival_at,
+                next_tap_at,
+                shadow.expected_at,
+            )
             .select_from(DeliveryPromise)
             .join(tap, tap.id == DeliveryPromise.delivery_status_history_id)
             .join(Delivery, Delivery.id == tap.delivery_id)
+            .outerjoin(
+                shadow,
+                and_(shadow.delivery_status_history_id == tap.id, shadow.model_version == MODEL_OSRM_SHADOW),
+            )
             .filter(
                 DeliveryPromise.model_version == MODEL_GOOGLE_TAP,
                 DeliveryPromise.shown.is_(True),
-                DeliveryPromise.expected_at.isnot(None),
-                DeliveryPromise.computed_at >= now - _HEADROOM_WINDOW,
-                # Bounded by the arrival the leg pairs with. With no arrival nothing interrupts it, and the leg is
-                # skipped below for want of one.
+                DeliveryPromise.source.in_((SOURCE_GOOGLE_TRAFFIC, SOURCE_STALE_ESTIMATE)),
+                DeliveryPromise.computed_at >= start,
+                DeliveryPromise.computed_at <= end,
+                # Bounded by the arrival the leg pairs with. With no arrival nothing interrupts it, and the leg has no
+                # `arrival` for want of one.
                 _leg_uninterrupted(tap, Delivery, before=first_arrival_at),
             )
             .all()
         )
+        return [
+            S2Leg(
+                tapped_at=ensure_utc(tapped_at),
+                source=source,
+                expected_at=ensure_utc_or_none(expected_at),
+                window_end=ensure_utc_or_none(window_end),
+                arrived_at=ensure_utc_or_none(arrived_at),
+                next_tap_at=ensure_utc_or_none(next_tap_at),
+                shadow_expected_at=ensure_utc_or_none(shadow_expected_at),
+            )
+            for tapped_at, source, expected_at, window_end, arrived_at, next_tap_at, shadow_expected_at in rows
+        ]
+
+    @staticmethod
+    def _leg_ratios(*, now: datetime, off_road: float) -> List[float]:
+        """(actual drive - off-road minutes) / Google's drive time, for each leg headroom learns from: the legs of the
+        four weeks before `now` (`s2_leg_rows`) with Google's time (a stale estimate has none) whose own trip arrived
+        (`S2Leg.arrival`). A leg with a drive outside 1-180 minutes, or with a Google time under a minute, teaches
+        nothing.
+        """
         ratios = []
-        for tapped_at, expected_at, arrived, next_tapped in legs:
-            if arrived is None:
+        for leg in DeliveryEtaService.s2_leg_rows(start=now - _HEADROOM_WINDOW, end=now):
+            arrived = leg.arrival
+            if leg.expected_at is None or arrived is None:
                 continue
-            if next_tapped is not None and ensure_utc(arrived) >= ensure_utc(next_tapped):
-                continue  # the first arrival ended a later trip: this tap's own trip never arrived
-            tapped_at = ensure_utc(tapped_at)
-            drive = _minutes(tapped_at, ensure_utc(arrived))
-            google_minutes = _minutes(tapped_at, ensure_utc(expected_at))
+            drive = minutes_between(leg.tapped_at, arrived)
+            google_minutes = minutes_between(leg.tapped_at, leg.expected_at)
             if not _DRIVE_MINUTES_MIN <= drive <= _DRIVE_MINUTES_MAX or google_minutes < _GOOGLE_MINUTES_MIN:
                 continue
             ratios.append((drive - off_road) / google_minutes)

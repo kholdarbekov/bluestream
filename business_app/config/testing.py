@@ -43,6 +43,10 @@ class TestingConfig(BaseConfig):
         "result_backend": "cache+memory://",
     }
 
+    # The capacity-aware ETA engine's kill switch (shared.business_config, honest-ETA Phase 2): off, so no commit a test
+    # makes requests a recompute. A test that drives the trigger switches it on in `app.config` for its own run.
+    ETA_SHADOW_ENGINE_ENABLED = False
+
     # CORS Configuration - Allow all for testing
     CORS_ORIGINS = ["*"]
 

@@ -13,13 +13,17 @@ tests/integration/test_delivery_promise_pg_constraints.py.
   from Google's drive time, or from our own engine's when the driver's position was too old for Google.
   The HIDDEN shadow row (`osrm_shadow_v1`) is our own engine's time for the same tap, kept to measure the
   shown promise against (§4.12a, "Accuracy data"). `shown` tells them apart.
+- The capacity-aware engine (`eta_plan`, honest-ETA Phase 2) writes a third kind, `engine_s1_v1`: the window it
+  expects for an order that is still waiting, HIDDEN (`shown` False) and tied to no tap
+  (`delivery_status_history_id` NULL). The Phase 1 readers look only at `google_tap_v1`. Only the engine fills
+  `promised_date`, the local day the promise names (migration 533fdcecfeff); a Phase 1 row leaves it NULL.
 - `(delivery_status_history_id, model_version)` is unique wherever the tap is known, so the notification
   worker re-running a tap cannot record it twice. A row that belongs to no tap is outside the index.
 - `source` says where the minutes came from, or why there are none (the SOURCE_* constants of
   business_app/services/delivery_eta_service.py). A SHOWN row: `google_traffic` (minutes from Google's
   live traffic), `stale_estimate` (position too old for Google: our own engine's minutes plus an allowance),
   `google_unavailable` (Google was asked and gave nothing: no key, the day's cap spent, or Google failed),
-  `stale_position` (position too old for Google, and our own engine had no real answer), `not_driver_tap`
+  `stale_position` (no position from the last 30 minutes, or our own engine had no real answer), `not_driver_tap`
   (someone other than the delivery's driver made the tap) or `no_destination` (the address has no
   coordinates). `google_traffic` and `stale_estimate` come with minutes (`window_end`), and only
   `google_traffic` has `expected_at`, which is Google's time. A HIDDEN shadow row: the distance matrix's own tier label
@@ -32,17 +36,25 @@ tests/integration/test_delivery_promise_pg_constraints.py.
   question the deploy runbook sends Google (§4.12a, "Storage").
 """
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, String, text
 
 from business_app import db
 from business_app.models.sales import _quoted
 from business_app.utils.timezone_utils import get_utc_now
 
 PROMISE_STAGES = ("waiting", "on_the_way")
-PROMISE_DAY_KINDS = ("today", "tomorrow", "date", "unconfirmed")
+# The label of the day a promise names (`windows.day_kind`), or "unconfirmed": no car can take the stop in the plan's
+# days, so it names no day (spec §4.7).
+DAY_KIND_TODAY = "today"
+DAY_KIND_TOMORROW = "tomorrow"
+DAY_KIND_DATE = "date"
+DAY_KIND_UNCONFIRMED = "unconfirmed"
+PROMISE_DAY_KINDS = (DAY_KIND_TODAY, DAY_KIND_TOMORROW, DAY_KIND_DATE, DAY_KIND_UNCONFIRMED)
 # The two models a tap writes: the one the customer is shown, and the shadow kept to judge it by.
 MODEL_GOOGLE_TAP = "google_tap_v1"
 MODEL_OSRM_SHADOW = "osrm_shadow_v1"
+# The model of the capacity-aware engine's rows (stage `waiting`, hidden, no tap).
+MODEL_ENGINE_S1 = "engine_s1_v1"
 
 _TAP_KNOWN = "delivery_status_history_id IS NOT NULL"
 
@@ -85,6 +97,9 @@ class DeliveryPromise(db.Model):
     window_start = Column(DateTime(timezone=True), nullable=True)
     window_end = Column(DateTime(timezone=True), nullable=True)
     day_kind = Column(String(12), nullable=True)
+    # The local calendar day the promise names (R11): the date of `expected_at` on the local clock, or the customer's
+    # own date for a dated row that has no time yet. NULL on a Phase 1 row, and on an unconfirmed engine row.
+    promised_date = Column(Date, nullable=True)
     stops_ahead = Column(Integer, nullable=True)
     day_started = Column(Boolean, nullable=True)
     drivers_working = Column(Integer, nullable=True)

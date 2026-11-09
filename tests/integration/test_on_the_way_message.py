@@ -57,13 +57,12 @@ from tests.integration.test_redispatch_reschedules_to_today import enqueued  # n
 from tests.integration.test_staff_delivery_ownership_guard import _bearer, _delivery, _driver
 from tests.integration.test_track_publishes_honest_eta import NOTHING_PROMISED, _eta, _track
 from tests.notification_send_fakes import BREVO_URL
-from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google, matrix and spec_tunables are fixtures
+from tests.unit.test_delivery_eta_service import (  # noqa: F401 -- google and matrix are fixtures
     DOOR_AT,
     DRIVER_AT,
     _promises,
     google,
     matrix,
-    spec_tunables,
 )
 from tests.unit.test_delivery_rescheduled_notification import (  # noqa: F401 -- live_send is a fixture
     TELEGRAM_URL,
@@ -330,8 +329,6 @@ def test_a_stale_position_still_says_when_it_arrives_on_our_own_engines_time(
     """A position more than 10 minutes old at the tap is not where the driver is, so Google is not asked. The customer
     is told a time all the same: our own engine's 11 minutes from that position, plus the 30-minute allowance, so the
     tap + 41. No "Live traffic: Google Maps" under it, as Google gave none of it."""
-    # The position is from the tap's own Tashkent day, also when this runs in the minutes after local midnight.
-    monkeypatch.setattr(delivery_eta_service, "local_date", lambda _at: date(2026, 11, 4))
     _connect_telegram(db, sample_user, language="en")
     driver, delivery = _stop(db, sample_user, number="ORD-ETA-STALE")
     _position_shared(db, driver, minutes_ago=11)
@@ -348,6 +345,27 @@ def test_a_stale_position_still_says_when_it_arrives_on_our_own_engines_time(
     [shown] = _promises(MODEL_GOOGLE_TAP)
     assert (shown.source, shown.expected_at) == ("stale_estimate", None)
     assert ensure_utc(shown.window_end) == ensure_utc(tap.changed_at) + timedelta(minutes=41)
+
+
+def test_a_position_older_than_thirty_minutes_says_on_the_way_without_a_time(
+    app, client, db, sample_user, live_send, google, matrix, worker  # noqa: F811
+):
+    """Owner rule 2026-11-09: a position more than 30 minutes old at the tap (DRIVER_LOCATION_FRESH_SECONDS) says too
+    little of where the driver is to promise a time from it. The customer is told the driver is on the way, without a
+    time; neither Google nor our engine is asked, and no shadow is kept."""
+    _connect_telegram(db, sample_user, language="en")
+    driver, delivery = _stop(db, sample_user, number="ORD-ETA-OLD")
+    _position_shared(db, driver, minutes_ago=31)
+
+    tap = _driver_taps(app, client, driver, delivery.id, "in_transit")
+    worker(tap)
+
+    [text] = _telegram_texts(live_send)
+    _went_out_without_a_time(text)
+    assert google.requests == [] and matrix.asks == []
+    [shown] = _promises(MODEL_GOOGLE_TAP)
+    assert (shown.source, shown.expected_at, shown.window_end) == ("stale_position", None, None)
+    assert _promises(MODEL_OSRM_SHADOW) == []
 
 
 @pytest.mark.parametrize(

@@ -72,6 +72,7 @@ def make_celery(app=None):
             "business_app.tasks.notification_tasks",
             "business_app.tasks.delivery_tasks",
             "business_app.tasks.delivery_monitoring_tasks",
+            "business_app.tasks.delivery_eta_tasks",
             "business_app.tasks.analytics_tasks",
             "business_app.tasks.subscription_tasks",
             "business_app.tasks.order_tasks",
@@ -160,6 +161,22 @@ def make_celery(app=None):
         "reenqueue-stale-pool-deliveries": {
             "task": "business_app.tasks.delivery_monitoring_tasks.reenqueue_stale_pool_deliveries",
             "schedule": crontab(minute="5-55/10"),
+        },
+        # Recompute the capacity-aware ETA plan and record its hidden promises (honest-ETA Phase 2), every ten minutes
+        # at :03, :13 ... :53, offset from the ten-minute jobs at :x0 and :x5. The backstop of the commit-driven
+        # requests, and the only trigger where Celery runs tasks eagerly (dev), since those requests publish nothing.
+        # Its time limit is the task's own, set on its decorator: the run lock's seconds (Ruling P6).
+        "recompute-eta-plan": {
+            "task": "business_app.tasks.delivery_eta_tasks.recompute_eta_plan",
+            "schedule": crontab(minute="3-53/10"),
+        },
+        # The weekly fit of the capacity-aware ETA plan's stop curve, depot line and window buckets (honest-ETA Phase 2,
+        # R13): Monday 05:30 local (celery.conf.timezone is DISPLAY_TIMEZONE), half an hour after the plan day that ends
+        # at 05:00 on Monday has closed, over the 28 plan days before it. Insert-only, so a second run does nothing.
+        "fit-eta-model": {
+            "task": "business_app.tasks.delivery_eta_tasks.fit_eta_model",
+            "schedule": crontab(hour=5, minute=30, day_of_week=1),
+            "options": {"time_limit": 600},
         },
         # Reconcile PENDING payments against the gateway every 15 minutes (PAY-007).
         # Polls payments older than PAYMENT_RECONCILE_AFTER_MINUTES (default 10 min)
@@ -537,6 +554,7 @@ celery.conf.task_routes = {
     "business_app.tasks.notification_tasks.*": {"queue": "notifications"},
     "business_app.tasks.delivery_tasks.*": {"queue": "delivery"},
     "business_app.tasks.delivery_monitoring_tasks.*": {"queue": "delivery"},
+    "business_app.tasks.delivery_eta_tasks.*": {"queue": "delivery"},
     "business_app.tasks.analytics_tasks.*": {"queue": "analytics"},
     "business_app.tasks.subscription_tasks.*": {"queue": "subscriptions"},
     "business_app.tasks.order_tasks.*": {"queue": "orders"},

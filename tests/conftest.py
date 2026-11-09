@@ -427,6 +427,57 @@ def block_external_side_effects(monkeypatch):
     monkeypatch.setattr(NotificationService, 'send_sms_to_phone', _mock_send_sms_to_phone, raising=True)
 
 
+@pytest.fixture(autouse=True)
+def no_eta_recompute_publish(request, monkeypatch):
+    """No test publishes a real recompute of the capacity-aware ETA plan (honest-ETA Phase 2, R15).
+
+    `_publish_recompute` (business_app/utils/eta_recompute_dispatch.py) is the ONE place a recompute is published,
+    and a commit that touches the plan's inputs reaches it through the after-commit drain whenever the kill switch
+    ETA_SHADOW_ENGINE_ENABLED is on. For every test it is a no-op instead: the call is checked against the real seam's
+    signature, so a caller that drifts from it still fails, and is then dropped.
+
+    Two ways back to a publish:
+    - a test that records what is published binds its own recorder to the seam (`recompute_requests` in
+      tests/integration/eta_plan_builders.py); its monkeypatch comes after this autouse one, so it wins;
+    - a test that drives the real seam down to `Task.apply_async` carries `@pytest.mark.real_eta_publish`, and this
+      fixture leaves the seam alone (`Task.apply_async` stays blocked by `block_external_side_effects` unless the test
+      records it itself).
+    """
+    if request.node.get_closest_marker("real_eta_publish") is not None:
+        return
+    import inspect
+
+    from business_app.utils import eta_recompute_dispatch
+
+    signature = inspect.signature(eta_recompute_dispatch._publish_recompute)
+
+    def _no_publish(*args, **kwargs):
+        signature.bind(*args, **kwargs)  # TypeError on a call the real seam would refuse
+
+    monkeypatch.setattr(eta_recompute_dispatch, '_publish_recompute', _no_publish)
+
+
+# The values the honest-ETA spec's worked numbers are stated in (spec 2026-11-03 §4.8 S2): the S2 promise "by tap +
+# off-road minutes + headroom x Google's drive time" and the headroom it learns. `spec_tunables` pins them per test so a
+# deployed override cannot move them; tests/unit/test_delivery_eta_service.py pins the shipped defaults against these.
+SPEC_TUNABLES = {
+    "ETA_POSITION_MAX_AGE_SECONDS": 600,
+    "ETA_OFF_ROAD_MINUTES": 5,
+    "ETA_HEADROOM_SEED": 1.3,
+    "ETA_HEADROOM_MIN_LEGS": 30,
+    "ETA_HEADROOM_PRIOR_LEGS": 20,
+    "ETA_STALE_DOOR_ALLOWANCE_MINUTES": 30,
+    "ETA_STALE_DEPOT_ALLOWANCE_MINUTES": 20,
+}
+
+
+@pytest.fixture
+def spec_tunables(app, monkeypatch):
+    """The ETA tunables at the spec's values (`SPEC_TUNABLES`) for one test."""
+    for name, value in SPEC_TUNABLES.items():
+        monkeypatch.setitem(app.config, name, value)
+
+
 @pytest.fixture
 def mock_redis():
     """Mock Redis client"""

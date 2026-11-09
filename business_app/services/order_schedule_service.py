@@ -14,7 +14,7 @@ from typing import Any, Dict, FrozenSet, Iterable, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app, g, has_app_context
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 # `Delivery` is imported alongside `DeliveryPerson` (same module, already on
 # this file's import path) for the `ensure_delivery_if_due` return annotation
@@ -196,7 +196,7 @@ class OrderScheduleService:
         return local.astimezone(timezone.utc)
 
     @classmethod
-    def is_awaiting_release(cls, order: Order) -> bool:
+    def is_awaiting_release(cls, order: Order, *, now: Optional[datetime] = None) -> bool:
         """True when this order must stay invisible to drivers for now.
 
         Held means one of two shapes: no `Delivery` row yet, or a row parked in
@@ -205,6 +205,11 @@ class OrderScheduleService:
         design.md). This stays the ONE place that answers, so the release
         gate, the Dispatch board's `scheduled` bucket and the Orders page's
         "Scheduled" tag cover a held row without a second copy of the rule.
+
+        `now` is the instant to judge at. The ETA engine passes the one it
+        plans for; every other caller leaves it out and gets the clock, read
+        through this module's `get_utc_now` so a test or the release sweep can
+        pin it in one place.
         """
         if order.delivery_date is None:
             return False
@@ -214,7 +219,7 @@ class OrderScheduleService:
         if order.status not in RELEASABLE_ORDER_STATUSES:
             return False
         release_at = cls.release_at(order)
-        return release_at is not None and release_at > get_utc_now()
+        return release_at is not None and release_at > (now or get_utc_now())
 
     @classmethod
     def published_release_at(cls, order: Order) -> Optional[datetime]:
@@ -337,6 +342,24 @@ class OrderScheduleService:
         FROM. `deliveries.order_id` is unique, so the join never repeats an order.
         """
         return and_(Delivery.status == DeliveryStatus.FAILED, Order.status.in_(ACTIVE_ORDER_STATUSES))
+
+    @classmethod
+    def held_order_candidates_filter(cls):
+        """The orders that may be held for release, as a bare SQL clause: no `Delivery` row or one parked in
+        `rescheduled`, a customer date, and a releasable status.
+
+        The candidate shape alone. It does not say whether the date has come: `is_awaiting_release` judges that per
+        order at an instant, and the release sweep adds its own `delivery_date <= today` cap. The sweep and the ETA
+        engine's dated demand both select with this clause, so they cannot disagree about what is held.
+
+        The caller must already have `orders` in FROM and `deliveries` OUTER-joined: an inner join would drop exactly
+        the orders that have no row yet.
+        """
+        return and_(
+            or_(Delivery.id.is_(None), Delivery.status == DeliveryStatus.RESCHEDULED),
+            Order.delivery_date.isnot(None),
+            Order.status.in_(RELEASABLE_ORDER_STATUSES),
+        )
 
     @classmethod
     def customer_display_status(cls, order: Order) -> str:

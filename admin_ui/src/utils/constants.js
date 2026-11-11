@@ -34,6 +34,16 @@ export const POLL_INTERVALS = {
 // and the Analytics cards read ONE cache entry, and the page's writes invalidate its prefix.
 export const LAPSED_CUSTOMERS_SUMMARY_KEY = ['lapsedCustomers', 'summary'];
 
+// Shared-place cases (the admin review queue): the nav badge reads the open
+// count, and every place-group / link write invalidates the whole prefix.
+export const SHARED_PLACE_CASES_KEY = ['sharedPlaceCases'];
+export const SHARED_PLACE_OPEN_COUNT_KEY = ['sharedPlaceCases', 'openCount'];
+
+// ─── Deep links ─────────────────────────────────────────────────────────────
+// /tryouts?tryout_id=<id> opens that try-out's drawer (Tryouts.js reads it; the
+// shared-place case screen links to it, where the Adjust Bottles tool lives).
+export const TRYOUT_LINK_PARAM = 'tryout_id';
+
 // ─── UI timing (ms) ─────────────────────────────────────────────────────────
 export const UI_DELAYS = {
   TOAST_AUTO_DISMISS: 5000,

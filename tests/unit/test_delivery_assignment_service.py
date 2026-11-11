@@ -134,16 +134,15 @@ def test_assign_driver_no_session_defers_when_not_required(db, app, sample_user,
 
 @pytest.mark.unit
 def test_assign_driver_over_capacity_defers_when_not_required(db, app, sample_user, sample_product):
-    """Auto-assign with a session that cannot cover the load must succeed without binding.
+    """Admin-style assign (require_session=False) judges FREE FULL bottles, never refuses, and never binds short.
 
-    Driver has a session with only 1 bottle loaded; order requires 5.
-    require_session=False (source=AUTO) → assignment succeeds (changed=True),
-    no DriverBottleSessionOrder binding is created, and no exception is raised.
-    The progress-time guard will enforce capacity later.
+    Driver has a session with 1 full bottle and 20 empties (21 on the truck); the order needs 5. Empties do not
+    count, so assignment succeeds (changed=True) with no DriverBottleSessionOrder binding and no exception.
     """
     from tests.unit.test_bottle_session_integration import _make_order_with_bottles
     driver = _driver(db, "+998901500006")
-    _open_session(db, driver, loaded=1)  # session exists but has only 1 bottle
+    s = _open_session(db, driver, loaded=1)  # one FULL bottle on board
+    s.bottles_collected_from_customers = 20  # plus empties: 21 bottles, still 1 free full
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=5)  # needs 5
     delivery = _scheduled_delivery(db, order)
     db.session.commit()

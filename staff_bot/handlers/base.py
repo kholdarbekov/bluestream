@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from html import escape
-from typing import Dict, Optional, Set, Tuple
+from typing import Callable, Dict, Optional, Set, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest, NetworkError, TelegramError, TimedOut
 from telegram.ext import ContextTypes
@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 from staff_bot.i18n import i18n
 from staff_bot.database import db_manager, StaffUserRepository
 from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.utils import auth_refusals, flow_state
 # Module-level so this module carries the same `api_client` seam every
 # handler module does — the guard below reads the backend, and a test that
@@ -185,18 +186,29 @@ class BaseHandler:
         'BOTTLE_JOIN_REQUEST_ALREADY_MEMBER': 'staff.error.api.join_request_already_member',
         'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE': 'staff.error.api.already_in_session',
         'BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND': 'staff.error.api.not_in_session',
+        # Leave refused while the co-driver's stops on the way hold bottles promised
+        # from the owner's truck (spec 2026-11-09 A8). With `count`,
+        # API_ERROR_DETAIL_COPY says how many.
+        'BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS': 'staff.error.api.leave_has_promised_stops',
         # A collection/fine at a place the customer is no longer a member of.
         'BOTTLE_SCOPE_MEMBERSHIP_REQUIRED': 'staff.error.api.customer_left_address',
         # The same retry token arrived with a different body: the entry that
         # landed is not the one on screen, so the driver starts over.
         'BOTTLE_IDEMPOTENCY_KEY_REUSED': 'staff.error.api.entry_already_submitted',
-        # With `requested`/`available`, API_ERROR_DETAIL_COPY names both numbers.
+        # With `kind` and `available`, API_ERROR_DETAIL_COPY names the number that was too high.
         'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': 'staff.error.api.transfer_exceeds_inventory',
+        # 0 full and 0 empties: chosen, or "Send all" on a truck with nothing on it.
+        'BOTTLE_TRANSFER_NOTHING_TO_SEND': 'staff.error.api.transfer_nothing_to_send',
         'BOTTLE_TRANSFER_NOT_FOUND': 'staff.error.api.transfer_not_found',
         'BOTTLE_TRANSFER_NOT_RECEIVER': 'staff.error.api.transfer_not_yours',
         'BOTTLE_TRANSFER_NOT_PENDING': 'staff.error.api.transfer_already_handled',
         # The receiver stopped being an active driver after the picker was drawn.
         'BOTTLE_TRANSFER_RECEIVER_INVALID': 'staff.error.api.transfer_receiver_invalid',
+        # Shared-place report (spec 2026-11-10): a stale question button after an admin settled the case, or a
+        # different answer than the one already stored. Polite, never the generic conflict sentence.
+        'SHARED_PLACE_ANSWER_REFUSED': 'staff.error.api.shared_place_answer_refused',
+        'SHARED_PLACE_CASE_NOT_FOUND': 'staff.error.api.not_found',
+        'SHARED_PLACE_ANSWER_INVALID': 'staff.error.api.invalid_input',
         # Sales-agent outlet flows (business_app/api/staff_sales.py).
         'SALES_OUTLET_NOT_FOUND': 'staff.error.api.outlet_not_found',
         'SALES_OUTLET_NOT_ASSIGNED': 'staff.error.api.outlet_not_assigned',
@@ -289,6 +301,11 @@ class BaseHandler:
         # typed 0 three times and read the generic "check the entered data".
         'RECONCILIATION_AMOUNT_NOT_POSITIVE': 'staff.error.api.handoff_amount_not_positive',
         'RECONCILIATION_NOTHING_TO_SUBMIT': 'staff.error.api.nothing_to_reconcile',
+        # The session the driver was settling closed while his tap waited on it: his own
+        # earlier tap (a double tap), a prepayment return from this trip's cash that
+        # emptied it, or an admin close. Nothing was recorded and that trip is settled,
+        # so the true sentence is the same one.
+        'RECONCILIATION_SESSION_CHANGED': 'staff.error.api.nothing_to_reconcile',
         # CashCollectionService: the customer behind an at-door collection or a
         # statement lookup was deleted/merged out from under the driver's card.
         'COD_CUSTOMER_NOT_FOUND': 'staff.error.api.customer_not_found',
@@ -358,8 +375,11 @@ class BaseHandler:
         'BOTTLE_SESSION_CAPACITY_EXCEEDED': (
             ErrorDetailCopy(
                 'staff.error.api.bottle_session_capacity_exceeded_detail',
-                {'available': 'available', 'required': 'required', 'shortfall': 'shortfall'},
+                {'available': 'available', 'required': 'required'},
             ),
+        ),
+        'BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS': (
+            ErrorDetailCopy('staff.error.api.leave_has_promised_stops_detail', {'count': 'count'}),
         ),
         'STAFF_INVALID_STATUS_TRANSITION': (
             ErrorDetailCopy(
@@ -368,7 +388,19 @@ class BaseHandler:
                 {'current_status': 'delivery_status', 'requested_status': 'delivery_status'},
             ),
         ),
+        # The backend names the number that was too high (`kind`, spec 2026-11-09 T2). A refusal
+        # without it (an older backend) keeps the sentence with both numbers.
         'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': (
+            ErrorDetailCopy(
+                'staff.error.api.transfer_exceeds_full_detail',
+                {'available': 'available'},
+                when={'kind': 'full'},
+            ),
+            ErrorDetailCopy(
+                'staff.error.api.transfer_exceeds_empty_detail',
+                {'available': 'available'},
+                when={'kind': 'empty'},
+            ),
             ErrorDetailCopy(
                 'staff.error.api.transfer_exceeds_inventory_detail',
                 {'requested': 'requested', 'available': 'available'},
@@ -425,13 +457,31 @@ class BaseHandler:
         # warehouse / Transfer / Incoming transfers — the only ways to get more
         # bottles onto the truck.
         'BOTTLE_SESSION_CAPACITY_EXCEEDED': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
-        'BOTTLE_SESSION_REQUIRED': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
         # No open session of the driver's own: the accountability screen is
         # where "Log bottles loaded" opens one.
         'BOTTLE_SESSION_NOT_FOUND': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
         'BOTTLE_SESSION_REQUIRED_TO_INVITE': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
         # A refused send ends the flow; the accountability screen is the way back to the session.
         'BOTTLE_TRANSFER_RECEIVER_INVALID': ('📊', 'staff.menu.my_bottle_accountability', 'staff_bottle_my_accountability'),
+        # A refused amount redraws the send screen when it can (bottle_collection._submit_transfer). When the
+        # session cannot be read again, or nothing is left to send, the flow ends here, with the transfer start.
+        'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': (
+            '🔄', 'staff.menu.transfer_bottles_to_driver', 'staff_bottle_transfer_start',
+        ),
+        'BOTTLE_TRANSFER_NOTHING_TO_SEND': (
+            '🔄', 'staff.menu.transfer_bottles_to_driver', 'staff_bottle_transfer_start',
+        ),
+    }
+
+    # Codes whose remedy is more than one button: code -> (keyboard builder taking the
+    # language, the label keys it draws). Tried before API_ERROR_REMEDY_BUTTONS.
+    API_ERROR_REMEDY_KEYBOARDS: Dict[str, Tuple[Callable[[str], InlineKeyboardMarkup], Tuple[str, ...]]] = {
+        # No bottle trip at Picked up or On the way (spec A6, A8): the accept refusal's own
+        # Start / Join a colleague's buttons. The accountability screen has no trip to show.
+        'BOTTLE_SESSION_REQUIRED': (
+            DeliveryKeyboards.session_required_remedy,
+            tuple(label_key for label_key, _callback in DeliveryKeyboards.SESSION_REQUIRED_REMEDY_BUTTONS),
+        ),
     }
 
     @classmethod
@@ -442,6 +492,8 @@ class BaseHandler:
         for specs in cls.API_ERROR_DETAIL_COPY.values():
             keys.update(spec.key for spec in specs)
         keys.update(label for _emoji, label, _callback in cls.API_ERROR_REMEDY_BUTTONS.values())
+        for _builder, label_keys in cls.API_ERROR_REMEDY_KEYBOARDS.values():
+            keys.update(label_keys)
         keys.add('staff.error.api.backend_reason')
         return keys
 
@@ -730,6 +782,15 @@ class BaseHandler:
         if isinstance(flow, dict):
             return flow
 
+        await self._answer_gone_flow(update, context, key)
+        return None
+
+    async def _answer_gone_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE, key: str) -> None:
+        """Say the flow named by `key` is over, for a tap or a message that reached it after its draft went.
+
+        `_require_flow`'s answer, for the flows whose draft is not one dict (the bottle transfers keep loose
+        keys). The caller ENDs its conversation: a reply that leaves it armed would swallow the next message too.
+        """
         logger.info(
             "Flow %r is gone for user %s; ending it rather than raising.",
             key, update.effective_user.id if update.effective_user else None,
@@ -741,7 +802,6 @@ class BaseHandler:
             await update.callback_query.edit_message_text(text, parse_mode='HTML')
         elif update.message:
             await update.message.reply_text(text, parse_mode='HTML')
-        return None
 
     async def _refuse_stale_card(self, update: Update, language: str, *, text: Optional[str] = None):
         """The tapped delivery is gone from the driver's active list.
@@ -846,6 +906,10 @@ class BaseHandler:
         )
 
     def _remedy_keyboard(self, language: str, error_code) -> Optional[InlineKeyboardMarkup]:
+        keyboard = self.API_ERROR_REMEDY_KEYBOARDS.get(str(error_code)) if error_code else None
+        if keyboard:
+            build, _label_keys = keyboard
+            return build(language)
         spec = self.API_ERROR_REMEDY_BUTTONS.get(str(error_code)) if error_code else None
         if not spec:
             return None
@@ -855,9 +919,9 @@ class BaseHandler:
         )]])
 
     def _with_remedy(self, language: str, error_code, markup=None):
-        """`markup` with the error code's remedy row (if it has one) placed
+        """`markup` with the error code's remedy rows (if it has any) placed
         first — for error screens that edit in place with their own keyboard,
-        so the remedy rule lives only in API_ERROR_REMEDY_BUTTONS."""
+        so the remedy rule lives only in API_ERROR_REMEDY_KEYBOARDS / _BUTTONS."""
         remedy = self._remedy_keyboard(language, error_code)
         if remedy is None:
             return markup

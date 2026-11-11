@@ -885,6 +885,69 @@ describe('AdminService', () => {
       expect(result).toEqual({ success: true, data: { place_group_id: 7 } });
     });
 
+    it('create sends notes only when stated', async () => {
+      api.post.mockResolvedValue({ data: { success: true } });
+
+      await adminService.createPlaceGroup([2, 9], 'Office', 'r', {}, { notes: 'Gate 12' });
+      expect(api.post.mock.calls[0]).toEqual([
+        '/admin/place-groups',
+        { addressIds: [2, 9], label: 'Office', reason: 'r', notes: 'Gate 12' },
+      ]);
+
+      await adminService.createPlaceGroup([2, 9], 'Office', 'r');
+      expect(Object.keys(api.post.mock.calls[1][1])).toEqual(['addressIds', 'label', 'reason']);
+    });
+
+    it('rename sends notes only when stated', async () => {
+      api.patch.mockResolvedValue({ data: { success: true } });
+
+      await adminService.renamePlaceGroup(7, 'HQ', 'r', { notes: 'Back door' });
+      expect(api.patch.mock.calls[0]).toEqual([
+        '/admin/place-groups/7',
+        { label: 'HQ', reason: 'r', notes: 'Back door' },
+      ]);
+
+      await adminService.renamePlaceGroup(7, 'HQ', 'r');
+      expect(Object.keys(api.patch.mock.calls[1][1])).toEqual(['label', 'reason']);
+    });
+
+    it('lists shared-place cases with the exact params and unwraps data', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { cases: [], open_count: 0 } } });
+
+      const result = await adminService.listSharedPlaceCases();
+      expect(api.get.mock.calls[0]).toEqual([
+        '/admin/shared-place-cases',
+        { params: { status: 'open', page: 1, per_page: 20 } },
+      ]);
+      expect(result).toEqual({ cases: [], open_count: 0 });
+
+      await adminService.listSharedPlaceCases({ status: 'resolved', page: 3, perPage: 50 });
+      expect(api.get.mock.calls[1][1]).toEqual({ params: { status: 'resolved', page: 3, per_page: 50 } });
+    });
+
+    it('fetches one shared-place case and unwraps data', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { case: { id: 4 } } } });
+
+      const result = await adminService.getSharedPlaceCase(4);
+      expect(api.get.mock.calls[0]).toEqual(['/admin/shared-place-cases/4']);
+      expect(result).toEqual({ case: { id: 4 } });
+    });
+
+    it('resolves a shared-place case, passing handledErrorCodes as the third argument', async () => {
+      api.post.mockResolvedValue({ data: { success: true, data: { case: { id: 4 } } } });
+      const payload = { kind: 'close', reason: 'ok' };
+
+      const result = await adminService.resolveSharedPlaceCase(4, payload, {
+        handledErrorCodes: ['SHARED_PLACE_NOT_VERIFIED'],
+      });
+      expect(api.post.mock.calls[0]).toEqual([
+        '/admin/shared-place-cases/4/resolve',
+        payload,
+        { handledErrorCodes: ['SHARED_PLACE_NOT_VERIFIED'] },
+      ]);
+      expect(result).toEqual({ case: { id: 4 } });
+    });
+
     it('renames a place group with a reason', async () => {
       api.patch.mockResolvedValue({ data: { success: true, data: { place_group_id: 7, label: 'HQ' } } });
 

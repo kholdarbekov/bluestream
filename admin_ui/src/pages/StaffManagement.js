@@ -296,9 +296,16 @@ const StaffManagement = () => {
             },
         },
         {
-            title: t('staff:expected_cash', 'Expected Cash'),
+            title: t('staff:cash_gross_collected', 'Collected (gross)'),
             dataIndex: 'expected_cash',
             key: 'expected_cash',
+            render: (value) => `${(value || 0).toLocaleString()} UZS`,
+        },
+        {
+            // What the driver must hand in: the gross minus what the office already returned from his trip.
+            title: t('staff:cash_to_hand_in', 'To hand in'),
+            dataIndex: 'expected_cash_on_hand',
+            key: 'expected_cash_on_hand',
             render: (value) => `${(value || 0).toLocaleString()} UZS`,
         },
         {

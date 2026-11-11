@@ -38,7 +38,7 @@ import json
 import re
 from math import ceil
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import pytest
 
@@ -136,8 +136,13 @@ DELIVERY_KEYS = (
     "staff.error.api.scope_busy",
     "staff.error.api.bottle_session_capacity_exceeded",
     "staff.error.api.bottle_session_capacity_exceeded_detail",
+    "staff.error.api.bottle_session_required",
     "staff.error.api.status_transition_refused_detail",
     "staff.menu.my_bottle_accountability",
+    "staff.bottles.session_required_to_accept",
+    "staff.bottles.start_session",
+    "staff.bottles.join_session",
+    "staff.delivery.enter_bottles_loaded_qty",
     "staff.delivery.pool_empty",
     "staff.delivery.pool_title",
     "staff.delivery.pool_count",
@@ -398,11 +403,22 @@ def _isolated_route_card_state():
     route_card_state._locks.clear()
 
 
-async def build_driver(monkeypatch, *, language="en", login=None, extra_keys: Sequence[str] = ()):
-    """A driver's bot. ``extra_keys`` serves more production copy, for a screen these journeys don't draw."""
+async def build_driver(
+    monkeypatch, *, language="en", login=None, extra_keys: Sequence[str] = (),
+    translations: Optional[dict] = None,
+):
+    """A driver's bot. ``extra_keys`` serves more production copy, for a screen these journeys don't draw.
+
+    ``translations`` is merged over the copy table. It serves the satellite seeds' keys,
+    which ``copy_for`` cannot: it asserts main-seed curation.
+    """
     harness = await build_staff_harness(
         monkeypatch,
-        translations={**translation_table(), **{key: copy_for(key) for key in extra_keys}},
+        translations={
+            **translation_table(),
+            **{key: copy_for(key) for key in extra_keys},
+            **(translations or {}),
+        },
         database=FakeStaffDatabase(staff_user=driver_row(language)),
     )
     harness.backend.route(
@@ -1526,6 +1542,67 @@ async def test_a_capacity_refusal_names_the_numbers_and_offers_the_session_scree
         "the refusal must lead somewhere the driver can fix it"
     )
     assert "Session 178" not in refusal.text, "the internal session id leaked to the driver"
+
+
+SESSION_CURRENT = "/api/v1/staff/bottles/session/current"
+SESSION_REQUIRED = staff_backend_failure(
+    "Order 9388 has no bottle-session binding and driver 55 has no open bottle session; "
+    "open a session to continue delivering this order.",
+    status_code=400,
+    error_code="BOTTLE_SESSION_REQUIRED",
+)
+
+
+@pytest.mark.parametrize("status", ["picked_up", "in_transit"])
+async def test_a_tap_refused_for_no_bottle_trip_offers_start_or_join_and_start_opens_one(bot, status):
+    """Spec A6/A8: Picked up or On the way with no bottle trip. The fix is one tap away: the same Start / Join a
+    colleague buttons the accept refusal shows, not the accountability screen, which has no trip to show."""
+    driver, labels = await sign_in(bot)
+    bot.desk.active = [active_row(1388, "BS-1388", status="assigned" if status == "picked_up" else "picked_up")]
+    bot.desk.serve(1388)
+    bot.desk.status_outcomes[1388] = SESSION_REQUIRED
+    bot.backend.route(
+        "GET", SESSION_CURRENT,
+        lambda _call: staff_backend_failure(
+            "No open bottle session found for this driver", status_code=404, error_code="BOTTLE_SESSION_NOT_FOUND"
+        ),
+    )
+
+    await bot.send(driver.text(menu_label(labels, "staff.menu.active_deliveries")))
+    await bot.send(driver.tap("staff_view_active_1388"))
+    await bot.send(driver.tap(f"staff_status_1388_{status}"))
+    bot.telegram.reset()
+    await bot.send(driver.tap(f"staff_execute_status_1388_{status}"))
+
+    refusal = bot.telegram.last_shown()
+    assert refusal.text == f"❌ {copy_for('staff.error.api.bottle_session_required')}"
+    assert refusal.callback_data() == ["bottles_start_session", "bottles_join_session"]
+    assert refusal.button_labels() == [copy_for("staff.bottles.start_session"), copy_for("staff.bottles.join_session")]
+    assert status_writes(bot) == [(status_endpoint(1388), {"status": status})]
+
+    await bot.send(driver.tap(refusal.callback_data()[0]))
+
+    assert bot.telegram.last_shown().text == copy_for("staff.delivery.enter_bottles_loaded_qty")
+
+
+async def test_an_accept_refused_for_no_bottle_trip_offers_start_join_and_back_to_the_pool(bot):
+    """The accept refusal draws its buttons from the same builder, with the way back to the pool under them."""
+    driver, _labels = await sign_in(bot)
+    bot.desk.serve(501)
+    bot.desk.accept_outcomes[501] = staff_backend_failure(
+        "Driver 55 has no open bottle session", status_code=400, error_code="BOTTLE_SESSION_REQUIRED"
+    )
+
+    await bot.send(driver.tap("staff_confirm_accept_501"))
+
+    refusal = bot.telegram.last_shown()
+    assert refusal.text == f"⚠️ {copy_for('staff.bottles.session_required_to_accept')}"
+    assert refusal.callback_data() == ["bottles_start_session", "bottles_join_session", "staff_new_orders"]
+    assert refusal.button_labels() == [
+        copy_for("staff.bottles.start_session"),
+        copy_for("staff.bottles.join_session"),
+        copy_for("staff.back"),
+    ]
 
 
 @pytest.mark.parametrize("settle", ["full", "partial"])

@@ -15,6 +15,7 @@ from datetime import datetime, UTC
 
 import pytest
 
+from business_app.models.payment import CustomerCreditPayout
 from business_app.models.user import User
 from business_app.models.customer_link import (
     CanonicalCustomer,
@@ -131,6 +132,40 @@ class TestMergeClearsNewUserFks:
         # The "face" is NOT repointed at a non-member; it is cleared for
         # CustomerLinkService._refresh_primary to re-elect.
         assert canonical.primary_user_id is None
+
+
+@pytest.mark.unit
+class TestMergeRepointsPayoutUserFks:
+    def test_merge_repoints_payout_user_fks(self, db):
+        primary = _make_user(db, "web@example.com", "+998900000031", "web")
+        secondary = _make_user(db, "tg@example.com", "+998900000032", "telegram")
+        now = datetime.now(UTC)
+        db.session.add_all(
+            [
+                CustomerCreditPayout(
+                    customer_id=secondary.id, amount=1000, paid_by="driver_settled", driver_user_id=secondary.id,
+                    reason="paid back in cash", paid_at=now, actor_user_id=secondary.id,
+                    voided_at=now, voided_by_user_id=secondary.id, void_reason="entered twice",
+                    idempotency_key="merge-1",
+                ),
+                CustomerCreditPayout(
+                    customer_id=secondary.id, amount=2000, paid_by="office",
+                    reason="paid back in cash", paid_at=now, actor_user_id=secondary.id,
+                    idempotency_key="merge-2",
+                ),
+            ]
+        )
+        db.session.commit()
+
+        result = cross_platform_sync_service.auto_link_accounts(
+            primary_user=primary, secondary_user=secondary, link_type="merge"
+        )
+        assert result["success"] is True, result.get("error")
+
+        first, second = CustomerCreditPayout.query.order_by(CustomerCreditPayout.id).all()
+        assert {first.customer_id, first.driver_user_id, first.actor_user_id, first.voided_by_user_id} == {primary.id}
+        assert {second.customer_id, second.actor_user_id} == {primary.id}
+        assert second.driver_user_id is None and second.voided_by_user_id is None
 
 
 @pytest.mark.unit

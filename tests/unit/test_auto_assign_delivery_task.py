@@ -12,6 +12,7 @@ raises `Retry` while scheduling the next run, and raises
 `MaxRetriesExceededError` once retries are exhausted.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -153,3 +154,196 @@ class TestAutoAssignDeliveryTaskRetryFlow:
             mock_recon_instance.is_driver_blocked_from_cod.assert_called_once_with(driver.user_id)
             # self.retry was called with countdown (no-driver path), not exc (exception path).
             mock_self.retry.assert_called_once_with(countdown=900)
+
+
+# ---------------------------------------------------------------------------
+# Bottle-aware candidate filter (spec A8): real rows, real services. Only the driver push and the route rebuild,
+# which talk to Telegram and the maps provider, are faked.
+# ---------------------------------------------------------------------------
+from celery.exceptions import Retry as _Retry  # noqa: E402
+
+from business_app.models.bottle import DriverBottleSession  # noqa: E402
+from business_app.models.delivery import Delivery  # noqa: E402
+from business_app.models.order import Order  # noqa: E402
+from business_app.services.bottle_tracking_service import BottleTrackingService  # noqa: E402
+from business_app.services.delivery_service import DeliveryService  # noqa: E402
+from shared.enums import DriverBottleSessionStatus, OrderStatus  # noqa: E402
+from tests.integration.eta_plan_builders import make_driver  # noqa: E402
+from tests.unit.test_staff_error_endpoints import _assigned_delivery, _order_with_bottles  # noqa: E402
+
+ALL_DAY = ("00:00", "23:59")  # on shift whatever the hour the suite runs
+
+
+class _RetrySpy:
+    """`Task.retry`'s own signature; raises `Retry` the way a worker does, and remembers every call."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, args=None, kwargs=None, exc=None, throw=True, eta=None, countdown=None, max_retries=None, **opts):
+        self.calls.append({"exc": exc, "countdown": countdown})
+        raise _Retry("retry")
+
+
+@pytest.fixture
+def retry_spy(monkeypatch):
+    spy = _RetrySpy()
+    monkeypatch.setattr(auto_assign_delivery_task, "retry", spy)
+    return spy
+
+
+@pytest.fixture(autouse=False)
+def no_driver_push(monkeypatch):
+    monkeypatch.setattr(DeliveryService, "_notify_driver", lambda self, delivery: None)
+    monkeypatch.setattr(DeliveryService, "_optimize_driver_route", lambda self, *a, **k: None)
+
+
+def _shift_driver(db):
+    return make_driver(db, roster=ALL_DAY)
+
+
+def _open_session(db, driver, loaded, collected=0):
+    session = DriverBottleSession(
+        driver_user_id=driver.id,
+        bottles_loaded=loaded,
+        bottles_collected_from_customers=collected,
+        status=DriverBottleSessionStatus.OPEN,
+    )
+    db.session.add(session)
+    db.session.commit()
+    return session
+
+
+def _pool_order(db, customer, product, quantity):
+    order = _order_with_bottles(db, customer, product, quantity=quantity)
+    order.status = OrderStatus.CONFIRMED
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.SCHEDULED,
+        scheduled_date=datetime.now(UTC) + timedelta(hours=1),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return delivery
+
+
+def _run(delivery_id):
+    return auto_assign_delivery_task.run(delivery_id)
+
+
+@pytest.mark.unit
+class TestAutoAssignBottleFilter:
+    def test_skips_driver_with_only_empties(self, app, db, no_driver_push, sample_user, sample_product):
+        a, b = _shift_driver(db), _shift_driver(db)
+        _open_session(db, a, loaded=3, collected=15)  # 18 on the truck, 3 full
+        _open_session(db, b, loaded=10)
+        delivery = _pool_order(db, sample_user, sample_product, quantity=8)
+
+        result = _run(delivery.id)
+
+        assert result["success"] is True
+        assert result["driver_id"] == b.id
+        assert Delivery.query.get(delivery.id).delivery_person_id == b.id
+
+    def test_on_the_way_orders_reduce_free_full(self, app, db, retry_spy, sample_user, sample_product):
+        a = _shift_driver(db)
+        _open_session(db, a, loaded=10)
+        _assigned_delivery(
+            db, _order_with_bottles(db, sample_user, sample_product, quantity=4), a, status=DeliveryStatus.IN_TRANSIT
+        )  # 6 free full left
+        delivery = _pool_order(db, sample_user, sample_product, quantity=8)
+
+        result = _run(delivery.id)
+
+        assert result == {"success": False, "delivery_id": delivery.id, "error": "no_driver_with_enough_bottles"}
+        assert Delivery.query.get(delivery.id).delivery_person_id is None
+
+    def test_no_driver_with_bottles_gives_reason_without_retry(self, app, db, retry_spy, sample_user, sample_product):
+        a = _shift_driver(db)
+        _open_session(db, a, loaded=3, collected=15)
+        delivery = _pool_order(db, sample_user, sample_product, quantity=8)
+
+        result = _run(delivery.id)
+
+        assert result == {"success": False, "delivery_id": delivery.id, "error": "no_driver_with_enough_bottles"}
+        assert retry_spy.calls == []
+
+    def test_driver_without_a_session_is_not_a_candidate(self, app, db, retry_spy, sample_user, sample_product):
+        _shift_driver(db)  # on shift, never loaded
+        delivery = _pool_order(db, sample_user, sample_product, quantity=2)
+
+        result = _run(delivery.id)
+
+        assert result == {"success": False, "delivery_id": delivery.id, "error": "no_driver_with_enough_bottles"}
+        assert retry_spy.calls == []
+
+    def test_no_candidates_at_all_still_retries(self, app, db, retry_spy, sample_user, sample_product):
+        delivery = _pool_order(db, sample_user, sample_product, quantity=2)  # nobody on the roster
+
+        with pytest.raises(_Retry):
+            _run(delivery.id)
+
+        assert retry_spy.calls == [{"exc": None, "countdown": 900}]
+
+    def test_race_refusal_is_treated_as_shortfall(
+        self, app, db, retry_spy, no_driver_push, monkeypatch, sample_user, sample_product
+    ):
+        """The filter saw 10 free; by the time the locked assign judged it only 3 were left: same answer, no retry."""
+        a = _shift_driver(db)
+        _open_session(db, a, loaded=3)
+        delivery = _pool_order(db, sample_user, sample_product, quantity=8)
+        monkeypatch.setattr(
+            BottleTrackingService, "free_full_bottles", lambda self, driver_user_id, *, exclude_delivery_id=None: 10
+        )
+
+        result = _run(delivery.id)
+
+        assert result == {"success": False, "delivery_id": delivery.id, "error": "no_driver_with_enough_bottles"}
+        assert retry_spy.calls == []
+        assert Delivery.query.get(delivery.id).delivery_person_id is None
+
+    def test_zero_bottle_order_still_auto_assigns_without_session(
+        self, app, db, no_driver_push, sample_user, sample_product
+    ):
+        a = _shift_driver(db)  # no session at all
+        delivery = _pool_order(db, sample_user, sample_product, quantity=2)
+        sample_product.tracks_returnable_bottles = False
+        sample_product.returnable_bottles_per_unit = 0
+        db.session.commit()
+        assert BottleTrackingService.calculate_bottles_for_order(Order.query.get(delivery.order_id)) == 0
+
+        result = _run(delivery.id)
+
+        assert result["success"] is True and result["driver_id"] == a.id
+        assert Delivery.query.get(delivery.id).delivery_person_id == a.id
+
+
+@pytest.mark.unit
+def test_pool_offer_skips_driver_who_cannot_carry(app, db, monkeypatch, sample_user, sample_product):
+    from business_app.services.route_optimization_service import RouteOptimizationService
+    from business_app.tasks.delivery_tasks import evaluate_pool_insertion_suggestions_task
+    from business_app.tasks.staff_tasks import notify_staff_new_order
+
+    a, b = _shift_driver(db), _shift_driver(db)
+    _open_session(db, a, loaded=3, collected=15)
+    _open_session(db, b, loaded=10)
+    delivery = _pool_order(db, sample_user, sample_product, quantity=8)
+
+    def gain(self, driver_id, delivery_id):  # both would gain from the diversion; only one can carry the water
+        return {"gain_minutes": 20.0, "committed_order_number": "ORD-X"}
+
+    offers = []
+
+    def offer(driver_id, delivery_id, order_no, detour_km, detour_minutes, gain_minutes, committed_order_number):
+        offers.append(driver_id)
+        return True
+
+    monkeypatch.setattr(RouteOptimizationService, "compute_diversion_gain", gain)
+    monkeypatch.setattr("business_app.utils.bot_webhook.notify_pool_insertion_suggestion", offer)
+    monkeypatch.setattr(notify_staff_new_order, "delay", lambda order_id, exclude_driver_user_id=None: None)
+
+    result = evaluate_pool_insertion_suggestions_task.run(delivery.id)
+
+    assert offers == [b.id]
+    assert result["suggested"] is True and result["driver_id"] == b.id

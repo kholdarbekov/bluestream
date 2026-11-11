@@ -19,6 +19,7 @@ from business_app.models.bottle import (
 )
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from shared.enums import (
+    DeliveryStatus,
     DriverBottleSessionStatus,
     DriverSessionMembershipStatus,
     UserRole,
@@ -691,7 +692,7 @@ def test_assert_progress_returns_none_for_order_without_bottles(db, sample_user,
     delivery = _make_delivery(db, order, driver)
 
     svc = BottleTrackingService()
-    assert svc.assert_driver_can_progress_delivery(delivery) is None
+    assert svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP) is None
 
 
 @pytest.mark.unit
@@ -714,7 +715,7 @@ def test_assert_progress_late_binds_when_no_binding_but_driver_has_open_session(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            got = svc.assert_driver_can_progress_delivery(delivery)
+            got = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
 
@@ -741,7 +742,7 @@ def test_assert_progress_strict_raises_when_no_binding_and_no_open_session(
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
             with pytest.raises(ValidationError) as exc:
-                svc.assert_driver_can_progress_delivery(delivery)
+                svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
             assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
@@ -788,7 +789,7 @@ def test_assert_progress_late_bind_respects_session_capacity(
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
             with pytest.raises(ValidationError) as exc:
-                svc.assert_driver_can_progress_delivery(delivery)
+                svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
             assert exc.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
@@ -811,7 +812,7 @@ def test_assert_progress_legacy_late_binds_when_no_binding_and_open_session(
     svc = BottleTrackingService()
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
-        result = svc.assert_driver_can_progress_delivery(delivery)
+        result = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
 
     assert result is not None
     assert result.id == session.id
@@ -834,7 +835,7 @@ def test_assert_progress_legacy_returns_none_when_no_binding_and_no_open_session
     svc = BottleTrackingService()
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
-        assert svc.assert_driver_can_progress_delivery(delivery) is None
+        assert svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP) is None
 
 
 @pytest.mark.unit
@@ -859,7 +860,7 @@ def test_assert_progress_strict_raises_when_session_closed_and_no_open_session(
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
             with pytest.raises(ValidationError) as exc:
-                svc.assert_driver_can_progress_delivery(delivery)
+                svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
             assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
@@ -891,7 +892,7 @@ def test_assert_progress_migrates_to_drivers_own_open_session(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            got = svc.assert_driver_can_progress_delivery(delivery)
+            got = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
 
@@ -968,17 +969,20 @@ def test_assign_delivery_driver_binds_order_to_open_session(db, app, sample_user
 
 @pytest.mark.unit
 def test_assign_delivery_driver_skips_binding_without_open_session(db, app, sample_user, sample_product):
-    """Best-effort: with no open session at assignment time, assignment still
-    succeeds and creates no binding — the progress guard late-binds later when the
-    driver opens a session."""
+    """With no open session at assignment time, assignment still succeeds, creates no binding, and DROPS a
+    binding the order held to another driver's session (a stale load must not keep counting this order). The
+    progress guard late-binds later when the driver opens a session."""
     from business_app.models.delivery import Delivery
     from business_app.services.delivery_service import DeliveryService
 
     driver = _make_driver(db, "+998901000131", "AssignNoSession")
     _make_driver_profile(db, driver, "+998901000131")
-    # No open session.
+    previous = _make_driver(db, "+998901000132", "AssignPrevOwner")
+    previous_session = _open_session(db, previous)
+    # No open session for `driver`.
     order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
     delivery = _make_scheduled_unassigned_delivery(db, order)
+    BottleTrackingService().bind_order_to_session(previous_session.id, order.id, accepted_by_driver_id=previous.id)
     db.session.commit()
 
     with app.test_request_context(), patch.object(
@@ -1007,7 +1011,7 @@ def test_assert_progress_happy_path_returns_bound_session(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            got = svc.assert_driver_can_progress_delivery(delivery)
+            got = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
     assert got is not None
@@ -1041,7 +1045,7 @@ def test_assert_progress_carry_over_migrates_to_new_open_session(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            got = svc.assert_driver_can_progress_delivery(delivery)
+            got = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
 
@@ -1076,7 +1080,7 @@ def test_assert_progress_carry_over_blocks_when_new_session_over_capacity(
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
             with pytest.raises(ValidationError) as exc:
-                svc.assert_driver_can_progress_delivery(delivery)
+                svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
             assert exc.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
@@ -1136,7 +1140,7 @@ def test_new_session_close_releases_carried_binding(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            svc.assert_driver_can_progress_delivery(delivery)  # migrates A→B
+            svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)  # migrates A→B
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
     db.session.commit()
@@ -1298,7 +1302,7 @@ def test_close_then_new_session_rebinds_released_order(
     with app.test_request_context():
         app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
         try:
-            result = svc.assert_driver_can_progress_delivery(delivery)
+            result = svc.assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.PICKED_UP)
         finally:
             app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
 

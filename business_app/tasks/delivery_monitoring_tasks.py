@@ -14,7 +14,7 @@ invariant; this task is the runtime backstop that surfaces any that slip through
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
@@ -77,6 +77,28 @@ def monitor_stranded_deliveries() -> Dict[str, Any]:
     }
 
 
+def _unassigned_pool_rows(*, created_before: Optional[datetime] = None):
+    """The pool deliveries auto-assign may still place: SCHEDULED, driverless, order still in the pool's order gate.
+
+    The one selection behind the stale sweep (`created_before` = its age floor)
+    and the capacity-gain re-offer (no floor). Oldest first.
+    """
+    from business_app.services.staff_service import StaffService
+
+    query = (
+        db.session.query(Delivery.id, Delivery.created_at, Order.order_number)
+        .join(Order, Order.id == Delivery.order_id)
+        .filter(
+            Delivery.status == DeliveryStatus.SCHEDULED,
+            Delivery.delivery_person_id.is_(None),
+            StaffService.pool_order_gate(),
+        )
+    )
+    if created_before is not None:
+        query = query.filter(Delivery.created_at < created_before)
+    return query.order_by(Delivery.created_at.asc()).all()
+
+
 @shared_task(time_limit=120, soft_time_limit=90)
 def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
     """Re-offer long-unassigned pool deliveries for auto-assignment.
@@ -90,7 +112,6 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
     any driver's shift, or while auto-assign wrongly saw no on-shift driver)
     stays invisibly stuck in the pool indefinitely.
     """
-    from business_app.services.staff_service import StaffService
     from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 
     threshold_minutes = int(
@@ -98,18 +119,7 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
     )
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
-    stale = (
-        db.session.query(Delivery.id, Delivery.created_at, Order.order_number)
-        .join(Order, Order.id == Delivery.order_id)
-        .filter(
-            Delivery.status == DeliveryStatus.SCHEDULED,
-            Delivery.delivery_person_id.is_(None),
-            StaffService.pool_order_gate(),
-            Delivery.created_at < cutoff,
-        )
-        .order_by(Delivery.created_at.asc())
-        .all()
-    )
+    stale = _unassigned_pool_rows(created_before=cutoff)
 
     delivery_ids = [row.id for row in stale]
     for delivery_id in delivery_ids:
@@ -130,3 +140,21 @@ def reenqueue_stale_pool_deliveries() -> Dict[str, Any]:
         "reenqueued_count": len(delivery_ids),
         "delivery_ids": delivery_ids,
     }
+
+
+@shared_task(time_limit=120, soft_time_limit=90)
+def reoffer_pool_deliveries_task() -> int:
+    """Offer every pool delivery to auto-assign again, now: a driver just gained full bottles.
+
+    Auto-assign refuses an order no on-shift driver can carry and does not retry it, so the order waits in the pool
+    until the capacity changes: a session opened, a co-driver joined, a transfer's full bottles credited. Those writes
+    publish this task after they commit. It is the stale sweep's selection without its age floor; each delivery goes to
+    `auto_assign_delivery_task` once, and the lock-and-recheck there decides. Returns how many it queued.
+    """
+    from business_app.tasks.delivery_tasks import auto_assign_delivery_task
+
+    delivery_ids = [row.id for row in _unassigned_pool_rows()]
+    for delivery_id in delivery_ids:
+        auto_assign_delivery_task.delay(delivery_id)
+    logger.info("Re-offered %d pool deliveries to auto-assign after a capacity gain", len(delivery_ids))
+    return len(delivery_ids)

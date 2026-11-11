@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Col,
@@ -40,6 +41,9 @@ import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
 
 const { Text } = Typography;
+
+// Page 1 of size 1 is enough: only the `total` is read, for the Bottle Transfers tab badge.
+const DISPUTED_COUNT_PARAMS = { status: 'disputed', page: 1, per_page: 1 };
 
 const EVENT_TYPE_COLORS = {
   delivery: 'blue',
@@ -403,6 +407,13 @@ const BottleTracking = () => {
     [transferPagination, transferStatusFilter]
   );
 
+  // The Bottle Transfers tab label carries the disputed total, so an admin learns of a dispute without opening
+  // the tab. Its key starts with 'bottle-transfers' so the resolve mutation's invalidation refreshes it.
+  const { data: disputedTransfersData } = useQuery({
+    queryKey: ['bottle-transfers', 'disputed-count'],
+    queryFn: () => adminService.getBottleTransfers(DISPUTED_COUNT_PARAMS),
+  });
+
   const { data: transfersData, isLoading: transfersLoading } = useQuery({
     queryKey: ['bottle-transfers', transferFilters],
     queryFn: () => adminService.getBottleTransfers(transferFilters),
@@ -458,6 +469,7 @@ const BottleTracking = () => {
 
   const transfers = transfersData?.data?.items || transfersData?.data || [];
   const transfersTotal = transfersData?.data?.total || transfers.length;
+  const disputedTransfersTotal = disputedTransfersData?.data?.total || 0;
 
   const refreshAll = () => {
     queryClient.invalidateQueries({
@@ -1102,6 +1114,9 @@ const BottleTracking = () => {
               { title: t('delivered', { defaultValue: 'Delivered' }), dataIndex: 'bottles_delivered', key: 'bottles_delivered', align: 'right' },
               { title: t('collected', { defaultValue: 'Collected' }), dataIndex: 'bottles_collected_from_customers', key: 'bottles_collected_from_customers', align: 'right' },
               { title: t('on_truck', { defaultValue: 'On Truck' }), dataIndex: 'current_inventory', key: 'current_inventory', align: 'right' },
+              { title: t('full_on_board', { defaultValue: 'Full on Board' }), dataIndex: 'full_bottles_on_board', key: 'full_bottles_on_board', align: 'right' },
+              { title: t('empties_on_board', { defaultValue: 'Empties on Board' }), dataIndex: 'empties_on_board', key: 'empties_on_board', align: 'right' },
+              { title: t('free_full', { defaultValue: 'Free Full' }), dataIndex: 'free_full_bottles', key: 'free_full_bottles', align: 'right' },
               { title: t('returned', { defaultValue: 'Returned' }), dataIndex: 'bottles_returned_to_warehouse', key: 'bottles_returned_to_warehouse', align: 'right', render: (v) => v ?? '—' },
               {
                 title: t('discrepancy', { defaultValue: 'Discrepancy' }), dataIndex: 'discrepancy', key: 'discrepancy', align: 'right',
@@ -1152,7 +1167,12 @@ const BottleTracking = () => {
     },
     {
       key: 'transfers',
-      label: t('tab_transfers', { defaultValue: 'Bottle Transfers' }),
+      label: (
+        <span>
+          {t('tab_transfers', { defaultValue: 'Bottle Transfers' })}
+          {disputedTransfersTotal > 0 && <Badge count={disputedTransfersTotal} style={{ marginLeft: 8 }} />}
+        </span>
+      ),
       children: (
         <>
           <Space wrap style={{ marginBottom: 12 }}>
@@ -1177,8 +1197,10 @@ const BottleTracking = () => {
             columns={[
               { title: t('sender', { defaultValue: 'Sender' }), dataIndex: 'sender_name', key: 'sender_name', render: (v, r) => v || r.sender_driver_id },
               { title: t('receiver', { defaultValue: 'Receiver' }), dataIndex: 'receiver_name', key: 'receiver_name', render: (v, r) => v || r.receiver_driver_id },
-              { title: t('declared', { defaultValue: 'Declared' }), dataIndex: 'declared_quantity', key: 'declared_quantity', align: 'right' },
-              { title: t('confirmed', { defaultValue: 'Confirmed' }), dataIndex: 'confirmed_quantity', key: 'confirmed_quantity', align: 'right', render: (v) => v ?? '—' },
+              { title: t('declared_full', { defaultValue: 'Declared Full' }), dataIndex: 'declared_full', key: 'declared_full', align: 'right' },
+              { title: t('declared_empty', { defaultValue: 'Declared Empty' }), dataIndex: 'declared_empty', key: 'declared_empty', align: 'right' },
+              { title: t('confirmed_full', { defaultValue: 'Confirmed Full' }), dataIndex: 'confirmed_full', key: 'confirmed_full', align: 'right', render: (v) => v ?? '—' },
+              { title: t('confirmed_empty', { defaultValue: 'Confirmed Empty' }), dataIndex: 'confirmed_empty', key: 'confirmed_empty', align: 'right', render: (v) => v ?? '—' },
               { title: t('sent_at', { defaultValue: 'Sent At' }), dataIndex: 'sent_at', key: 'sent_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
               {
                 title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status',
@@ -1423,8 +1445,13 @@ const BottleTracking = () => {
               <Descriptions.Item label={t('loaded', { defaultValue: 'Loaded' })}>{sessionDetail.bottles_loaded}</Descriptions.Item>
               <Descriptions.Item label={t('delivered', { defaultValue: 'Delivered' })}>{sessionDetail.bottles_delivered}</Descriptions.Item>
               <Descriptions.Item label={t('collected', { defaultValue: 'Collected' })}>{sessionDetail.bottles_collected_from_customers}</Descriptions.Item>
-              <Descriptions.Item label={t('transferred_out', { defaultValue: 'Transferred Out' })}>{sessionDetail.bottles_transferred_out}</Descriptions.Item>
-              <Descriptions.Item label={t('transferred_in', { defaultValue: 'Transferred In' })}>{sessionDetail.bottles_transferred_in}</Descriptions.Item>
+              <Descriptions.Item label={t('full_transferred_out', { defaultValue: 'Full Transferred Out' })}>{sessionDetail.bottles_transferred_out}</Descriptions.Item>
+              <Descriptions.Item label={t('full_transferred_in', { defaultValue: 'Full Transferred In' })}>{sessionDetail.bottles_transferred_in}</Descriptions.Item>
+              <Descriptions.Item label={t('empties_transferred_out', { defaultValue: 'Empties Transferred Out' })}>{sessionDetail.empties_transferred_out}</Descriptions.Item>
+              <Descriptions.Item label={t('empties_transferred_in', { defaultValue: 'Empties Transferred In' })}>{sessionDetail.empties_transferred_in}</Descriptions.Item>
+              <Descriptions.Item label={t('full_on_board', { defaultValue: 'Full on Board' })}>{sessionDetail.full_bottles_on_board}</Descriptions.Item>
+              <Descriptions.Item label={t('empties_on_board', { defaultValue: 'Empties on Board' })}>{sessionDetail.empties_on_board}</Descriptions.Item>
+              <Descriptions.Item label={t('free_full', { defaultValue: 'Free Full' })}>{sessionDetail.free_full_bottles}</Descriptions.Item>
               <Descriptions.Item label={t('returned_to_wh', { defaultValue: 'Returned to WH' })}>{sessionDetail.bottles_returned_to_warehouse ?? '—'}</Descriptions.Item>
               <Descriptions.Item label={t('discrepancy', { defaultValue: 'Discrepancy' })}>
                 {sessionDetail.discrepancy != null
@@ -1539,18 +1566,30 @@ const BottleTracking = () => {
       >
         {resolveTarget && (
           <p style={{ marginBottom: 16 }}>
-            {t('sender_declared_prefix', { defaultValue: 'Sender declared' })} <strong>{resolveTarget.declared_quantity}</strong>{t('receiver_confirmed_infix', { defaultValue: ', receiver confirmed' })} <strong>{resolveTarget.confirmed_quantity}</strong>.
+            {t('resolve_counts_summary', {
+              defaultValue: 'Sender declared {{declaredFull}} full and {{declaredEmpty}} empty, receiver confirmed {{confirmedFull}} full and {{confirmedEmpty}} empty.',
+              declaredFull: resolveTarget.declared_full,
+              declaredEmpty: resolveTarget.declared_empty,
+              confirmedFull: resolveTarget.confirmed_full ?? '—',
+              confirmedEmpty: resolveTarget.confirmed_empty ?? '—',
+            })}
           </p>
         )}
         <Form
           form={resolveForm}
           layout="vertical"
-          onFinish={(values) => resolveTransferMutation.mutate({ transferId: resolveTarget.id, data: values })}
+          onFinish={({ resolvedFull, resolvedEmpty, resolutionNotes }) => resolveTransferMutation.mutate({
+            transferId: resolveTarget.id,
+            data: { resolvedFull, resolvedEmpty, resolutionNotes },
+          })}
         >
-          <Form.Item name="resolved_quantity" label={t('resolved_quantity_label', { defaultValue: 'Resolved Quantity' })} rules={[{ required: true }]}>
+          <Form.Item name="resolvedFull" label={t('resolved_full_label', { defaultValue: 'Resolved Full' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
-          <Form.Item name="resolution_notes" label={t('resolution_notes_label', { defaultValue: 'Resolution Notes (required)' })} rules={[{ required: true, message: t('resolution_notes_required_msg', { defaultValue: 'Please explain the resolution' }) }]}>
+          <Form.Item name="resolvedEmpty" label={t('resolved_empty_label', { defaultValue: 'Resolved Empty' })} rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%' }} min={0} />
+          </Form.Item>
+          <Form.Item name="resolutionNotes" label={t('resolution_notes_label', { defaultValue: 'Resolution Notes (required)' })} rules={[{ required: true, message: t('resolution_notes_required_msg', { defaultValue: 'Please explain the resolution' }) }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>

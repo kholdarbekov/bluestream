@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import LoyaltyRewards from '../../pages/LoyaltyRewards';
@@ -105,5 +105,40 @@ describe('LoyaltyRewards page', () => {
     fireEvent.mouseDown(productSelector);
 
     expect(await screen.findByTitle('19 litrlik suv')).toBeInTheDocument();
+  });
+
+  it('sends the picked validity window as exact toISOString() instants on update', async () => {
+    adminService.getLoyaltyRewards.mockResolvedValue({
+      items: [{
+        id: 5,
+        name: 'Winter reward',
+        program_id: 1,
+        program_name: 'Gold',
+        reward_type: 'discount',
+        points_cost: 100,
+        discount_type: 'fixed',
+        discount_value: 1000,
+        is_active: true,
+        valid_from: '2026-12-01T00:00:00+05:00',
+        valid_until: '2026-12-31T23:59:00+05:00',
+      }],
+      total: 1,
+    });
+    adminService.getLoyaltyPrograms.mockResolvedValue({ items: [{ id: 1, name: 'Gold' }], total: 1 });
+    adminService.updateLoyaltyReward.mockResolvedValue({});
+
+    render(<LoyaltyRewards />, { wrapper: createWrapper() });
+    await screen.findByText('Winter reward');
+    const row = screen.getByText('Winter reward').closest('tr');
+    const buttons = row.querySelectorAll('button');
+    fireEvent.click(buttons[1]);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /save|update/i }));
+
+    await waitFor(() => expect(adminService.updateLoyaltyReward).toHaveBeenCalledTimes(1));
+    const [rewardId, payload] = adminService.updateLoyaltyReward.mock.calls[0];
+    expect(rewardId).toBe(5);
+    expect(payload.valid_from).toBe('2026-11-30T19:00:00.000Z');
+    expect(payload.valid_until).toBe('2026-12-31T18:59:00.000Z');
   });
 });

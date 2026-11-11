@@ -73,6 +73,20 @@ const DELIVERY_STATUS_FALLBACK_LABELS = {
   returned: 'Returned'
 };
 
+// The refusals of a status move this page explains itself: `data.error_code` -> [translation key,
+// English fallback]. Spec A9: an admin move skips the bottle count, but the driver must still be on a
+// bottle trip. Named in the request's `handledErrorCodes` so api.js does not toast the backend's English
+// driver sentence as well. A Map because the lookup key comes off the wire.
+const STATUS_MOVE_ERROR_MESSAGES = new Map([
+  [
+    'BOTTLE_SESSION_REQUIRED',
+    [
+      'ui.delivery.status_error.BOTTLE_SESSION_REQUIRED',
+      'This driver has no open bottle session. Ask them to open one or join a colleague, then try again.',
+    ],
+  ],
+]);
+
 const Delivery = () => {
   // Load delivery namespace for ui.delivery.* keys
   const { t } = useTranslation('delivery');
@@ -128,7 +142,7 @@ const Delivery = () => {
   // Update delivery mutation
   const updateDeliveryMutation = useMutation({
     mutationFn: ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data, {
-      handledErrorCodes: [...ADMIN_REASON_ERROR_MESSAGES.keys()],
+      handledErrorCodes: [...ADMIN_REASON_ERROR_MESSAGES.keys(), ...STATUS_MOVE_ERROR_MESSAGES.keys()],
     }),
 
     onSuccess: (response) => {
@@ -141,9 +155,10 @@ const Delivery = () => {
     },
 
     onError: (error) => {
-      // A return's reason refusal was named in handledErrorCodes, so api.js stayed silent: this is
-      // its one message, in the words the Orders page uses (F6).
-      const known = ADMIN_REASON_ERROR_MESSAGES.get(apiErrorCode(error));
+      // A return's reason refusal (F6, in the words the Orders page uses) and a driver with no bottle
+      // trip (A9) were named in handledErrorCodes, so api.js stayed silent: this is their one message.
+      const code = apiErrorCode(error);
+      const known = ADMIN_REASON_ERROR_MESSAGES.get(code) ?? STATUS_MOVE_ERROR_MESSAGES.get(code);
       if (known) {
         message.error(t(known[0], known[1]));
         return;

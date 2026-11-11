@@ -52,6 +52,8 @@ AUDIT: list[tuple[str, str]] = [
     ("BOTTLE_JOIN_REQUEST_ALREADY_MEMBER", "staff.error.api.join_request_already_member"),
     ("BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE", "staff.error.api.already_in_session"),
     ("BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND", "staff.error.api.not_in_session"),
+    # Final fix wave (spec 2026-11-09 A8): Leave refused while the co-driver has orders on the way.
+    ("BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS", "staff.error.api.leave_has_promised_stops"),
     ("BOTTLE_SCOPE_MEMBERSHIP_REQUIRED", "staff.error.api.customer_left_address"),
     ("BOTTLE_IDEMPOTENCY_KEY_REUSED", "staff.error.api.entry_already_submitted"),
     ("BOTTLE_TRANSFER_EXCEEDS_INVENTORY", "staff.error.api.transfer_exceeds_inventory"),
@@ -59,9 +61,14 @@ AUDIT: list[tuple[str, str]] = [
     ("BOTTLE_TRANSFER_NOT_RECEIVER", "staff.error.api.transfer_not_yours"),
     ("BOTTLE_TRANSFER_NOT_PENDING", "staff.error.api.transfer_already_handled"),
     ("BOTTLE_TRANSFER_RECEIVER_INVALID", "staff.error.api.transfer_receiver_invalid"),
+    ("SHARED_PLACE_ANSWER_REFUSED", "staff.error.api.shared_place_answer_refused"),
+    # Full/empty transfer split (spec 2026-11-09 §4.3): 0 full + 0 empties, chosen or sent with "Send all".
+    ("BOTTLE_TRANSFER_NOTHING_TO_SEND", "staff.error.api.transfer_nothing_to_send"),
     # Task 8: cash and reconciliation.
     ("RECONCILIATION_AMOUNT_NOT_POSITIVE", "staff.error.api.handoff_amount_not_positive"),
     ("RECONCILIATION_NOTHING_TO_SUBMIT", "staff.error.api.nothing_to_reconcile"),
+    # Prepayment return, Task 4: the trip being settled closed under the tap (double tap, a return).
+    ("RECONCILIATION_SESSION_CHANGED", "staff.error.api.nothing_to_reconcile"),
     ("COD_CUSTOMER_NOT_FOUND", "staff.error.api.customer_not_found"),
     # Task 9: operator flows. STAFF_PHONE_INVALID / STAFF_PHONE_EXISTS point at
     # operator keys that predate this audit, so they have no row here.

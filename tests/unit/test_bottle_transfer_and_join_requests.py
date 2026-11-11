@@ -292,10 +292,11 @@ def _disputed_at_zero(client, app, db, phone_base, qty=4):
 
 
 def _resolve(client, admin_claim_headers, transfer_id, qty):
+    """The admin resolve modal's body: these hand-offs carried full bottles only."""
     return client.post(
         f"/api/v1/admin/bottles/transfers/{transfer_id}/resolve",
         headers=admin_claim_headers,
-        json={"resolved_quantity": qty, "resolution_notes": "counted at the depot"},
+        json={"resolvedFull": qty, "resolvedEmpty": 0, "resolutionNotes": "counted at the depot"},
     )
 
 
@@ -380,7 +381,8 @@ def test_a_saved_transfer_is_pushed_to_the_receiver(app, client, db, pushes):
     transfer = _send(client, app, sender, receiver, 4)
 
     assert pushes == [((int(receiver.telegram_id), "transfer_received",
-                        {"id": transfer["id"], "declared_quantity": 4, "sender_name": "Ali Driver"}), {})]
+                        {"id": transfer["id"], "declared_quantity": 4, "declared_empty_quantity": 0,
+                         "sender_name": "Ali Driver"}), {})]
 
 
 def test_a_refused_transfer_pushes_nothing(app, client, db, pushes):

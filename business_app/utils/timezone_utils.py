@@ -148,6 +148,9 @@ def parse_user_datetime(
     """
     Parse user input datetime string to UTC datetime
 
+    A value with no offset is wall-clock time in ``source_tz``; a value with an explicit offset or ``Z``
+    is that instant. The result is always aware UTC.
+
     Args:
         dt_string: Datetime string from user
         format_string: Format string for parsing
@@ -166,7 +169,10 @@ def parse_user_datetime(
                 "%Y-%m-%d",
                 "%Y-%m-%dT%H:%M:%S",
                 "%Y-%m-%dT%H:%M:%S.%f",
-                "%Y-%m-%dT%H:%M:%S.%fZ",
+                # An explicit offset or "Z" names the instant itself, so it is honoured, never re-read as local
+                # time. JS toISOString() is "...T09:00:00.000Z"; %z accepts "Z", "+05:00" and "+0500".
+                "%Y-%m-%dT%H:%M:%S%z",
+                "%Y-%m-%dT%H:%M:%S.%f%z",
             ]
 
             dt = None

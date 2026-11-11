@@ -381,10 +381,10 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "vaqti nomalum",
         "ru": "время неизвестно",
     },
-    "staff.delivery.pending_transfer_line": {
-        "en": "• From <b>{sender}</b>: <b>{qty}</b> bottles  [ref: {ref}]",
-        "uz": "• <b>{sender}</b>dan: <b>{qty}</b> ta idish  [ref: {ref}]",
-        "ru": "• От <b>{sender}</b>: <b>{qty}</b> ед. тары  [ref: {ref}]",
+    "staff.delivery.pending_transfer_split_line": {
+        "en": "• From <b>{sender}</b>: <b>{full}</b> full + <b>{empty}</b> empty  [ref: {ref}]",
+        "uz": "• <b>{sender}</b>dan: <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh  [ref: {ref}]",
+        "ru": "• От <b>{sender}</b>: <b>{full}</b> полных + <b>{empty}</b> пустых  [ref: {ref}]",
     },
     "staff.tryout.default_label": {
         "en": "Try-out",
@@ -1082,15 +1082,17 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # reloading at the warehouse; a transfer is no remedy, because the
     # transfer picker (list_eligible_co_drivers) excludes every driver who
     # already has an open session.
+    # Counted in FREE FULL bottles (spec 2026-11-09 A1, A8): full bottles on the
+    # truck minus the stops already on their way. Empties never count.
     "staff.error.api.bottle_session_capacity_exceeded": {
-        "en": "Your bottle session doesn't have enough bottles for this order. Return to the warehouse to reload.",
-        "uz": "Idish sessiyangizda bu buyurtma uchun yetarli idish yo'q. Qayta yuklash uchun omborga qayting.",
-        "ru": "В вашей сессии недостаточно тары для этого заказа. Вернитесь на склад и загрузитесь заново.",
+        "en": "You don't have enough free full bottles for this order. Return to the warehouse to reload.",
+        "uz": "Bu buyurtma uchun band qilinmagan to'la idishlaringiz yetarli emas. Qayta yuklash uchun omborga qayting.",
+        "ru": "Для этого заказа не хватает свободных полных бутылок. Вернитесь на склад и загрузитесь заново.",
     },
     "staff.error.api.bottle_session_capacity_exceeded_detail": {
-        "en": "Your session has {available} bottle(s) left, but this order needs {required} — {shortfall} short. Return to the warehouse to reload.",
-        "uz": "Sessiyangizda {available} ta idish qolgan, bu buyurtmaga esa {required} ta kerak — {shortfall} ta yetishmayapti. Qayta yuklash uchun omborga qayting.",
-        "ru": "В сессии осталось {available} бут., а для заказа нужно {required} — не хватает {shortfall}. Вернитесь на склад и загрузитесь заново.",
+        "en": "You have {available} free full bottles; this order needs {required}.",
+        "uz": "Sizda {available} ta band qilinmagan to'la idish bor; bu buyurtmaga {required} ta kerak.",
+        "ru": "У вас {available} свободных полных бутылок; для этого заказа нужно {required}.",
     },
     # Bottle sessions, co-drivers and transfers (2026-09-24 audit): one sentence
     # per refusal code, mapped in staff_bot/handlers/base.py.
@@ -1154,6 +1156,19 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Hozir siz hech kimning idish sessiyasida emassiz.",
         "ru": "Сейчас вы не состоите ни в чьей сессии по таре.",
     },
+    # A co-driver may not leave while his stops on the way (In Transit or Arrived) hold
+    # bottles promised from the owner's truck (spec 2026-11-09 A8). The second sentence
+    # names how many, from the refusal's `count`.
+    "staff.error.api.leave_has_promised_stops": {
+        "en": "Deliver the orders you have on the way before leaving this session.",
+        "uz": "Bu sessiyadan chiqishdan oldin yo'ldagi buyurtmalaringizni yetkazib bering.",
+        "ru": "Прежде чем выйти из этой сессии, доставьте заказы, которые у вас в пути.",
+    },
+    "staff.error.api.leave_has_promised_stops_detail": {
+        "en": "You have {count} order(s) on the way. Deliver them before leaving this session.",
+        "uz": "Sizda yo'lda {count} ta buyurtma bor. Sessiyadan chiqishdan oldin ularni yetkazib bering.",
+        "ru": "У вас в пути заказов: {count}. Доставьте их, прежде чем выйти из сессии.",
+    },
     "staff.error.api.customer_left_address": {
         "en": "This customer is no longer linked to that address. Search for the customer again.",
         "uz": "Bu mijoz endi bu manzilga bog'lanmagan. Mijozni qayta qidiring.",
@@ -1174,6 +1189,24 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Mashinada {available} ta idish bor, shuning uchun {requested} ta o'tkaza olmaysiz.",
         "ru": "В машине {available} бут., поэтому перевести {requested} нельзя.",
     },
+    # The same refusal naming the number that was too high (spec 2026-11-09 T2): the backend's `kind` picks one.
+    # A refusal with no kind (an older backend) keeps the sentence above.
+    "staff.error.api.transfer_exceeds_full_detail": {
+        "en": "You have only {available} full bottles.",
+        "uz": "Sizda faqat {available} ta to'la idish bor.",
+        "ru": "У вас только {available} полных бутылок.",
+    },
+    "staff.error.api.transfer_exceeds_empty_detail": {
+        "en": "You have only {available} empty bottles.",
+        "uz": "Sizda faqat {available} ta bo'sh idish bor.",
+        "ru": "У вас только {available} пустых бутылок.",
+    },
+    # A transfer of 0 full and 0 empties (spec 2026-11-09 §4.3): chosen, or "Send all" on an empty truck.
+    "staff.error.api.transfer_nothing_to_send": {
+        "en": "Nothing to transfer. Choose at least one full or empty bottle from your truck.",
+        "uz": "O'tkazadigan hech narsa yo'q. Mashinangizdan kamida bitta to'la yoki bo'sh idishni tanlang.",
+        "ru": "Нечего передавать. Выберите хотя бы одну полную или пустую бутылку из машины.",
+    },
     "staff.error.api.transfer_not_found": {
         "en": "This transfer no longer exists.",
         "uz": "Bu o'tkazma endi mavjud emas.",
@@ -1188,6 +1221,12 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This transfer has already been handled.",
         "uz": "Bu o'tkazma allaqachon ko'rib chiqilgan.",
         "ru": "Этот перевод уже обработан.",
+    },
+    # A stale shared-place question button: the case was settled, or a different answer is already stored.
+    "staff.error.api.shared_place_answer_refused": {
+        "en": "This report is already settled — nothing more is needed.",
+        "uz": "Bu hisobot allaqachon hal qilingan — boshqa hech narsa kerak emas.",
+        "ru": "Этот отчёт уже закрыт — больше ничего не требуется.",
     },
     "staff.error.api.transfer_receiver_invalid": {
         "en": "This driver can't receive bottles right now.",
@@ -2057,25 +2096,42 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Boshqa faol haydovchilar topilmadi.",
         "ru": "Других активных водителей не найдено.",
     },
-    "staff.delivery.select_transfer_driver": {
-        "en": "Select the driver to transfer bottles to.\n(You have <b>{available}</b> bottles available)\n\n🚚 has a session · 🤝 co-driver · 👤 no session yet",
-        "uz": "Idish o'tkazish uchun haydovchini tanlang.\n(Sizda <b>{available}</b> ta idish mavjud)\n\n🚚 sessiyasi bor · 🤝 hamkor haydovchi · 👤 hali sessiyasi yo'q",
-        "ru": "Выберите водителя для передачи бутылок.\n(У вас <b>{available}</b> бутылок доступно)\n\n🚚 есть сессия · 🤝 напарник · 👤 сессии пока нет",
+    # The sender's screens (spec 2026-11-09 §4.4): pick a colleague, then send everything or choose two numbers.
+    # The numbers are the backend's transferable full / empties; the backend caps each one.
+    "staff.delivery.select_transfer_receiver": {
+        "en": "Select the driver to transfer bottles to.\n\n🚚 has a session · 🤝 co-driver · 👤 no session yet",
+        "uz": "Idish o'tkazish uchun haydovchini tanlang.\n\n🚚 sessiyasi bor · 🤝 hamkor haydovchi · 👤 hali sessiyasi yo'q",
+        "ru": "Выберите водителя для передачи бутылок.\n\n🚚 есть сессия · 🤝 напарник · 👤 сессии пока нет",
     },
-    "staff.delivery.enter_transfer_qty": {
-        "en": "📦 How many bottles are you transferring?\n(You have <b>{available}</b> available)",
-        "uz": "📦 Nechta idish o'tkazmoqdasiz?\n(Sizda <b>{available}</b> ta mavjud)",
-        "ru": "📦 Сколько бутылок вы передаёте?\n(У вас <b>{available}</b> доступно)",
+    "staff.delivery.transfer_send_prompt": {
+        "en": "📦 What are you handing over?",
+        "uz": "📦 Nimani topshirasiz?",
+        "ru": "📦 Что вы передаёте?",
     },
-    "staff.delivery.transfer_qty_exceeds_available": {
-        "en": "⚠️ You only have {available} bottle(s) available. Enter a smaller number.",
-        "uz": "⚠️ Sizda faqat {available} ta idish mavjud. Kichikroq raqam kiriting.",
-        "ru": "⚠️ У вас всего {available} бутылок. Введите меньшее число.",
+    "staff.delivery.transfer_send_all_button": {
+        "en": "Send all ({full} full + {empty} empty)",
+        "uz": "Hammasini yuborish ({full} ta to'la + {empty} ta bo'sh)",
+        "ru": "Отправить всё ({full} полных + {empty} пустых)",
     },
-    "staff.delivery.bottle_transfer_initiated": {
-        "en": "✅ <b>Transfer initiated!</b>\n\n📦 Quantity: <b>{qty}</b> bottles\nThe receiving driver will get a notification to confirm.\nRef: <code>{ref}</code>",
-        "uz": "✅ <b>O'tkazish boshlandi!</b>\n\n📦 Miqdor: <b>{qty}</b> ta idish\nQabul qiluvchi haydovchi tasdiqlash uchun bildirishnoma oladi.\nRaqam: <code>{ref}</code>",
-        "ru": "✅ <b>Передача инициирована!</b>\n\n📦 Количество: <b>{qty}</b> бутылок\nПринимающий водитель получит уведомление для подтверждения.\nНомер: <code>{ref}</code>",
+    "staff.delivery.transfer_choose_amounts_button": {
+        "en": "Choose amounts",
+        "uz": "Sonini tanlash",
+        "ru": "Указать количество",
+    },
+    "staff.delivery.enter_transfer_full_qty": {
+        "en": "How many full bottles? (max {max})",
+        "uz": "Nechta to'la idish? (ko'pi bilan {max})",
+        "ru": "Сколько полных бутылок? (макс. {max})",
+    },
+    "staff.delivery.enter_transfer_empty_qty": {
+        "en": "How many empty bottles? (max {max})",
+        "uz": "Nechta bo'sh idish? (ko'pi bilan {max})",
+        "ru": "Сколько пустых бутылок? (макс. {max})",
+    },
+    "staff.delivery.bottle_transfer_sent": {
+        "en": "✅ <b>Transfer initiated!</b>\n\n📦 <b>{full}</b> full + <b>{empty}</b> empty\nThe receiving driver will get a notification to confirm.\nRef: <code>{ref}</code>",
+        "uz": "✅ <b>O'tkazish boshlandi!</b>\n\n📦 <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh\nQabul qiluvchi haydovchi tasdiqlash uchun bildirishnoma oladi.\nRaqam: <code>{ref}</code>",
+        "ru": "✅ <b>Передача инициирована!</b>\n\n📦 <b>{full}</b> полных + <b>{empty}</b> пустых\nПринимающий водитель получит уведомление для подтверждения.\nНомер: <code>{ref}</code>",
     },
     "staff.delivery.no_pending_transfers": {
         "en": "No pending transfers waiting for your confirmation.",
@@ -2087,25 +2143,38 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "📥 <b>Kutilayotgan kiruvchi o'tkazmalar:</b>",
         "ru": "📥 <b>Ожидающие входящие передачи:</b>",
     },
-    "staff.delivery.enter_actual_received_qty": {
-        "en": "✏️ How many bottles did you actually receive?\nEnter the count:",
-        "uz": "✏️ Aslida nechta idish oldiniz?\nSonni kiriting:",
-        "ru": "✏️ Сколько бутылок вы фактически получили?\nВведите количество:",
+    # The receiver's "Different count": full first, then empties.
+    "staff.delivery.enter_received_full_qty": {
+        "en": "✏️ How many full bottles did you receive?",
+        "uz": "✏️ Nechta to'la idish oldingiz?",
+        "ru": "✏️ Сколько полных бутылок вы получили?",
+    },
+    "staff.delivery.enter_received_empty_qty": {
+        "en": "✏️ How many empty bottles did you receive?",
+        "uz": "✏️ Nechta bo'sh idish oldingiz?",
+        "ru": "✏️ Сколько пустых бутылок вы получили?",
     },
     "staff.delivery.transfer_confirm_failed": {
         "en": "Failed to confirm transfer. Please try again.",
         "uz": "O'tkazmani tasdiqlash muvaffaqiyatsiz. Qayta urinib ko'ring.",
         "ru": "Не удалось подтвердить передачу. Попробуйте ещё раз.",
     },
-    "staff.delivery.transfer_confirmed": {
-        "en": "✅ <b>Transfer confirmed!</b>\n\n📥 <b>{qty}</b> bottles added to your session.",
-        "uz": "✅ <b>O'tkazma tasdiqlandi!</b>\n\n📥 <b>{qty}</b> ta idish sessiyangizga qo'hildi.",
-        "ru": "✅ <b>Передача подтверждена!</b>\n\n📥 <b>{qty}</b> бутылок добавлено в вашу сессию.",
+    "staff.delivery.transfer_confirmed_split": {
+        "en": "✅ <b>Transfer confirmed!</b>\n\n📥 <b>{full}</b> full + <b>{empty}</b> empty added to your session.",
+        "uz": "✅ <b>O'tkazma tasdiqlandi!</b>\n\n📥 <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh idish sessiyangizga qo'shildi.",
+        "ru": "✅ <b>Передача подтверждена!</b>\n\n📥 <b>{full}</b> полных + <b>{empty}</b> пустых добавлено в вашу сессию.",
     },
-    "staff.delivery.transfer_disputed": {
-        "en": "⚠️ <b>Bottle transfer to other driver request filed.</b>\n\nSender declared <b>{declared}</b>, you received <b>{qty}</b>.\nAdmin has been notified. Your session has been credited with <b>{qty}</b> pending resolution.",
-        "uz": "⚠️ <b>Idish o'tkazma so'rovi kiritildi.</b>\n\nJo'natuvchi <b>{declared}</b> ta deb ko'rsatdi, siz <b>{qty}</b> ta oldingiz.\nAdmin xabardor qilindi. Sessiyangizga hal bo'lgunga qadar <b>{qty}</b> ta yozildi.",
-        "ru": "⚠️ <b>Запрос на передачу бутылки другому водителю подан.</b>\n\nОтправитель указал <b>{declared}</b>, вы получили <b>{qty}</b>.\nАдмин уведомлён. В вашу сессию записано <b>{qty}</b> до разрешения.",
+    # The receiver's disputed count (spec 2026-11-09 §4.4): it says an admin was notified only when the backend's
+    # `admins_alerted` says one was; the twin below asks the driver to tell one instead.
+    "staff.delivery.transfer_disputed_split": {
+        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{dfull}</b> full + <b>{dempty}</b> empty; you received <b>{cfull}</b> full + <b>{cempty}</b> empty.\nAdmin has been notified. Your session has been credited with your count pending resolution.",
+        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi <b>{dfull}</b> ta to'la + <b>{dempty}</b> ta bo'sh deb ko'rsatdi, siz <b>{cfull}</b> ta to'la + <b>{cempty}</b> ta bo'sh oldingiz.\nAdmin xabardor qilindi. Sessiyangizga hal bo'lgunga qadar siz sanagan son yozildi.",
+        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал <b>{dfull}</b> полных + <b>{dempty}</b> пустых, вы получили <b>{cfull}</b> полных + <b>{cempty}</b> пустых.\nАдмин уведомлён. В вашу сессию записан ваш подсчёт до разрешения.",
+    },
+    "staff.delivery.transfer_disputed_split_no_admin": {
+        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{dfull}</b> full + <b>{dempty}</b> empty; you received <b>{cfull}</b> full + <b>{cempty}</b> empty.\nPlease tell an admin so they can settle it. Your session has been credited with your count pending resolution.",
+        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi <b>{dfull}</b> ta to'la + <b>{dempty}</b> ta bo'sh deb ko'rsatdi, siz <b>{cfull}</b> ta to'la + <b>{cempty}</b> ta bo'sh oldingiz.\nIltimos, hal qilishlari uchun adminga xabar bering. Sessiyangizga hal bo'lgunga qadar siz sanagan son yozildi.",
+        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал <b>{dfull}</b> полных + <b>{dempty}</b> пустых, вы получили <b>{cfull}</b> полных + <b>{cempty}</b> пустых.\nПожалуйста, сообщите администратору, чтобы он решил вопрос. В вашу сессию записан ваш подсчёт до разрешения.",
     },
     # Session display labels (used in _format_session)
     "staff.delivery.session_ref_label": {
@@ -2133,15 +2202,15 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yig'ilgan",
         "ru": "Собрано",
     },
-    "staff.delivery.bottles_transferred_out_label": {
-        "en": "Transferred out",
-        "uz": "Chiqib ketgan",
-        "ru": "Передано",
+    "staff.delivery.bottles_transferred_out_split": {
+        "en": "Transferred out: {full} full + {empty} empty",
+        "uz": "Chiqib ketgan: {full} ta to'la + {empty} ta bo'sh",
+        "ru": "Передано: {full} полных + {empty} пустых",
     },
-    "staff.delivery.bottles_transferred_in_label": {
-        "en": "Transferred in",
-        "uz": "Kirib kelgan",
-        "ru": "Получено",
+    "staff.delivery.bottles_transferred_in_split": {
+        "en": "Transferred in: {full} full + {empty} empty",
+        "uz": "Kirib kelgan: {full} ta to'la + {empty} ta bo'sh",
+        "ru": "Получено: {full} полных + {empty} пустых",
     },
     "staff.delivery.bottles_on_truck_label": {
         "en": "On truck now",
@@ -2195,10 +2264,21 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Sessiya egasi",
         "ru": "Владелец сессии",
     },
-    "staff.bottles.bottles_on_truck": {
-        "en": "Bottles on truck",
-        "uz": "Mashinadagi shishalar",
-        "ru": "Бутылок в машине",
+    # The truck in the backend's numbers (spec 2026-11-09 U1), on the session, return and join screens.
+    "staff.bottles.full_on_truck": {
+        "en": "Full on truck: {n}",
+        "uz": "Mashinadagi to'la idishlar: {n}",
+        "ru": "Полных в машине: {n}",
+    },
+    "staff.bottles.empties_on_truck": {
+        "en": "Empties on truck: {n}",
+        "uz": "Mashinadagi bo'sh idishlar: {n}",
+        "ru": "Пустых в машине: {n}",
+    },
+    "staff.bottles.free_full_bottles": {
+        "en": "Free full bottles: {n}",
+        "uz": "Band qilinmagan to'la idishlar: {n}",
+        "ru": "Свободных полных бутылок: {n}",
     },
     "staff.bottles.join_session_confirm_title": {
         "en": "Ask to join this session?",
@@ -2230,10 +2310,10 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Siz <b>{name}</b>ning so'rovini rad etdingiz.",
         "ru": "Вы отклонили запрос: <b>{name}</b>.",
     },
-    "staff.bottles.notify.transfer_received": {
-        "en": "📥 <b>{sender}</b> sent you <b>{qty}</b> bottles. Confirm the count you received.",
-        "uz": "📥 <b>{sender}</b> sizga <b>{qty}</b> ta idish yubordi. Qabul qilgan soningizni tasdiqlang.",
-        "ru": "📥 <b>{sender}</b> передал вам <b>{qty}</b> бутылок. Подтвердите полученное количество.",
+    "staff.bottles.notify.transfer_received_split": {
+        "en": "📥 <b>{sender}</b> sent you <b>{full}</b> full + <b>{empty}</b> empty. Confirm the count you received.",
+        "uz": "📥 <b>{sender}</b> sizga <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh idish yubordi. Qabul qilgan soningizni tasdiqlang.",
+        "ru": "📥 <b>{sender}</b> передал вам <b>{full}</b> полных + <b>{empty}</b> пустых. Подтвердите полученное количество.",
     },
     "staff.bottles.notify.join_requested": {
         "en": "🤝 <b>{name}</b> wants to join your bottle session. Orders they accept will count against your truck.",
@@ -2244,6 +2324,30 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "❌ <b>{name}</b> declined your request to join their session.",
         "uz": "❌ <b>{name}</b> sessiyasiga qo'shilish so'rovingizni rad etdi.",
         "ru": "❌ <b>{name}</b> отклонил ваш запрос на присоединение к сессии.",
+    },
+    # The sender's message once the receiver has counted a transfer (spec 2026-11-09 T4, T5), rendered by
+    # staff_bot/webhook_server.py::_render_bottle_event. The trip line is appended only when the backend reports the
+    # trip really closed; the disputed sentence says an admin will check only when an admin was really alerted, and
+    # its twin below asks the driver to tell one instead.
+    "staff.bottles.notify.transfer_confirmed": {
+        "en": "{receiver} confirmed {full} full + {empty} empty.",
+        "uz": "{receiver} {full} ta to'la + {empty} ta bo'sh idishni tasdiqladi.",
+        "ru": "{receiver} подтвердил(а): {full} полных + {empty} пустых.",
+    },
+    "staff.bottles.notify.trip_auto_closed": {
+        "en": "Your trip was closed: nothing is left on your truck.",
+        "uz": "Sessiyangiz yopildi: mashinangizda hech narsa qolmadi.",
+        "ru": "Ваша сессия закрыта: в машине ничего не осталось.",
+    },
+    "staff.bottles.notify.transfer_disputed": {
+        "en": "{receiver} counted {cfull} full + {cempty} empty; you sent {dfull} full + {dempty} empty. An admin will check it.",
+        "uz": "{receiver} {cfull} ta to'la + {cempty} ta bo'sh idish sanadi; siz {dfull} ta to'la + {dempty} ta bo'sh yubordingiz. Admin buni tekshiradi.",
+        "ru": "{receiver} насчитал(а) {cfull} полных + {cempty} пустых; вы отправили {dfull} полных + {dempty} пустых. Администратор это проверит.",
+    },
+    "staff.bottles.notify.transfer_disputed_no_admin": {
+        "en": "{receiver} counted {cfull} full + {cempty} empty; you sent {dfull} full + {dempty} empty. Please tell an admin so they can settle it.",
+        "uz": "{receiver} {cfull} ta to'la + {cempty} ta bo'sh idish sanadi; siz {dfull} ta to'la + {dempty} ta bo'sh yubordingiz. Iltimos, hal qilishlari uchun adminga xabar bering.",
+        "ru": "{receiver} насчитал(а) {cfull} полных + {cempty} пустых; вы отправили {dfull} полных + {dempty} пустых. Пожалуйста, сообщите администратору, чтобы он решил вопрос.",
     },
     "staff.bottles.join_request_approve": {
         "en": "Approve",
@@ -2274,11 +2378,6 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Active Co-Driver Session",
         "uz": "Faol hamkor sessiyasi",
         "ru": "Активная совместная сессия",
-    },
-    "staff.bottles.current_membership": {
-        "en": "Using {name}'s session — <b>{qty}</b> bottles available",
-        "uz": "{name} sessiyasida — <b>{qty}</b> shisha mavjud",
-        "ru": "Сессия {name} — доступно <b>{qty}</b> бутылок",
     },
     "staff.bottles.session_closed_membership_revoked": {
         "en": "ℹ️ The session you joined has been closed. Start or join a new session when needed.",
@@ -2380,10 +2479,10 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Oldindan to'lov ushlangandan keyin naqd pul talab qilinmaydi",
         "ru": "Наличные не требуются после вычета предоплаты",
     },
-    "staff.delivery.transfer_confirm_button": {
-        "en": "Confirm {qty} from {sender}",
-        "uz": "{sender} dan {qty} ni tasdiqlash",
-        "ru": "Подтвердить {qty} от {sender}",
+    "staff.delivery.transfer_confirm_split_button": {
+        "en": "Confirm {full} full + {empty} empty",
+        "uz": "{full} ta to'la + {empty} ta bo'shni tasdiqlash",
+        "ru": "Подтвердить {full} полных + {empty} пустых",
     },
     "staff.delivery.transfer_custom_count_button": {
         "en": "Different count",

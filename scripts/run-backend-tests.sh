@@ -29,6 +29,8 @@ else
     test_redis_url="redis://redis:6379/15"
 fi
 
+# SENTRY_DSN / SLACK_WEBHOOK_URL are blanked: tests never reach the real Sentry
+# or Slack (owner rule 2026-11-10; see scripts/precommit-backend-tests.sh).
 exec docker run --rm \
     --network "${network}" \
     "${env_file_arg[@]}" \
@@ -38,6 +40,8 @@ exec docker run --rm \
     -e FLASK_ENV=testing \
     -e TESTING=true \
     -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
+    -e SENTRY_DSN= \
+    -e SLACK_WEBHOOK_URL= \
     -e UPDATE_API_SNAPSHOT="${UPDATE_API_SNAPSHOT:-}" \
     "${image}" \
     sh -c "python -c 'import xdist, pytest_timeout' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; exec pytest \"\$@\" --no-cov" sh "$@"

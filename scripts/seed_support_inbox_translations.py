@@ -33,6 +33,11 @@ TRANSLATIONS = {
         "ui.support.send_pin": "Send pin",
         "ui.support.bad_coordinates": "Could not read those coordinates",
         "ui.support.unsupported_attachment": "Unsupported attachment",
+        "ui.support.play_video": "Play video",
+        "ui.support.play_video_size": "Play video · {{size}}",
+        "ui.support.attachment_load_failed": "Couldn't load the attachment",
+        "ui.support.retry": "Retry",
+        "ui.support.media_cant_play": "This file can't play here",
     },
     "ru": {
         "ui.support.today": "Сегодня",
@@ -48,6 +53,11 @@ TRANSLATIONS = {
         "ui.support.send_pin": "Отправить точку",
         "ui.support.bad_coordinates": "Не удалось распознать координаты",
         "ui.support.unsupported_attachment": "Вложение не поддерживается",
+        "ui.support.play_video": "Смотреть видео",
+        "ui.support.play_video_size": "Смотреть видео · {{size}}",
+        "ui.support.attachment_load_failed": "Не удалось загрузить вложение",
+        "ui.support.retry": "Повторить",
+        "ui.support.media_cant_play": "Этот файл нельзя воспроизвести здесь",
     },
     "uz": {
         "ui.support.today": "Bugun",
@@ -63,11 +73,18 @@ TRANSLATIONS = {
         "ui.support.send_pin": "Nuqta yuborish",
         "ui.support.bad_coordinates": "Koordinatalarni o'qib bo'lmadi",
         "ui.support.unsupported_attachment": "Ilova qo'llab-quvvatlanmaydi",
+        "ui.support.play_video": "Videoni ko'rish",
+        "ui.support.play_video_size": "Videoni ko'rish · {{size}}",
+        "ui.support.attachment_load_failed": "Ilovani yuklab bo'lmadi",
+        "ui.support.retry": "Qayta urinish",
+        "ui.support.media_cant_play": "Bu faylni bu yerda ijro etib bo'lmaydi",
     },
 }
 
-app = create_app()
-with app.app_context():
-    Translation.bulk_create_or_update(TRANSLATIONS, category="ui")
-    db.session.commit()
-    print(f"Seeded {sum(len(v) for v in TRANSLATIONS.values())} rows into category 'ui'")
+if __name__ == "__main__":
+    # Guarded so tests can import TRANSLATIONS without writing to a database.
+    app = create_app()
+    with app.app_context():
+        Translation.bulk_create_or_update(TRANSLATIONS, category="ui")
+        db.session.commit()
+        print(f"Seeded {sum(len(v) for v in TRANSLATIONS.values())} rows into category 'ui'")

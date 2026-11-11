@@ -39,6 +39,8 @@ from shared.redis_failure import report_redis_failure
 from shared.staff_constants import (
     BOTTLE_EVENT_JOIN_APPROVED,
     BOTTLE_EVENT_JOIN_REQUESTED,
+    BOTTLE_EVENT_TRANSFER_CONFIRMED,
+    BOTTLE_EVENT_TRANSFER_DISPUTED,
     BOTTLE_EVENT_TRANSFER_RECEIVED,
     BOTTLE_EVENTS,
     SALES_EVENT_PAY_PENALTY_CONFIRMED,
@@ -452,15 +454,37 @@ def _render_bottle_event(event: str, payload: dict, language: str) -> Tuple[str,
     driver to act, or answers a question they asked a moment ago."""
     unknown = i18n.get('staff.common.unknown_driver', language)
     if event == BOTTLE_EVENT_TRANSFER_RECEIVED:
+        # Full bottles and empties, read like an inbox row: a push queued before the split names no empties.
+        full, empties = DeliveryKeyboards.transfer_declared_counts(payload)
         text = i18n.get(
-            'staff.bottles.notify.transfer_received', language,
+            'staff.bottles.notify.transfer_received_split', language,
             sender=escape_html(payload.get('sender_name') or unknown),
-            qty=payload.get('declared_quantity', 0),
+            full=full, empty=empties,
         )
         # The inbox's own keyboard: its confirm button is a global handler and
         # its "different count" button a conversation entry point, so both work
         # from this message exactly as from "📥 Incoming transfers".
         return text, DeliveryKeyboards.pending_transfer_list(language, [payload])
+    if event == BOTTLE_EVENT_TRANSFER_CONFIRMED:
+        text = i18n.get(
+            'staff.bottles.notify.transfer_confirmed', language,
+            receiver=escape_html(payload.get('receiver_name') or unknown),
+            full=payload.get('confirmed_full', 0), empty=payload.get('confirmed_empty', 0),
+        )
+        # The backend says whether the trip really closed; the bot never guesses it from the numbers.
+        if payload.get('auto_closed'):
+            text = f"{text}\n{i18n.get('staff.bottles.notify.trip_auto_closed', language)}"
+        return text, None
+    if event == BOTTLE_EVENT_TRANSFER_DISPUTED:
+        counts = {
+            'receiver': escape_html(payload.get('receiver_name') or unknown),
+            'cfull': payload.get('confirmed_full', 0), 'cempty': payload.get('confirmed_empty', 0),
+            'dfull': payload.get('declared_full', 0), 'dempty': payload.get('declared_empty', 0),
+        }
+        # Says an admin will check only when the backend reports one was alerted.
+        if payload.get('admins_alerted'):
+            return i18n.get('staff.bottles.notify.transfer_disputed', language, **counts), None
+        return i18n.get('staff.bottles.notify.transfer_disputed_no_admin', language, **counts), None
     if event == BOTTLE_EVENT_JOIN_REQUESTED:
         suffix = f"{payload.get('session_id')}_{payload.get('requester_id')}"
         keyboard = InlineKeyboardMarkup([[

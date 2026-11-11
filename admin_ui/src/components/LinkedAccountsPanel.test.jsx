@@ -6,6 +6,8 @@ import { message } from 'antd';
 
 import LinkedAccountsPanel from './LinkedAccountsPanel';
 import adminService from '../services/adminService';
+import { useAuthStore } from '../stores/authStore';
+import { SHARED_PLACE_CASES_KEY } from '../utils/constants';
 
 vi.mock('../services/adminService');
 
@@ -46,6 +48,7 @@ const USER = { id: 11, first_name: 'Alice', last_name: 'Tester', phone: '+998900
 describe('LinkedAccountsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useAuthStore.setState({ permissions: { can_manage_users: true } });
 
     adminService.getLinkedAccounts.mockResolvedValue({
       data: {
@@ -204,5 +207,29 @@ describe('LinkedAccountsPanel', () => {
     await waitFor(() => {
       expect(message.warning).toHaveBeenCalled();
     });
+  });
+
+  it('unlink refreshes the shared-place case queue too (an open case reads the links)', async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LinkedAccountsPanel user={USER} />
+      </QueryClientProvider>
+    );
+
+    const bobRow = (await screen.findByText(/Bob Second/)).closest('li');
+    await user.click(within(bobRow).getByRole('button', { name: 'Unlink' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByRole('textbox'), 'Not the same person after all');
+    await user.click(within(dialog).getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => expect(adminService.unlinkAccount).toHaveBeenCalledWith(12, 'Not the same person after all'));
+    await waitFor(() => expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['linkedAccounts', 11] }],
+      [{ queryKey: ['linkSuggestions', 11] }],
+      [{ queryKey: SHARED_PLACE_CASES_KEY }],
+    ]));
   });
 });

@@ -283,6 +283,81 @@ describe('Orders collected cash edit flow', () => {
     expect(adminService.editCollectedCash).not.toHaveBeenCalled();
   });
 
+  it('translates the prepayment-return block in the collected-cash modal', async () => {
+    setupBaseMocks();
+    adminService.previewCollectedCashEdit.mockResolvedValueOnce({
+      data: {
+        new_amount: 60000,
+        applied_to_order: 54000,
+        projected_outstanding: 0,
+        customer_credit_delta: 6000,
+        session_will_reopen: false,
+        is_editable: false,
+        blocking_reasons: ['event_funds_prepayment_return: payout 9 drew on event 31'],
+        warnings: [],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+
+    const reasonInputs = screen.getAllByRole('textbox');
+    await user.type(reasonInputs[reasonInputs.length - 1], 'driver collected extra cash from customer');
+    fireEvent.click(screen.getByText(/Preview impact/i));
+
+    expect(await screen.findByText(
+      'A prepayment return drew on this collection. Undo the return first.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/payout 9 drew on event 31/)).toBeNull();
+    expect((await screen.findByText(/Apply correction/i)).closest('button')).toBeDisabled();
+  });
+
+  it('says why the edit is gone when a prepayment return drew on the collection', async () => {
+    setupBaseMocks();
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          ...DELIVERED_CASH_ORDER_DETAIL,
+          is_collected_cash_editable: false,
+          collected_cash_edit_block_code: 'event_funds_prepayment_return',
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+
+    const reason = await screen.findByTestId('cash-edit-blocked-by-return');
+    expect(reason).toHaveTextContent('A prepayment return drew on this collection. Undo the return first.');
+    expect(screen.queryByText(/Edit collected cash/i)).toBeNull();
+  });
+
+  it('stays silent when the edit is closed for another reason', async () => {
+    setupBaseMocks();
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: { ...DELIVERED_CASH_ORDER_DETAIL, is_collected_cash_editable: false, collected_cash_edit_block_code: null },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await screen.findByText(/view_details|View Details/i));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await screen.findAllByText(/Fiscalization/i);
+    expect(screen.queryByTestId('cash-edit-blocked-by-return')).toBeNull();
+  });
+
   it('does NOT show Edit collected cash button when isAdmin() is false', async () => {
     // Override usePermissions mock to return isAdmin: () => false for this test
     const { usePermissions } = await import('../../components/common/PermissionGuard');

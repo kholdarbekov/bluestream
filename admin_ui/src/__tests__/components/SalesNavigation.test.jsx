@@ -70,7 +70,11 @@ vi.mock('../../pages/SalesCompensation', () => ({ default: () => <div>compensati
 // default mock grants every permission, so it runs here too.
 vi.mock('../../services/adminService', () => ({
   __esModule: true,
-  default: { getReorderReminderSummary: vi.fn().mockResolvedValue({ counts: { follow_up: 0, reminding: 0 } }) },
+  default: {
+    getReorderReminderSummary: vi.fn().mockResolvedValue({ counts: { follow_up: 0, reminding: 0 } }),
+    // The Users item's shared-place badge (§4.5) reads the open count the same way.
+    listSharedPlaceCases: vi.fn().mockResolvedValue({ open_count: 0 }),
+  },
 }));
 
 // The layout's Compensation badge reads A1. Every method is a spy, so a manager's session can

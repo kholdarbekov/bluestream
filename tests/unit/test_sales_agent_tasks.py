@@ -25,6 +25,12 @@ from tests.integration.test_outlet_create import GROCERY
 from tests.unit.test_sales_agent_role import make_sales_agent_user
 
 
+# What `send_notification` returns when the in-app channel accepted the alert. The fan-out
+# (`in_app_alerts.send_in_app_alert`) counts a recipient only on this answer, so a spy that
+# returns None would count nobody.
+IN_APP_ACCEPTED = {"in_app": {"success": True}}
+
+
 def _spy(monkeypatch, obj, attr, result=None):
     """Signature-enforcing spy: a wrong-arity or wrong-keyword call raises here
     instead of being silently accepted.
@@ -241,7 +247,11 @@ def test_managers_get_in_app_and_operators_get_a_push(db, agent, admin_user, ope
     override = in_app[0][1]["template_override"]
     assert override.subject == "staff.notification.subject.outlet_activation_requested"
     assert override.content == "staff.notification.content.outlet_activation_requested"
-    assert override.get_translated("content", "ru") == "staff.notification.content.outlet_activation_requested"
+    # The stored notification row reads the same alert (`title` / `message` are the row's text).
+    assert (in_app[0][1]["template_data"]["title"], in_app[0][1]["template_data"]["message"]) == (
+        "staff.notification.subject.outlet_activation_requested",
+        "staff.notification.content.outlet_activation_requested",
+    )
     assert delays == [
         ((777000222, "activation_requested", {"outlet_id": outlet.id, "outlet_name": "Bahor market", "reason": None}), {})
     ]
@@ -268,7 +278,7 @@ def test_the_onboarder_is_asked_on_neither_channel_to_approve_their_own_outlet(
     db.session.add(SalesAgentProfile(user_id=onboarder.id, districts=["chilanzar"]))
     operator_user.telegram_id = "777000222"
     db.session.commit()
-    in_app = _spy(monkeypatch, NotificationService, "send_notification")
+    in_app = _spy(monkeypatch, NotificationService, "send_notification", result=IN_APP_ACCEPTED)
     pushes = []
     push_signature = inspect.signature(sales_agent_tasks.push_sales_event.run)
 
@@ -422,7 +432,7 @@ def test_the_exception_summary_counts_yesterday_and_speaks_once_per_manager(
     )
     db.session.commit()
 
-    in_app = _spy(monkeypatch, NotificationService, "send_notification")
+    in_app = _spy(monkeypatch, NotificationService, "send_notification", result=IN_APP_ACCEPTED)
 
     result = sales_agent_tasks.notify_managers_exception_summary.run()
 
@@ -439,17 +449,19 @@ def test_the_exception_summary_counts_yesterday_and_speaks_once_per_manager(
     for _, kwargs in in_app:
         assert kwargs["channels"] == [NotificationChannel.IN_APP]
         assert kwargs["notification_type"] == NotificationType.SYSTEM_ALERT
+    # Markup-FREE keys: the admin UI prints notification `content` as plain text. Unseeded
+    # keys render as themselves, which is exactly what makes the choice of key visible here.
+    # `title` / `message` are the stored row's text: the same alert.
     assert in_app[0][1]["template_data"] == {
         "day": yesterday.isoformat(),
         "count": 2,
         "path": "/sales/visits?tab=exceptions",
+        "title": "staff.notification.subject.sales_exception_summary",
+        "message": "staff.notification.content.sales_exception_summary",
     }
-    # Markup-FREE keys: the admin UI prints notification `content` as plain text. Unseeded
-    # keys render as themselves, which is exactly what makes the choice of key visible here.
     override = in_app[0][1]["template_override"]
     assert override.subject == "staff.notification.subject.sales_exception_summary"
     assert override.content == "staff.notification.content.sales_exception_summary"
-    assert override.get_translated("content", "ru") == "staff.notification.content.sales_exception_summary"
 
 
 def test_the_exception_summary_is_silent_when_yesterday_was_clean(db, admin_user, monkeypatch):
@@ -514,7 +526,9 @@ def test_the_manager_fan_out_skips_the_excluded_and_survives_a_bad_recipient(db,
         calls.append((user_id, notification_type, channels, template_data, template_override))
         if user_id == admin_user.id:
             raise RuntimeError("inbox write failed")
+        return answer.get(user_id, IN_APP_ACCEPTED)
 
+    answer = {}
     monkeypatch.setattr(NotificationService, "send_notification", fake)
 
     everyone = sales_agent_tasks._send_manager_in_app(
@@ -530,11 +544,24 @@ def test_the_manager_fan_out_skips_the_excluded_and_survives_a_bad_recipient(db,
     )
     assert excluded == 0
     assert [call[0] for call in calls] == [admin_user.id]
-    assert calls[0][1:4] == (NotificationType.SYSTEM_ALERT, [NotificationChannel.IN_APP], {"order_id": 7})
-    # Unseeded keys render as themselves, which is what makes the choice of key visible.
+    # Unseeded keys render as themselves, which is what makes the choice of key visible. The
+    # stored row's `title` / `message` are the same rendered alert.
+    assert calls[0][1:4] == (
+        NotificationType.SYSTEM_ALERT,
+        [NotificationChannel.IN_APP],
+        {"order_id": 7, "title": "subject.key", "message": "content.key"},
+    )
     override = calls[0][4]
     assert (override.subject, override.content) == ("subject.key", "content.key")
-    assert override.get_translated("content", "ru") == "content.key"
+
+    # A send that returned is not a manager notified: `send_notification` turns a failed channel
+    # into {"success": False} instead of raising, and that answer counts nobody.
+    answer[manager.id] = {"in_app": {"success": False, "error": "template_not_found"}}
+    refused = sales_agent_tasks._send_manager_in_app(
+        "subject.key", "content.key", fields={"count": 3}, template_data={"order_id": 7},
+        exclude_user_ids=[admin_user.id],
+    )
+    assert refused == 0
 
 
 def test_the_awaiting_approval_alert_is_seeded_trilingually_and_markup_free():

@@ -490,7 +490,7 @@ async def test_the_screens_timeout_stays_silent_under_the_flow_that_displaced_it
 ):
     """Five minutes after 📞, PTB fires this screen's timeout on an agent who is
     now picking a shop type or checking in at a door. With its draft gone it
-    ends in silence (`_flow_timeout(own_key=...)`): no "timed out" line, and no
+    ends in silence (`_flow_timeout(own_keys=...)`): no "timed out" line, and no
     main menu drawn over the walk-in's or the check-in's own keyboard."""
     harness, ops, labels = await _agent(monkeypatch)
     _resumable_visit(harness)

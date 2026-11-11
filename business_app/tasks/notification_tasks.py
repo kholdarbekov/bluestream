@@ -19,6 +19,19 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+def send_prepayment_returned_notice_task(self, payout_id: int):
+    """Tell the customer part of their prepaid balance was returned (spec 2026-11-10 P8): the customer bot's
+    notice route, else email. A bot failure retries; email is one attempt. Published after the payout committed."""
+    from business_app.services import customer_notices
+
+    try:
+        return customer_notices.send_prepayment_returned(payout_id)
+    except customer_notices.RetryableNoticeError as exc:
+        logger.warning("Prepayment-returned notice for payout %s will be retried: %s", payout_id, exc)
+        raise self.retry(exc=exc)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=1800, soft_time_limit=1700)
 def execute_notification_campaign_task(self, campaign_id: int):
     """Execute one queued notification campaign."""

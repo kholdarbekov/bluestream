@@ -687,6 +687,17 @@ KEYS = {
         "uz": "Joy guruhini tahrirlash",
         "ru": "Изменить группу адресов",
     },
+    # A reader without `can_manage_users` opens the same card read-only.
+    "ui.users.grouped_addresses.view_action": {
+        "en": "View",
+        "uz": "Ko'rish",
+        "ru": "Открыть",
+    },
+    "ui.users.grouped_addresses.view_title": {
+        "en": "Place group",
+        "uz": "Joy guruhi",
+        "ru": "Группа адресов",
+    },
     "ui.users.place_groups.remove_dissolves_warning": {
         "en": "Only one address will be left, so this place group will be dissolved. The remaining address keeps the place history.",
         "uz": "Faqat bitta manzil qoladi, shuning uchun bu joy guruhi tarqatiladi. Qolgan manzil joy tarixini saqlab qoladi.",

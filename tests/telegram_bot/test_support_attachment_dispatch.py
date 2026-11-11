@@ -298,6 +298,39 @@ async def test_a_voice_note_is_captured_and_no_longer_answered_with_not_supporte
     assert bot.telegram.of("sendMessage") == []
 
 
+async def test_a_video_is_captured_with_its_file_id_mime_and_size(bot, user):
+    """The admin inbox can only play what the bot filed: the file id it streams from, the mime the
+    browser decodes by, and the size the Play button shows."""
+    await bot.send(user.video(file_id="tg-video-1001", caption="the seal is leaking"))
+
+    calls = _support_calls(bot)
+    assert len(calls) == 1
+    assert calls[0].data == {
+        "message_type": "video",
+        "telegram_file_id": "tg-video-1001",
+        "attachment_mime_type": "video/mp4",
+        "attachment_size": 51200,
+        "content": "the seal is leaking",
+    }
+    # Silent by design — no auto-acknowledgement, matching every other attachment type.
+    assert bot.telegram.of("sendMessage") == []
+
+
+async def test_a_round_video_note_is_captured_as_a_video_note(bot, user):
+    """Telegram sends no mime_type for a round video; the bot files it as mp4 so it can play."""
+    await bot.send(user.video_note(file_id="tg-video-note-7"))
+
+    calls = _support_calls(bot)
+    assert len(calls) == 1
+    assert calls[0].data == {
+        "message_type": "video_note",
+        "telegram_file_id": "tg-video-note-7",
+        "attachment_mime_type": "video/mp4",
+        "attachment_size": 734003,
+    }
+    assert bot.telegram.of("sendMessage") == []
+
+
 async def test_a_sticker_with_no_flow_open_is_captured_as_unsupported(bot, user):
     """FIX 1: stickers matched none of the catch-all's filters, so
     `build_support_payload`'s UNSUPPORTED branch was unreachable in

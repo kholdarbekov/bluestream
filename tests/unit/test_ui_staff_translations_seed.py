@@ -31,3 +31,16 @@ def test_seed_ui_staff_translations_resolve_via_staff_namespace(app, db):
         ru = AdminUiTranslationService.get_translations("ru", "staff")
         assert ru["reversed"] == UI_STAFF_TRANSLATIONS["ru"]["reversed"]
         assert ru["customer_phone"] == "Телефон"
+
+
+@pytest.mark.unit
+def test_cash_columns_copy_is_seeded_and_equals_the_screens_fallbacks():
+    """StaffManagement and DeliveryReports label gross collected vs what the driver must hand in."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "admin_ui" / "src" / "pages"
+    sources = (root / "StaffManagement.js").read_text() + (root / "DeliveryReports.js").read_text()
+    for key in ("cash_gross_collected", "cash_to_hand_in"):
+        for lang in ("en", "uz", "ru"):
+            assert UI_STAFF_TRANSLATIONS[lang][key].strip(), (key, lang)
+        assert f"t('staff:{key}', '{UI_STAFF_TRANSLATIONS['en'][key]}')" in sources, key

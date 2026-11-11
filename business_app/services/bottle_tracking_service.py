@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 from flask import current_app
-from sqlalchemy import event as sa_event, false as sa_false, func, or_, select, text
+from sqlalchemy import case, event as sa_event, false as sa_false, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session as SASession, joinedload
@@ -23,12 +23,14 @@ from business_app.models.bottle import (
     DriverBottleTransfer,
     DriverSessionMembership,
 )
+from business_app.models.delivery import Delivery as DeliveryModel, DeliveryPerson
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.services.bottle_scope import BottleScope  # noqa: F401 — re-exported for callers
 from shared.enums import (
     BottleFineStatus,
     BottleLedgerEventType,
+    DeliveryStatus,
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
     DriverSessionMembershipStatus,
@@ -43,12 +45,33 @@ from business_app.utils.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from business_app.utils.state_validators import DELIVERY_BOTTLES_PROMISED_STATES, DRIVER_HELD_ORDER_STATUSES
 from business_app.utils.transactions import transactional
 
 if TYPE_CHECKING:
     from business_app.models.delivery import Delivery
 
 logger = logging.getLogger(__name__)
+
+# How a trip's row is locked (`with_for_update` flags): FOR NO KEY UPDATE. Send, close, force-close, the count and the
+# resolve of a transfer, and the Delivered tally's UPDATE still queue behind one another. An order binding, a co-driver
+# membership or a transfer referencing the trip only takes FOR KEY SHARE on it (their foreign-key check), and that does
+# not wait: a plain FOR UPDATE made the assignment and the progress guard, which bind after locking DeliveryPerson rows,
+# wait on a close that then wrote a DeliveryPerson row itself (a deadlock).
+SESSION_ROW_LOCK = {"key_share": True}
+
+# What the admin resolve route asks of its caller (`validate_admin_action` in business_app/api/admin_bottles.py).
+TRANSFER_DISPUTE_RESOLVE_PERMISSIONS: Tuple[str, ...] = ("manage_orders",)
+
+
+@dataclass(frozen=True)
+class TransferCountOutcome:
+    """What `BottleTrackingService.confirm_bottle_transfer` answers: the transfer as counted, and whether the admins'
+    Slack alerts channel took the dispute alert (always False for a confirmed count). The confirm route publishes both,
+    so the receiver's reply says an admin was told only when one was (spec 2026-11-09 §4.4)."""
+
+    transfer: DriverBottleTransfer
+    admins_alerted: bool
 
 
 @dataclass(frozen=True)
@@ -1404,7 +1427,7 @@ class BottleTrackingService:
             self._assert_replay_matches_collection(entry, user_id=user_id, address_id=address_id, quantity=-qty)
 
         # THE TALLY LIVES INSIDE THE DEDUP FENCE. `update_session_delivery_tally`
-        # is a bare read-modify-write with no idempotency of its own, so calling
+        # is a bare increment with no idempotency of its own, so calling
         # it on a REPLAY credits the driver's session with bottles that were
         # already counted — and the damage is UNRECOVERABLE: `admin_adjust_balance`
         # repairs the CUSTOMER's balance and no admin surface can touch
@@ -1430,8 +1453,16 @@ class BottleTrackingService:
         adjustment: Decimal,
         actor_user_id: int,
         notes: str,
+        *,
+        idempotency_key: Optional[str] = None,
     ) -> BottleLedger:
         """Admin manually adjusts a PLACE's balance. Positive = more bottles owed.
+
+        `idempotency_key` (optional) makes the write replay-safe: a second call
+        with the same key returns the stored row and moves nothing. A key hit
+        counts as a replay only when the stored row has the same address,
+        quantity and ADMIN_ADJUSTMENT type; any other match is a
+        `BOTTLE_ADJUSTMENT_KEY_CONFLICT` (409), never a silent no-op.
 
         `user_id=None` means "no member named" — the admin adjusts the place, and
         the audit stamp is derived (see `resolve_place_attribution_user_id`).
@@ -1441,16 +1472,28 @@ class BottleTrackingService:
         if not notes:
             raise ValidationError("Notes are required for admin adjustments")
         scope, user_id = self._authorised_place_attribution(user_id, address_id)
-        return self._create_ledger_entry(
+        quantity = self._as_decimal(adjustment)
+        entry, created = self._create_ledger_entry_with_status(
             user_id=user_id,
             address_id=address_id,
             event_type=BottleLedgerEventType.ADMIN_ADJUSTMENT,
-            quantity=self._as_decimal(adjustment),
+            quantity=quantity,
             actor_user_id=actor_user_id,
             notes=notes,
+            idempotency_key=idempotency_key,
             scope=scope,
             metadata={"source": "admin_adjustment"},
         )
+        if not created and (
+            int(entry.address_id) != int(address_id)
+            or entry.event_type != BottleLedgerEventType.ADMIN_ADJUSTMENT
+            or self._as_decimal(entry.quantity) != quantity
+        ):
+            raise ConflictError(
+                "idempotency_key was already used for a different adjustment",
+                error_code="BOTTLE_ADJUSTMENT_KEY_CONFLICT",
+            )
+        return entry
 
     @transactional
     def set_initial_balance(
@@ -2788,12 +2831,23 @@ class BottleTrackingService:
           - bottles_collected: abs value of the RETURN_ON_DELIVERY row for the order; 0 if absent
           - balance: the PLACE balance (the address group when the delivery
             address is grouped, else the address itself); 0 if no row
+          - place_balance_before_delivery: the place balance just before the
+            DELIVERY row (balance_after - quantity); None without that row
+          - delivery_place_group_id: the DELIVERY row's address_group_id; None
+            without that row or when the address was ungrouped. Both are exact
+            only until the place is regrouped (they read the stored stamp).
         """
         expected_bottles = BottleTrackingService.calculate_bottles_for_order(order)
 
         delivery_row = BottleLedger.query.filter_by(idempotency_key=f"delivery:{order.id}").first()
         delivery_recorded = delivery_row is not None
         bottles_delivered = Decimal(str(delivery_row.quantity)) if delivery_row is not None else Decimal("0")
+        place_balance_before_delivery = (
+            Decimal(str(delivery_row.balance_after)) - Decimal(str(delivery_row.quantity))
+            if delivery_row is not None
+            else None
+        )
+        delivery_place_group_id = delivery_row.address_group_id if delivery_row is not None else None
 
         return_row = (
             BottleLedger.query.filter_by(
@@ -2817,6 +2871,8 @@ class BottleTrackingService:
             "bottles_delivered": bottles_delivered,
             "bottles_collected": bottles_collected,
             "balance": balance,
+            "place_balance_before_delivery": place_balance_before_delivery,
+            "delivery_place_group_id": delivery_place_group_id,
         }
 
     @staticmethod
@@ -3207,8 +3263,36 @@ class BottleTrackingService:
         if value > ceiling:
             raise ValidationError(f"{field} cannot exceed {ceiling}")
 
-    @transactional
     def open_bottle_session(
+        self,
+        driver_user_id: int,
+        bottles_loaded: int,
+        *,
+        actor_user_id: int = None,
+        notes: str = None,
+    ) -> DriverBottleSession:
+        """Open a trip session for the driver, then offer the pool to the new capacity (see `_open_bottle_session`).
+
+        The re-offer is queued only after the open has committed, so a refused open offers nothing.
+        """
+        session = self._open_bottle_session(driver_user_id, bottles_loaded, actor_user_id=actor_user_id, notes=notes)
+        self._reoffer_pool_after_capacity_gain()
+        return session
+
+    @staticmethod
+    def _reoffer_pool_after_capacity_gain() -> None:
+        """Publish `reoffer_pool_deliveries_task`: a crew just gained free full bottles, so an order auto-assign refused
+        for want of them may fit now. Call it only after the write has committed. The write is already done, so a broker
+        failure is logged, never raised: the stale sweep re-offers the pool anyway."""
+        from business_app.tasks.delivery_monitoring_tasks import reoffer_pool_deliveries_task
+
+        try:
+            reoffer_pool_deliveries_task.delay()
+        except Exception:  # noqa: BLE001
+            logger.exception("[BOTTLE] could not queue the pool re-offer after a capacity gain")
+
+    @transactional
+    def _open_bottle_session(
         self,
         driver_user_id: int,
         bottles_loaded: int,
@@ -3260,11 +3344,15 @@ class BottleTrackingService:
         *,
         actor_user_id: int = None,
         notes: str = None,
+        anchor_at_warehouse: bool = True,
     ) -> DriverBottleSession:
         """Close the driver's active trip session (return to warehouse).
 
         Computes and persists the discrepancy.
         Raises NotFoundError if no open session exists.
+
+        The session is read under its row lock (and re-read), so a transfer send and this close serialize either way: a
+        close behind a send seals the counters the send left, and a send behind a close finds no open session.
 
         A driver may close at any time. Any still-undelivered order bound to the
         session is released here (its binding deleted) rather than blocking the
@@ -3275,8 +3363,20 @@ class BottleTrackingService:
         anchored there — see `_anchor_actor_at_warehouse`. Deliberately NOT
         mirrored in `admin_force_close_session`: an admin closing an abandoned
         session is at a desk, and the driver is wherever they actually are.
+        `anchor_at_warehouse=False` is the same reasoning for a trip that closes
+        mid-route (`_auto_close_sender_if_emptied`), which locks no DeliveryPerson row.
+
+        Lock order: the anchor writes the driver's DeliveryPerson row BEFORE the
+        session row is locked, the order every other path keeps (DeliveryPerson rows,
+        then the trip: assignment and the progress guard bind an order after their
+        DeliveryPerson lock, and Delivered adds to the trip's tallies after writing the
+        deliverer's row). Anchoring after the session lock deadlocked with them. A
+        refused close rolls the anchor back with everything else.
         """
-        session = self._get_open_session_or_raise(driver_user_id)
+        if anchor_at_warehouse:
+            self._anchor_actor_at_warehouse(driver_user_id, actor_user_id)
+            db.session.flush()
+        session = self._get_open_session_or_raise(driver_user_id, lock=True)
 
         if bottles_returned_to_warehouse < 0:
             raise ValidationError("bottles_returned_to_warehouse cannot be negative")
@@ -3311,7 +3411,6 @@ class BottleTrackingService:
             logger.info(
                 "[BOTTLE] close_bottle_session revoked %s co-driver membership(s) for session=%s", revoked, session.id
             )
-        self._anchor_actor_at_warehouse(driver_user_id, actor_user_id)
         db.session.flush()
         return session
 
@@ -3328,8 +3427,12 @@ class BottleTrackingService:
 
         The discrepancy will reflect the full unaccounted load.
         A reason is mandatory for the audit trail.
+
+        The session is read under its row lock (and re-read) before its OPEN check, as `close_bottle_session` reads
+        it: a force-close behind a transfer send seals the counters the send left, and a send behind it finds no open
+        session. Locks: the one session row, never a DeliveryPerson row.
         """
-        session = DriverBottleSession.query.get(session_id)
+        session = self._lock_session(session_id)
         if not session:
             raise NotFoundError("Bottle session not found")
         if session.status != DriverBottleSessionStatus.OPEN:
@@ -3472,13 +3575,21 @@ class BottleTrackingService:
             db.session.flush()
         return session
 
-    def get_open_session(self, driver_user_id: int) -> Optional[DriverBottleSession]:
-        """Return the driver's current open session, or None."""
+    def get_open_session(self, driver_user_id: int, *, lock: bool = False) -> Optional[DriverBottleSession]:
+        """Return the driver's current open session, or None.
+
+        `lock` locks the row until the transaction ends and re-reads it (`populate_existing`). A close that commits
+        while the lock waits takes the row out of the `status = 'open'` match, so the read then finds nothing. The
+        lock is `SESSION_ROW_LOCK` (FOR NO KEY UPDATE), so binding an order to the trip never waits on it.
+        """
         logger.debug("[BOTTLE] get_open_session driver=%s", driver_user_id)
-        session = DriverBottleSession.query.filter_by(
+        query = DriverBottleSession.query.filter_by(
             driver_user_id=driver_user_id,
             status=DriverBottleSessionStatus.OPEN,
-        ).first()
+        )
+        if lock:
+            query = query.with_for_update(**SESSION_ROW_LOCK).populate_existing()
+        session = query.first()
         logger.debug(
             "[BOTTLE] get_open_session driver=%s → %s",
             driver_user_id,
@@ -3486,8 +3597,8 @@ class BottleTrackingService:
         )
         return session
 
-    def _get_open_session_or_raise(self, driver_user_id: int) -> DriverBottleSession:
-        session = self.get_open_session(driver_user_id)
+    def _get_open_session_or_raise(self, driver_user_id: int, *, lock: bool = False) -> DriverBottleSession:
+        session = self.get_open_session(driver_user_id, lock=lock)
         if not session:
             raise NotFoundError(
                 "No open bottle session found for this driver",
@@ -3499,23 +3610,83 @@ class BottleTrackingService:
     # Co-driver session membership
     # ------------------------------------------------------------------
 
-    def get_effective_session(self, driver_user_id: int) -> Optional[DriverBottleSession]:
+    def get_effective_session(self, driver_user_id: int, *, lock: bool = False) -> Optional[DriverBottleSession]:
         """Return the session this driver should operate under.
 
         Priority:
           1. Driver's own OPEN session (if they have one).
           2. The OPEN session they have joined as a co-driver member.
           3. None — driver has no access to any session.
+
+        `lock` reads either session under its row lock (and re-reads it), like `get_open_session`: a close that commits
+        while the lock waits takes the row out of the OPEN match, so a closed session is never returned locked.
         """
-        own = self.get_open_session(driver_user_id)
+        own = self.get_open_session(driver_user_id, lock=lock)
         if own:
             return own
         membership = self.get_active_membership(driver_user_id)
         if membership:
-            session = DriverBottleSession.query.get(membership.session_id)
-            if session and session.status == DriverBottleSessionStatus.OPEN:
-                return session
+            query = DriverBottleSession.query.filter_by(id=membership.session_id, status=DriverBottleSessionStatus.OPEN)
+            if lock:
+                query = query.with_for_update(**SESSION_ROW_LOCK).populate_existing()
+            return query.first()
         return None
+
+    @staticmethod
+    def crew_driver_ids(session: DriverBottleSession) -> List[int]:
+        """The session owner plus every ACTIVE co-driver, sorted: the drivers who share one truck."""
+        member_ids = [
+            row[0]
+            for row in db.session.query(DriverSessionMembership.member_driver_id).filter(
+                DriverSessionMembership.session_id == session.id,
+                DriverSessionMembership.status == DriverSessionMembershipStatus.ACTIVE,
+            )
+        ]
+        return sorted({int(session.driver_user_id), *(int(m) for m in member_ids)})
+
+    @staticmethod
+    def promised_stops_query(driver_ids: Iterable[int]):
+        """The orders of the stops these drivers have set off on with bottles from their truck: the delivery On the
+        way or Arrived (`DELIVERY_BOTTLES_PROMISED_STATES`), owned by one of them, its order one a driver holds
+        (`DRIVER_HELD_ORDER_STATUSES`, the ETA engine's own set). An order closed on the Orders page while its
+        delivery stayed on the road no longer counts. Read by the crew's free full bottles and by `leave_session`.
+        """
+        return Order.query.join(DeliveryModel, DeliveryModel.order_id == Order.id).filter(
+            DeliveryModel.delivery_person_id.in_(list(driver_ids)),
+            DeliveryModel.status.in_(DELIVERY_BOTTLES_PROMISED_STATES),
+            Order.status.in_(DRIVER_HELD_ORDER_STATUSES),
+        )
+
+    def free_full_bottles_for_session(
+        self, session: DriverBottleSession, *, exclude_delivery_id: Optional[int] = None
+    ) -> int:
+        """Full bottles the crew can still promise: full on board minus the stops already under way.
+
+        The one capacity number. Empties never count, ASSIGNED / PICKED_UP stops do not reserve, and the
+        crew shares one number (counted by who owns the delivery, not by the order's session binding;
+        `promised_stops_query`). A reopened session is correction-only, and a closed one is a finished trip,
+        so neither has any.
+
+        It reads the stops on their way before the trip's full-bottle tallies. The progress guard relies on that
+        order (see `_lock_crew_delivery_persons`).
+        """
+        if session.status != DriverBottleSessionStatus.OPEN or session.reopened_at is not None:
+            return 0
+        query = self.promised_stops_query(self.crew_driver_ids(session)).options(
+            joinedload(Order.order_items).joinedload(OrderItem.product)
+        )
+        if exclude_delivery_id is not None:
+            query = query.filter(DeliveryModel.id != exclude_delivery_id)
+        promised = sum((self.calculate_bottles_for_order(o) for o in query.all()), Decimal("0"))
+        # The tallies after the stops, never before: a tally the caller expired reloads here.
+        return max(0, session.full_bottles_on_board - int(promised))
+
+    def free_full_bottles(self, driver_user_id: int, *, exclude_delivery_id: Optional[int] = None) -> Optional[int]:
+        """Free full bottles of the session this driver operates under, or None when they have none."""
+        session = self.get_effective_session(driver_user_id)
+        if session is None:
+            return None
+        return self.free_full_bottles_for_session(session, exclude_delivery_id=exclude_delivery_id)
 
     def get_active_membership(self, driver_user_id: int) -> Optional[DriverSessionMembership]:
         """Return the driver's current active co-driver membership, if any."""
@@ -3583,8 +3754,27 @@ class BottleTrackingService:
         self._assert_free_to_join(member_driver_id)
         return session
 
-    @transactional
     def join_session(
+        self,
+        member_driver_id: int,
+        session_id: int,
+        *,
+        notes: str = None,
+        invited_by_user_id: int = None,
+    ) -> DriverSessionMembership:
+        """Add the driver to another driver's open session as a co-driver (see `_join_session`), then offer the pool.
+
+        The crew now shares the owner's free full bottles, so the re-offer is queued after the membership has
+        committed. Every way in (own join, invite, an approved request) lands here, so each queues it exactly once.
+        """
+        membership = self._join_session(
+            member_driver_id, session_id, notes=notes, invited_by_user_id=invited_by_user_id
+        )
+        self._reoffer_pool_after_capacity_gain()
+        return membership
+
+    @transactional
+    def _join_session(
         self,
         member_driver_id: int,
         session_id: int,
@@ -3627,13 +3817,24 @@ class BottleTrackingService:
     def leave_session(self, member_driver_id: int) -> DriverSessionMembership:
         """Voluntarily leave the current co-driver session membership.
 
-        Raises NotFoundError if the driver has no active membership.
+        Raises NotFoundError if the driver has no active membership, and ConflictError
+        BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS (details `count`) while he owns a stop the crew's bottles are
+        promised to (`promised_stops_query`): leaving would take it out of the crew's sum while its bottles stay on
+        the truck, so they could be promised twice (spec A8). He delivers or fails those stops first. Assigned and
+        Picked-up stops hold no bottles (A10) and never block a leave.
         """
         membership = self.get_active_membership(member_driver_id)
         if not membership:
             raise NotFoundError(
                 "No active co-driver session membership found",
                 error_code="BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND",
+            )
+        promised = self.promised_stops_query([int(member_driver_id)]).count()
+        if promised:
+            raise ConflictError(
+                f"Finish your {promised} stop(s) on the way before leaving the session",
+                details={"count": int(promised)},
+                error_code="BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS",
             )
         membership.status = DriverSessionMembershipStatus.LEFT
         membership.left_at = self._utc_now()
@@ -3778,7 +3979,6 @@ class BottleTrackingService:
         reading `StaffService.assert_delivery_person_active` applies at the
         staff-bot door, so nobody listed here is locked out of the bot.
         """
-        from business_app.models.delivery import DeliveryPerson
         from business_app.services.staff_service import StaffService
 
         return User.query.outerjoin(DeliveryPerson, DeliveryPerson.user_id == User.id).filter(
@@ -3964,17 +4164,23 @@ class BottleTrackingService:
         logger.info("[BOTTLE] unbind_order order=%s removed binding from session=%s", order_id, binding.session_id)
         return True
 
-    @staticmethod
-    def assert_delivery_within_session_capacity(session: DriverBottleSession, bottles_to_deliver: int) -> None:
-        """Raise ValidationError if the session cannot cover this delivery.
+    def assert_delivery_within_session_capacity(
+        self,
+        session: DriverBottleSession,
+        bottles_to_deliver: int,
+        *,
+        exclude_delivery_id: Optional[int] = None,
+    ) -> None:
+        """Raise ValidationError if the crew's free full bottles cannot cover this delivery.
 
         `details` carries the three numbers the staff bot prints ("4 left, 5
         needed, 1 short"); the message keeps the session id for the logs.
+        `exclude_delivery_id` keeps a stop from counting against itself when it is already promised.
         """
-        available = session.current_inventory
+        available = self.free_full_bottles_for_session(session, exclude_delivery_id=exclude_delivery_id)
         if bottles_to_deliver > available:
             raise ValidationError(
-                f"Session {session.id} only has {available} bottle(s) available; "
+                f"Session {session.id} only has {available} full bottle(s) available; "
                 f"cannot deliver {bottles_to_deliver}.",
                 details={
                     "available": int(available),
@@ -3992,8 +4198,61 @@ class BottleTrackingService:
         except RuntimeError:
             return False
 
-    def assert_driver_can_progress_delivery(self, delivery: "Delivery") -> Optional[DriverBottleSession]:
-        """Guard called before any post-assignment delivery transition.
+    # The moves out of ASSIGNED that put the order on the truck: Picked up, or a jump past it.
+    _PROGRESS_FROM_ASSIGNED = frozenset(
+        {DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED, DeliveryStatus.DELIVERED}
+    )
+
+    @classmethod
+    def _progress_counts_bottles(cls, from_status: DeliveryStatus, to_status: DeliveryStatus) -> bool:
+        """Whether this move must find the crew's free full bottles covering the order (spec A6, A8).
+
+        Two steps count, whether or not the order is already bound: leaving ASSIGNED (Picked up, or straight to
+        On the way), and entering the promised set (On the way), which is where the bottles are reserved. An
+        ASSIGNED -> IN_TRANSIT jump is both, and both are the one check. Arrived and Delivered of a stop already
+        on its way are not counted again: its bottles are already promised.
+        """
+        leaving_assigned = from_status == DeliveryStatus.ASSIGNED and to_status in cls._PROGRESS_FROM_ASSIGNED
+        entering_promised = (
+            to_status in DELIVERY_BOTTLES_PROMISED_STATES and from_status not in DELIVERY_BOTTLES_PROMISED_STATES
+        )
+        return leaving_assigned or entering_promised
+
+    def _lock_crew_delivery_persons(self, session: DriverBottleSession) -> None:
+        """Lock every crew member's DeliveryPerson row, in user-id order, until this transaction ends, and make
+        the count that follows reload the trip's full-bottle tallies.
+
+        Two taps that would promise the same full bottles (two co-drivers, or one driver twice) queue here, so
+        the later one counts the earlier one's stop. Never followed by a session row lock (the spec's lock order:
+        no session row lock after a DeliveryPerson lock). The lock is a no-op on SQLite.
+
+        The session was read before this lock, and the lock may have waited on a crew member's delivery. A
+        delivery commits two things at once: its stop leaves the stops on their way, and its bottles leave the
+        trip's tallies. The count reads them in two statements. So the tallies are expired here and reload in
+        `free_full_bottles_for_session`, after it has read the stops. A delivery that commits before the stops
+        are read is then in both. One that commits between the two reads is in the tallies only: that
+        under-counts by its bottles (a refusal the driver can retry), and never promises them twice. Some
+        completions (an admin's Delivered on the Orders page) write no DeliveryPerson row, so they do not wait for
+        this lock and can commit at any point of the count. The reload is a plain SELECT and locks nothing.
+        """
+        crew_ids = self.crew_driver_ids(session)
+        (
+            db.session.query(DeliveryPerson.id)
+            .filter(DeliveryPerson.user_id.in_(crew_ids))
+            .order_by(DeliveryPerson.user_id)
+            .with_for_update()
+            .all()
+        )
+        db.session.expire(session, list(DriverBottleSession.FULL_ON_BOARD_TALLIES))
+
+    def assert_driver_can_progress_delivery(
+        self,
+        delivery: "Delivery",
+        *,
+        to_status: DeliveryStatus,
+        enforce_capacity: bool = True,
+    ) -> Optional[DriverBottleSession]:
+        """Guard called before a delivery moves on to ``to_status`` after assignment.
 
         Ensures the order is delivered under an OPEN bottle session whose
         binding follows the session the driver is currently operating under, so
@@ -4008,9 +4267,17 @@ class BottleTrackingService:
         rotated/closed their session between assignment and progress. It is no
         longer the primary fix for missing-binding-at-assignment.
 
+        Free full bottles (spec A6, A8): when the move leaves ASSIGNED or enters
+        On the way (``_progress_counts_bottles``), the crew's free full bottles,
+        not counting this stop, must cover the order, or
+        ``BOTTLE_SESSION_CAPACITY_EXCEEDED`` is raised. Bound or not: the order
+        being on the trip already does not skip the count. A move into the
+        promised set first locks the crew's DeliveryPerson rows, so two taps
+        cannot promise the same bottles. ``enforce_capacity=False`` (admin status
+        moves, spec A9) skips the count but not the trip requirement below.
+
         Carry-over / late-bind: whenever the driver has an open session, the
-        order is (re)bound onto it — provided that session has capacity,
-        otherwise ``BOTTLE_SESSION_CAPACITY_EXCEEDED`` is raised. This covers
+        order is (re)bound onto it. This covers
         both an order accepted under a now-closed/different session (carry-over)
         and an order that was never bound at all because it was assigned outside
         the bot-accept flow — admin assignment and ``auto_assign_delivery_task``
@@ -4054,6 +4321,14 @@ class BottleTrackingService:
         bound = DriverBottleSession.query.get(binding.session_id) if binding else None
         effective = self.get_effective_session(delivery.delivery_person_id)
 
+        if effective is not None:
+            if to_status in DELIVERY_BOTTLES_PROMISED_STATES:
+                self._lock_crew_delivery_persons(effective)
+            if enforce_capacity and self._progress_counts_bottles(delivery.status, to_status):
+                self.assert_delivery_within_session_capacity(
+                    effective, int(bottles_needed), exclude_delivery_id=delivery.id
+                )
+
         # Happy path: the order is already on the driver's current open session.
         if (
             binding is not None
@@ -4073,11 +4348,10 @@ class BottleTrackingService:
         #     assigned outside the bot-accept flow (admin assignment /
         #     auto_assign_delivery_task create no binding), then surfaced to a
         #     driver who has an open session.
-        # Capacity is enforced here exactly as at accept time: refuse if the
-        # session can't cover the load. rebind_order_to_session creates the
-        # binding when none exists yet, so both shapes share this code path.
+        # Capacity was judged above, for the moves that count bottles.
+        # rebind_order_to_session creates the binding when none exists yet, so
+        # both shapes share this code path.
         if effective is not None:
-            self.assert_delivery_within_session_capacity(effective, int(bottles_needed))
             previous_session_id = binding.session_id if binding else None
             self.rebind_order_to_session(
                 order.id,
@@ -4112,13 +4386,21 @@ class BottleTrackingService:
             )
         return None
 
+    # Orders whose binding is historical: kept for the closed trip's tally, never moved or dropped.
+    TERMINAL_BINDING_ORDER_STATUSES = (OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED)
+
+    @staticmethod
+    def order_binding_is_historical(order) -> bool:
+        """True when the order is finished, so its session binding must be left exactly as it is."""
+        return order.status in BottleTrackingService.TERMINAL_BINDING_ORDER_STATUSES
+
     @staticmethod
     def _open_bindings_query_for_session(session_id: int):
         """Bindings on this session whose order is not in a terminal status."""
         return (
             DriverBottleSessionOrder.query.join(Order, DriverBottleSessionOrder.order_id == Order.id)
             .filter(DriverBottleSessionOrder.session_id == session_id)
-            .filter(Order.status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED]))
+            .filter(Order.status.notin_(BottleTrackingService.TERMINAL_BINDING_ORDER_STATUSES))
         )
 
     @staticmethod
@@ -4172,18 +4454,44 @@ class BottleTrackingService:
                 "[BOTTLE] update_session_delivery_tally driver=%s no effective session, skipping", driver_user_id
             )
             return None
-        prev_delivered = session.bottles_delivered or 0
-        prev_collected = session.bottles_collected_from_customers or 0
-        session.bottles_delivered = prev_delivered + bottles_delivered
-        session.bottles_collected_from_customers = prev_collected + bottles_collected
-        db.session.flush()
+        self.add_to_session_tallies(session, delivered=bottles_delivered, collected=bottles_collected)
         logger.info(
-            f"[BOTTLE] update_session_delivery_tally OK "
-            f"session={session.id} "
-            f"delivered={prev_delivered}→{session.bottles_delivered} "
-            f"collected={prev_collected}→{session.bottles_collected_from_customers}"
+            "[BOTTLE] update_session_delivery_tally OK session=%s delivered+%s=%s collected+%s=%s",
+            session.id,
+            bottles_delivered,
+            session.bottles_delivered,
+            bottles_collected,
+            session.bottles_collected_from_customers,
         )
         return session
+
+    @staticmethod
+    def add_to_session_tallies(session: DriverBottleSession, *, delivered: int = 0, collected: int = 0) -> None:
+        """Add to the trip's Delivered and collected-empties tallies in SQL (`tally = tally + n`), never below 0.
+
+        Every writer of these two tallies goes through here. Two crew members' Delivered taps on one truck lock
+        different rows until they reach this one, so a total read earlier and written back overwrote the other tap's
+        bottles. The UPDATE adds to what the row holds once its lock is granted. The two attributes are expired, so
+        the next read in this transaction loads the sum. Lock order: a Delivered has already written the deliverer's
+        DeliveryPerson row; this takes the trip row's update lock after it, as before.
+        """
+        values = {}
+        for column, amount in (
+            (DriverBottleSession.bottles_delivered, delivered),
+            (DriverBottleSession.bottles_collected_from_customers, collected),
+        ):
+            if amount:
+                total = column + int(amount)
+                values[column.key] = case((total < 0, 0), else_=total)
+        if not values:
+            return
+        db.session.execute(
+            update(DriverBottleSession)
+            .where(DriverBottleSession.id == session.id)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        db.session.expire(session, list(values))
 
     # ------------------------------------------------------------------
     # Driver-to-driver bottle transfers
@@ -4193,8 +4501,10 @@ class BottleTrackingService:
         self,
         sender_driver_id: int,
         receiver_driver_id: int,
-        declared_quantity: int,
         *,
+        full_quantity: int = 0,
+        empty_quantity: int = 0,
+        send_all: bool = False,
         notes: str = None,
     ) -> DriverBottleTransfer:
         """Record the hand-off, then tell the receiver.
@@ -4207,7 +4517,9 @@ class BottleTrackingService:
         transfer = self._record_bottle_transfer(
             sender_driver_id,
             receiver_driver_id,
-            declared_quantity,
+            full_quantity=full_quantity,
+            empty_quantity=empty_quantity,
+            send_all=send_all,
             notes=notes,
         )
         bottle_notifications.notify_transfer_received(transfer)
@@ -4218,25 +4530,32 @@ class BottleTrackingService:
         self,
         sender_driver_id: int,
         receiver_driver_id: int,
-        declared_quantity: int,
         *,
+        full_quantity: int = 0,
+        empty_quantity: int = 0,
+        send_all: bool = False,
         notes: str = None,
     ) -> DriverBottleTransfer:
-        """Sender initiates a mid-route transfer of bottles to another driver.
+        """Sender hands full bottles and empties to another driver, mid-route (spec 2026-11-09 T1-T3).
 
-        Immediately deducts declared_quantity from sender's session inventory.
-        Raises ConflictError if sender has no open session.
-        Raises ValidationError if quantity exceeds sender's current inventory.
+        `send_all` sends everything on the truck as read under the lock, the full bottles promised to his own
+        On-the-way stops included (T3). Otherwise each number is capped by its own component (T2):
+        BOTTLE_TRANSFER_EXCEEDS_INVENTORY names the `kind` that is too high. A total of 0 is
+        BOTTLE_TRANSFER_NOTHING_TO_SEND. Both components leave the sender's session at once (pessimistic), each into
+        its own counter; the receiver's are credited when he counts them.
+
+        The sender's session row is locked (and re-read) first, so two sends, or a send racing a delivery, cannot
+        both spend the same bottles. A transfer path never locks a DeliveryPerson row (the lock order).
         """
         # JWT identities arrive as str (`sub`); every column compared below is int.
         sender_driver_id = int(sender_driver_id)
         receiver_driver_id = int(receiver_driver_id)
         if sender_driver_id == receiver_driver_id:
             raise ValidationError("Sender and receiver cannot be the same driver")
-        if declared_quantity <= 0:
-            raise ValidationError("Transfer quantity must be greater than zero")
+        if full_quantity < 0 or empty_quantity < 0:
+            raise ValidationError("Transfer quantities cannot be negative")
 
-        sender_session = self._get_open_session_or_raise(sender_driver_id)
+        sender_session = self._get_open_session_or_raise(sender_driver_id, lock=True)
         receiver = self._transfer_recipients_query(sender_driver_id).filter(User.id == receiver_driver_id).first()
         if receiver is None:
             raise ValidationError(
@@ -4244,25 +4563,33 @@ class BottleTrackingService:
                 error_code="BOTTLE_TRANSFER_RECEIVER_INVALID",
             )
 
-        if declared_quantity > sender_session.current_inventory:
+        if send_all:
+            full_quantity, empty_quantity = sender_session.transferable_full, sender_session.transferable_empties
+        if full_quantity + empty_quantity == 0:
             raise ValidationError(
-                f"Cannot transfer {declared_quantity} bottle(s); "
-                f"sender only has {sender_session.current_inventory} on truck.",
-                error_code="BOTTLE_TRANSFER_EXCEEDS_INVENTORY",
-                details={
-                    "requested": int(declared_quantity),
-                    "available": int(sender_session.current_inventory),
-                },
+                "Nothing to transfer: no full bottles and no empties.",
+                error_code="BOTTLE_TRANSFER_NOTHING_TO_SEND",
             )
+        for kind, requested, available in (
+            ("full", full_quantity, sender_session.transferable_full),
+            ("empty", empty_quantity, sender_session.transferable_empties),
+        ):
+            if requested > available:
+                raise ValidationError(
+                    f"Cannot transfer {requested} {kind} bottle(s); the sender has {available} on the truck.",
+                    error_code="BOTTLE_TRANSFER_EXCEEDS_INVENTORY",
+                    details={"kind": kind, "requested": int(requested), "available": int(available)},
+                )
 
-        # Deduct immediately (pessimistic) to prevent over-delivery
-        sender_session.bottles_transferred_out = (sender_session.bottles_transferred_out or 0) + declared_quantity
+        sender_session.bottles_transferred_out = (sender_session.bottles_transferred_out or 0) + full_quantity
+        sender_session.empties_transferred_out = (sender_session.empties_transferred_out or 0) + empty_quantity
 
         transfer = DriverBottleTransfer(
             sender_session_id=sender_session.id,
             sender_driver_id=sender_driver_id,
             receiver_driver_id=receiver_driver_id,
-            declared_quantity=declared_quantity,
+            declared_quantity=full_quantity,
+            declared_empty_quantity=empty_quantity,
             status=DriverBottleTransferStatus.PENDING,
             notes=notes,
         )
@@ -4270,27 +4597,210 @@ class BottleTrackingService:
         db.session.flush()
         return transfer
 
-    @transactional
+    @staticmethod
+    def _lock_session(session_id: int) -> DriverBottleSession:
+        """The session row, locked (`SESSION_ROW_LOCK`) until this transaction ends and re-read, so a write based on its
+        tallies sees the last committed ones. A no-op lock on SQLite."""
+        return db.session.get(DriverBottleSession, session_id, with_for_update=SESSION_ROW_LOCK, populate_existing=True)
+
+    @staticmethod
+    def _lock_transfer(transfer_id: int) -> Optional[DriverBottleTransfer]:
+        """The transfer row, locked and re-read before its status is judged: a second tap on Confirm (or a second
+        resolve) waits here and then sees what the first one wrote. Always the first lock a transfer path takes."""
+        return db.session.get(DriverBottleTransfer, transfer_id, with_for_update=True, populate_existing=True)
+
     def confirm_bottle_transfer(
         self,
         transfer_id: int,
         receiver_driver_id: int,
-        confirmed_quantity: int,
         *,
+        confirmed_full: Optional[int] = None,
+        confirmed_empty: Optional[int] = None,
+        confirm_as_declared: bool = False,
+        notes: str = None,
+    ) -> TransferCountOutcome:
+        """Record the receiver's count (`_record_transfer_count`), then act on it once it has committed.
+
+        A refused count commits nothing and does nothing after. Each step after the commit is best-effort
+        (`_after_count_step`), because the count stands whatever they do: a failed step is logged and the session
+        rolled back, the steps after it still run, and the receiver still gets the transfer he counted.
+          - CONFIRMED: the sender's trip closes if the hand-off emptied it (T4), then the sender is told the count and
+            whether his trip closed.
+          - DISPUTED: the dispute is posted to the admins' Slack alerts channel, then the sender is told both counts,
+            and that an admin will check only if Slack took the post (T5; Slack per owner decision 2026-11-10).
+          - Full bottles credited to the receiver (either outcome): the pool is offered to auto-assign again (§4.2).
+        Returns the transfer, read again with both drivers, and whether Slack took the dispute alert. That last
+        read is a step too: if it fails, the transfer as read right after the commit stands in for it, so the receiver
+        still gets the count he made.
+        """
+        self._record_transfer_count(
+            transfer_id,
+            receiver_driver_id,
+            confirmed_full=confirmed_full,
+            confirmed_empty=confirmed_empty,
+            confirm_as_declared=confirm_as_declared,
+            notes=notes,
+        )
+        as_committed, admins_alerted = self._after_transfer_counted(transfer_id)
+        transfer = self._after_count_step(
+            transfer_id, "final read", lambda: self._counted_transfer(transfer_id), as_committed
+        )
+        return TransferCountOutcome(transfer, admins_alerted)
+
+    @staticmethod
+    def _counted_transfer(transfer_id: int) -> DriverBottleTransfer:
+        """The transfer as committed, with both drivers loaded in the same read: what a step after the count needs. The
+        commit (and any failed step's rollback) expired the rows read before it, so nothing relies on those."""
+        return db.session.get(
+            DriverBottleTransfer,
+            transfer_id,
+            options=[joinedload(DriverBottleTransfer.sender_driver), joinedload(DriverBottleTransfer.receiver_driver)],
+            populate_existing=True,
+        )
+
+    @staticmethod
+    def _after_count_step(transfer_id: int, step: str, run, default=None):
+        """One step after a transfer's count has committed, isolated from the rest: its result, or `default` if it
+        raised. Raising would answer the receiver 500 for a count that stands (and his bot would retry into "not
+        pending"). The rollback clears a session a failed step left unusable, so the next step and the route's
+        answer start clean; nothing of the count is left to lose. `best_effort_step` is the order flows' twin: it
+        returns nothing and its log line names an order."""
+        try:
+            return run()
+        except Exception:  # noqa: BLE001 - after commit; the count stands
+            db.session.rollback()
+            logger.exception("[BOTTLE] %s after transfer %s's count failed", step, transfer_id)
+            return default
+
+    @staticmethod
+    def _kept_as_read(transfer: DriverBottleTransfer) -> DriverBottleTransfer:
+        """Detach the transfer and both its drivers, every column loaded, so no later commit or rollback expires them
+        and nothing reloads them: the answer `confirm_bottle_transfer` falls back on when its final read fails. The
+        steps read the transfer afresh, so none of them uses this copy."""
+        for row in (transfer, transfer.sender_driver, transfer.receiver_driver):
+            if row is not None and row in db.session:
+                db.session.expunge(row)
+        return transfer
+
+    def _after_transfer_counted(self, transfer_id: int) -> Tuple[Optional[DriverBottleTransfer], bool]:
+        """The post-commit steps of `confirm_bottle_transfer`, in the order the sender's message depends on. Each reads
+        the transfer afresh (`_counted_transfer`) inside its own guard (`_after_count_step`). Returns the transfer as
+        read right after the commit (`_kept_as_read`; None if that read failed) and whether the admins' Slack alerts
+        channel took the dispute alert."""
+        from business_app.services import bottle_notifications
+
+        def step(name, run, default=None):
+            return self._after_count_step(transfer_id, name, run, default)
+
+        counted = step("read", lambda: self._kept_as_read(self._counted_transfer(transfer_id)))
+        if counted is None:
+            return None, False
+        confirmed, credited_full = counted.status == DriverBottleTransferStatus.CONFIRMED, counted.confirmed_quantity
+        admins_alerted = False
+        if confirmed:
+            auto_closed = step(
+                "auto-close", lambda: self._auto_close_sender_if_emptied(self._counted_transfer(transfer_id)), False
+            )
+            step(
+                "sender message",
+                lambda: bottle_notifications.notify_transfer_outcome_to_sender(
+                    self._counted_transfer(transfer_id), auto_closed=auto_closed
+                ),
+            )
+        else:
+            alerted = step(
+                "dispute alert",
+                lambda: bottle_notifications.notify_admins_transfer_disputed(self._counted_transfer(transfer_id)),
+                False,
+            )
+            admins_alerted = alerted is True
+            step(
+                "sender message",
+                lambda: bottle_notifications.notify_transfer_outcome_to_sender(
+                    self._counted_transfer(transfer_id), auto_closed=False, admins_alerted=admins_alerted
+                ),
+            )
+        if (credited_full or 0) > 0:
+            step("pool re-offer", self._reoffer_pool_after_capacity_gain)
+        return counted, admins_alerted
+
+    @transactional
+    def _auto_close_sender_if_emptied(self, transfer: DriverBottleTransfer) -> bool:
+        """Close the sender's trip if this confirmed hand-off left nothing for it to do (spec 2026-11-09 T4).
+
+        Its own transaction, after the count has committed. Every condition is judged here, under the sender session's
+        row lock, against what the rows say now: never from the count's snapshot. Closes only if all hold:
+          - the trip the bottles left is still OPEN;
+          - nothing is left on it (`transferable_full` and `transferable_empties` both 0);
+          - the crew holds no delivery in the driver's active list (Assigned, Picked up, On the way, Arrived): the
+            workload count `StaffService.get_active_delivery_counts` keeps over `ACTIVE_DELIVERY_STATUSES`;
+          - nobody co-drives it (ACTIVE memberships);
+          - no other transfer from it waits for its receiver's count.
+        Otherwise the trip stays open, silently: the driver closes it at the warehouse as usual.
+
+        The close is an ordinary one (bindings and memberships released, discrepancy computed) with 0 returned to the
+        warehouse, the sender as the closer and a note naming the transfer. The sender is not moved to the depot: the
+        hand-off happened mid-route. Lock order: the one session row, and no DeliveryPerson row. Returns whether it
+        closed.
+        """
+        from business_app.services.staff_service import StaffService
+
+        session = self._lock_session(transfer.sender_session_id)
+        if session is None or session.status != DriverBottleSessionStatus.OPEN:
+            return False
+        if session.transferable_full or session.transferable_empties:
+            return False
+        crew = self.crew_driver_ids(session)
+        if any(StaffService.get_active_delivery_counts(crew).values()):
+            return False
+        if len(crew) > 1:  # the owner plus an ACTIVE co-driver
+            return False
+        another_pending = (
+            db.session.query(DriverBottleTransfer.id)
+            .filter(
+                DriverBottleTransfer.sender_session_id == session.id,
+                DriverBottleTransfer.status == DriverBottleTransferStatus.PENDING,
+                DriverBottleTransfer.id != transfer.id,
+            )
+            .first()
+        )
+        if another_pending is not None:
+            return False
+
+        self.close_bottle_session(
+            session.driver_user_id,
+            0,
+            actor_user_id=transfer.sender_driver_id,
+            notes=f"Closed automatically after transfer {transfer.transfer_ref}: nothing left on the truck.",
+            anchor_at_warehouse=False,
+        )
+        logger.info("[BOTTLE] session=%s closed automatically after transfer %s", session.id, transfer.id)
+        return True
+
+    @transactional
+    def _record_transfer_count(
+        self,
+        transfer_id: int,
+        receiver_driver_id: int,
+        *,
+        confirmed_full: Optional[int] = None,
+        confirmed_empty: Optional[int] = None,
+        confirm_as_declared: bool = False,
         notes: str = None,
     ) -> DriverBottleTransfer:
-        """Receiver confirms (or disputes) a pending transfer.
+        """Receiver confirms (or disputes) a pending transfer: as declared, or with both counts (spec 2026-11-09 T5).
 
-        Quantities match → CONFIRMED; mismatch → DISPUTED.
-        The receiver's state AT CONFIRM TIME decides where the bottles land:
-        their own open session, else the session they co-drive (one truck,
-        one load), else a session opened for them by this hand-off. A receiver
-        with nothing open who counts 0 opens nothing; the dispute goes to the
-        admin like any other mismatch.
+        Both counts match the declared ones → CONFIRMED; either differs → DISPUTED, and the receiver's truck holds
+        what he counted until an admin resolves it. The receiver's state AT CONFIRM TIME decides where the bottles
+        land: their own open session, else the session they co-drive (one truck, one load), else a session opened for
+        them by this hand-off. A receiver with nothing open who counts 0 in total opens nothing; the dispute goes to
+        the admin like any other mismatch.
+
+        Locks the transfer row before its status check, then the landing session: transfer row → session rows.
         """
         # JWT identities arrive as str (`sub`); every column compared below is int.
         receiver_driver_id = int(receiver_driver_id)
-        transfer = DriverBottleTransfer.query.get(transfer_id)
+        transfer = self._lock_transfer(transfer_id)
         if not transfer:
             raise NotFoundError("Transfer not found", error_code="BOTTLE_TRANSFER_NOT_FOUND")
         if transfer.receiver_driver_id != receiver_driver_id:
@@ -4303,22 +4813,27 @@ class BottleTrackingService:
                 f"Transfer is already {transfer.status.value}",
                 error_code="BOTTLE_TRANSFER_NOT_PENDING",
             )
-        if confirmed_quantity < 0:
-            raise ValidationError("confirmed_quantity cannot be negative")
+        declared = (transfer.declared_quantity, transfer.declared_empty_quantity or 0)
+        if confirm_as_declared:
+            confirmed_full, confirmed_empty = declared
+        elif confirmed_full is None or confirmed_empty is None:
+            raise ValidationError("Confirm as declared, or give both the full and the empty count")
+        if confirmed_full < 0 or confirmed_empty < 0:
+            raise ValidationError("Confirmed counts cannot be negative")
 
-        receiver_session = self._receiver_session_for(transfer, receiver_driver_id, confirmed_quantity)
+        receiver_session = self._receiver_session_for(transfer, receiver_driver_id, confirmed_full + confirmed_empty)
 
         if receiver_session is not None:
-            receiver_session.bottles_transferred_in = (
-                receiver_session.bottles_transferred_in or 0
-            ) + confirmed_quantity
+            receiver_session.bottles_transferred_in = (receiver_session.bottles_transferred_in or 0) + confirmed_full
+            receiver_session.empties_transferred_in = (receiver_session.empties_transferred_in or 0) + confirmed_empty
             transfer.receiver_session_id = receiver_session.id
-        transfer.confirmed_quantity = confirmed_quantity
+        transfer.confirmed_quantity = confirmed_full
+        transfer.confirmed_empty_quantity = confirmed_empty
         transfer.confirmed_at = self._utc_now()
         if notes:
             transfer.notes = (transfer.notes or "") + f"\n{notes}"
 
-        if confirmed_quantity == transfer.declared_quantity:
+        if (confirmed_full, confirmed_empty) == declared:
             transfer.status = DriverBottleTransferStatus.CONFIRMED
         else:
             transfer.status = DriverBottleTransferStatus.DISPUTED
@@ -4329,17 +4844,23 @@ class BottleTrackingService:
         return transfer
 
     def _receiver_session_for(
-        self, transfer: DriverBottleTransfer, receiver_driver_id: int, quantity: int
+        self, transfer: DriverBottleTransfer, receiver_driver_id: int, total: int
     ) -> Optional[DriverBottleSession]:
         """The one rule for where a transfer's bottles land (confirm and admin resolve).
 
         The receiver's own open session, else the session they co-drive, else a
-        session opened by this hand-off; nothing to land (quantity 0) opens nothing.
+        session opened by this hand-off; nothing to land (a total of 0, full and
+        empties together) opens nothing.
         Confirm-time only: the receiver is on that truck right now. An admin
         resolve differs (see `admin_resolve_transfer_dispute`).
+
+        Read under the session's row lock, held until the confirm commits: a trip
+        whose close commits while this waits is no longer OPEN, so it is passed
+        over and the rule lands the bottles on what the receiver has now. A
+        closed trip's discrepancy is sealed; crediting it would leave it off.
         """
-        session = self.get_effective_session(receiver_driver_id)
-        if session is None and quantity > 0:
+        session = self.get_effective_session(receiver_driver_id, lock=True)
+        if session is None and total > 0:
             session = self._open_session_for_transfer(receiver_driver_id, transfer)
         return session
 
@@ -4379,49 +4900,75 @@ class BottleTrackingService:
         self,
         transfer_id: int,
         actor_user_id: int,
-        resolved_quantity: int,
         *,
+        resolved_full: int,
+        resolved_empty: int,
         resolution_notes: str,
     ) -> DriverBottleTransfer:
-        """Admin arbitrates a disputed transfer.
+        """Admin arbitrates a disputed transfer: the full bottles and the empties that really moved.
 
-        Adjusts sender and receiver session tallies to use resolved_quantity.
-        A transfer that was never credited (the receiver counted 0 with nothing
-        open) lands the full resolved_quantity on the receiver's OWN open
-        session, else one opened for them with the admin as `loaded_by_user_id`.
-        Unlike confirm it never uses the session the receiver co-drives: the
-        hand-off is in the past, and that truck's owner was not party to it.
+        Adjusts both components on the sender's session (declared → resolved) and the receiver's (confirmed →
+        resolved). A transfer that was never credited (the receiver counted 0 with nothing open) lands the resolved
+        counts on the receiver's OWN open session, else one opened for them with the admin as `loaded_by_user_id`.
+        Unlike confirm it never uses the session the receiver co-drives: the hand-off is in the past, and that
+        truck's owner was not party to it. A touched session that is no longer OPEN gets its discrepancy recomputed:
+        it was computed at close from the counts this resolve corrects.
+
+        Locks the transfer row before its status check, then the sessions in id order: transfer row → session rows.
         """
-        transfer = DriverBottleTransfer.query.get(transfer_id)
+        transfer = self._lock_transfer(transfer_id)
         if not transfer:
             raise NotFoundError("Transfer not found")
         if transfer.status != DriverBottleTransferStatus.DISPUTED:
             raise ConflictError("Can only resolve DISPUTED transfers")
         if not resolution_notes or not resolution_notes.strip():
             raise ValidationError("resolution_notes is required")
-        if resolved_quantity < 0:
-            raise ValidationError("resolved_quantity cannot be negative")
+        if resolved_full < 0 or resolved_empty < 0:
+            raise ValidationError("Resolved counts cannot be negative")
 
-        # Adjust sender session: replace declared with resolved
-        delta_out = resolved_quantity - transfer.declared_quantity
-        transfer.sender_session.bottles_transferred_out = (
-            transfer.sender_session.bottles_transferred_out or 0
-        ) + delta_out
+        landing_id = transfer.receiver_session_id
+        if landing_id is None and resolved_full + resolved_empty > 0:
+            own = self.get_open_session(transfer.receiver_driver_id)
+            landing_id = own.id if own is not None else None
+        locked = {
+            session_id: self._lock_session(session_id)
+            for session_id in sorted({transfer.sender_session_id, landing_id} - {None})
+        }
 
-        # Adjust receiver session: replace confirmed with resolved
-        if transfer.receiver_session:
-            delta_in = resolved_quantity - (transfer.confirmed_quantity or 0)
-            transfer.receiver_session.bottles_transferred_in = (
-                transfer.receiver_session.bottles_transferred_in or 0
-            ) + delta_in
-        elif resolved_quantity > 0:
-            landing = self.get_open_session(transfer.receiver_driver_id) or self._open_session_for_transfer(
+        # The sender's session: replace what he declared with what really left his truck.
+        sender_session = locked[transfer.sender_session_id]
+        declared_full, declared_empty = transfer.declared_quantity, transfer.declared_empty_quantity or 0
+        sender_session.bottles_transferred_out = (
+            (sender_session.bottles_transferred_out or 0) + resolved_full - declared_full
+        )
+        sender_session.empties_transferred_out = (
+            (sender_session.empties_transferred_out or 0) + resolved_empty - declared_empty
+        )
+        touched = [sender_session]
+
+        # The receiver's: replace what he counted with what really arrived. Never credited: he counted nothing.
+        if transfer.receiver_session_id is not None:
+            landing = locked[landing_id]
+            credited_full, credited_empty = transfer.confirmed_quantity or 0, transfer.confirmed_empty_quantity or 0
+        elif resolved_full + resolved_empty > 0:
+            landing = locked.get(landing_id) or self._open_session_for_transfer(
                 transfer.receiver_driver_id, transfer, actor_user_id=actor_user_id
             )
-            landing.bottles_transferred_in = (landing.bottles_transferred_in or 0) + resolved_quantity
+            credited_full, credited_empty = 0, 0
+        else:
+            landing = None
+        if landing is not None:
+            landing.bottles_transferred_in = (landing.bottles_transferred_in or 0) + resolved_full - credited_full
+            landing.empties_transferred_in = (landing.empties_transferred_in or 0) + resolved_empty - credited_empty
             transfer.receiver_session_id = landing.id
+            touched.append(landing)
 
-        transfer.confirmed_quantity = resolved_quantity
+        for session in touched:
+            if session.status != DriverBottleSessionStatus.OPEN:
+                session.compute_discrepancy()
+
+        transfer.confirmed_quantity = resolved_full
+        transfer.confirmed_empty_quantity = resolved_empty
         transfer.status = DriverBottleTransferStatus.RESOLVED
         transfer.resolved_at = self._utc_now()
         transfer.resolved_by_user_id = actor_user_id
@@ -4519,7 +5066,10 @@ class BottleTrackingService:
     def get_pending_transfers_for_driver(
         driver_user_id: int,
     ) -> List[DriverBottleTransfer]:
-        """Return transfers pending confirmation by this driver (as receiver)."""
+        """Return transfers pending confirmation by this driver (as receiver).
+
+        Rows for `serialize_bottle_transfer`, which reads both drivers' names.
+        """
         return (
             DriverBottleTransfer.query.filter_by(
                 receiver_driver_id=driver_user_id,
@@ -4527,6 +5077,7 @@ class BottleTrackingService:
             )
             .options(
                 joinedload(DriverBottleTransfer.sender_driver),
+                joinedload(DriverBottleTransfer.receiver_driver),
                 joinedload(DriverBottleTransfer.sender_session),
             )
             .order_by(DriverBottleTransfer.sent_at.desc())
@@ -4540,7 +5091,10 @@ class BottleTrackingService:
         status: str = None,
         driver_user_id: int = None,
     ) -> Dict:
-        """Get paginated transfer list for admin."""
+        """Get paginated transfer list for admin: the rows the staff routes publish, with names and the full / empty
+        split (`serialize_bottle_transfer`)."""
+        from business_app.serializers.bottle_serializers import serialize_bottle_transfer
+
         query = DriverBottleTransfer.query.options(
             joinedload(DriverBottleTransfer.sender_driver),
             joinedload(DriverBottleTransfer.receiver_driver),
@@ -4560,7 +5114,7 @@ class BottleTrackingService:
         total = query.count()
         items = query.offset((page - 1) * per_page).limit(per_page).all()
         return {
-            "items": [t.to_dict() for t in items],
+            "items": [serialize_bottle_transfer(t) for t in items],
             "total": total,
             "page": page,
             "per_page": per_page,

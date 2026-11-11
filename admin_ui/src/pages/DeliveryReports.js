@@ -458,7 +458,7 @@ const DeliveryReports = () => {
       ),
     },
     {
-      title: t('staff:expected_cash', 'Expected Cash'),
+      title: t('staff:cash_to_hand_in', 'To hand in'),
       dataIndex: 'expected_cash_on_hand',
       key: 'expected_cash_on_hand',
       render: money,
@@ -952,7 +952,7 @@ const DeliveryReports = () => {
               <Descriptions.Item label={t('staff:session_age_days', 'Session Age')}>
                 {selectedSession.session_age_days == null ? '—' : `${selectedSession.session_age_days}d`}
               </Descriptions.Item>
-              <Descriptions.Item label={t('staff:expected_cash', 'Expected Cash')}>{money(selectedSession.expected_cash)}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:cash_gross_collected', 'Collected (gross)')}>{money(selectedSession.expected_cash)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:expected_cash_on_hand', 'Expected On Hand')}>
                 {money(selectedSession.expected_cash_on_hand)}
               </Descriptions.Item>

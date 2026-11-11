@@ -262,6 +262,12 @@ def _extract_ui_fallbacks():
         "src/pages/Orders.js",
         "src/pages/Users.js",
         "src/pages/Prepayments.js",
+        # The Users page's "Driver reports" tab (shared-place cases): its own
+        # `ui.users.shared_place_reports.*` copy, pinned by
+        # tests/unit/test_shared_place_ui_translation_seed.py.
+        "src/components/sharedPlace/SharedPlaceReportsPanel.jsx",
+        "src/components/sharedPlace/SharedPlaceCaseDetail.jsx",
+        "src/components/sharedPlace/SharedPlaceAdjustConfirm.jsx",
         # Listed LAST on purpose: ``found.setdefault`` gives the first file that
         # declares a key precedence, and ``ui.users.entity_subtype_*`` is also
         # read here — Users.js stays the canonical fallback for those.

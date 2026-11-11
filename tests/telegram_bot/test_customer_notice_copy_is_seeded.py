@@ -38,6 +38,7 @@ BOT_KEYS = {
     "telegram.customer_notice.paid_order_kept_pause": {"order_number", "date"},
     "telegram.customer_notice.paid_order_kept_cancel": {"order_number", "date"},
     "telegram.customer_notice.payment_expired": {"order_number", "deadline"},
+    "telegram.customer_notice.prepayment_returned": {"amount", "balance"},
     # A slot write changed the schedule (spec 2026-10-27 §6.5): one line per change inside `schedule_changed`.
     "telegram.customer_notice.schedule_changed": {"subscription_name", "lines"},
     "telegram.customer_notice.schedule_changed_next": {"date"},

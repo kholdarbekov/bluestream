@@ -123,10 +123,12 @@ def test_admin_bulk_mark_in_transit_uses_delivery_service(db, admin_user, sample
             admin_id=admin_user.id,
         )
 
+    # An admin move skips the free-full-bottle count (spec A9); the trip requirement stays.
     service_cls.return_value.begin_delivery_in_transit.assert_called_once_with(
         delivery.id,
         actor_user_id=admin_user.id,
         notes='Bulk dispatch',
+        enforce_bottle_capacity=False,
     )
     assert result['success_count'] == 1
     assert result['failed_count'] == 0

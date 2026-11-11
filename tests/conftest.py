@@ -47,6 +47,43 @@ os.environ['STAFF_BOT_WEBHOOK_URL'] = 'http://staff-bot-must-be-mocked.invalid'
 os.environ['BOT_WEBHOOK_URL'] = 'http://telegram-bot-must-be-mocked.invalid'
 os.environ['BUSINESS_APP_URL'] = 'http://api-must-be-mocked.invalid'
 
+# Tests never report to the real Sentry and never post to the real Slack alerts channel (owner rule 2026-11-10).
+# The docker test runners pass the real `.env`, whose SENTRY_DSN is the production project, and both bots call
+# `sentry_sdk.init` at IMPORT time whenever that variable is set (staff_bot/bot.py, telegram_bot/bot.py): every
+# run that imported a bot sent its errors and performance traces to production ("Sentry is attempting to send 2
+# pending events"). The runners now blank both with `-e` (the outer layer); a pytest started any other way still
+# gets these two. Layer 1: blank both destinations before any module can read them. Blank, not deleted, so a
+# dotenv-style loader that never overrides an existing key cannot bring the real value back.
+os.environ['SENTRY_DSN'] = ''
+os.environ['SLACK_WEBHOOK_URL'] = ''
+
+
+def _without_sentry_dsn(get_options):
+    """Wrap sentry_sdk's client-option builder so the client it configures has no DSN."""
+
+    def get_options_without_dsn(*args, **kwargs):
+        options = get_options(*args, **kwargs)
+        options['dsn'] = None
+        return options
+
+    return get_options_without_dsn
+
+
+# Layer 2: no Sentry client this process builds can send, whatever DSN it is handed. Every client, whether made
+# by `sentry_sdk.init` or by `sentry_sdk.Client(...)` directly, takes its options from
+# `sentry_sdk.client.get_options` (sentry-sdk 2.x). With no DSN, the client builds no transport, so nothing leaves
+# the process: not a DSN passed explicitly, positionally, or read back from an environment a test monkeypatched.
+# A test that patches `sentry_sdk.init` itself replaces the whole call, which is equally inert. If an upgrade
+# renames the seam, fail here instead of letting the guard lapse in silence.
+import sentry_sdk.client as _sentry_client  # noqa: E402
+
+if not callable(getattr(_sentry_client, 'get_options', None)):
+    raise RuntimeError(
+        "tests/conftest.py: sentry_sdk.client.get_options is gone (sentry-sdk upgrade?); "
+        "move the no-DSN guard to the new seam so tests still cannot report to Sentry"
+    )
+_sentry_client.get_options = _without_sentry_dsn(_sentry_client.get_options)
+
 
 def _force_nonzero_redis_db(url: str) -> str:
     """Rewrite a redis URL so it can never point at DB 0 (the live broker).

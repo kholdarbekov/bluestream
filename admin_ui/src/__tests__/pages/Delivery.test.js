@@ -133,10 +133,12 @@ const statusOption = (label) => document.querySelector(
 // The return's reason is the Orders page's AdminReasonField, under this page's
 // `ui.delivery.return_reason_*` copy (the same words as the Orders field's).
 const RETURN_REASON_LABEL = 'Reason (internal, not shown to the customer)';
-// The refusals of a return the page explains itself, named on every save so api.js does not
-// toast them as well: one refusal, one message. The interceptor side is pinned in
-// services/api.test.js.
-const REASON_REFUSALS = { handledErrorCodes: ['ADMIN_REASON_REQUIRED', 'ADMIN_REASON_TOO_LONG'] };
+// The refusals the page explains itself (a return's reason, and a driver with no bottle trip),
+// named on every save so api.js does not toast them as well: one refusal, one message. The
+// interceptor side is pinned in services/api.test.js.
+const EXPLAINED_REFUSALS = {
+  handledErrorCodes: ['ADMIN_REASON_REQUIRED', 'ADMIN_REASON_TOO_LONG', 'BOTTLE_SESSION_REQUIRED'],
+};
 
 // Lets every pending promise settle, so a check that nothing was sent proves it was not sent.
 const flush = () => act(() => new Promise((resolve) => { setTimeout(resolve, 0); }));
@@ -242,7 +244,7 @@ describe('Delivery page — actions follow what the backend publishes', () => {
       status: 'returned',
       notes: 'Gate code 42',
       reason: 'Customer moved away',
-    }, REASON_REFUSALS));
+    }, EXPLAINED_REFUSALS));
   });
 
   it('a row with no status move still edits its notes, and saves them with its status unchanged', async () => {
@@ -268,7 +270,7 @@ describe('Delivery page — actions follow what the backend publishes', () => {
     await waitFor(() => expect(adminService.updateDelivery).toHaveBeenCalledWith(2, {
       status: 'failed',
       notes: 'Customer asked to call first',
-    }, REASON_REFUSALS));
+    }, EXPLAINED_REFUSALS));
   });
 
   it('the detail modal offers a held delivery its notes edit but no status move and no Assign', async () => {
@@ -349,7 +351,7 @@ describe('Delivery page — a move to Returned is confirmed and names its reason
       status: 'returned',
       notes: 'Ring twice',
       reason: 'Refused at the door',
-    }, REASON_REFUSALS));
+    }, EXPLAINED_REFUSALS));
   });
 
   it('a reason typed for one row, then cancelled, never reaches the next row', async () => {
@@ -380,7 +382,7 @@ describe('Delivery page — a move to Returned is confirmed and names its reason
     await waitFor(() => expect(adminService.updateDelivery).toHaveBeenCalledWith(6, {
       status: 'returned',
       notes: 'Collected at the depot',
-    }, REASON_REFUSALS));
+    }, EXPLAINED_REFUSALS));
     expect(document.querySelector('.ant-modal-confirm')).toBeNull();
   });
 
@@ -404,7 +406,7 @@ describe('Delivery page — a move to Returned is confirmed and names its reason
     await waitFor(() => expect(adminService.updateDelivery).toHaveBeenCalledWith(5, {
       status: 'returned',
       notes: 'Ring twice',
-    }, REASON_REFUSALS));
+    }, EXPLAINED_REFUSALS));
     expect(document.querySelector('.ant-modal-confirm')).toBeNull();
   });
 
@@ -426,8 +428,47 @@ describe('Delivery page — a move to Returned is confirmed and names its reason
 
     await waitFor(() => expect(message.error).toHaveBeenCalled());
     // The request named the code, so api.js stays silent: this is the only message.
-    expect(adminService.updateDelivery).toHaveBeenCalledWith(5, expect.any(Object), REASON_REFUSALS);
+    expect(adminService.updateDelivery).toHaveBeenCalledWith(5, expect.any(Object), EXPLAINED_REFUSALS);
     expect(message.error.mock.calls).toEqual([[copy]]);
+    expect(message.success).not.toHaveBeenCalled();
+  });
+
+  it('tells the admin, in their language, that the driver has no bottle trip (A9)', async () => {
+    // An admin move skips the bottle count but still needs the driver on a trip. Before, the page
+    // showed the backend's English driver sentence (and api.js toasted it a second time).
+    const ASSIGNED = row({
+      id: 7, delivery_id: 'DLV-000007', status: 'assigned', driver_id: 7, driver_name: 'Rel Driver',
+      notes: 'Gate 3', allowed_status_transitions: ['picked_up', 'returned'], can_assign: true,
+    });
+    adminService.getDeliveries.mockResolvedValue({
+      data: { items: [HELD, ASSIGNED] },
+      meta: { total: 2, summary: {} },
+    });
+    adminService.updateDelivery.mockRejectedValue(Object.assign(new Error('Request failed with status code 400'), {
+      response: {
+        status: 400,
+        data: {
+          success: false,
+          message: 'Validation failed',
+          errors: ['Order 100 has no bottle-session binding and driver 7 has no open bottle session; '
+            + 'open a session to continue delivering this order.'],
+          data: { error_code: 'BOTTLE_SESSION_REQUIRED' },
+        },
+      },
+    }));
+    await renderPage();
+
+    await pickStatusOn('DLV-000007', 'Picked up');
+    fireEvent.click(screen.getByRole('button', { name: 'ui.delivery.update_delivery_button' }));
+
+    await waitFor(() => expect(message.error).toHaveBeenCalled());
+    expect(adminService.updateDelivery).toHaveBeenCalledWith(7, {
+      status: 'picked_up',
+      notes: 'Gate 3',
+    }, EXPLAINED_REFUSALS);
+    expect(message.error.mock.calls).toEqual([[
+      'This driver has no open bottle session. Ask them to open one or join a colleague, then try again.',
+    ]]);
     expect(message.success).not.toHaveBeenCalled();
   });
 });

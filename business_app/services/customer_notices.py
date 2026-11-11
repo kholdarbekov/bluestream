@@ -23,6 +23,7 @@ customer_notice_builders.py::CONTRACT_KEYS and tests/telegram_bot/test_webhook_c
     subscription_schedule_changed subscription_id, subscription_name, changes, old_window, new_window, old_weekday,
                                   new_weekday, added_weekdays, removed_weekdays, next_delivery_date,
                                   kept_order_note, time_kind
+    prepayment_returned           payout_id, amount, balance (money floats; the balance is read when sent)
 `subscription_id` is None for an ordinary order. `actions` is `customer_actions(order)`, the backend's published
 answers (pay, cancel, confirm): the bot draws Pay from `actions["pay"]` and the email links the website page, and
 neither re-derives the rule.
@@ -72,6 +73,7 @@ SUBSCRIPTION_DELIVERY_SKIPPED = NotificationType.SUBSCRIPTION_DELIVERY_SKIPPED.v
 SUBSCRIPTION_PAID_ORDER_KEPT = NotificationType.SUBSCRIPTION_PAID_ORDER_KEPT.value
 ORDER_PAYMENT_EXPIRED = NotificationType.ORDER_PAYMENT_EXPIRED.value
 SUBSCRIPTION_SCHEDULE_CHANGED = NotificationType.SUBSCRIPTION_SCHEDULE_CHANGED.value
+PREPAYMENT_RETURNED = NotificationType.PREPAYMENT_RETURNED.value
 # The facts a schedule change carries, as `SubscriptionService.reconcile_with_slots` records them. The next delivery
 # and its kept-order note are read when the notice is sent (`send_schedule_changed`).
 _SCHEDULE_CHANGED_FACTS = (
@@ -93,6 +95,7 @@ NOTICE_KINDS = frozenset(
         SUBSCRIPTION_PAID_ORDER_KEPT,
         ORDER_PAYMENT_EXPIRED,
         SUBSCRIPTION_SCHEDULE_CHANGED,
+        PREPAYMENT_RETURNED,
     }
 )
 
@@ -192,6 +195,31 @@ def send_payment_expired(order_id: int) -> str:
             **_order_facts(order, _language(order.user)),
         },
         notice_id=f"order-payment-expired:{order.id}",
+    )
+
+
+def send_prepayment_returned(payout_id: int) -> str:
+    """An admin returned part of the customer's prepaid balance (spec 2026-11-10 P8). It goes to the payout's
+    customer, the account the admin acted on. The balance is read now, from the one source
+    (`CashCollectionService.get_customer_prepaid_balance`), so it is right even if the credit moved since the
+    commit. A payout undone before this ran is not announced."""
+    from business_app.models.payment import CustomerCreditPayout
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    payout = db.session.get(CustomerCreditPayout, payout_id)
+    if payout is None:
+        return "skipped:payout_missing"
+    if not payout.is_live:
+        return "skipped:payout_undone"
+    return _send(
+        payout.customer,
+        PREPAYMENT_RETURNED,
+        {
+            "payout_id": payout.id,
+            "amount": float(payout.amount),
+            "balance": float(CashCollectionService().get_customer_prepaid_balance(payout.customer_id)),
+        },
+        notice_id=f"prepayment_returned:{payout_id}",
     )
 
 
@@ -295,6 +323,10 @@ def email_template_data(kind: str, facts: Dict[str, Any], language: str) -> Dict
     # Nothing due (a prepaid balance covers it) and no prepaid credit both print as absent.
     for key in ("total", "amount_due", "prepaid_applied"):
         data[key] = NotificationService._format_money(facts[key]) if facts.get(key) else None
+    # A balance of 0 is a fact, not an absence: both print.
+    for key in ("amount", "balance"):
+        if key in facts:
+            data[key] = NotificationService._format_money(facts[key])
     order_id, subscription_id = facts.get("order_id"), facts.get("subscription_id")
     pay_allowed = (facts.get("actions") or {}).get("pay", {}).get("allowed")
     data["order_url"] = tracking_url(order_id) if order_id else None

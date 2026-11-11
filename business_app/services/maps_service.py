@@ -8,6 +8,7 @@ import requests
 from typing import Dict, Any, List, Optional, Tuple
 from flask import current_app
 
+from business_app.utils.address_format import shorten_geocoded_address
 from business_app.utils.distance_matrix import _OSRM_DEMO_BASE_URL
 from business_app.utils.distance_matrix import get_cached_matrix_source as _get_cached_matrix_source
 from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
@@ -128,6 +129,14 @@ class MapsService:
             return f"{_OSRM_DEMO_BASE_URL}/route/v1/driving"
         return None
 
+    @staticmethod
+    def _with_short_address(result: Dict[str, Any]) -> Dict[str, Any]:
+        """Shorten `formatted_address` once, for every provider. `address_components` stays raw:
+        district extraction reads it."""
+        if isinstance(result, dict) and result.get("formatted_address"):
+            result["formatted_address"] = shorten_geocoded_address(result["formatted_address"])
+        return result
+
     def geocode_address(self, address: str, city: str = "Tashkent") -> Dict[str, Any]:
         """
         Convert address to coordinates
@@ -143,11 +152,12 @@ class MapsService:
 
         try:
             if self.provider == "google":
-                return self._google_geocode(full_address)
+                result = self._google_geocode(full_address)
             elif self.provider == "yandex":
-                return self._yandex_geocode(full_address)
+                result = self._yandex_geocode(full_address)
             else:  # OpenStreetMap
-                return self._osm_geocode(full_address)
+                result = self._osm_geocode(full_address)
+            return self._with_short_address(result)
         except NotFoundError:
             # Expected "no match for this address" — let it propagate as a 404,
             # don't re-wrap it into a 503 ExternalServiceError.
@@ -168,11 +178,12 @@ class MapsService:
         """
         try:
             if self.provider == "google":
-                return self._google_reverse_geocode(latitude, longitude)
+                result = self._google_reverse_geocode(latitude, longitude)
             elif self.provider == "yandex":
-                return self._yandex_reverse_geocode(latitude, longitude)
+                result = self._yandex_reverse_geocode(latitude, longitude)
             else:  # OpenStreetMap
-                return self._osm_reverse_geocode(latitude, longitude)
+                result = self._osm_reverse_geocode(latitude, longitude)
+            return self._with_short_address(result)
         except Exception as e:
             raise ExternalServiceError(f"Reverse geocoding failed: {e}")
 

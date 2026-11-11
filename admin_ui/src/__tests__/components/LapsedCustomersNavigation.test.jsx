@@ -32,7 +32,8 @@ vi.mock('../../pages/LapsedCustomers', () => ({ default: () => <div>lapsed-custo
 vi.mock('../../pages/Dashboard', () => ({ default: () => <div>dashboard-page</div> }));
 vi.mock('../../services/adminService', () => ({
   __esModule: true,
-  default: { getReorderReminderSummary: vi.fn() },
+  // The Users item's shared-place badge also reads adminService (every flag is granted here).
+  default: { getReorderReminderSummary: vi.fn(), listSharedPlaceCases: vi.fn().mockResolvedValue({ open_count: 0 }) },
 }));
 vi.mock('../../services/salesService', () => ({
   __esModule: true,

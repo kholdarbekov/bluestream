@@ -263,7 +263,7 @@ def test_address_search_finds_other_customers_and_excludes_grouped(client, db, a
     found = {a["address_id"] for a in resp.get_json()["data"]["addresses"]}
     assert {a1.id, a2.id}.issubset(found)
     row = next(a for a in resp.get_json()["data"]["addresses"] if a["address_id"] == a1.id)
-    assert set(row) == {"address_id", "title", "full_address", "address_group_id", "owner"}
+    assert set(row) == {"address_id", "title", "full_address", "address_group_id", "address_group_label", "owner"}
     assert set(row["owner"]) == {"id", "first_name", "last_name", "phone"}
     assert row["owner"]["id"] == u1.id
 
@@ -637,7 +637,7 @@ def test_rename_updates_the_label_and_records_it_in_history(client, db, admin_au
     gid, _ = _group(client, admin_auth_headers, "1", label="office")
     r = _rename(client, admin_auth_headers, gid, {"label": "  HQ  ", "reason": "new sign"})
     assert r.status_code == 200, r.get_json()
-    assert r.get_json()["data"] == {"place_group_id": gid, "label": "HQ"}
+    assert r.get_json()["data"] == {"place_group_id": gid, "label": "HQ", "notes": None}
     assert r.get_json()["message"] == "Place group renamed"
     data = _events(client, admin_auth_headers, gid)
     assert data["label"] == "HQ"

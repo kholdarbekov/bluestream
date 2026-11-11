@@ -43,7 +43,7 @@ import salesService from '../../services/salesService';
 import useResponsive from '../../hooks/useResponsive';
 import LanguageSwitcher from '../common/LanguageSwitcher';
 import { useTranslation } from 'react-i18next';
-import { LAPSED_CUSTOMERS_SUMMARY_KEY } from '../../utils/constants';
+import { LAPSED_CUSTOMERS_SUMMARY_KEY, SHARED_PLACE_OPEN_COUNT_KEY } from '../../utils/constants';
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -92,6 +92,17 @@ const AdminLayout = ({ children }) => {
     refetchInterval: 60_000,
   });
   const lapsedFollowUps = lapsedSummary?.counts?.follow_up || 0;
+  // Shared-place spec §4.5: the Users item counts the OPEN driver reports (awaiting the driver or an
+  // admin), admins only. The tab's writes invalidate the `sharedPlaceCases` prefix this key sits under.
+  const canReviewSharedPlaces = hasPermission('can_review_shared_places');
+  const { data: sharedPlaceOpen } = useQuery({
+    queryKey: SHARED_PLACE_OPEN_COUNT_KEY,
+    queryFn: () => adminService.listSharedPlaceCases({ status: 'open', perPage: 1 }),
+    enabled: canReviewSharedPlaces,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const openSharedPlaceCases = sharedPlaceOpen?.open_count || 0;
 
   // Initialize real-time updates
   const { isConnected, connectionType } = useRealTimeWithFallback({
@@ -104,6 +115,15 @@ const AdminLayout = ({ children }) => {
     onError: (error) => console.error('Real-time updates error:', error)
   });
 
+  const openDriverReports = useCallback((event) => {
+    // Not the item's own click: that one navigates to the plain /users.
+    event.stopPropagation();
+    navigate('/users?tab=driver-reports');
+    if (responsive.shouldUseDrawerNavigation) {
+      setMobileDrawerVisible(false);
+    }
+  }, [navigate, responsive.shouldUseDrawerNavigation]);
+
   // Menu configuration
   const menuItems = [
     {
@@ -114,7 +134,18 @@ const AdminLayout = ({ children }) => {
     {
       key: '/users',
       icon: <UserOutlined />,
-      label: t('ui.nav.users')
+      // The badge opens the Driver reports tab itself; the item (key /users) still opens the List.
+      label: canReviewSharedPlaces ? (
+        <Space size={6}>
+          {t('ui.nav.users')}
+          <Badge
+            count={openSharedPlaceCases}
+            size="small"
+            style={{ cursor: 'pointer' }}
+            onClick={openDriverReports}
+          />
+        </Space>
+      ) : t('ui.nav.users')
     },
     // Top level, next to Users: the layout has no Customers group (spec §9.1).
     ...(canManageLapsedCustomers ? [{

@@ -2835,16 +2835,24 @@ def test_every_cash_edit_warning_code_has_ui_copy_and_vice_versa(place_seeds):
     backend_codes = set(
         re.findall(r'warnings\.append\(\s*\n?\s*(?:f?["\'])([a-z_]+)[ :\-]', service_src)
     )
+    blocking_codes = set(
+        re.findall(r'blocking\.append\(\s*\n?\s*(?:f?["\'])([a-z_]+)[ :\-"\']', service_src)
+    )
     display_src = (REPO_ROOT / "admin_ui" / "src" / "utils" / "cashScopeDisplay.js").read_text(
         encoding="utf-8"
     )
-    ui_codes = set(re.findall(r"\['([a-z_]+)',\s*\[", display_src))
+    # Only the collected-cash map: the same file also holds the prepayment-return copy maps.
+    warning_map = re.search(r"const WARNING_COPY = new Map\(\[(.*?)\n\]\);", display_src, re.S)
+    assert warning_map, "cashScopeDisplay.js no longer defines WARNING_COPY"
+    ui_codes = set(re.findall(r"\['([a-z_]+)',\s*\[", warning_map.group(1)))
 
     assert len(backend_codes) == 6, backend_codes
-    assert backend_codes == ui_codes, (
-        f"backend-only: {sorted(backend_codes - ui_codes)}; "
-        f"ui-only: {sorted(ui_codes - backend_codes)}"
-    )
+    assert backend_codes <= ui_codes, f"warnings without UI copy: {sorted(backend_codes - ui_codes)}"
+    # The map may also translate a blocking reason Orders.js renders through describeCashEditWarning
+    # (the prepayment-return guard), but every extra entry must be a code the service really emits.
+    extra = ui_codes - backend_codes
+    assert extra == {"event_funds_prepayment_return"}, extra
+    assert extra <= blocking_codes, f"UI copy for codes the service never emits: {sorted(extra - blocking_codes)}"
     for key in sorted(k for k in _ui_place_keys() if k.startswith("ui.orders.cash_warning_")):
         for lang in LANGUAGES:
             assert _row(key, lang).strip()
@@ -2873,8 +2881,13 @@ def test_both_backend_warning_separators_survive_the_ui_code_extraction(place_se
     display_src = (REPO_ROOT / "admin_ui" / "src" / "utils" / "cashScopeDisplay.js").read_text(
         encoding="utf-8"
     )
-    splitter = re.search(r"String\(warning\)\.split\((/[^/]+/)[^)]*\)", display_src)
-    assert splitter, "describeCashEditWarning no longer splits the warning string"
+    # describeCashEditWarning delegates to the shared describeCodedReason, which does the split.
+    assert re.search(
+        r"function describeCashEditWarning\(warning, t\) \{\s*return describeCodedReason\(warning, WARNING_COPY, t\);",
+        display_src,
+    ), "describeCashEditWarning no longer delegates to describeCodedReason with WARNING_COPY"
+    splitter = re.search(r"String\(reason\)\.split\((/[^/]+/)[^)]*\)", display_src)
+    assert splitter, "describeCodedReason no longer splits the reason string"
     separators = splitter.group(1)
     assert ":" in separators and r"\s" in separators, separators
     # And the codes those separators have to yield are the ones the UI maps.

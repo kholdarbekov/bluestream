@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from flask import current_app
 from sqlalchemy import func, or_
 from sqlalchemy.orm import aliased, joinedload, selectinload
 
@@ -185,6 +186,36 @@ class AdminDeliveryService:
         return AdminDeliveryService.serialize_delivery(delivery)
 
     @staticmethod
+    def assign_delivery(delivery_id: int, driver_user_id: int, *, actor_id: int) -> Delivery:
+        """Hand a pool delivery to a driver (the Deliveries page's Assign).
+
+        An admin assignment (spec A5): attributed to the admin, never judged on the driver's
+        bottles and without a max-concurrent check. Thin wrapper over the canonical
+        ``DeliveryAssignmentService.assign_driver`` SSOT with ``require_session=False``, so
+        a held or failed row is still refused there. The customer-update task is enqueued
+        after ``assign_driver`` has committed."""
+        from business_app.tasks.notification_tasks import send_delivery_update_task
+        from shared.enums import AssignmentSource
+
+        result = DeliveryAssignmentService.assign_driver(
+            delivery_id,
+            driver_user_id=driver_user_id,
+            actor_id=actor_id,
+            source=AssignmentSource.ADMIN_ASSIGN,
+            require_session=False,
+        )
+        if result.changed and result.history_id is not None:
+            try:
+                send_delivery_update_task.delay(result.history_id)
+            except Exception as notify_exc:
+                current_app.logger.warning(
+                    "Failed to enqueue assigned-delivery notification for delivery %s: %s",
+                    delivery_id,
+                    notify_exc,
+                )
+        return result.delivery
+
+    @staticmethod
     def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
         """Reassign a delivery to a different delivery person (admin override).
 
@@ -363,11 +394,14 @@ class AdminDeliveryService:
                 metadata["fail_reason"] = fail_reason
             if cash_collected is not None:
                 metadata["cash_collected"] = cash_collected
+            # A9: an admin move skips the free-full-bottle count, but the driver
+            # must still be on a bottle trip.
             StaffService.update_delivery_status(
                 delivery_id=delivery.id,
                 new_status=new_status.value,
                 staff_user_id=actor_id,
                 metadata=metadata,
+                enforce_bottle_capacity=False,
             )
             return
 

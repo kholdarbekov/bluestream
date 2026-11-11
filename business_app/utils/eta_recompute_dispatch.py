@@ -98,6 +98,8 @@ PLAN_INPUTS: Dict[type, Watched] = {
             DriverBottleSession.bottles_collected_from_customers,
             DriverBottleSession.bottles_transferred_out,
             DriverBottleSession.bottles_transferred_in,
+            DriverBottleSession.empties_transferred_out,
+            DriverBottleSession.empties_transferred_in,
             DriverBottleSession.bottles_returned_to_warehouse,
         ),
         insert=True,

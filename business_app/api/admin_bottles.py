@@ -18,7 +18,10 @@ from business_app.serializers.bottle_serializers import (
     serialize_bottle_session,
     serialize_bottle_transfer,
 )
-from business_app.services.bottle_tracking_service import BottleTrackingService
+from business_app.services.bottle_tracking_service import (
+    TRANSFER_DISPUTE_RESOLVE_PERMISSIONS,
+    BottleTrackingService,
+)
 from business_app.utils.api_responses import success_response, validation_error_response
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.decorators import validate_admin_action
@@ -417,7 +420,7 @@ def list_bottle_transfers():
 @admin_bottles_bp.route("/bottles/transfers/<int:transfer_id>/resolve", methods=["POST"])
 @handle_api_exception
 @jwt_required()
-@validate_admin_action(["manage_orders"])
+@validate_admin_action(list(TRANSFER_DISPUTE_RESOLVE_PERMISSIONS))
 def resolve_bottle_transfer_dispute(transfer_id):
     """Admin resolves a disputed driver-to-driver bottle transfer."""
     data = _validated_payload(AdminResolveTransferRequest)
@@ -429,7 +432,8 @@ def resolve_bottle_transfer_dispute(transfer_id):
     transfer = service.admin_resolve_transfer_dispute(
         transfer_id=transfer_id,
         actor_user_id=current_user_id,
-        resolved_quantity=data["resolved_quantity"],
+        resolved_full=data["resolved_full"],
+        resolved_empty=data["resolved_empty"],
         resolution_notes=data["resolution_notes"],
     )
     return success_response(

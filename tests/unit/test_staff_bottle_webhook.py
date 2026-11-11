@@ -26,15 +26,24 @@ _spec.loader.exec_module(_SEED)
 
 LANGUAGES = ("en", "uz", "ru")
 KEYS = (
-    "staff.bottles.notify.transfer_received", "staff.bottles.notify.join_requested",
+    "staff.bottles.notify.transfer_received_split", "staff.bottles.notify.join_requested",
     "staff.bottles.notify.join_declined", "staff.bottles.join_request_approve",
     "staff.bottles.join_request_decline", "staff.bottles.joined_session",
-    "staff.bottles.joined_session_info", "staff.delivery.transfer_confirm_button",
+    "staff.bottles.joined_session_info", "staff.delivery.transfer_confirm_split_button",
     "staff.delivery.transfer_custom_count_button", "staff.common.unknown_driver", "staff.back",
+    "staff.bottles.notify.transfer_confirmed", "staff.bottles.notify.trip_auto_closed",
+    "staff.bottles.notify.transfer_disputed", "staff.bottles.notify.transfer_disputed_no_admin",
 )
 
 PAYLOADS = {
-    "transfer_received": {"id": 31, "declared_quantity": 4, "sender_name": "Ali <&> Co"},
+    "transfer_received": {"id": 31, "declared_quantity": 4, "declared_empty_quantity": 2, "sender_name": "Ali <&> Co"},
+    "transfer_confirmed": {
+        "id": 31, "receiver_name": "Ali <&> Co", "confirmed_full": 5, "confirmed_empty": 2, "auto_closed": True,
+    },
+    "transfer_disputed": {
+        "id": 31, "receiver_name": "Ali <&> Co", "declared_full": 5, "declared_empty": 2,
+        "confirmed_full": 4, "confirmed_empty": 1, "admins_alerted": True,
+    },
     "join_requested": {"session_id": 12, "requester_id": 77, "requester_name": "Ali <&> Co"},
     "join_approved": {"session_id": 12, "owner_name": "Ali <&> Co"},
     "join_declined": {"session_id": 12, "owner_name": "Ali <&> Co"},
@@ -108,8 +117,10 @@ def test_every_event_renders_escaped_names_and_no_unfilled_placeholder(server, r
 
 def test_a_transfer_push_carries_the_inbox_buttons(server, real_copy):
     _post(server, "transfer_received")
-    assert _callbacks(_sent(server)["reply_markup"])[:2] == ["staff_transfer_confirm_31_4", "staff_transfer_custom_31"]
-    assert "4" in _sent(server)["text"]
+    assert _callbacks(_sent(server)["reply_markup"])[:2] == ["staff_transfer_confirm_31", "staff_transfer_custom_31"]
+    assert _sent(server)["text"] == i18n.translations["en"]["staff.bottles.notify.transfer_received_split"].format(
+        sender="Ali &lt;&amp;&gt; Co", full=4, empty=2
+    )
 
 
 def test_a_join_request_push_carries_approve_and_decline_for_that_session_and_driver(server, real_copy):
@@ -117,7 +128,7 @@ def test_a_join_request_push_carries_approve_and_decline_for_that_session_and_dr
     assert _callbacks(_sent(server)["reply_markup"]) == ["bottles_jr_ok_12_77", "bottles_jr_no_12_77"]
 
 
-@pytest.mark.parametrize("event", ("join_approved", "join_declined"))
+@pytest.mark.parametrize("event", ("join_approved", "join_declined", "transfer_confirmed", "transfer_disputed"))
 def test_an_answer_needs_no_buttons(server, real_copy, event):
     _post(server, event)
     assert _sent(server)["reply_markup"] is None
@@ -165,3 +176,33 @@ def test_without_redis_the_same_event_id_sends_once(server, real_copy):
     _post_dedup(server, "evt-1")
     _post_dedup(server, "evt-1")
     assert server.bot_app.bot.send_message.await_count == 1
+
+
+def _render_with(server, event, language, **flags):
+    server.bot_app.bot.send_message.reset_mock()
+    _post(server, event, language, payload={**PAYLOADS[event], **flags})
+    return _sent(server)["text"]
+
+
+def _last_sentence(key, language):
+    return i18n.translations[language][key].rsplit(". ", 1)[-1]
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_the_trip_line_follows_the_backends_auto_closed_flag(server, real_copy, language):
+    trip_line = i18n.translations[language]["staff.bottles.notify.trip_auto_closed"]
+
+    assert _render_with(server, "transfer_confirmed", language, auto_closed=True).endswith("\n" + trip_line)
+    assert trip_line not in _render_with(server, "transfer_confirmed", language, auto_closed=False)
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_an_admin_will_check_only_when_the_backend_alerted_one(server, real_copy, language):
+    will_check = _last_sentence("staff.bottles.notify.transfer_disputed", language)
+    tell_one = _last_sentence("staff.bottles.notify.transfer_disputed_no_admin", language)
+
+    alerted = _render_with(server, "transfer_disputed", language, admins_alerted=True)
+    nobody = _render_with(server, "transfer_disputed", language, admins_alerted=False)
+
+    assert alerted.endswith(will_check) and tell_one not in alerted
+    assert nobody.endswith(tell_one) and will_check not in nobody

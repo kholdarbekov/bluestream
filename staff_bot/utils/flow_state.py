@@ -117,6 +117,13 @@ PENDING_FLOW_USER_DATA_KEYS = (
     # between disarms it — an armed flag plus an unrelated later pin would
     # otherwise re-render the route card out of nowhere.
     'pending_optimize_after_location',
+    # Armed by the shared-place question under the Delivered message: the next
+    # text is the driver's note for the admin (`handlers/delivery/shared_place.py`
+    # reads it; the router's LAST flow branch, so a COD amount is never taken as a
+    # note). WRITE-side rule: the Delivered screen and the question's taps stamp it,
+    # so a menu tap must drop it. No `mark_active`: a note holds no money, and route
+    # offers keep arriving while it waits.
+    'pending_shared_place_note',
     'tryout_pickup_task_id',
     'tryout_pickup_products',
     'tryout_pickup_state',
@@ -159,19 +166,23 @@ PENDING_FLOW_USER_DATA_KEYS = (
     # -- Inline-keyboard flows whose entire record is a loose key.  Nothing
     #    cleared these before, so an abandoned flow stayed armed with numbers
     #    measured at the moment it opened:
-    #      * `pending_transfer_available` is the "you cannot transfer more than
-    #        you have" ceiling, stamped from the open session by
-    #        `start_transfer_bottles` and enforced by `receive_transfer_quantity`
-    #        — it must never outlive the truck load it was measured from;
+    #      * `pending_transfer_flow` keeps a bottle transfer alive: stamped by
+    #        `start_transfer_bottles` with the backend's transferable full and
+    #        empties (what the send screen shows; the backend caps the send), and
+    #        checked by every picker and send-screen tap, so a button left in the
+    #        chat is refused once the driver walks away;
     #      * `pending_transfer_receiver_id` names the colleague the bottles go
-    #        to, chosen from a picker that may be hours old;
-    #      * the `pending_confirm_transfer_*` pair is the receiver-side mirror;
+    #        to, chosen from a picker that may be hours old, and
+    #        `pending_transfer_full_qty` the full count typed before the empties;
+    #      * the `pending_confirm_transfer_*` pair is the receiver-side mirror
+    #        (the transfer, and the full count typed before the empties);
     #      * `pending_join_session_id` / `pending_invite_driver_id` are the
     #        co-driver flows' breadcrumbs. --
-    'pending_transfer_available',
+    'pending_transfer_flow',
     'pending_transfer_receiver_id',
+    'pending_transfer_full_qty',
     'pending_confirm_transfer_id',
-    'pending_confirm_transfer_qty',
+    'pending_confirm_transfer_full',
     'pending_join_session_id',
     'pending_invite_driver_id',
     # Stamped by `initiate_status_change`. Its `flow_address_id` is what the three

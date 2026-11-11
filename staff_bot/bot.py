@@ -9,7 +9,7 @@ import sys
 import os
 import re
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 # Initialize Sentry before any other imports
 import sentry_sdk
@@ -69,10 +69,12 @@ from staff_bot.handlers.delivery.bottle_collection import (
     BOTTLE_FINE_AMOUNT_INPUT, BOTTLE_FINE_NOTE_INPUT,
     BOTTLES_LOADED_INPUT, BOTTLES_RETURNED_WH_INPUT,
     BOTTLE_SESSION_LOADED_QTY_INPUT, BOTTLE_SESSION_RETURNED_QTY_INPUT,
-    BOTTLE_TRANSFER_DRIVER_SELECT, BOTTLE_TRANSFER_QTY_INPUT,
-    BOTTLE_TRANSFER_CONFIRM_QTY_INPUT,
+    BOTTLE_TRANSFER_DRIVER_SELECT, BOTTLE_TRANSFER_SEND_CHOICE,
+    BOTTLE_TRANSFER_FULL_QTY_INPUT, BOTTLE_TRANSFER_EMPTY_QTY_INPUT,
+    BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT, BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT,
 )
 from staff_bot.handlers.delivery.bottle_session import BottleSessionMembershipHandler
+from staff_bot.handlers.delivery.shared_place import SharedPlaceHandler
 from staff_bot.handlers.operator.create_user import CreateUserHandler
 from staff_bot.handlers.operator.create_user import ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME
 from staff_bot.handlers.operator.create_user import SELECT_LANGUAGE as CREATE_USER_LANG
@@ -563,6 +565,7 @@ class StaffBot:
         cash_collection_handler = CashCollectionHandler()
         bottle_collection_handler = BottleCollectionHandler()
         bottle_session_membership_handler = BottleSessionMembershipHandler()
+        shared_place_handler = SharedPlaceHandler()
         history_handler = HistoryHandler()
         location_handler = LocationHandler()
         tryout_handler = TryoutHandler()
@@ -672,7 +675,7 @@ class StaffBot:
 
         start_reset = CommandHandler("start", _start_is_a_hard_reset)
 
-        def _flow_timeout(*, offer_menu: bool = True, own_key: Optional[str] = None):
+        def _flow_timeout(*, offer_menu: bool = True, own_keys: Tuple[str, ...] = ()):
             """The `ConversationHandler.TIMEOUT` state for one staff flow.
 
             `conversation_timeout` is not self-announcing: when the timer fires
@@ -700,25 +703,27 @@ class StaffBot:
             Deliberately NOT raising ApplicationHandlerStop: PTB dispatches
             TIMEOUT handlers itself and documents that it has no effect there.
 
-            `own_key` is for the conversations that can be DISPLACED: PTB checks
+            `own_keys` is for the conversations that can be DISPLACED: PTB checks
             an inactive conversation's entry points on every update, so a sales
             agent can arm Nearby or a try-out and then walk into a visit, leaving
-            the loser armed with a timer nobody cancels. Such a timeout clears
-            only the key its own conversation owns -- never the whole flow set,
-            which would take the live flow's draft with it -- and says nothing at
-            all when that key is already gone, because the person it would be
-            talking to left this conversation minutes ago and is standing in
-            another one.
+            the loser armed with a timer nobody cancels. The same holds for a
+            driver's bottle send and his "Different count" on a colleague's
+            transfer. Such a timeout clears only the keys its own conversation
+            owns -- never the whole flow set, which would take the live flow's
+            draft with it -- and says nothing at all when every one of them is
+            already gone, because the person it would be talking to left this
+            conversation minutes ago and is standing in another one.
             """
             async def _announce_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
-                    if own_key is not None and own_key not in (context.user_data or {}):
+                    if own_keys and not any(key in (context.user_data or {}) for key in own_keys):
                         return ConversationHandler.END
                     language = await self._language_handler._get_language(update, context)
-                    if own_key is None:
+                    if not own_keys:
                         await self._clear_all_pending_flows(context, update)
                     else:
-                        context.user_data.pop(own_key, None)
+                        for key in own_keys:
+                            context.user_data.pop(key, None)
                     text = i18n.get('staff.flow_timed_out', language)
                     keyboard = (
                         MenuKeyboards.main_menu(
@@ -760,6 +765,7 @@ class StaffBot:
             'history': history_handler,
             'location': location_handler,
             'tryouts': tryout_handler,
+            'shared_place': shared_place_handler,
         }
         self._operator_handlers = {
             'orders_pool_view': operator_orders_pool_view_handler,
@@ -961,6 +967,10 @@ class StaffBot:
             CallbackQueryHandler(status_update_handler.start_custom_bottle_return, pattern=r"^staff_bottles_custom_\d+$"),
             CallbackQueryHandler(status_update_handler.skip_bottle_return, pattern=r"^staff_bottles_none_\d+$"),
 
+            # The shared-place question under the Delivered message: pick a candidate, none, skip,
+            # or close the note prompt.
+            CallbackQueryHandler(shared_place_handler.on_tap, pattern=r"^staff_sp_\d+_(p[0-2]|none|skip|done)$"),
+
             # Standalone bottle collection
             CallbackQueryHandler(bottle_collection_handler.show_customer_bottle_statement, pattern=r"^staff_bottle_customer_\d+$"),
             CallbackQueryHandler(bottle_collection_handler.select_address, pattern=r"^staff_bottle_addr_\d+_\d+$"),
@@ -976,7 +986,9 @@ class StaffBot:
 
             # Bottle session & transfer (non-conversation callbacks)
             CallbackQueryHandler(bottle_collection_handler.show_pending_transfers, pattern="^staff_bottle_transfers_pending$"),
-            CallbackQueryHandler(bottle_collection_handler.receive_transfer_confirm_callback, pattern=r"^staff_transfer_confirm_\d+_\d+$"),
+            # One-tap "Confirm as declared". `staff_transfer_confirm_<id>` since the full/empties split;
+            # the `_<qty>` suffix is on messages sent before it, still in drivers' chats, and confirms the same way.
+            CallbackQueryHandler(bottle_collection_handler.receive_transfer_confirm_callback, pattern=r"^staff_transfer_confirm_\d+(_\d+)?$"),
 
             # History & Stats
             CallbackQueryHandler(history_handler.show_history, pattern="^staff_delivery_history$"),
@@ -1354,27 +1366,41 @@ class StaffBot:
         bottle_transfer_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(bottle_collection_handler.start_transfer_bottles, pattern="^staff_bottle_transfer_start$"),
-                # A driver button tapped from a picker the driver already walked
-                # away from. Now that a menu tap ENDS this conversation, the
-                # buttons still sitting in the scrollback reach no state -- and a
-                # tap that lands nowhere is the failure this wave is about.
-                # `receive_transfer_driver_select` refuses out loud when
-                # `pending_transfer_available` is gone (i.e. the flow is over)
-                # and re-renders the session menu. Registered as an entry point,
-                # not a second global handler, so the LIVE flow and the stale tap
-                # go to the same function and cannot answer differently.
+                # A driver button, or a send-screen button, tapped from a screen
+                # the driver already walked away from. Now that a menu tap ENDS
+                # this conversation, the buttons still sitting in the scrollback
+                # reach no state -- and a tap that lands nowhere is the failure
+                # this wave is about. Each handler refuses out loud when
+                # `pending_transfer_flow` is gone (i.e. the flow is over) and
+                # re-renders the session menu. Registered as entry points, not
+                # second global handlers, so the LIVE flow and the stale tap go to
+                # the same function and cannot answer differently.
                 CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
+                CallbackQueryHandler(bottle_collection_handler.send_all_bottles, pattern="^staff_transfer_send_all$"),
+                CallbackQueryHandler(bottle_collection_handler.choose_transfer_amounts, pattern="^staff_transfer_choose$"),
             ],
             states={
                 BOTTLE_TRANSFER_DRIVER_SELECT: [
                     menu_escape,
                     CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
                 ],
-                BOTTLE_TRANSFER_QTY_INPUT: [
+                # The send screen: everything on the truck, or two numbers.
+                BOTTLE_TRANSFER_SEND_CHOICE: [
                     menu_escape,
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_quantity)
+                    CallbackQueryHandler(bottle_collection_handler.send_all_bottles, pattern="^staff_transfer_send_all$"),
+                    CallbackQueryHandler(bottle_collection_handler.choose_transfer_amounts, pattern="^staff_transfer_choose$"),
                 ],
-                ConversationHandler.TIMEOUT: _flow_timeout(),
+                BOTTLE_TRANSFER_FULL_QTY_INPUT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_full_quantity)
+                ],
+                BOTTLE_TRANSFER_EMPTY_QTY_INPUT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_empty_quantity)
+                ],
+                # Displaceable by the receiver's "Different count" below (it drops this flow's keys):
+                # the timeout drops only this flow's keys, and is silent once they are gone.
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=bottle_collection_handler.TRANSFER_FLOW_KEYS),
             },
             fallbacks=[
                 CommandHandler("cancel", _cancel_bottle_flow),
@@ -1390,17 +1416,22 @@ class StaffBot:
         )
         self.application.add_handler(bottle_transfer_conv)
 
-        # Receiver enters a custom confirmed quantity for a pending transfer
+        # Receiver enters the counts he received for a pending transfer: full bottles, then empties
         bottle_transfer_confirm_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(bottle_collection_handler.start_transfer_custom_confirm, pattern=r"^staff_transfer_custom_\d+$"),
             ],
             states={
-                BOTTLE_TRANSFER_CONFIRM_QTY_INPUT: [
+                BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT: [
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm)
                 ],
-                ConversationHandler.TIMEOUT: _flow_timeout(),
+                BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm_empties)
+                ],
+                # Displaceable by a send started above (it drops this flow's keys), as the send is by this.
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=bottle_collection_handler.CONFIRM_FLOW_KEYS),
             },
             fallbacks=[
                 CommandHandler("cancel", _cancel_bottle_flow),
@@ -1865,7 +1896,7 @@ class StaffBot:
                     # conversation armed behind it.
                     CallbackQueryHandler(nearby_handler.open_outlet, pattern=r"^staff_sales_outlet_\d+$"),
                 ],
-                ConversationHandler.TIMEOUT: _flow_timeout(own_key=NEARBY_FLOW_KEY),
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=(NEARBY_FLOW_KEY,)),
             },
             fallbacks=[
                 CommandHandler("cancel", nearby_handler.cancel),
@@ -1951,7 +1982,7 @@ class StaffBot:
                 # saved" is simply true here -- a try-out exists only after
                 # Confirm. Scoped to its OWN key, because this conversation can
                 # be displaced by a visit and must not clear that visit's draft.
-                ConversationHandler.TIMEOUT: _flow_timeout(own_key=TRYOUT_FLOW_KEY),
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=(TRYOUT_FLOW_KEY,)),
             },
             fallbacks=[
                 CommandHandler("cancel", sales_tryout_handler.cancel),
@@ -2027,7 +2058,7 @@ class StaffBot:
                 # number is sent. Scoped to its OWN key, like the try-out's,
                 # because a visit, the walk-in, Nearby or a try-out can displace
                 # this screen, and their drafts must survive its timer.
-                ConversationHandler.TIMEOUT: _flow_timeout(own_key=SET_PHONE_FLOW_KEY),
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=(SET_PHONE_FLOW_KEY,)),
             },
             fallbacks=[
                 CommandHandler("cancel", set_phone_handler.cancel),
@@ -2756,6 +2787,15 @@ class StaffBot:
             tryout_handler = self._delivery_handlers.get('tryouts')
             if tryout_handler:
                 await tryout_handler.receive_pickup_quantities(update, context)
+            return
+
+        # The driver's optional note after the shared-place question. LAST of the
+        # flows on purpose: a COD collection started from its button does not clear
+        # the other flows, so a note branch ahead of it would file the cash amount the
+        # driver types next as a note for the admin (spec 2026-11-10 §9).
+        shared_place_handler = self._delivery_handlers.get('shared_place')
+        if context.user_data.get('pending_shared_place_note') and shared_place_handler:
+            await shared_place_handler.receive_note(update, context)
             return
 
         # Not a menu label (handled at the top) and no active flow consumed it →

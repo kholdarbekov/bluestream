@@ -290,6 +290,327 @@ PREPAYMENT_TRANSLATIONS = {
         'ru': '🧾 К оплате при доставке после зачёта: {payable_after} сум',
     },
 
+    # ------------------------------------------------------------------
+    # Admin UI — returning a customer's prepayment (Return prepayment, Undo,
+    # blocking-reason copy). JSX fallbacks equal the 'en' values byte for byte.
+    # ------------------------------------------------------------------
+    'ui.prepayments.return_button': {
+        'en': 'Return prepayment',
+        'uz': "Oldindan to'lovni qaytarish",
+        'ru': 'Вернуть предоплату',
+    },
+    'ui.prepayments.mode_amount': {
+        'en': 'Amount to return',
+        'uz': 'Qaytariladigan summa',
+        'ru': 'Сумма к возврату',
+    },
+    'ui.prepayments.mode_target': {
+        'en': 'Balance after return',
+        'uz': 'Qaytarishdan keyingi qoldiq',
+        'ru': 'Остаток после возврата',
+    },
+    'ui.prepayments.paid_by_office': {
+        'en': 'Office',
+        'uz': 'Ofis',
+        'ru': 'Офис',
+    },
+    'ui.prepayments.paid_by_driver_current': {
+        'en': "Driver, from his current trip's cash",
+        'uz': 'Haydovchi, joriy reysdagi naqd pulidan',
+        'ru': 'Водитель, из наличных текущего рейса',
+    },
+    'ui.prepayments.paid_by_driver_settled': {
+        'en': 'Driver, already settled',
+        'uz': 'Haydovchi, allaqachon hisob-kitob qilingan',
+        'ru': 'Водитель, уже рассчитан',
+    },
+    'ui.prepayments.returned': {
+        'en': 'Returned',
+        'uz': 'Qaytarilgan',
+        'ru': 'Возвращено',
+    },
+    'ui.prepayments.undone': {
+        'en': 'Undone',
+        'uz': 'Bekor qilingan',
+        'ru': 'Отменено',
+    },
+    'ui.prepayments.undo': {
+        'en': 'Undo',
+        'uz': 'Bekor qilish',
+        'ru': 'Отменить',
+    },
+    'ui.prepayments.undo_title': {
+        'en': 'Undo this return',
+        'uz': 'Ushbu qaytarishni bekor qilish',
+        'ru': 'Отменить этот возврат',
+    },
+    'ui.prepayments.undo_success': {
+        'en': 'Return undone',
+        'uz': 'Qaytarish bekor qilindi',
+        'ru': 'Возврат отменён',
+    },
+    'ui.prepayments.lifetime_returned': {
+        'en': 'Lifetime returned',
+        'uz': 'Jami qaytarilgan',
+        'ru': 'Всего возвращено',
+    },
+    'ui.prepayments.returns_table': {
+        'en': 'Returned to the customer',
+        'uz': 'Mijozga qaytarilgan',
+        'ru': 'Возвращено клиенту',
+    },
+    'ui.prepayments.card_click_share': {
+        'en': 'Of this, from card/Click',
+        'uz': 'Shundan karta/Click orqali tushgan',
+        'ru': 'Из них поступило картой/Click',
+    },
+    'ui.prepayments.release_by_cancel': {
+        'en': 'Cancel order {{order_number}} to release it',
+        'uz': "Bo'shatish uchun {{order_number}} buyurtmani bekor qiling",
+        'ru': 'Чтобы освободить, отмените заказ {{order_number}}',
+    },
+    'ui.prepayments.correction_blocked_by_return': {
+        'en': 'A prepayment return drew on this collection. Undo the return first.',
+        'uz': "Oldindan to'lovni qaytarish ushbu yig'imdan foydalangan. Avval qaytarishni bekor qiling.",
+        'ru': 'Возврат предоплаты использовал эту инкассацию. Сначала отмените возврат.',
+    },
+    'ui.prepayments.return_amount': {
+        'en': 'Amount returned',
+        'uz': 'Qaytarilgan summa',
+        'ru': 'Возвращённая сумма',
+    },
+    'ui.prepayments.return_paid_by': {
+        'en': 'Paid by',
+        'uz': "Kim to'lagan",
+        'ru': 'Кто выплатил',
+    },
+    'ui.prepayments.return_driver': {
+        'en': 'Driver',
+        'uz': 'Haydovchi',
+        'ru': 'Водитель',
+    },
+    'ui.prepayments.return_driver_placeholder': {
+        'en': 'Select a driver',
+        'uz': 'Haydovchini tanlang',
+        'ru': 'Выберите водителя',
+    },
+    'ui.prepayments.return_driver_required': {
+        'en': 'Pick the driver',
+        'uz': 'Haydovchini tanlang',
+        'ru': 'Выберите водителя',
+    },
+    'ui.prepayments.return_paid_at': {
+        'en': 'Paid at (optional)',
+        'uz': "To'langan vaqt (ixtiyoriy)",
+        'ru': 'Время выплаты (необязательно)',
+    },
+    'ui.prepayments.return_reason': {
+        'en': 'Reason',
+        'uz': 'Sabab',
+        'ru': 'Причина',
+    },
+    'ui.prepayments.return_reason_required': {
+        'en': 'Reason (min 5 chars) is required',
+        'uz': 'Sabab kiritilishi shart (kamida 5 belgi)',
+        'ru': 'Укажите причину (минимум 5 символов)',
+    },
+    'ui.prepayments.return_preview': {
+        'en': 'Preview',
+        'uz': "Ko'rib chiqish",
+        'ru': 'Предпросмотр',
+    },
+    'ui.prepayments.return_free_balance': {
+        'en': 'Free balance',
+        'uz': "Bo'sh qoldiq",
+        'ru': 'Свободный остаток',
+    },
+    'ui.prepayments.return_pending_orders': {
+        'en': 'Pending orders',
+        'uz': 'Kutilayotgan buyurtmalar',
+        'ru': 'Ожидающие заказы',
+    },
+    'ui.prepayments.return_live_subscriptions': {
+        'en': 'Live subscriptions may rely on this credit',
+        'uz': 'Faol obunalar shu kreditga tayanishi mumkin',
+        'ru': 'Активные подписки могут опираться на этот кредит',
+    },
+    'ui.prepayments.return_place_debts': {
+        'en': "Open debts at this customer's places",
+        'uz': 'Mijozning joylaridagi ochiq qarzlar',
+        'ru': 'Открытые долги по местам клиента',
+    },
+    'ui.prepayments.return_session_effect': {
+        'en': "The driver's trip cash",
+        'uz': 'Haydovchining reysdagi naqd puli',
+        'ru': 'Наличные водителя на рейсе',
+    },
+    'ui.prepayments.return_contract_effect': {
+        'en': 'Contract accounts',
+        'uz': 'Shartnoma hisoblari',
+        'ru': 'Счета договоров',
+    },
+    'ui.prepayments.order_status_pending': {
+        'en': 'Pending',
+        'uz': 'Kutilmoqda',
+        'ru': 'Ожидает',
+    },
+    'ui.prepayments.order_status_confirmed': {
+        'en': 'Confirmed',
+        'uz': 'Tasdiqlangan',
+        'ru': 'Подтверждён',
+    },
+    'ui.prepayments.order_status_preparing': {
+        'en': 'Preparing',
+        'uz': 'Tayyorlanmoqda',
+        'ru': 'Готовится',
+    },
+    'ui.prepayments.order_status_out_for_delivery': {
+        'en': 'Out for delivery',
+        'uz': 'Yetkazib berilmoqda',
+        'ru': 'В пути',
+    },
+    'ui.prepayments.sub_status_active': {
+        'en': 'Active',
+        'uz': 'Faol',
+        'ru': 'Активна',
+    },
+    'ui.prepayments.sub_status_paused': {
+        'en': 'Paused',
+        'uz': "To'xtatilgan",
+        'ru': 'Приостановлена',
+    },
+    'ui.prepayments.return_amount_locked_hint': {
+        'en': 'There is no free prepayment right now. Preview shows what is held.',
+        'uz': "Hozir bo'sh oldindan to'lov yo'q. Ko'rib chiqish nimalar band ekanini ko'rsatadi.",
+        'ru': 'Свободной предоплаты сейчас нет. Предпросмотр покажет, что удержано.',
+    },
+    'ui.prepayments.return_success': {
+        'en': 'Prepayment returned',
+        'uz': "Oldindan to'lov qaytarildi",
+        'ru': 'Предоплата возвращена',
+    },
+    'ui.prepayments.block_no_free_balance': {
+        'en': 'There is no free prepayment to return. Credit held on pending orders is released by cancelling them.',
+        'uz': "Qaytariladigan bo'sh oldindan to'lov yo'q. Kutilayotgan buyurtmalarda band qilingan kredit ularni bekor qilish orqali bo'shatiladi.",
+        'ru': 'Свободной предоплаты для возврата нет. Кредит, удерживаемый ожидающими заказами, освобождается их отменой.',
+    },
+    'ui.prepayments.block_amount_exceeds_free_balance': {
+        'en': 'That is more than the free prepayment balance.',
+        'uz': "Bu bo'sh oldindan to'lov qoldig'idan ko'p.",
+        'ru': 'Это больше свободного остатка предоплаты.',
+    },
+    'ui.prepayments.block_target_not_below_free_balance': {
+        'en': 'The balance after the return must be lower than the free balance now.',
+        'uz': "Qaytarishdan keyingi qoldiq hozirgi bo'sh qoldiqdan past bo'lishi kerak.",
+        'ru': 'Остаток после возврата должен быть ниже текущего свободного остатка.',
+    },
+    'ui.prepayments.block_driver_not_eligible': {
+        'en': 'That person is not an active driver.',
+        'uz': 'Bu shaxs faol haydovchi emas.',
+        'ru': 'Этот человек не является активным водителем.',
+    },
+    'ui.prepayments.block_no_active_session': {
+        'en': 'This driver has no current trip to take the cash from.',
+        'uz': "Bu haydovchida naqd pul olinadigan joriy reys yo'q.",
+        'ru': 'У этого водителя нет текущего рейса, из наличных которого можно выплатить.',
+    },
+    'ui.prepayments.block_amount_exceeds_driver_cash': {
+        'en': "The driver's current trip does not hold that much cash.",
+        'uz': "Haydovchining joriy reysida bunchalik naqd pul yo'q.",
+        'ru': 'В текущем рейсе водителя нет столько наличных.',
+    },
+    'ui.prepayments.block_paid_before_current_trip': {
+        'en': "The paid-at time is before the driver's current trip started. Use Driver, already settled instead.",
+        'uz': 'To\'lov vaqti haydovchining joriy reysi boshlanishidan oldin. Buning o\'rniga "Haydovchi, allaqachon hisob-kitob qilingan" ni tanlang.',
+        'ru': 'Время выплаты раньше начала текущего рейса водителя. Выберите «Водитель, уже рассчитан».',
+    },
+    'ui.prepayments.block_ambiguous_contract_mirror': {
+        'en': 'This credit sits on more than one contract, so it cannot be returned automatically.',
+        'uz': "Bu kredit bir nechta shartnomada turibdi, shuning uchun uni avtomatik qaytarib bo'lmaydi.",
+        'ru': 'Этот кредит лежит на нескольких договорах, поэтому автоматически вернуть его нельзя.',
+    },
+    'ui.prepayments.block_units_contract_mirror': {
+        'en': 'This credit funds prepaid contract bottles, so it cannot be returned as cash.',
+        'uz': "Bu kredit shartnomadagi oldindan to'langan idishlarni ta'minlaydi, shuning uchun uni naqd pul sifatida qaytarib bo'lmaydi.",
+        'ru': 'Этот кредит обеспечивает предоплаченные бутыли по договору, поэтому вернуть его наличными нельзя.',
+    },
+    'ui.prepayments.block_contract_account_missing': {
+        'en': 'The contract account for this credit is missing, so it cannot be returned.',
+        'uz': "Bu kredit uchun shartnoma hisobi topilmadi, shuning uchun uni qaytarib bo'lmaydi.",
+        'ru': 'Счёт договора для этого кредита не найден, поэтому вернуть его нельзя.',
+    },
+    'ui.prepayments.undo_block_already_undone': {
+        'en': 'This return has already been undone.',
+        'uz': 'Bu qaytarish allaqachon bekor qilingan.',
+        'ru': 'Этот возврат уже отменён.',
+    },
+    'ui.prepayments.undo_block_funding_event_voided': {
+        'en': 'A collection this return drew on was voided, so it cannot be undone.',
+        'uz': "Bu qaytarish foydalangan yig'im bekor qilingan, shuning uchun qaytarishni bekor qilib bo'lmaydi.",
+        'ru': 'Инкассация, из которой был сделан этот возврат, аннулирована, поэтому отменить возврат нельзя.',
+    },
+    'ui.prepayments.undo_block_session_checked': {
+        'en': "The driver's trip is closed, so this return can no longer be undone.",
+        'uz': "Haydovchining reysi yopilgan, shuning uchun bu qaytarishni endi bekor qilib bo'lmaydi.",
+        'ru': 'Рейс водителя закрыт, поэтому этот возврат больше нельзя отменить.',
+    },
+
+    'ui.prepayments.return_success_amount': {
+        'en': 'Returned {{amount}} to the customer',
+        'uz': '{{amount}} mijozga qaytarildi',
+        'ru': 'Клиенту возвращено {{amount}}',
+    },
+    'ui.prepayments.return_amount_required': {
+        'en': 'Enter an amount above 0',
+        'uz': '0 dan katta summani kiriting',
+        'ru': 'Введите сумму больше 0',
+    },
+    'ui.prepayments.return_drivers_failed': {
+        'en': 'Could not load the drivers. Close this window and try again.',
+        'uz': "Haydovchilarni yuklab bo'lmadi. Oynani yopib, qayta urinib ko'ring.",
+        'ru': 'Не удалось загрузить водителей. Закройте окно и попробуйте снова.',
+    },
+    'ui.prepayments.return_paid_at_future': {
+        'en': "Paid at can't be in the future",
+        'uz': "To'lov vaqti kelajakda bo'lishi mumkin emas",
+        'ru': 'Время выплаты не может быть в будущем',
+    },
+    'ui.prepayments.return_session_closes_warning': {
+        'en': "This return closes the driver's trip; it can't be undone afterwards.",
+        'uz': "Bu qaytarish haydovchining reysini yopadi; keyin uni bekor qilib bo'lmaydi.",
+        'ru': 'Этот возврат закроет рейс водителя; потом его нельзя будет отменить.',
+    },
+    'ui.prepayments.error_amount': {
+        'en': 'Enter the amount to return, or the balance to leave.',
+        'uz': 'Qaytariladigan summani yoki qoldiriladigan qoldiqni kiriting.',
+        'ru': 'Введите сумму к возврату или остаток, который нужно оставить.',
+    },
+    'ui.prepayments.error_paid_at': {
+        'en': 'Paid at must be a past date and time.',
+        'uz': "To'lov vaqti o'tgan sana va vaqt bo'lishi kerak.",
+        'ru': 'Время выплаты должно быть датой и временем в прошлом.',
+    },
+    'ui.prepayments.error_reason': {
+        'en': 'The reason is required: at least 5 characters, and not too long.',
+        'uz': 'Sabab majburiy: kamida 5 ta belgi, va juda uzun emas.',
+        'ru': 'Причина обязательна: не меньше 5 символов и не слишком длинная.',
+    },
+    'ui.prepayments.error_payer': {
+        'en': 'Check who paid: the office names no driver, and a driver payment needs one.',
+        'uz': "Kim to'laganini tekshiring: ofis haydovchini ko'rsatmaydi, haydovchi to'lovi esa haydovchini talab qiladi.",
+        'ru': 'Проверьте, кто платил: для офиса водитель не указывается, а для выплаты водителем он обязателен.',
+    },
+    'ui.prepayments.error_key_reused': {
+        'en': 'This return was already recorded with different values. Close this window and start a new return.',
+        'uz': 'Bu qaytarish boshqa qiymatlar bilan allaqachon yozilgan. Oynani yopib, yangi qaytarishni boshlang.',
+        'ru': 'Этот возврат уже записан с другими значениями. Закройте окно и начните новый возврат.',
+    },
+    'ui.prepayments.error_request': {
+        'en': 'The request was not understood. Reload the page and try again.',
+        'uz': "So'rov tushunilmadi. Sahifani yangilab, qayta urinib ko'ring.",
+        'ru': 'Запрос не распознан. Обновите страницу и попробуйте снова.',
+    },
+
     # The 'telegram.cart.*' prepayment block lived here until B4b moved it to
     # scripts/seed_backend_translations.py — see the note above.
 }

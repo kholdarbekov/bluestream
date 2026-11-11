@@ -181,8 +181,9 @@ def staff_or_higher_required(f):
 def admin_role_permissions(role_value: str) -> Tuple[str, ...]:
     """The permission names an admin-panel role holds. Any other role holds none.
 
-    "edit_collected_cash" and "edit_order_payment_method" are intentionally Admin-only: they are
-    not granted to MANAGER/OPERATOR, so only the ADMIN "all" wildcard satisfies them.
+    "edit_collected_cash", "edit_order_payment_method" and "return_customer_prepayment" are
+    intentionally Admin-only: they are not granted to MANAGER/OPERATOR, so only the ADMIN "all"
+    wildcard satisfies them.
     """
     # This would integrate with a permission system; for now, basic role-based checks.
     if role_value == UserRole.ADMIN.value:

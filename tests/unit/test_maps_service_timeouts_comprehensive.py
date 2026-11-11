@@ -212,7 +212,7 @@ class TestGoogleMapsTimeouts:
 
             result = svc.reverse_geocode(41.3111, 69.2401)
 
-        assert result["formatted_address"] == "Tashkent, Uzbekistan"
+        assert result["formatted_address"] == "Tashkent"
         _assert_positive_timeout(mock_get)
 
     def test_google_get_route_directions_passes_positive_timeout(self, app, monkeypatch):
@@ -335,7 +335,7 @@ class TestOSMMapsTimeouts:
 
             result = svc.reverse_geocode(41.3111, 69.2401)
 
-        assert result["formatted_address"] == "Tashkent, Uzbekistan"
+        assert result["formatted_address"] == "Tashkent"
         _assert_positive_timeout(mock_get)
 
     def test_osrm_get_route_passes_positive_timeout(self, app, monkeypatch):

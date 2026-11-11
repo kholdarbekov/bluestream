@@ -55,7 +55,8 @@ Cross-customer place groups are a SANCTIONED state
 - allocation_stamp_mismatches: dual audit stamps inconsistent with their
   event/payment rows — POST-MIGRATION allocations only (pre-migration stamps
   are NULL by design and skipped).
-- event_conservation_violations: SUM(live allocations) + unapplied != amount.
+- event_conservation_violations: SUM(live allocations) + SUM(live prepayment-return
+  payout debits) + unapplied != amount. A debit counts only while its payout is live.
 - stamp_incoherent_ledger_entries: ORACLE 2 of the locking design
   (`.superpowers/sdd/2026-07-29-place-ledger-e2e/DESIGN-locking.md` §6). A
   `bottle_ledger` row stamped to NO group whose OWN address is currently in a
@@ -106,7 +107,13 @@ from sqlalchemy import Text, cast, func, or_
 from business_app import db
 from business_app.models.bottle import BottleBalance, BottleFine, BottleLedger
 from business_app.models.customer_link import CanonicalCustomer, CustomerLinkEvent
-from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent, Payment
+from business_app.models.payment import (
+    CashCollectionAllocation,
+    CashCollectionEvent,
+    CustomerCreditPayout,
+    CustomerCreditPayoutDebit,
+    Payment,
+)
 from business_app.models.user import User, UserAddress
 from shared.enums import BottleFineStatus, UserType
 
@@ -426,7 +433,7 @@ def reconcile_customer_link_invariants() -> dict:
         if source_id != event_customer_id or beneficiary_id != payment_user_id:
             allocation_stamp_mismatches.append(alloc_id)
 
-    # -- per-event conservation: SUM(live allocations) + unapplied == amount --
+    # -- per-event conservation: SUM(live allocations) + SUM(live payout debits) + unapplied == amount --
     live_sums = dict(
         db.session.query(
             CashCollectionAllocation.cash_collection_event_id,
@@ -436,6 +443,16 @@ def reconcile_customer_link_invariants() -> dict:
         .group_by(CashCollectionAllocation.cash_collection_event_id)
         .all()
     )
+    payout_sums = dict(
+        db.session.query(
+            CustomerCreditPayoutDebit.cash_collection_event_id,
+            func.coalesce(func.sum(CustomerCreditPayoutDebit.amount), 0),
+        )
+        .join(CustomerCreditPayout, CustomerCreditPayoutDebit.payout_id == CustomerCreditPayout.id)
+        .filter(CustomerCreditPayout.is_live)
+        .group_by(CustomerCreditPayoutDebit.cash_collection_event_id)
+        .all()
+    )
     event_conservation_violations = []
     for event_id, amount, unapplied in (
         db.session.query(CashCollectionEvent.id, CashCollectionEvent.amount, CashCollectionEvent.unapplied_amount)
@@ -443,7 +460,8 @@ def reconcile_customer_link_invariants() -> dict:
         .all()
     ):
         allocated = Decimal(str(live_sums.get(event_id, 0) or 0))
-        if allocated + Decimal(str(unapplied or 0)) != Decimal(str(amount or 0)):
+        paid_out = Decimal(str(payout_sums.get(event_id, 0) or 0))
+        if allocated + paid_out + Decimal(str(unapplied or 0)) != Decimal(str(amount or 0)):
             event_conservation_violations.append(event_id)
 
     report = {
@@ -469,3 +487,15 @@ def reconcile_customer_link_invariants() -> dict:
 @shared_task(name="business_app.tasks.customer_link_tasks.reconcile_customer_link_invariants_task")
 def reconcile_customer_link_invariants_task() -> dict:
     return reconcile_customer_link_invariants()
+
+
+@shared_task(
+    bind=True,
+    max_retries=0,
+    name="business_app.tasks.customer_link_tasks.post_shared_place_case_alert_task",
+)
+def post_shared_place_case_alert_task(self, case_id: int) -> bool:
+    """Post the shared-place Slack alert once: after the driver's answer window, or at once for an admin case."""
+    from business_app.services.shared_place.alerts import SharedPlaceAlerts
+
+    return SharedPlaceAlerts.post_once(case_id)

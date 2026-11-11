@@ -40,6 +40,9 @@ UI_STAFF_TRANSLATIONS = {
         # roles column and the invite-role Select show the literal
         # "staff:sales_agent".
         "sales_agent": "Sales agent",
+        # Cash reconciliation: gross collected vs what the driver must hand in (expected_cash_on_hand).
+        "cash_gross_collected": "Collected (gross)",
+        "cash_to_hand_in": "To hand in",
     },
     "uz": {
         "customer_phone": "Telefon",
@@ -51,6 +54,8 @@ UI_STAFF_TRANSLATIONS = {
         "scope": "Qamrov",
         "attribution": "To'lovchi → yopiladi",
         "sales_agent": "Savdo agenti",
+        "cash_gross_collected": "Yig'ilgan (umumiy)",
+        "cash_to_hand_in": "Topshirilishi kerak",
     },
     "ru": {
         "customer_phone": "Телефон",
@@ -62,6 +67,8 @@ UI_STAFF_TRANSLATIONS = {
         "scope": "Область",
         "attribution": "Платит → погашает",
         "sales_agent": "Торговый агент",
+        "cash_gross_collected": "Собрано (всего)",
+        "cash_to_hand_in": "К сдаче",
     },
 }
 

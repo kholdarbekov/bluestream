@@ -86,6 +86,7 @@ const ADDRESS_SEARCH_HIT_KEYS = new Set([
   'title',
   'full_address',
   'address_group_id',
+  'address_group_label',
   'owner',
 ]);
 

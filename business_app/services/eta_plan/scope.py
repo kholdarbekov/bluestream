@@ -19,18 +19,17 @@ from business_app.models.delivery_promise import MODEL_ENGINE_S1, DeliveryPromis
 from business_app.models.order import Order
 from business_app.services.route_optimization_service import COMMITTED_STATUSES
 from business_app.services.staff_service import StaffService
-from business_app.utils.state_validators import ACTIVE_ORDER_STATUSES, DELIVERY_WITH_DRIVER_STATES
+from business_app.utils.state_validators import DELIVERY_WITH_DRIVER_STATES, DRIVER_HELD_ORDER_STATUSES
 from shared.constants import ETA_STAGE_WAITING
-from shared.enums import DeliveryStatus, OrderStatus
+from shared.enums import DeliveryStatus
 
 # A driver is on the road with the stop (R6): picked up, in transit or arrived, the set a customer's cancel calls "with
 # the driver". Sorted by value only so an SQL `IN` list is stable. Supply subtracts these stops' bottles once, and the
 # planner never subtracts them again or reloads for them.
 IN_FLIGHT_DELIVERY_STATUSES = tuple(sorted(DELIVERY_WITH_DRIVER_STATES, key=lambda status: status.value))
 
-# The orders a driver can hold a stop on (R7): the live ones, less the unconfirmed. A pickup moves the order to
-# OUT_FOR_DELIVERY (`DELIVERY_TO_ORDER_STATUS_SYNC`), so a confirmed/preparing-only set would drop every in-flight stop.
-DRIVER_HELD_ORDER_STATUSES = ACTIVE_ORDER_STATUSES - {OrderStatus.PENDING}
+# The orders a driver can hold a stop on (R7) are `state_validators.DRIVER_HELD_ORDER_STATUSES`, imported above and
+# shared with the crew's promised stops (`BottleTrackingService.promised_stops_query`).
 
 
 def driver_held_rows_filter():

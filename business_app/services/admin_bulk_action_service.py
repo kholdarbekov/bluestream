@@ -413,10 +413,12 @@ class AdminBulkActionService:
                     continue
 
                 elif action == "mark_in_transit":
+                    # A9: no free-full-bottle count for an admin, but the driver must be on a bottle trip.
                     DeliveryService().begin_delivery_in_transit(
                         delivery.id,
                         actor_user_id=admin_id,
                         notes=reason or "Updated via admin bulk action to in_transit",
+                        enforce_bottle_capacity=False,
                     )
                     success_count += 1
                     continue

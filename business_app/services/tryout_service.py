@@ -403,6 +403,38 @@ class TryoutService:
         return {product_id: units for product_id, units in outstanding.items() if units > 0}
 
     @staticmethod
+    def converted_tryouts_with_trial_bottles(user_ids: List[int]) -> List[Dict[str, Any]]:
+        """Every try-out converted into one of these accounts that handed trial bottles over, oldest first, with the
+        trial bottles still out (0 once settled).
+
+        A settled try-out stays listed: the shared-place case screen must still tell the admin to book the returned
+        empties with "Customer's own bottles" after settling it, not to Close (spec 2026-11-10 §9). A try-out with no
+        bottle ledger entry never handed any over, so it explains no empties and is left out.
+
+        A converted account can carry several try-outs (`converted_user_id` is not unique). The total is the
+        float the Tryouts page shows (`serialize_tryout`'s sum, in its product order).
+        """
+        ids = sorted({int(user_id) for user_id in user_ids if user_id is not None})
+        if not ids:
+            return []
+        tryouts = (
+            ProductTryout.query.options(selectinload(ProductTryout.bottle_ledger_entries))
+            .filter(ProductTryout.converted_user_id.in_(ids))
+            .order_by(ProductTryout.id.asc())
+            .all()
+        )
+        rows = []
+        for tryout in tryouts:
+            if not tryout.bottle_ledger_entries:
+                continue
+            outstanding = TryoutService.get_outstanding_bottles_by_product(tryout)
+            total = sum((float(units) for _, units in sorted(outstanding.items())), 0.0)
+            rows.append(
+                {"tryout_id": tryout.id, "tryout_number": tryout.tryout_number, "outstanding_bottles_total": total}
+            )
+        return rows
+
+    @staticmethod
     def _compute_total_returnables_due(tryout: ProductTryout) -> Decimal:
         total = Decimal("0.00")
         for item in tryout.items or []:

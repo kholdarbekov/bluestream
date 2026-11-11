@@ -179,7 +179,7 @@ def test_admin_assign_delivery_with_null_driver_id_is_a_clean_400(
     app, client, db, admin_claim_headers, sample_user, sample_product
 ):
     """Prod-shaped payload `{"delivery_person_id": null}`: `validate_json` only checks the
-    key is present, not non-null, so `None` reaches `StaffService.accept_order` ->
+    key is present, not non-null, so `None` reaches `AdminDeliveryService.assign_delivery` ->
     `DeliveryAssignmentService.assign_driver`. Before the JWT-identity coercion this landed
     on `DeliveryPerson.query.filter_by(user_id=None)`, found nothing, and raised
     NotFoundError("Driver not found", STAFF_DRIVER_NOT_FOUND) -> the route's

@@ -557,6 +557,15 @@ _PREVIEW_SURFACES: Dict[Tuple[str, str], Union[Tuple[str, str], Tuple[Tuple[str,
         ("replace_items_for_user", "self._item_lines("),
         ("update_subscription_for_user", "self._address_change_plan("),
     ),
+    # Spec 2026-11-10 (prepayment return). ONE-DECISION (shared expression): the admin's preview and the
+    # apply both run the ONE planner `_plan`, the apply under its locks (credit events, then the driver's
+    # cash session). The amount drawn, the card/Click share and the driver session effect (on hand
+    # before/after, the cap, whether the trip closes) are re-derived from the locked rows, never replayed
+    # from the figure the admin saw, and a plan that no longer holds is refused (PAYOUT_BLOCKED).
+    ("business_app.services.prepayment_payout_service", "PrepaymentPayoutService.preview"): (
+        "apply",
+        "self._plan(",
+    ),
 }
 
 

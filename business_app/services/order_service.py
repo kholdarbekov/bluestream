@@ -617,7 +617,7 @@ class OrderService:
 
                 # C14: a held order is a manager's to confirm (OA2), never this block's. Asked
                 # inside the try: a failing lookup must not fail a creation that already committed.
-                if not AgentOrderApprovalService.is_awaiting(order.id) and self._customer_has_delivered_order(user_id):
+                if not AgentOrderApprovalService.is_awaiting(order.id) and self.customer_has_delivered_order(user_id):
                     self.update_order_status(
                         order.id,
                         OrderStatus.CONFIRMED,
@@ -985,17 +985,20 @@ class OrderService:
             },
         }
 
-    def _customer_has_delivered_order(self, user_id: int) -> bool:
+    @staticmethod
+    def customer_has_delivered_order(user_id: int, *, exclude_order_id: Optional[int] = None) -> bool:
         """True if the customer has at least one DELIVERED order.
 
         Used to decide whether a new COD order may skip the PENDING
-        verification gate and confirm immediately. Cheap existence lookup
-        backed by the idx_orders_user_status (user_id, status) index.
+        verification gate and confirm immediately, and (with
+        `exclude_order_id`) whether the order just delivered is the customer's
+        first. Cheap existence lookup backed by the idx_orders_user_status
+        (user_id, status) index.
         """
-        return (
-            db.session.query(Order.id).filter(Order.user_id == user_id, Order.status == OrderStatus.DELIVERED).first()
-            is not None
-        )
+        query = db.session.query(Order.id).filter(Order.user_id == user_id, Order.status == OrderStatus.DELIVERED)
+        if exclude_order_id is not None:
+            query = query.filter(Order.id != exclude_order_id)
+        return query.first() is not None
 
     @staticmethod
     def reorderable_lines(order: Order) -> List[OrderItem]:
@@ -1263,6 +1266,7 @@ class OrderService:
         *,
         history_reason: Optional[str] = None,
         notify: bool = True,
+        asked_driver_id: Optional[int] = None,
     ) -> Order:
         """Update order status.
 
@@ -1276,6 +1280,10 @@ class OrderService:
 
         ``notify=False`` sends no generic status notice: the caller tells the customer with a message of its
         own (a subscription order's creation notice, the payment-deadline cancellation notice).
+
+        ``asked_driver_id`` is the driver a DELIVERED transition's shared-place question goes to: the acting
+        driver on the driver's door flow, None everywhere else (the admin Orders path sends the case straight to
+        admin review). Never inferred from ``updated_by``: an admin may also hold the driver role.
         """
         order = Order.query.get(order_id)
         if not order:
@@ -1358,7 +1366,12 @@ class OrderService:
         # Handle status-specific actions (run before commit so a failure rolls
         # back the status change atomically).
         self._handle_status_change_actions(
-            order, new_status, bottles_returned=bottles_returned, updated_by=updated_by, commit=commit
+            order,
+            new_status,
+            bottles_returned=bottles_returned,
+            updated_by=updated_by,
+            commit=commit,
+            asked_driver_id=asked_driver_id,
         )
 
         if commit:
@@ -2378,12 +2391,17 @@ class OrderService:
         bottles_returned: int = None,
         updated_by: int = None,
         commit: bool = True,
+        *,
+        asked_driver_id: Optional[int] = None,
     ):
         """Handle actions when order status changes.
 
         When ``commit`` is False the caller owns the transaction boundary and
         no commit is issued from inside this method or the inner services it
         invokes (delivery completion, cash-collection helpers).
+
+        ``asked_driver_id``: see ``update_order_status``. Read only by the
+        shared-place hook in the delivered branch.
         """
         from shared.enums import PaymentMethod
 
@@ -2417,6 +2435,24 @@ class OrderService:
             # while there is still something to abort. See
             # `_record_delivery_bottles` for the full reasoning.
             self._record_delivery_bottles(order, bottles_returned, updated_by)
+
+            # --- Shared-place detection (spec 2026-11-10 §4.1) ---
+            # A first-order customer who handed back empties opens a case. HERE
+            # and nowhere else: this is the one place both callers that can carry
+            # returns pass through (the driver's door flow and the admin Orders
+            # dialog), it reads the ledger rows booked just above, and nothing
+            # has committed yet. Never inside `_record_delivery_bottles`, whose
+            # swallow-all `try` would leave an aborted Postgres transaction.
+            # It runs in its own SAVEPOINT and never raises, so a case failure
+            # cannot fail, roll back or alter the delivery. It must stay ahead of
+            # anything that parks work on the loyalty-award, route-card or
+            # reorder-reminder dispatchers: those drain or discard on a
+            # savepoint's release / rollback. The savepoint also clears the
+            # bottle scope-lock registry, so no explicit-scope bottle write may
+            # follow this hook.
+            from business_app.services.shared_place.detection import SharedPlaceDetection
+
+            SharedPlaceDetection.open_for_delivery(order, asked_driver_id=asked_driver_id)
 
             # Mark delivery as completed (sync_order_status=False to prevent circular callback)
             if order.delivery:
@@ -2892,18 +2928,17 @@ class OrderService:
                 if binding:
                     bottle_session = DriverBottleSession.query.get(binding.session_id)
                     if bottle_session:
-                        prev_delivered = bottle_session.bottles_delivered or 0
-                        prev_collected = bottle_session.bottles_collected_from_customers or 0
-                        bottle_session.bottles_delivered = prev_delivered + int(bottles_in_order)
-                        bottle_session.bottles_collected_from_customers = prev_collected + int(bottles_returned_qty)
-                        db.session.flush()
+                        # Added in SQL: a co-driver's Delivered on the same truck may be adding its own right now.
+                        bottle_service.add_to_session_tallies(
+                            bottle_session, delivered=int(bottles_in_order), collected=int(bottles_returned_qty)
+                        )
                         logger.info(
-                            "[BOTTLE] order=%s tallied to bound session=%s " "delivered=%s→%s collected=%s→%s",
+                            "[BOTTLE] order=%s tallied to bound session=%s delivered+%s=%s collected+%s=%s",
                             order.id,
                             bottle_session.id,
-                            prev_delivered,
+                            int(bottles_in_order),
                             bottle_session.bottles_delivered,
-                            prev_collected,
+                            int(bottles_returned_qty),
                             bottle_session.bottles_collected_from_customers,
                         )
                     else:

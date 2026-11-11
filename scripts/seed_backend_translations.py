@@ -6913,6 +6913,15 @@ BACKEND_TRANSLATIONS = {
               'U {deadline} gacha to\'lanmagani uchun bekor qilindi.',
         'ru': '❌ <b>Заказ {order_number} отменён</b>\n\nОн не был оплачен до {deadline}, поэтому мы его отменили.'
     },
+    # A prepaid-balance return recorded by an admin (spec 2026-11-10 P8). No buttons.
+    'telegram.customer_notice.prepayment_returned': {
+        'en': '✅ We returned {amount} UZS of your prepaid balance to you.\n'
+              '💳 Prepaid balance now: {balance} UZS',
+        'uz': '✅ Oldindan to\'langan qoldig\'ingizdan {amount} so\'m sizga qaytarildi.\n'
+              '💳 Oldindan to\'langan qoldiq endi: {balance} so\'m',
+        'ru': '✅ Мы вернули вам {amount} сум из предоплаченного остатка.\n'
+              '💳 Предоплаченный остаток теперь: {balance} сум'
+    },
 
 }
 
@@ -8234,6 +8243,15 @@ ADMIN_UI_BACKFILL_TRANSLATIONS = {
     'ui.delivery.status_returned': _ui_tr('Returned', 'Qaytarildi', 'Возвращено'),
     'ui.delivery.status_scheduled': _ui_tr('Scheduled', 'Rejalashtirilgan', 'Запланировано'),
     'ui.delivery.status_rescheduled': _ui_tr('Rescheduled', 'Ko\'chirildi', 'Перенесено'),
+    # Spec 2026-11-09 A9: an admin status move skips the bottle count but still needs the driver on a
+    # bottle trip. Delivery.js shows this for BOTTLE_SESSION_REQUIRED instead of the backend's driver text.
+    'ui.delivery.status_error.BOTTLE_SESSION_REQUIRED': _ui_tr(
+        'This driver has no open bottle session. Ask them to open one or join a colleague, then try again.',
+        "Bu haydovchida ochiq idish sessiyasi yo'q. Undan sessiya ochishini yoki hamkasbining "
+        "sessiyasiga qo'shilishini so'rang, so'ng qayta urinib ko'ring.",
+        'У этого водителя нет открытой сессии по таре. Попросите его открыть сессию или '
+        'присоединиться к коллеге, затем повторите попытку.',
+    ),
     # The update action on a row with no status move (failed, delivered, cancelled,
     # returned, held): the same form, for its notes only.
     'ui.delivery.edit_notes': _ui_tr('Edit notes', 'Izohni tahrirlash', 'Изменить заметки'),

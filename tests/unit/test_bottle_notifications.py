@@ -14,13 +14,16 @@ from tests.unit.test_sales_agent_tasks import _spy
 pytestmark = pytest.mark.unit
 
 
-def _transfer(db, sender, receiver, qty=4):
-    session = DriverBottleSession(driver_user_id=sender.id, bottles_loaded=10, status=DriverBottleSessionStatus.OPEN)
+def _transfer(db, sender, receiver, qty=4, empties=2):
+    session = DriverBottleSession(
+        driver_user_id=sender.id, bottles_loaded=10, bottles_collected_from_customers=3,
+        status=DriverBottleSessionStatus.OPEN,
+    )
     db.session.add(session)
     db.session.flush()
     transfer = DriverBottleTransfer(
         sender_session_id=session.id, sender_driver_id=sender.id,
-        receiver_driver_id=receiver.id, declared_quantity=qty,
+        receiver_driver_id=receiver.id, declared_quantity=qty, declared_empty_quantity=empties,
     )
     db.session.add(transfer)
     db.session.commit()
@@ -36,7 +39,8 @@ def test_the_receiver_is_pushed_the_transfer_with_the_senders_name(db, monkeypat
     bottle_notifications.notify_transfer_received(transfer)
 
     assert pushes == [((int(receiver.telegram_id), "transfer_received",
-                        {"id": transfer.id, "declared_quantity": 4, "sender_name": "Ali Driver"}), {})]
+                        {"id": transfer.id, "declared_quantity": 4, "declared_empty_quantity": 2,
+                         "sender_name": "Ali Driver"}), {})]
 
 
 def test_the_owner_is_pushed_the_request_and_the_requester_the_answer(db, monkeypatch):

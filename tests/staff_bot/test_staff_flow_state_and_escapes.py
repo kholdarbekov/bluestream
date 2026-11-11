@@ -44,10 +44,7 @@ from pathlib import Path
 import pytest
 from telegram.ext import ConversationHandler
 
-from staff_bot.handlers.delivery.bottle_collection import (
-    BOTTLE_TRANSFER_DRIVER_SELECT,
-    BOTTLE_TRANSFER_QTY_INPUT,
-)
+from staff_bot.handlers.delivery.bottle_collection import BOTTLE_TRANSFER_DRIVER_SELECT
 from staff_bot.handlers.operator.create_order import (
     CONFIRM_ORDER as ORDER_CONFIRM_ORDER,
     SELECT_ADDRESS as ORDER_SELECT_ADDRESS,
@@ -149,6 +146,10 @@ OPEN_SESSION = {
     "session_ref": "SESS0001",
     "started_at": "2026-08-21T08:00:00",
     "bottles_loaded": 40,
+    "full_bottles_on_board": 20,
+    "empties_on_board": 5,
+    "transferable_full": 20,
+    "transferable_empties": 5,
     "current_inventory": 25,
 }
 OTHER_DRIVERS = [{"id": 12, "first_name": "Bek", "last_name": "Toshev", "name": "Bek Toshev"}]
@@ -1078,8 +1079,8 @@ async def test_every_conversation_state_has_a_menu_escape_wired(staff):
 # gets deleted rather than quietly protecting a bug forever.
 
 
-async def test_walking_out_of_the_transfer_picker_disarms_the_stale_bottle_ceiling(monkeypatch):
-    """Was: ``test_RATCHET_the_transfer_driver_picker_survives_a_main_menu_tap``.
+async def test_walking_out_of_the_transfer_picker_disarms_the_transfer(monkeypatch):
+    """Was: ``test_walking_out_of_the_transfer_picker_disarms_the_stale_bottle_ceiling``.
 
     ``staff_bottle_transfer`` opens directly into ``BOTTLE_TRANSFER_DRIVER_SELECT``,
     a callback-only state, so a main-menu tap there used to be handled by the
@@ -1089,26 +1090,27 @@ async def test_walking_out_of_the_transfer_picker_disarms_the_stale_bottle_ceili
     ``test_every_conversation_state_has_a_menu_escape_wired`` above.
 
     What this test now measures is the half that decides whether the leak can
-    HURT: ``start_transfer_bottles`` stamps ``pending_transfer_available`` from
-    the open session and ``receive_transfer_quantity`` enforces it as the "you
-    cannot transfer more than you have" ceiling. Registered with the flow-state
-    SSOT, that ceiling dies the moment the driver walks away, so it can never
-    outlive the truck load it was measured from.
+    HURT: ``start_transfer_bottles`` stamps ``pending_transfer_flow`` (the
+    backend's transferable numbers, which the send screen shows) and every
+    picker and send-screen tap requires it. Registered with the flow-state SSOT,
+    it dies the moment the driver walks away, so a button left in the chat can
+    never send bottles measured hours ago.
     """
     harness = await build_staff(monkeypatch)
     staff_member, labels = await sign_in(harness)
 
     await open_conversation(harness, staff_member, "staff_bottle_transfer")
-    assert user_data(harness)["pending_transfer_available"] == OPEN_SESSION["current_inventory"], (
-        "fixture: opening the transfer stamps the ceiling this test is about"
-    )
+    assert user_data(harness)["pending_transfer_flow"] == {
+        "transferable_full": OPEN_SESSION["transferable_full"],
+        "transferable_empties": OPEN_SESSION["transferable_empties"],
+    }, "fixture: opening the transfer arms the flow this test is about"
 
     await harness.send(staff_member.text(menu_label(labels, "staff.menu.cash")))
 
     assert harness.telegram.shown, "the tap did at least navigate"
-    assert "pending_transfer_available" not in user_data(harness), (
-        "the bottle ceiling survived the driver walking away; the next tap on the stale "
-        "picker measures the transfer against a truck load from hours ago"
+    assert "pending_transfer_flow" not in user_data(harness), (
+        "the transfer survived the driver walking away; a tap on the stale picker "
+        "would carry on with a truck load from hours ago"
     )
     assert "pending_transfer_receiver_id" not in user_data(harness)
 
@@ -1122,13 +1124,12 @@ async def test_a_stale_driver_button_can_no_longer_transfer_bottles_that_left_th
     taps Cash, and delivers all day. The transfer message is still in the chat
     above with its driver buttons on it.
 
-    That tap used to resume the flow with ``pending_transfer_available`` still
-    saying 25, so the bot's own "you cannot transfer more than you have" guard
-    was measured against the morning's load and waved through 20 bottles out of
-    a session holding 3. Whichever way the tap is handled now — the conversation
-    ended (once the picker state gets its menu escape) or the ceiling is gone
-    (``flow_state``) — the invariant is the same and is what this asserts: a
-    transfer the driver abandoned can never reach the backend.
+    That tap used to resume the flow with the morning's 25 bottles still on
+    record, and waved through 20 bottles out of a session holding 3. Whichever
+    way the tap is handled now — the conversation ended (the picker state has
+    its menu escape) or the flow is gone (``flow_state``) — the invariant is the
+    same and is what this asserts: a transfer the driver abandoned can never
+    reach the backend, whatever the driver taps or types next.
     """
     harness = await build_staff(monkeypatch)
     staff_member, labels = await sign_in(harness)
@@ -1138,15 +1139,17 @@ async def test_a_stale_driver_button_can_no_longer_transfer_bottles_that_left_th
 
     # A day of deliveries later: the session is down to 3 bottles.
     harness.backend.route(
-        "GET", SESSION_ENDPOINT, lambda _call: {**OPEN_SESSION, "current_inventory": 3}
+        "GET", SESSION_ENDPOINT,
+        lambda _call: {**OPEN_SESSION, "transferable_full": 3, "transferable_empties": 0, "current_inventory": 3},
     )
     harness.backend.route("POST", TRANSFERS_ENDPOINT, lambda _call: {"transfer_ref": "TRF00001"})
 
     harness.telegram.reset()
     await harness.send(staff_member.tap("staff_transfer_driver_12"))
-    # 20 is impossible against the 3 bottles actually on the van, and was
-    # accepted for as long as the morning's 25 outlived the flow.
+    await harness.send(staff_member.tap("staff_transfer_send_all"))
+    await harness.send(staff_member.tap("staff_transfer_choose"))
     await harness.send(staff_member.text("20"))
+    await harness.send(staff_member.text("0"))
 
     assert not [c for c in harness.backend.calls if c.endpoint == TRANSFERS_ENDPOINT], (
         "an abandoned transfer still reached the backend: 20 bottles handed to a colleague "
@@ -1333,7 +1336,8 @@ async def test_leaving_a_flow_clears_every_key_that_flow_wrote(monkeypatch):
     ``new_address``/``new_tryout``) plus the ``flow_state`` flags; the router
     dropped only the flags. So the same gesture left different residue depending
     on where it landed, and four keys production actually writes —
-    ``adding_address_for``, ``pending_transfer_available``,
+    ``adding_address_for``, the transfer's flow key (then
+    ``pending_transfer_available``, now ``pending_transfer_flow``),
     ``pending_transfer_receiver_id``, ``pending_confirm_transfer_id`` — were in
     NEITHER list and were cleared by nothing at all.
 
@@ -1367,12 +1371,14 @@ async def test_leaving_a_flow_clears_every_key_that_flow_wrote(monkeypatch):
 
     assert harness.conversation_state("staff_bottle_transfer_confirm") is None
     assert "pending_confirm_transfer_id" not in user_data(harness)
-    assert "pending_confirm_transfer_qty" not in user_data(harness)
+    assert "pending_confirm_transfer_full" not in user_data(harness)
 
 
+# The transfer's flow key was `pending_transfer_available` (a bot-side cap) until
+# the full/empties split (spec 2026-11-09); `pending_transfer_flow` replaced it.
 ORPHANED_UNTIL_THE_SSOT_COVERED_THEM = (
     "adding_address_for",
-    "pending_transfer_available",
+    "pending_transfer_flow",
     "pending_transfer_receiver_id",
     "pending_confirm_transfer_id",
 )
@@ -1398,6 +1404,16 @@ def test_no_second_list_of_flow_keys_survives_outside_the_ssot():
         "StaffBot._CONVERSATION_WORK_KEYS and not by flow_state — so the catch-all "
         "router does not clear it and the same gesture means two things again"
     )
+
+
+def test_the_transfers_own_key_list_is_registered_with_the_ssot():
+    """The bottle transfer and the receiver's count each drop their own keys when they
+    start over, end, are displaced or time out. Every one of them must also be one a
+    menu tap drops, or walking away leaves it armed."""
+    from staff_bot.handlers.delivery.bottle_collection import BottleCollectionHandler
+
+    assert set(BottleCollectionHandler.TRANSFER_FLOW_KEYS) <= set(PENDING_FLOW_USER_DATA_KEYS)
+    assert set(BottleCollectionHandler.CONFIRM_FLOW_KEYS) <= set(PENDING_FLOW_USER_DATA_KEYS)
 
 
 @pytest.mark.parametrize("key", ORPHANED_UNTIL_THE_SSOT_COVERED_THEM)

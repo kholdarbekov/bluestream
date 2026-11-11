@@ -1089,3 +1089,88 @@ def test_online_payable_since_backfills_live_unpaid_online_orders_and_rolls_back
         command.upgrade(config, "head")
         with db.engine.connect() as conn:
             assert "online_payable_since" in _schema_columns(conn, "orders")
+
+
+PAYOUTS_PARENT_REVISION = "a7c41e9b2d05"
+
+
+@pytest.mark.integration
+def test_customer_credit_payouts_downgrade_refuses_while_a_payout_row_exists(ephemeral_pg_database):
+    """Rolling the payout tables back with a payout recorded would turn its drawn credit and the driver's lowered
+    on hand back into money (the old code knows no payouts). The downgrade names the rows and refuses, even for an
+    undone one, and writes nothing; with none left it drops both tables, and head comes back."""
+    from alembic import command
+
+    from business_app import db
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, "head")
+        head = _revision(db.engine)
+        user_id = _insert_user(db, phone="+998900000801", password_hash="not-a-real-hash", first_name="Payout")
+        _run(
+            db.engine,
+            "INSERT INTO customer_credit_payouts (customer_id, amount, paid_by, reason, paid_at, actor_user_id, "
+            f"voided_at, void_reason, idempotency_key, created_at, updated_at) VALUES ({user_id}, 30000, 'office', "
+            f"'paid back', now(), {user_id}, now(), 'undone', 'mig-key-1', now(), now())",
+        )
+        db.session.remove()
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"customer credit payouts downgrade: 1 payout rows exist; export and delete "
+            r"customer_credit_payout_debits and customer_credit_payouts first",
+        ):
+            command.downgrade(config, PAYOUTS_PARENT_REVISION)
+        assert _revision(db.engine) == head
+        assert _rows(db.engine, "SELECT count(*) FROM customer_credit_payouts") == [(1,)]
+        with db.engine.connect() as conn:
+            assert "target_balance" in _schema_columns(conn, "customer_credit_payouts")
+
+        _run(db.engine, "DELETE FROM customer_credit_payouts")
+        command.downgrade(config, PAYOUTS_PARENT_REVISION)
+        assert _revision(db.engine) == PAYOUTS_PARENT_REVISION
+        assert _rows(db.engine, "SELECT to_regclass('customer_credit_payouts')") == [(None,)]
+
+        command.upgrade(config, "head")
+        assert _revision(db.engine) == head
+        assert _rows(db.engine, "SELECT to_regclass('customer_credit_payouts') IS NOT NULL") == [(True,)]
+
+
+SHARED_PLACE_REVISION = "e3b7c1d9a5f4"
+SHARED_PLACE_PARENT_REVISION = "c8a4f2d6b1e3"
+
+
+@pytest.mark.integration
+def test_shared_place_cases_downgrade_removes_exactly_what_upgrade_added(ephemeral_pg_database):
+    """Spec 2026-11-10 §9. The parent has neither `shared_place_cases` nor `address_groups.notes`; the revision
+    has both; nothing else on `address_groups` moves, and the second upgrade brings them back."""
+    from alembic import command
+
+    from business_app import db
+
+    def present():
+        with db.engine.connect() as conn:
+            return (
+                bool(_schema_columns(conn, "shared_place_cases")),
+                _schema_columns(conn, "address_groups"),
+                _schema_names(conn, "address_groups"),
+            )
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, SHARED_PLACE_REVISION)
+        table_there, columns_with, names_with = present()
+        assert table_there and "notes" in columns_with
+
+        command.downgrade(config, SHARED_PLACE_PARENT_REVISION)
+        table_there, columns_without, names_without = present()
+        assert not table_there
+        assert columns_without == columns_with - {"notes"}
+        assert names_without == names_with
+        assert _revision(db.engine) == SHARED_PLACE_PARENT_REVISION
+
+        command.upgrade(config, SHARED_PLACE_REVISION)
+        assert present() == (True, columns_with, names_with)

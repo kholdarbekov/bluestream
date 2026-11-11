@@ -241,7 +241,8 @@ class DriverBottleSession(db.Model, TimestampMixin):
     partial unique index and validated in the service layer.
 
     Discrepancy formula (computed on close):
-        loaded + transferred_in - delivered + collected - transferred_out - returned_to_wh
+        loaded + transferred_in - delivered - transferred_out
+        + collected + empties_in - empties_out - returned_to_wh
     Zero = perfect accountability.  Positive = bottles unaccounted for.
     """
 
@@ -297,6 +298,10 @@ class DriverBottleSession(db.Model, TimestampMixin):
     bottles_transferred_out = Column(Integer, nullable=False, default=0)
     # Credited when receiver confirms a transfer
     bottles_transferred_in = Column(Integer, nullable=False, default=0)
+    # Empties handed to / received from another driver. The two counters above move FULL bottles only; empties
+    # collected from customers are `bottles_collected_from_customers`.
+    empties_transferred_out = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    empties_transferred_in = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
 
     # --- Close side (NULL while OPEN) ---
     bottles_returned_to_warehouse = Column(Integer, nullable=True)
@@ -353,6 +358,10 @@ class DriverBottleSession(db.Model, TimestampMixin):
         if not self.session_ref:
             self.session_ref = str(uuid.uuid4())
 
+    # The columns `full_bottles_on_board` reads. The progress guard expires them under its crew lock, so the count
+    # reloads them (BottleTrackingService._lock_crew_delivery_persons).
+    FULL_ON_BOARD_TALLIES = ("bottles_loaded", "bottles_transferred_in", "bottles_delivered", "bottles_transferred_out")
+
     @property
     def full_bottles_on_board(self) -> int:
         """Full bottles on the truck: loaded + transferred in - delivered - transferred out.
@@ -368,18 +377,32 @@ class DriverBottleSession(db.Model, TimestampMixin):
         )
 
     @property
+    def empties_on_board(self) -> int:
+        """Empties on the truck: collected from customers + received from colleagues - handed to colleagues."""
+        return (
+            (self.bottles_collected_from_customers or 0)
+            + (self.empties_transferred_in or 0)
+            - (self.empties_transferred_out or 0)
+        )
+
+    @property
     def current_inventory(self) -> int:
-        """Bottles currently on truck (real-time; valid while session is OPEN): the full ones and the empties
-        collected from customers."""
-        return self.full_bottles_on_board + (self.bottles_collected_from_customers or 0)
+        """Bottles currently on truck (real-time; valid while session is OPEN): the full ones and the empties."""
+        return self.full_bottles_on_board + self.empties_on_board
+
+    @property
+    def transferable_full(self) -> int:
+        """Full bottles the driver can hand over: never negative, whatever a legacy tally says."""
+        return max(self.full_bottles_on_board, 0)
+
+    @property
+    def transferable_empties(self) -> int:
+        """Empties the driver can hand over: never negative."""
+        return max(self.empties_on_board, 0)
 
     def compute_discrepancy(self) -> None:
         """Compute and store discrepancy on session close."""
-        self.discrepancy = (
-            self.full_bottles_on_board
-            + (self.bottles_collected_from_customers or 0)
-            - (self.bottles_returned_to_warehouse or 0)
-        )
+        self.discrepancy = self.current_inventory - (self.bottles_returned_to_warehouse or 0)
 
     def to_dict(self):
         return {
@@ -392,6 +415,12 @@ class DriverBottleSession(db.Model, TimestampMixin):
             "bottles_collected_from_customers": self.bottles_collected_from_customers,
             "bottles_transferred_out": self.bottles_transferred_out,
             "bottles_transferred_in": self.bottles_transferred_in,
+            "empties_transferred_out": self.empties_transferred_out,
+            "empties_transferred_in": self.empties_transferred_in,
+            "full_bottles_on_board": self.full_bottles_on_board,
+            "empties_on_board": self.empties_on_board,
+            "transferable_full": self.transferable_full,
+            "transferable_empties": self.transferable_empties,
             "current_inventory": self.current_inventory,
             "bottles_returned_to_warehouse": self.bottles_returned_to_warehouse,
             "discrepancy": self.discrepancy,
@@ -554,8 +583,11 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
     # Populated when the receiver confirms (they may not have a session yet at send time)
     receiver_session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=True, index=True)
 
+    # `declared_quantity` / `confirmed_quantity` are the FULL bottles; the empties travel in the two columns below.
     declared_quantity = Column(Integer, nullable=False)
     confirmed_quantity = Column(Integer, nullable=True)  # NULL until receiver confirms
+    declared_empty_quantity = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    confirmed_empty_quantity = Column(Integer, nullable=True)  # NULL until receiver confirms
 
     status = Column(
         SqlEnum(
@@ -612,6 +644,8 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
             "receiver_session_id": self.receiver_session_id,
             "declared_quantity": self.declared_quantity,
             "confirmed_quantity": self.confirmed_quantity,
+            "declared_empty_quantity": self.declared_empty_quantity,
+            "confirmed_empty_quantity": self.confirmed_empty_quantity,
             "status": self.status.value if hasattr(self.status, "value") else self.status,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "confirmed_at": self.confirmed_at.isoformat() if self.confirmed_at else None,

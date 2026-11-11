@@ -943,7 +943,10 @@ class ClickPaymentProviderService:
         hand over those notes and still owes the office exactly the same total.
         """
         from business_app.models.payment import CashCollectionAllocation
-        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.cash_collection_service import (
+            CLICK_RAIL_RESTORE_REASON_PREFIX,
+            CashCollectionService,
+        )
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 
         order = payment.order
@@ -956,8 +959,10 @@ class ClickPaymentProviderService:
         )
 
         cash_service = CashCollectionService()
+        # The prefix marks what this restore reverses: `card_click_origin_event_clause` reads it to tell
+        # the freed Click residual from released prior credit (spec 2026-11-10 P7).
         reason = (
-            f"Late Click debit {incoming_trans_id} settled order {payment.order_id}; "
+            f"{CLICK_RAIL_RESTORE_REASON_PREFIX}{incoming_trans_id} settled order {payment.order_id}; "
             "its cash freed for the customer's debts, the rest prepaid balance"
         )
 

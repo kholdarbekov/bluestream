@@ -413,7 +413,7 @@ async def test_the_geocode_request_carries_the_building_number_and_the_district_
 
     assert geocode_requests(bot) == [
         {
-            "address": f"Bunyodkor street, 15, {DISTRICT_UZ}, Tashkent, Uzbekistan",
+            "address": f"Bunyodkor street, 15, {DISTRICT_UZ}, Tashkent",
             "hint_lat": DISTRICT_CENTRE[0],
             "hint_lon": DISTRICT_CENTRE[1],
         }
@@ -460,7 +460,7 @@ async def test_skipping_the_building_never_asks_for_an_apartment_or_a_floor(bot,
     }
     assert geocode_requests(bot) == [
         {
-            "address": f"Bunyodkor street, {DISTRICT_UZ}, Tashkent, Uzbekistan",
+            "address": f"Bunyodkor street, {DISTRICT_UZ}, Tashkent",
             "hint_lat": DISTRICT_CENTRE[0],
             "hint_lon": DISTRICT_CENTRE[1],
         }
@@ -483,7 +483,7 @@ async def test_a_geocoder_outage_falls_back_to_the_district_centre_and_admits_it
 
     await walk_to_the_geocode_confirmation(bot, user)
 
-    expected_string = f"Bunyodkor street, 15, {DISTRICT_UZ}, Tashkent, Uzbekistan"
+    expected_string = f"Bunyodkor street, 15, {DISTRICT_UZ}, Tashkent"
     assert bot.telegram.last_shown().text == (
         UZ["telegram.address.geocode_found_with_address"].format(address=expected_string)
         + UZ["telegram.address.geocode_note_approximate_center"]

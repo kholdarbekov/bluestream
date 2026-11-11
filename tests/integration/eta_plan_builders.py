@@ -56,6 +56,7 @@ from business_app.models.eta_model_fit import EtaModelFit
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
 from business_app.models.user import User, UserAddress
+from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.delivery_eta_service import SOURCE_GOOGLE_TRAFFIC, SOURCE_STALE_ESTIMATE
 from business_app.services.eta_plan import windows
 from business_app.services.eta_plan.recorder import _LOCAL_NOON_MINUTES
@@ -68,7 +69,6 @@ from shared.constants import ETA_STAGE_ON_THE_WAY, ETA_STAGE_WAITING
 from shared.enums import (
     DeliveryStatus,
     DriverBottleSessionStatus,
-    DriverBottleTransferStatus,
     DriverSessionMembershipStatus,
     OrderStatus,
     UserRole,
@@ -230,33 +230,17 @@ def join_session(db, member: User, session: DriverBottleSession, at: datetime) -
 def hand_over(
     db, sender_session: DriverBottleSession, receiver: User, at: datetime, *, quantity: int
 ) -> DriverBottleSession:
-    """A colleague hands `quantity` full bottles to `receiver`, who had no session: sent and confirmed at `at`. The
-    confirm opens the receiver a session with nothing loaded (`_open_session_for_transfer`), which is returned."""
-    sender_session.bottles_transferred_out = (sender_session.bottles_transferred_out or 0) + quantity
-    received = DriverBottleSession(
-        driver_user_id=receiver.id,
-        bottles_loaded=0,
-        bottles_transferred_in=quantity,
-        status=DriverBottleSessionStatus.OPEN,
-        loaded_by_user_id=receiver.id,
-        started_at=ensure_utc(at),
-        notes="Opened by a transfer",
-    )
-    db.session.add(received)
-    db.session.flush()
-    db.session.add(
-        DriverBottleTransfer(
-            sender_session_id=sender_session.id,
-            sender_driver_id=sender_session.driver_user_id,
-            receiver_driver_id=receiver.id,
-            receiver_session_id=received.id,
-            declared_quantity=quantity,
-            confirmed_quantity=quantity,
-            status=DriverBottleTransferStatus.CONFIRMED,
-            sent_at=ensure_utc(at),
-            confirmed_at=ensure_utc(at),
-        )
-    )
+    """A colleague hands `quantity` full bottles to `receiver`, who had no session: sent and confirmed at `at`.
+
+    Booked by the service the staff routes call (`initiate_bottle_transfer`, then `confirm_bottle_transfer` as
+    declared), so the counters it moves are the ones a real hand-off moves: full bottles, never empties. The confirm
+    opens the receiver a session with nothing loaded (`_open_session_for_transfer`), which is returned. The service
+    stamps the real clock, so the transfer's two instants and that session's start are moved to `at`."""
+    service = BottleTrackingService()
+    sent = service.initiate_bottle_transfer(sender_session.driver_user_id, receiver.id, full_quantity=quantity)
+    transfer = service.confirm_bottle_transfer(sent.id, receiver.id, confirm_as_declared=True).transfer
+    received = db.session.get(DriverBottleSession, transfer.receiver_session_id)
+    transfer.sent_at = transfer.confirmed_at = received.started_at = ensure_utc(at)
     db.session.commit()
     return received
 

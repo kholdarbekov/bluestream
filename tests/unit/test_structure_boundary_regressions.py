@@ -23,6 +23,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "admin_reorder_reminders.py": 0,
     "admin_sales.py": 0,
     "admin_sales_pay.py": 0,
+    "admin_shared_place.py": 0,
     "admin_tryouts.py": 0,
     "analytics.py": 25,
     "auth.py": 36,

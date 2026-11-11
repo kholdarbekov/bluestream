@@ -17,6 +17,7 @@ from sqlalchemy import (
     text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship, backref
 import uuid
 from business_app import db
@@ -707,6 +708,103 @@ class CashCollectionAllocation(db.Model, TimestampMixin):
             "reversal_reason": self.reversal_reason,
             "allocation_metadata": self.allocation_metadata or {},
         }
+
+
+class CustomerCreditPayout(db.Model, TimestampMixin):
+    """A return of a customer's free prepaid credit to the customer as money (spec 2026-11-10).
+
+    The header holds no totals: revenue / Click classification lives on the debit rows.
+    A payout is live iff ``voided_at`` is NULL (``is_live``).
+    """
+
+    PAID_BY_OFFICE = "office"
+    PAID_BY_DRIVER_CURRENT = "driver_current_session"
+    PAID_BY_DRIVER_SETTLED = "driver_settled"
+    PAID_BY_VALUES = (PAID_BY_OFFICE, PAID_BY_DRIVER_CURRENT, PAID_BY_DRIVER_SETTLED)
+    REASON_MAX_LENGTH = 500
+
+    __tablename__ = "customer_credit_payouts"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_customer_credit_payouts_amount_positive"),
+        CheckConstraint(
+            "paid_by IN (" + ", ".join(f"'{v}'" for v in PAID_BY_VALUES) + ")",
+            name="ck_customer_credit_payouts_paid_by",
+        ),
+        CheckConstraint(
+            "(paid_by = 'office' AND driver_user_id IS NULL AND driver_cash_session_id IS NULL) "
+            "OR (paid_by = 'driver_settled' AND driver_user_id IS NOT NULL AND driver_cash_session_id IS NULL) "
+            "OR (paid_by = 'driver_current_session' AND driver_user_id IS NOT NULL "
+            "AND driver_cash_session_id IS NOT NULL)",
+            name="ck_customer_credit_payouts_payer_shape",
+        ),
+        CheckConstraint(
+            "(voided_at IS NULL AND void_reason IS NULL) OR (voided_at IS NOT NULL AND void_reason IS NOT NULL)",
+            name="ck_customer_credit_payouts_void_shape",
+        ),
+        CheckConstraint(
+            "target_balance IS NULL OR target_balance >= 0",
+            name="ck_customer_credit_payouts_target_balance_nonneg",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_customer_credit_payouts_idempotency_key"),
+        Index("ix_customer_credit_payouts_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount = Column(Numeric(precision=12, scale=2), nullable=False)
+    # "Set balance" (P12): the balance the admin asked to leave, from which ``amount`` was derived under the
+    # locks; NULL for a return of a stated amount. Kept so a replayed idempotency key can be told from a
+    # request for another target.
+    target_balance = Column(Numeric(precision=12, scale=2), nullable=True)
+    paid_by = Column(String(32), nullable=False)
+    driver_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    driver_cash_session_id = Column(Integer, ForeignKey("driver_cash_sessions.id"), nullable=True, index=True)
+    reason = Column(String(500), nullable=False)
+    paid_at = Column(DateTime(timezone=True), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    void_reason = Column(String(500), nullable=True)
+    idempotency_key = Column(String(64), nullable=False)
+
+    customer = relationship("User", foreign_keys=[customer_id])
+    driver_user = relationship("User", foreign_keys=[driver_user_id])
+    actor = relationship("User", foreign_keys=[actor_user_id])
+    voided_by = relationship("User", foreign_keys=[voided_by_user_id])
+    driver_cash_session = relationship("DriverCashSession", foreign_keys=[driver_cash_session_id])
+    debits = relationship(
+        "CustomerCreditPayoutDebit",
+        back_populates="payout",
+        order_by="CustomerCreditPayoutDebit.id",
+    )
+
+    @hybrid_property
+    def is_live(self):
+        return self.voided_at is None
+
+    @is_live.expression
+    def is_live(cls):  # noqa: N805
+        return cls.voided_at.is_(None)
+
+
+class CustomerCreditPayoutDebit(db.Model):
+    """The part of one credit event (cash collection event) a payout drew."""
+
+    __tablename__ = "customer_credit_payout_debits"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_customer_credit_payout_debits_amount_positive"),
+        UniqueConstraint("payout_id", "cash_collection_event_id", name="uq_customer_credit_payout_debits_payout_event"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    payout_id = Column(Integer, ForeignKey("customer_credit_payouts.id"), nullable=False, index=True)
+    cash_collection_event_id = Column(Integer, ForeignKey("cash_collection_events.id"), nullable=False, index=True)
+    amount = Column(Numeric(precision=12, scale=2), nullable=False)
+    revenue_counted = Column(Boolean, nullable=False)
+    card_click = Column(Boolean, nullable=False)
+
+    payout = relationship("CustomerCreditPayout", back_populates="debits")
+    event = relationship("CashCollectionEvent", backref=backref("payout_debits", lazy="select"))
 
 
 class CreditCard(db.Model, TimestampMixin):

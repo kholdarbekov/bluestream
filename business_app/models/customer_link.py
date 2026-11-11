@@ -59,6 +59,9 @@ class AddressGroup(db.Model, TimestampMixin):
         nullable=True,
     )
     label = Column(String(100), nullable=True)
+    # The place note: admin-only (never shown to a driver or customer); pre-filled from the driver's note on a
+    # shared-place case. At most 1000 characters (PLACE_GROUP_NOTES_INVALID).
+    notes = Column(Text, nullable=True)
     # THE FORWARDING POINTER (spec §7.3). Which address this place's history was
     # RELEASED ONTO when it dissolved — NULL for every live place.
     #

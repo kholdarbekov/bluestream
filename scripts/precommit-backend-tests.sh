@@ -143,6 +143,13 @@ fi
 # work through this runner. Empty means "not set": the test compares
 # `os.environ.get('UPDATE_API_SNAPSHOT') == '1'`, so forwarding "" is a no-op.
 #
+# SENTRY_DSN and SLACK_WEBHOOK_URL are blanked because tests never report to the
+# real Sentry or post to the real Slack alerts channel (owner rule 2026-11-10).
+# `.env`'s SENTRY_DSN is the production project, and both bots call
+# sentry_sdk.init at import time whenever it is set. tests/conftest.py blanks
+# both in-process and strips the DSN from every Sentry client; these flags keep
+# the container itself clean, including anything that runs before conftest.
+#
 # PLACE_COD_COLLECTION_ENABLED is forwarded (empty when unset) so a two-state
 # measurement is possible from the host shell:
 #   PLACE_COD_COLLECTION_ENABLED=false bash scripts/precommit-backend-tests.sh ...
@@ -199,6 +206,8 @@ docker run --rm --init \
     -e STAFF_BOT_WEBHOOK_URL="http://staff-bot-must-be-mocked.invalid" \
     -e BOT_WEBHOOK_URL="http://telegram-bot-must-be-mocked.invalid" \
     -e BUSINESS_APP_URL="http://api-must-be-mocked.invalid" \
+    -e SENTRY_DSN= \
+    -e SLACK_WEBHOOK_URL= \
     -e PLACE_COD_COLLECTION_ENABLED="${PLACE_COD_COLLECTION_ENABLED:-}" \
     -e UPDATE_API_SNAPSHOT="${UPDATE_API_SNAPSHOT:-}" \
     "${image}" \

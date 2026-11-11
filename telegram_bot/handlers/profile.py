@@ -3548,7 +3548,7 @@ class ProfileHandlers(BaseHandler):
                 address_parts.append(addr_data['building_number'])
             if addr_data.get('district_name'):
                 address_parts.append(addr_data['district_name'])
-            address_parts.append('Tashkent, Uzbekistan')
+            address_parts.append('Tashkent')
 
             address_string = ', '.join(address_parts)
             logger.info(f"Geocoding address: {address_string}")

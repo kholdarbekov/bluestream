@@ -38,16 +38,21 @@ import {
   PhoneOutlined,
   MailOutlined,
   LockOutlined,
-  UnlockOutlined
+  UnlockOutlined,
+  AlertOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import adminService from '../services/adminService';
 import staffService from '../services/staffService';
+import PayoutRows from '../components/prepayments/PayoutRows';
+import ReturnPrepaymentModal from '../components/prepayments/ReturnPrepaymentModal';
 import LinkedAccountsPanel from '../components/LinkedAccountsPanel';
 import PlaceGroupPanel from '../components/PlaceGroupPanel';
 import GroupedAddressesPanel from '../components/GroupedAddressesPanel';
+import SharedPlaceReportsPanel from '../components/sharedPlace/SharedPlaceReportsPanel';
+import { useAuthStore } from '../stores/authStore';
 import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
@@ -121,6 +126,7 @@ const Users = () => {
   const [userCodStatementLoading, setUserCodStatementLoading] = useState(false);
   const [userPrepaymentHistory, setUserPrepaymentHistory] = useState(null);
   const [userPrepaymentHistoryLoading, setUserPrepaymentHistoryLoading] = useState(false);
+  const [returnPrepaymentOpen, setReturnPrepaymentOpen] = useState(false);
   const [userCart, setUserCart] = useState(null);
   const [userCartLoading, setUserCartLoading] = useState(false);
   const [isNotificationReasonModalVisible, setIsNotificationReasonModalVisible] = useState(false);
@@ -129,7 +135,14 @@ const Users = () => {
   const [districts, setDistricts] = useState([]);
   const [addressCoordinates, setAddressCoordinates] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
-  const [activeTab, setActiveTab] = useState('list');
+  // The tab lives in the URL (`?tab=`, the SalesCompensation.js pattern), so a
+  // tab is linkable: the Slack alert links `?tab=driver-reports&case=<id>`. A
+  // tab this user is not shown falls back to List rather than a blank page.
+  const canReviewSharedPlaces = useAuthStore().hasPermission('can_review_shared_places');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const renderedTabs = ['list', 'map', 'grouped-addresses', ...(canReviewSharedPlaces ? ['driver-reports'] : [])];
+  const activeTab = renderedTabs.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'list';
+  const setActiveTab = (key) => setSearchParams({ tab: key });
   const responsive = useResponsive();
   const [createForm] = Form.useForm();
   const [addressForm] = Form.useForm();
@@ -426,6 +439,12 @@ const Users = () => {
     } finally {
       setUserPrepaymentHistoryLoading(false);
     }
+  };
+
+  // A return or an undo moves the prepayment balance and the COD figures beside it.
+  const refreshAfterPayout = () => {
+    fetchUserPrepaymentHistory(selectedUser);
+    fetchUserCodStatement(selectedUser);
   };
 
   const fetchUserCart = async (user) => {
@@ -804,6 +823,7 @@ const Users = () => {
     setNotificationSettingsError('');
     setUserCodStatement(null);
     setUserPrepaymentHistory(null);
+    setReturnPrepaymentOpen(false);
     setUserCart(null);
     fetchUserAddresses(user.id);
     fetchUserNotificationSettings(user.id);
@@ -1141,6 +1161,17 @@ const Users = () => {
             // estate, which must not run on every Users page load.
             children: activeTab === 'grouped-addresses' ? <GroupedAddressesPanel /> : null,
           },
+          // Shared-place cases: admins only (can_review_shared_places), lazy like the two above.
+          ...(canReviewSharedPlaces ? [{
+            key: 'driver-reports',
+            label: (
+              <Space>
+                <AlertOutlined />
+                {t('ui.users.shared_place_reports.tab', 'Driver reports')}
+              </Space>
+            ),
+            children: activeTab === 'driver-reports' ? <SharedPlaceReportsPanel onViewUser={openUserDetailById} /> : null,
+          }] : []),
         ]}
       />
 
@@ -1454,15 +1485,33 @@ const Users = () => {
                 size="small"
                 style={{ marginBottom: 12 }}
                 extra={(
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => navigate(`/staff/prepayments?customer_id=${selectedUser.id}`)}
-                  >
-                    {t('ui.users.view_full_ledger', 'View full ledger')} →
-                  </Button>
+                  <Space size="small">
+                    {userPrepaymentHistory?.can_return_prepayment && (
+                      <Button size="small" type="primary" onClick={() => setReturnPrepaymentOpen(true)}>
+                        {t('ui.prepayments.return_button', 'Return prepayment')}
+                      </Button>
+                    )}
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => navigate(`/staff/prepayments?customer_id=${selectedUser.id}`)}
+                    >
+                      {t('ui.users.view_full_ledger', 'View full ledger')} →
+                    </Button>
+                  </Space>
                 )}
               >
+                <PayoutRows payouts={userPrepaymentHistory?.payouts} onChanged={refreshAfterPayout} />
+                {/* Mounted only while open: a fresh form (and the balance of THIS open) every time. */}
+                {returnPrepaymentOpen && (
+                  <ReturnPrepaymentModal
+                    open
+                    customerId={selectedUser.id}
+                    freeBalance={userPrepaymentHistory?.available_prepayment_balance || 0}
+                    onClose={() => setReturnPrepaymentOpen(false)}
+                    onDone={refreshAfterPayout}
+                  />
+                )}
                 {userPrepaymentHistoryLoading ? (
                   <div style={{ textAlign: 'center', padding: '12px 0' }}>
                     {t('ui.common.loading', 'Loading...')}
@@ -1485,6 +1534,11 @@ const Users = () => {
                             {row.voided_at && (
                               <Tag color="red" style={{ marginTop: 2 }}>
                                 {t('ui.prepayments.voided', 'Voided')}
+                              </Tag>
+                            )}
+                            {Number(row.returned_amount) > 0 && (
+                              <Tag color="orange" style={{ marginTop: 2 }}>
+                                {t('ui.prepayments.returned', 'Returned')}
                               </Tag>
                             )}
                           </Space>

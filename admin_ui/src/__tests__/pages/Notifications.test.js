@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import Notifications from '../../pages/Notifications';
@@ -74,5 +74,38 @@ describe('Notifications page', () => {
     expect(await screen.findByText('Total Campaigns')).toBeInTheDocument();
     expect(await screen.findByText('Retention Push')).toBeInTheDocument();
     expect(screen.getAllByText('Actions').length).toBeGreaterThan(0);
+  });
+
+  // The wire contract the backend integration tests replay: the picked moment travels as the exact
+  // `toISOString()` string ("...T09:00:00.000Z"), never as local wall-clock digits.
+  it('sends the picked schedule as the exact toISOString() instant when a draft is saved', async () => {
+    adminService.getNotificationCampaign.mockResolvedValue({
+      id: 1,
+      name: 'Retention Push',
+      template_id: null,
+      notification_type: 'delivery_reminder',
+      channel: 'telegram',
+      subject: '',
+      content: 'Hi',
+      target_audience: 'all_customers',
+      target_segment_id: null,
+      specific_user_ids: [],
+      priority: 'normal',
+      scheduled_at: '2026-11-30T14:00:00+05:00',
+    });
+    adminService.updateNotificationCampaign.mockResolvedValue({ id: 1 });
+
+    render(<Notifications />, { wrapper: createWrapper() });
+    await screen.findByText('Retention Push');
+    const row = screen.getByText('Retention Push').closest('tr');
+    fireEvent.click(row.querySelector('button'));
+    fireEvent.click(await screen.findByText('Edit'));
+    fireEvent.click(await screen.findByRole('button', { name: /save draft/i }));
+
+    await waitFor(() => expect(adminService.updateNotificationCampaign).toHaveBeenCalledTimes(1));
+    const [campaignId, payload] = adminService.updateNotificationCampaign.mock.calls[0];
+    expect(campaignId).toBe(1);
+    expect(payload.scheduled_at).toBe('2026-11-30T09:00:00.000Z');
+    expect(payload.name).toBe('Retention Push');
   });
 });

@@ -3,7 +3,7 @@ Orders Pool Handler for Staff Bot
 Shows unassigned orders available for pickup by delivery persons.
 """
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
@@ -349,23 +349,11 @@ class OrdersPoolHandler(BaseHandler):
                 error_code = getattr(response, 'error_code', None)
                 if error_code == 'BOTTLE_SESSION_REQUIRED':
                     # Driver has no bottle session — offer to start one or join a colleague's
-                    keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(
-                            i18n.get('staff.bottles.start_session', language),
-                            callback_data='bottles_start_session',
-                        )],
-                        [InlineKeyboardButton(
-                            i18n.get('staff.bottles.join_session', language),
-                            callback_data='bottles_join_session',
-                        )],
-                        [InlineKeyboardButton(
-                            i18n.get('staff.back', language),
-                            callback_data='staff_new_orders',
-                        )],
-                    ])
                     await query.edit_message_text(
                         f"⚠️ {i18n.get('staff.bottles.session_required_to_accept', language)}",
-                        reply_markup=keyboard,
+                        reply_markup=DeliveryKeyboards.session_required_remedy(
+                            language, back_callback='staff_new_orders'
+                        ),
                         parse_mode='HTML',
                     )
                     return

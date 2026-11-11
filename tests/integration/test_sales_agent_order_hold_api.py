@@ -67,7 +67,7 @@ from tests.integration.test_staff_sales_visits_api import (
 from tests.unit.test_order_tasks_auto_confirm import _aged_cash_order
 from tests.unit.test_outlet_dedupe import FAR, PIN, _customer
 from tests.unit.test_sales_agent_role import make_sales_agent_user
-from tests.unit.test_sales_agent_tasks import _spy
+from tests.unit.test_sales_agent_tasks import IN_APP_ACCEPTED, _spy
 
 pytestmark = pytest.mark.integration
 
@@ -313,7 +313,7 @@ def test_t_hold_2_the_alert_reaches_every_admin_and_manager_in_app_with_no_amoun
     """T-HOLD-2, the task half: one IN_APP SYSTEM_ALERT per active admin and manager, naming the
     agent, the outlet, the order number and the queue's path, and no money (C11)."""
     _seed_backend_rows(db, ALERT_SUBJECT, ALERT_CONTENT)
-    in_app = _spy(monkeypatch, NotificationService, "send_notification")
+    in_app = _spy(monkeypatch, NotificationService, "send_notification", result=IN_APP_ACCEPTED)
 
     result = sales_agent_tasks.notify_managers_agent_order_awaiting_approval.run(held.order_id)
 
@@ -323,17 +323,21 @@ def test_t_hold_2_the_alert_reaches_every_admin_and_manager_in_app_with_no_amoun
     for _args, kwargs in in_app:
         assert kwargs["channels"] == [NotificationChannel.IN_APP]
         assert kwargs["notification_type"] == NotificationType.SYSTEM_ALERT
+        alert = (
+            f"🕒 Sardor Agent placed another order today for {held.outlet.name} ({held.order_number}). "
+            f"Approve or reject it at {ORDER_APPROVALS_PATH}"
+        )
+        # `title` / `message` are what the stored notification row reads: the alert itself.
         assert kwargs["template_data"] == {
             "order_id": held.order_id,
             "order_number": held.order_number,
             "outlet_id": held.outlet.id,
+            "title": "Agent order awaiting approval",
+            "message": alert,
         }
         override = kwargs["template_override"]
         assert override.subject == "Agent order awaiting approval"
-        assert override.content == (
-            f"🕒 Sardor Agent placed another order today for {held.outlet.name} ({held.order_number}). "
-            f"Approve or reject it at {ORDER_APPROVALS_PATH}"
-        )
+        assert override.content == alert
         assert str(int(total)) not in override.content
 
 

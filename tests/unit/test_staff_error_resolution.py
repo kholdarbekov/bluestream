@@ -16,6 +16,8 @@ def copy(monkeypatch):
         "staff.test.plain": "Plain copy.",
         "staff.test.detail": "Has {available} of {required}.",
         "staff.test.money": "Owes {amount}.",
+        "staff.test.full": "Only {available} full.",
+        "staff.test.empty": "Only {available} empty.",
         "staff.currency.uzs": "UZS",
     }
     monkeypatch.setitem(i18n.translations, "en", {**i18n.translations.get("en", {}), **table})
@@ -40,6 +42,28 @@ def test_detail_copy_falls_back_to_plain_key_without_details(copy, monkeypatch):
     )
     for details in (None, {}, {"available": 4}):
         assert _handler()._resolve_api_error_message("en", "x", 400, "TEST_CODE", details=details) == "Plain copy."
+
+
+def test_detail_copy_applies_only_when_the_named_field_holds_its_value(copy, monkeypatch):
+    """One code, two sentences: the backend's `kind` picks one. A refusal without
+    it, or with another value, falls through to the next spec and then the plain key."""
+    monkeypatch.setitem(BaseHandler.API_ERROR_CODE_KEY_MAP, "TEST_CODE", "staff.test.plain")
+    monkeypatch.setitem(
+        BaseHandler.API_ERROR_DETAIL_COPY,
+        "TEST_CODE",
+        (
+            ErrorDetailCopy("staff.test.full", {"available": "available"}, when={"kind": "full"}),
+            ErrorDetailCopy("staff.test.empty", {"available": "available"}, when={"kind": "empty"}),
+        ),
+    )
+
+    def resolve(details):
+        return _handler()._resolve_api_error_message("en", "x", 400, "TEST_CODE", details=details)
+
+    assert resolve({"kind": "full", "available": 5}) == "Only 5 full."
+    assert resolve({"kind": "empty", "available": 2}) == "Only 2 empty."
+    assert resolve({"available": 5}) == "Plain copy."
+    assert resolve({"kind": "other", "available": 5}) == "Plain copy."
 
 
 def test_money_format_is_applied(copy):
@@ -113,6 +137,11 @@ def test_error_copy_keys_cover_every_target():
         assert {spec.key for spec in specs} <= keys
     for _emoji, label, _callback in BaseHandler.API_ERROR_REMEDY_BUTTONS.values():
         assert label in keys
+    for build, label_keys in BaseHandler.API_ERROR_REMEDY_KEYBOARDS.values():
+        assert set(label_keys) <= keys
+        # The listed keys are the ones the keyboard really draws, so /health checks what drivers read.
+        drawn = [button.text for row in build("en").inline_keyboard for button in row]
+        assert drawn == [i18n.get(key, "en") for key in label_keys]
 
 
 def _callbacks(markup):

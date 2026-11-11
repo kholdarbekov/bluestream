@@ -14,6 +14,9 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
+import LinkAccountsConfirm from './LinkAccountsConfirm';
+import { useAuthStore } from '../stores/authStore';
+import { SHARED_PLACE_CASES_KEY } from '../utils/constants';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -69,6 +72,7 @@ export default function LinkedAccountsPanel({ user }) {
   const { t } = useTranslation('users');
   const queryClient = useQueryClient();
   const userId = user?.id;
+  const canManage = useAuthStore().hasPermission('can_manage_users');
 
   // action: { kind: 'unlink' | 'link' | 'dismiss', payload }
   // "Same physical place" is deliberately NOT here: place groups are ownerless
@@ -107,6 +111,9 @@ export default function LinkedAccountsPanel({ user }) {
   const invalidateLinkedData = () => {
     queryClient.invalidateQueries({ queryKey: ['linkedAccounts', userId] });
     queryClient.invalidateQueries({ queryKey: ['linkSuggestions', userId] });
+    // An open shared-place case reads the links (its facts, move sources and what B/C can verify), as does
+    // the badge; LinkAccountsConfirm does the same after a link.
+    queryClient.invalidateQueries({ queryKey: SHARED_PLACE_CASES_KEY });
   };
 
   const unlinkMutation = useMutation({
@@ -124,21 +131,6 @@ export default function LinkedAccountsPanel({ user }) {
       }
       message.success(t('ui.users.linked_accounts.unlink_success', 'Account unlinked'));
       closeAction();
-      invalidateLinkedData();
-    },
-    onError: (error) => {
-      message.error(errorMessageOf(error, t('ui.users.linked_accounts.action_failed', 'Action failed')));
-    },
-  });
-
-  const linkMutation = useMutation({
-    mutationFn: ({ secondaryUserId, reason: linkReason }) =>
-      adminService.linkAccounts(userId, secondaryUserId, linkReason),
-    onSuccess: () => {
-      message.success(t('ui.users.linked_accounts.link_success', 'Accounts linked'));
-      closeAction();
-      setManualResults([]);
-      setManualSearch('');
       invalidateLinkedData();
     },
     onError: (error) => {
@@ -188,8 +180,6 @@ export default function LinkedAccountsPanel({ user }) {
     }
     if (action.kind === 'unlink') {
       unlinkMutation.mutate({ memberId: action.member.id, reason: reason.trim() });
-    } else if (action.kind === 'link') {
-      linkMutation.mutate({ secondaryUserId: action.candidate.id, reason: reason.trim() });
     } else if (action.kind === 'dismiss') {
       dismissMutation.mutate(action.suggestionUserId);
     }
@@ -197,7 +187,6 @@ export default function LinkedAccountsPanel({ user }) {
 
   const modalIsPending =
     (action?.kind === 'unlink' && unlinkMutation.isPending) ||
-    (action?.kind === 'link' && linkMutation.isPending) ||
     (action?.kind === 'dismiss' && dismissMutation.isPending);
 
   return (
@@ -217,7 +206,7 @@ export default function LinkedAccountsPanel({ user }) {
             renderItem={(member) => (
               <List.Item
                 key={member.id}
-                actions={[
+                actions={!canManage ? [] : [
                   <Button
                     key="unlink"
                     size="small"
@@ -270,7 +259,7 @@ export default function LinkedAccountsPanel({ user }) {
             renderItem={(suggestion) => (
               <List.Item
                 key={suggestion.user_id}
-                actions={[
+                actions={!canManage ? [] : [
                   <Button
                     key="link"
                     size="small"
@@ -322,6 +311,7 @@ export default function LinkedAccountsPanel({ user }) {
         <Text strong>
           {t('ui.users.linked_accounts.manual_title', 'Link another account')}
         </Text>
+        {canManage && (
         <Space style={{ marginTop: 8, marginBottom: 8 }}>
           <Input
             value={manualSearch}
@@ -333,6 +323,7 @@ export default function LinkedAccountsPanel({ user }) {
             {t('ui.users.linked_accounts.find', 'Find')}
           </Button>
         </Space>
+        )}
         {manualResults.length > 0 && (
           <List
             size="small"
@@ -340,7 +331,7 @@ export default function LinkedAccountsPanel({ user }) {
             renderItem={(candidate) => (
               <List.Item
                 key={candidate.id}
-                actions={[
+                actions={!canManage ? [] : [
                   <Button
                     key="link"
                     size="small"
@@ -361,17 +352,27 @@ export default function LinkedAccountsPanel({ user }) {
         )}
       </div>
 
+      <LinkAccountsConfirm
+        userId={userId}
+        candidate={action?.kind === 'link' ? action.candidate : null}
+        open={action?.kind === 'link'}
+        onClose={closeAction}
+        onLinked={() => {
+          closeAction();
+          setManualResults([]);
+          setManualSearch('');
+        }}
+      />
+
       <ActionModal
-        open={!!action}
+        open={action?.kind === 'unlink' || action?.kind === 'dismiss'}
         title={
           action?.kind === 'unlink'
             ? t(
                 'ui.users.linked_accounts.unlink_title',
                 `Unlink ${action ? `${action.member.first_name} ${action.member.last_name}` : ''} from this customer?`
               )
-            : action?.kind === 'link'
-              ? t('ui.users.linked_accounts.link_title', 'Link this account?')
-              : t('ui.users.linked_accounts.dismiss_title', `Mark ${action?.name || ''} as a different person?`)
+            : t('ui.users.linked_accounts.dismiss_title', `Mark ${action?.name || ''} as a different person?`)
         }
         showReasonField={action?.kind !== 'dismiss'}
         reasonValue={reason}

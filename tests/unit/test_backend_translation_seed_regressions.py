@@ -217,6 +217,23 @@ def test_the_delivery_page_notes_action_is_seeded_as_the_page_writes_it():
     )
 
 
+def test_the_delivery_page_no_bottle_trip_refusal_is_seeded_as_the_page_writes_it():
+    """Spec A9: an admin status move skips the bottle count but still needs the driver on a bottle trip. The
+    page answers BOTTLE_SESSION_REQUIRED in the admin's language, not with the backend's English driver text."""
+    _assert_seeded_as_the_delivery_page_writes_it(
+        {
+            "ui.delivery.status_error.BOTTLE_SESSION_REQUIRED": {
+                "en": "This driver has no open bottle session. Ask them to open one or join a colleague, "
+                "then try again.",
+                "uz": "Bu haydovchida ochiq idish sessiyasi yo'q. Undan sessiya ochishini yoki hamkasbining "
+                "sessiyasiga qo'shilishini so'rang, so'ng qayta urinib ko'ring.",
+                "ru": "У этого водителя нет открытой сессии по таре. Попросите его открыть сессию или "
+                "присоединиться к коллеге, затем повторите попытку.",
+            },
+        }
+    )
+
+
 def test_the_dispatch_map_says_the_orders_tag_sentence_from_the_same_row():
     """F8: the popup on a "needs a new date" pin says why, in the Orders tag's own sentence and
     from its own row, `ui.orders.delivery_failed_needs_new_date`. A `ui.dispatch.*` twin would

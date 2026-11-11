@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
@@ -15,6 +15,7 @@ from business_app import db
 from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
+    CustomerCreditPayout,
     DriverCashHandoff,
     DriverCashSession,
     Payment,
@@ -32,6 +33,39 @@ from shared.enums import (
 from shared.staff_constants import RECONCILIATION_RISK_FLAGS
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 from business_app.utils.local_windows import parse_date_range
+
+
+class CashFigures(NamedTuple):
+    """A driver cash session's money, the one set of figures every reader and the close rule share.
+
+    ``gross`` is what the driver collected (``expected_cash``), ``on_hand`` what he still holds after the
+    prepayment he handed back from this trip (``expected_cash_on_hand``), ``handed_in`` what he has handed in
+    (unvoided handoffs, ``declared_cash``).
+    """
+
+    gross: Decimal
+    on_hand: Decimal
+    handed_in: Decimal
+
+    @property
+    def remaining_to_hand_in(self) -> Decimal:
+        """What the driver still owes the office. Negative when he handed in more than he holds (unclamped)."""
+        return self.on_hand - self.handed_in
+
+    @property
+    def handed_back(self) -> Decimal:
+        """What the driver paid customers back out of this trip's cash (live current-trip payouts): gross − on hand."""
+        return self.gross - self.on_hand
+
+    @classmethod
+    def from_session(cls, session: DriverCashSession) -> "CashFigures":
+        """The figures as ``refresh_expected_cash`` last stored them on the row."""
+        to_decimal = DriverReconciliationService._to_decimal
+        return cls(
+            gross=to_decimal(session.expected_cash),
+            on_hand=to_decimal(session.expected_cash_on_hand),
+            handed_in=to_decimal(session.declared_cash or 0),
+        )
 
 
 class DriverReconciliationService:
@@ -72,6 +106,8 @@ class DriverReconciliationService:
         DriverCashSessionStatus.OVERDUE.value,
         DriverCashSessionStatus.FORCE_CLOSED.value,
     }
+    # The sessions the hourly reminder run messages a driver about.
+    REMINDED_STATUSES = (DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE)
 
     @staticmethod
     def _to_decimal(value: Any) -> Decimal:
@@ -217,11 +253,9 @@ class DriverReconciliationService:
         driver = session.driver_user
         events = list(session.cash_collection_events or []) if include_events else []
         stats = event_stats or {}
-        expected_on_hand = self._to_decimal(session.expected_cash_on_hand)
-        cumulative_declared = self._to_decimal(session.declared_cash)
-        remaining = expected_on_hand - cumulative_declared
-        if remaining < Decimal("0.00"):
-            remaining = Decimal("0.00")
+        figures = CashFigures.from_session(session)
+        cumulative_declared = figures.handed_in
+        remaining = max(Decimal("0.00"), figures.remaining_to_hand_in)
         payload.update(
             {
                 "driver_name": driver.full_name if driver else None,
@@ -351,29 +385,77 @@ class DriverReconciliationService:
         if status not in allowed:
             raise ValidationError(f"Cannot {operation} session with current status '{status}'")
 
+    def find_active_session(
+        self,
+        driver_user_id: int,
+        *,
+        for_update: bool = False,
+    ) -> Optional[DriverCashSession]:
+        """The driver's current not-yet-closed cash session (OPEN, PARTIAL or OVERDUE), or None. Creates nothing.
+
+        ``for_update`` takes the session row lock every writer of an active session shares (FOR NO KEY
+        UPDATE, re-read from the database): the driver's handoff, verify, resolve, force-close and a
+        prepayment return from this trip's cash. It is the LAST lock in the payout's order (credit events →
+        contract accounts → this row). The handoff, verify, resolve and force-close take only this one, so
+        none of them can form a cycle with the payout.
+
+        The collection engine CAN. ``CashCollectionService.post_collection`` (and ``reverse_collection_event``)
+        locks this row (``lock_session``) to refresh it through ``refresh_expected_cash``, and only afterwards,
+        in its ring-3 sweep, locks the customer cluster's credit events (``_locked_cluster_credit_events``): the
+        payout's order reversed. A surplus collection from customer X by driver D that reserves against X's
+        pending cash order, racing a return for X from D's current trip, can deadlock; Postgres then aborts
+        one of the two (40P01, a 500 for that side). Money is safe: the aborted side rolls back whole. Rare and
+        retryable; reordering the frozen engine is an open owner decision.
+
+        A row this statement waited on and that the other writer then CLOSED no longer matches and is
+        dropped (None), even though that writer may already have opened the driver's next session: this
+        statement's snapshot predates it. ``get_or_create_session`` reads again before creating one.
+        """
+        query = DriverCashSession.query.filter(
+            DriverCashSession.driver_user_id == driver_user_id,
+            DriverCashSession.status.in_([DriverCashSessionStatus(status) for status in sorted(self.ACTIVE_STATUSES)]),
+        ).order_by(DriverCashSession.session_started_at.desc(), DriverCashSession.id.desc())
+        if for_update:
+            query = query.with_for_update(key_share=True).populate_existing()
+        return query.first()
+
+    def lock_session(self, session_id: int) -> Optional[DriverCashSession]:
+        """Session ``session_id`` under the same row lock as ``find_active_session(for_update=True)``, or None."""
+        return (
+            DriverCashSession.query.filter(DriverCashSession.id == session_id)
+            .with_for_update(key_share=True)
+            .populate_existing()
+            .first()
+        )
+
     def get_or_create_session(
         self,
         *,
         driver_user_id: int,
+        for_update: bool = False,
+        refresh: bool = True,
     ) -> DriverCashSession:
+        """The driver's active session, created when he has none, with its figures refreshed.
+
+        The refresh computes its sums under the session row lock (``lock_session``, or the caller's
+        ``for_update`` read): sums read before a concurrent writer of this row commits (a prepayment return
+        from this trip's cash) would be written back after it, storing a stale on hand. A session created
+        here is new and invisible to everyone else, so it needs no lock. ``refresh=False`` is for
+        ``post_collection``, which refreshes the session itself at its end, under that lock and after its
+        payment locks: refreshing here would take the session lock ahead of them.
+        """
         driver = User.query.get(driver_user_id)
         if not driver:
             raise NotFoundError("Driver not found")
 
-        session = (
-            DriverCashSession.query.filter(
-                DriverCashSession.driver_user_id == driver_user_id,
-                DriverCashSession.status.in_(
-                    [
-                        DriverCashSessionStatus.OPEN,
-                        DriverCashSessionStatus.PARTIAL,
-                        DriverCashSessionStatus.OVERDUE,
-                    ]
-                ),
-            )
-            .order_by(DriverCashSession.session_started_at.desc(), DriverCashSession.id.desc())
-            .first()
-        )
+        session = self.find_active_session(driver_user_id, for_update=for_update)
+        if not session and for_update:
+            # A locked read that waited on a session another writer then CLOSED drops that row on its re-check,
+            # and its snapshot predates the next session that writer opened. A new statement sees that one;
+            # creating a session from the stale read would collide with it (uq_driver_cash_sessions_driver_active).
+            session = self.find_active_session(driver_user_id, for_update=True)
+        # Read under the lock, or about to be our own INSERT, which no one else can see yet.
+        locked = for_update or session is None
         if not session:
             started_at = self._now_utc()
             warning_due_at = self._build_warning_due_at(started_at)
@@ -388,7 +470,10 @@ class DriverReconciliationService:
             db.session.add(session)
             db.session.flush()
 
-        self.refresh_expected_cash(session)
+        if refresh:
+            if not locked:
+                session = self.lock_session(session.id)
+            self.refresh_expected_cash(session)
         return session
 
     def _sum_handoffs(self, session: DriverCashSession) -> Decimal:
@@ -405,8 +490,29 @@ class DriverReconciliationService:
         )
         return self._to_decimal(total)
 
-    def refresh_expected_cash(self, session: DriverCashSession) -> DriverCashSession:
-        gross_cash_collected = (
+    def _sum_live_payouts(self, session: DriverCashSession) -> Decimal:
+        """Prepayment the driver handed back to customers out of THIS session's cash: the live
+        ``driver_current_session`` payouts recorded against it."""
+        if session.id is None:
+            return Decimal("0.00")
+        total = (
+            db.session.query(func.coalesce(func.sum(CustomerCreditPayout.amount), 0))
+            .filter(
+                CustomerCreditPayout.driver_cash_session_id == session.id,
+                CustomerCreditPayout.paid_by == CustomerCreditPayout.PAID_BY_DRIVER_CURRENT,
+                CustomerCreditPayout.is_live,
+            )
+            .scalar()
+        )
+        return self._to_decimal(total)
+
+    def cash_figures(self, session: DriverCashSession) -> CashFigures:
+        """The session's figures summed live from its rows. Mutates nothing (a preview may call it).
+
+        on_hand = gross − live current-trip payouts: a prepayment handed back from the trip's cash leaves
+        the driver's pocket, while what he collected stays what it was.
+        """
+        gross = self._to_decimal(
             db.session.query(func.coalesce(func.sum(CashCollectionEvent.amount), 0))
             .filter(
                 CashCollectionEvent.driver_cash_session_id == session.id,
@@ -414,7 +520,40 @@ class DriverReconciliationService:
             )
             .scalar()
         )
-        gross = self._to_decimal(gross_cash_collected)
+        return CashFigures(
+            gross=gross,
+            on_hand=gross - self._sum_live_payouts(session),
+            handed_in=self._sum_handoffs(session),
+        )
+
+    @staticmethod
+    def session_closes(*, handed_in: Decimal, on_hand: Decimal, has_live_payout: bool) -> bool:
+        """THE close rule: a session closes once what was handed in covers what the driver holds.
+
+        An empty session (nothing held, nothing handed in) stays open, unless a prepayment return from
+        this trip's cash is what emptied it: then it closes at zero, because the driver has nothing left
+        to submit. ``submit_session`` and ``apply_payout_effect`` both decide through this one rule.
+        """
+        zero = Decimal("0.00")
+        return handed_in >= on_hand and (on_hand > zero or handed_in > zero or has_live_payout)
+
+    def _refresh_and_closes(self, session: DriverCashSession) -> Tuple[CashFigures, bool]:
+        """Refresh the session's stored figures, then (the figures, whether ``session_closes`` says it closes now).
+
+        The ONE place a handoff and a prepayment return ask the close rule, so they cannot ask it differently.
+        The live-payout test reads the stored figures (gross − on hand), so the payout SUM runs once, in the refresh.
+        """
+        self.refresh_expected_cash(session)
+        figures = CashFigures.from_session(session)
+        closes = self.session_closes(
+            handed_in=figures.handed_in, on_hand=figures.on_hand, has_live_payout=figures.handed_back > Decimal("0.00")
+        )
+        return figures, closes
+
+    def refresh_expected_cash(self, session: DriverCashSession) -> DriverCashSession:
+        figures = self.cash_figures(session)
+        gross = figures.gross
+        on_hand = figures.on_hand
         last_cash_activity_at = (
             db.session.query(func.max(CashCollectionEvent.occurred_at))
             .filter(
@@ -427,7 +566,7 @@ class DriverReconciliationService:
 
         session.expected_cash = gross
         session.gross_cash_collected = gross
-        session.expected_cash_on_hand = gross
+        session.expected_cash_on_hand = on_hand
         session.last_cash_activity_at = last_cash_activity_at
         session.warning_due_at = session.warning_due_at or self._build_warning_due_at(session.session_started_at)
         session.submission_due_at = session.submission_due_at or session.warning_due_at
@@ -435,14 +574,17 @@ class DriverReconciliationService:
         # declared_cash is the running sum of unvoided handoffs. We keep the
         # column on the session row for fast reads and admin reports; this
         # method is the single source of truth that keeps it in sync.
-        handoff_total = self._sum_handoffs(session)
+        # Every variance is measured against what the driver HOLDS (on_hand), the
+        # figure verify / resolve / force-close measure against too: measured
+        # against gross, the next refresh would overwrite a verified variance.
+        handoff_total = figures.handed_in
         session.declared_cash = handoff_total if handoff_total > Decimal("0.00") else None
         if session.declared_cash is not None:
-            session.declared_variance = handoff_total - gross
+            session.declared_variance = handoff_total - on_hand
         else:
             session.declared_variance = Decimal("0.00")
         if session.verified_cash is not None:
-            session.verified_variance = self._to_decimal(session.verified_cash) - gross
+            session.verified_variance = self._to_decimal(session.verified_cash) - on_hand
         else:
             session.verified_variance = Decimal("0.00")
 
@@ -473,17 +615,31 @@ class DriverReconciliationService:
         balance (``expected_cash_on_hand - already-handed-off``), so the
         "Submit expected cash" button always settles the remainder rather
         than re-stamping the full expected total.
+
+        It holds the session row lock (``for_update``) from the read to the
+        commit, so a prepayment return from this trip's cash recorded at the same
+        moment is either already in on_hand here or waits and sees this handoff.
+        If the session the driver was settling closed while this call waited (a
+        return that emptied it, his own earlier tap, an admin close), the handoff
+        is refused (409 ``RECONCILIATION_SESSION_CHANGED``): his figure belongs
+        to that trip, never to the empty one opened after it.
         """
-        session = self.get_or_create_session(driver_user_id=driver_user_id)
+        settling = self.find_active_session(driver_user_id)
+        session = self.get_or_create_session(driver_user_id=driver_user_id, for_update=True)
+        if settling is not None and session.id != settling.id:
+            raise ConflictError(
+                "Your cash session closed while this handoff was being recorded; nothing was recorded",
+                error_code="RECONCILIATION_SESSION_CHANGED",
+            )
         self._assert_session_transition(session, operation="submit")
 
         now = self._now_utc()
         self.refresh_expected_cash(session)
-        expected_on_hand = self._to_decimal(session.expected_cash_on_hand)
-        prior_declared = self._to_decimal(session.declared_cash)
+        figures = CashFigures.from_session(session)
+        prior_declared = figures.handed_in
 
         if declared_cash is None:
-            target_amount = expected_on_hand - prior_declared
+            target_amount = figures.remaining_to_hand_in
         else:
             target_amount = self._to_decimal(declared_cash)
 
@@ -517,21 +673,14 @@ class DriverReconciliationService:
             db.session.flush()
 
         # Recompute declared_cash / variance from the now-current handoff set.
-        self.refresh_expected_cash(session)
-        cumulative_declared = self._to_decimal(session.declared_cash)
+        figures, closes_session = self._refresh_and_closes(session)
+        expected_on_hand = figures.on_hand
+        cumulative_declared = figures.handed_in
 
         next_session: Optional[DriverCashSession] = None
-        closes_session = cumulative_declared >= expected_on_hand and (
-            expected_on_hand > Decimal("0.00") or cumulative_declared > Decimal("0.00")
-        )
 
         if closes_session:
-            session.status = DriverCashSessionStatus.SUBMITTED
-            session.submitted_at = now
-            session.session_ended_at = now
-            session.submitted_by_user_id = recorder_id
-            session.blocked_from_cod = False
-            session.block_reason = None
+            next_session = self._close_session(session, actor_user_id=recorder_id, now=now)
         else:
             # Partial handoff: keep the session active so the driver can
             # continue to settle the balance. The first partial moves OPEN/
@@ -539,14 +688,8 @@ class DriverReconciliationService:
             session.status = DriverCashSessionStatus.PARTIAL
             # Do not stamp submitted_at / session_ended_at / submitted_by:
             # those mark the close event, which has not happened yet.
-
-        session.risk_flags = self._build_risk_flags(session)
-        db.session.flush()
-
-        if closes_session:
-            next_session = self.get_or_create_session(driver_user_id=driver_user_id)
-            session._next_active_session = next_session
-        else:
+            session.risk_flags = self._build_risk_flags(session)
+            db.session.flush()
             session._next_active_session = None
 
         audit_logger.log_event(
@@ -573,6 +716,37 @@ class DriverReconciliationService:
         db.session.commit()
         return session
 
+    def _close_session(self, session: DriverCashSession, *, actor_user_id: int, now: datetime) -> DriverCashSession:
+        """Close ``session`` (SUBMITTED) and open the driver's next empty session, which it returns.
+
+        The one close transition, for a handoff that covers what the driver holds and for a prepayment
+        return that leaves him nothing to hand in. Flushes; never commits (the caller owns the transaction).
+        """
+        session.status = DriverCashSessionStatus.SUBMITTED
+        session.submitted_at = now
+        session.session_ended_at = now
+        session.submitted_by_user_id = actor_user_id
+        session.blocked_from_cod = False
+        session.block_reason = None
+        session.risk_flags = self._build_risk_flags(session)
+        db.session.flush()
+
+        next_session = self.get_or_create_session(driver_user_id=session.driver_user_id)
+        session._next_active_session = next_session
+        return next_session
+
+    def apply_payout_effect(self, session: DriverCashSession, *, actor_user_id: int) -> Optional[DriverCashSession]:
+        """After a prepayment return from this trip's cash was written against ``session`` (and flushed):
+        lower what the driver holds, and close the session when, by ``session_closes``, nothing is left
+        to hand in. Returns the driver's next session when it closed, else None. Never commits.
+
+        The caller holds the session row lock (the payout planner's lock 3).
+        """
+        _, closes = self._refresh_and_closes(session)
+        if closes:
+            return self._close_session(session, actor_user_id=actor_user_id, now=self._now_utc())
+        return None
+
     def verify_session(
         self,
         *,
@@ -582,9 +756,8 @@ class DriverReconciliationService:
         reason_code: str,
         notes: Optional[str] = None,
     ) -> DriverCashSession:
-        session = DriverCashSession.query.options(
-            joinedload(DriverCashSession.driver_user),
-        ).get(session_id)
+        # The session row lock: a verify can act on an ACTIVE session a current-trip return also locks.
+        session = self.lock_session(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")
         self._assert_session_transition(session, operation="verify")
@@ -643,7 +816,8 @@ class DriverReconciliationService:
         resolution_notes: str,
         verified_cash: Optional[Any] = None,
     ) -> DriverCashSession:
-        session = DriverCashSession.query.get(session_id)
+        # The session row lock: an OVERDUE session is still active, and a current-trip return locks it too.
+        session = self.lock_session(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")
         self._assert_session_transition(session, operation="resolve")
@@ -704,8 +878,11 @@ class DriverReconciliationService:
         The admin may optionally record the cash they physically counted, which
         stamps verified_cash / verified_variance the same way verify_session
         does. Existing handoffs and declared_cash are left intact.
+
+        It takes the session row lock first: the session is ACTIVE, so a
+        prepayment return from this trip's cash may be changing on_hand.
         """
-        session = DriverCashSession.query.get(session_id)
+        session = self.lock_session(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")
 
@@ -871,69 +1048,76 @@ class DriverReconciliationService:
     ) -> int:
         reference_time = self._as_aware_utc(reference_time) or self._now_utc()
         updated = 0
-        sessions = DriverCashSession.query.filter(
-            DriverCashSession.status == DriverCashSessionStatus.OPEN,
-        ).all()
-
-        for session in sessions:
-            self.refresh_expected_cash(session)
-            if session.submitted_at:
-                continue
-            if self._is_warning_due(session, reference_time=reference_time):
-                session.status = DriverCashSessionStatus.OVERDUE
-                session.blocked_from_cod = False
-                if session.block_reason == "reconciliation_overdue":
-                    session.block_reason = None
-                session.risk_flags = self._build_risk_flags(session)
-                updated += 1
-
-        if updated:
+        for session_id in self._session_ids_in((DriverCashSessionStatus.OPEN,)):
+            # The session lock first (MONEY-3): the figures below are summed under it, so a prepayment return
+            # from this trip's cash that commits meanwhile is not overwritten by a stale on hand. A session
+            # another writer closed while this one waited is skipped. Each session's lock is released (commit)
+            # before the next is taken, whether or not anything changed: the sweep holds one session row at a
+            # time, and none once it returns, so a driver's cash tap never waits on the sweep for long and the
+            # sweep never holds one session while it waits on another.
+            session = self.lock_session(session_id)
+            if session is not None and session.status == DriverCashSessionStatus.OPEN:
+                self.refresh_expected_cash(session)
+                if not session.submitted_at and self._is_warning_due(session, reference_time=reference_time):
+                    self._mark_overdue(session)
+                    updated += 1
             db.session.commit()
         return updated
+
+    def _session_ids_in(self, statuses: Tuple[DriverCashSessionStatus, ...]) -> List[int]:
+        """The ids of the sessions in ``statuses``, in id order: what a sweep walks, one session lock at a time."""
+        rows = (
+            db.session.query(DriverCashSession.id)
+            .filter(DriverCashSession.status.in_(statuses))
+            .order_by(DriverCashSession.id)
+            .all()
+        )
+        return [session_id for (session_id,) in rows]
+
+    def _mark_overdue(self, session: DriverCashSession) -> None:
+        """An OPEN session past its warning becomes OVERDUE: visible to managers, never blocking the driver's COD."""
+        session.status = DriverCashSessionStatus.OVERDUE
+        session.blocked_from_cod = False
+        if session.block_reason == "reconciliation_overdue":
+            session.block_reason = None
+        session.risk_flags = self._build_risk_flags(session)
 
     def get_sessions_due_for_reminder(
         self,
         *,
         reference_time: Optional[datetime] = None,
     ) -> List[Tuple[DriverCashSession, str]]:
+        """The sessions whose driver is due a reminder now, each with its stage.
+
+        Like ``mark_overdue_sessions``, it refreshes each session under its row lock (MONEY-3), marks a due OPEN
+        one OVERDUE, and commits before it locks the next: it returns holding no session row, so the reminders
+        are sent with none held.
+        """
         reference_time = self._as_aware_utc(reference_time) or self._now_utc()
         interval_minutes = int(current_app.config.get("COD_REMINDER_INTERVAL_MINUTES", 60))
-        sessions = (
-            DriverCashSession.query.options(
-                joinedload(DriverCashSession.driver_user),
-            )
-            .filter(
-                DriverCashSession.status.in_(
-                    [
-                        DriverCashSessionStatus.OPEN,
-                        DriverCashSessionStatus.OVERDUE,
-                    ]
-                ),
-            )
-            .all()
-        )
 
         due_sessions: List[Tuple[DriverCashSession, str]] = []
-        for session in sessions:
-            self.refresh_expected_cash(session)
-            if session.submitted_at:
-                continue
-
-            if session.last_reminder_at:
-                elapsed = reference_time - self._as_aware_utc(session.last_reminder_at)
-                if elapsed < timedelta(minutes=interval_minutes):
-                    continue
-
-            if self._is_warning_due(session, reference_time=reference_time):
-                if self._status_value(session.status) == DriverCashSessionStatus.OPEN.value:
-                    session.status = DriverCashSessionStatus.OVERDUE
-                    session.blocked_from_cod = False
-                    if session.block_reason == "reconciliation_overdue":
-                        session.block_reason = None
-                    session.risk_flags = self._build_risk_flags(session)
-                due_sessions.append((session, "overdue"))
+        for session_id in self._session_ids_in(self.REMINDED_STATUSES):
+            session = self.lock_session(session_id)
+            if session is not None and session.status in self.REMINDED_STATUSES:
+                self.refresh_expected_cash(session)
+                if self._reminder_due(session, reference_time=reference_time, interval_minutes=interval_minutes):
+                    if session.status == DriverCashSessionStatus.OPEN:
+                        self._mark_overdue(session)
+                    due_sessions.append((session, "overdue"))
+            db.session.commit()
 
         return due_sessions
+
+    def _reminder_due(self, session: DriverCashSession, *, reference_time: datetime, interval_minutes: int) -> bool:
+        """Not closed, not reminded within the last ``interval_minutes``, and past its warning."""
+        if session.submitted_at:
+            return False
+        if session.last_reminder_at:
+            elapsed = reference_time - self._as_aware_utc(session.last_reminder_at)
+            if elapsed < timedelta(minutes=interval_minutes):
+                return False
+        return self._is_warning_due(session, reference_time=reference_time)
 
     def send_due_reconciliation_reminders(
         self,
@@ -945,16 +1129,22 @@ class DriverReconciliationService:
         sent = 0
         failed = 0
         for session, stage in pending:
+            # Read again: no lock is held across a send, so the driver may have handed in everything while the
+            # messages before his were sent (each Telegram call can take 15 s). A closed trip gets no reminder.
+            db.session.refresh(session)
+            if session.status not in self.REMINDED_STATUSES or session.submitted_at:
+                continue
             try:
                 self._send_driver_reconciliation_reminder(session, stage=stage)
-                session.last_reminder_at = reference_time
-                session.reminder_stage = stage
-                sent += 1
             except Exception:
                 failed += 1
-
-        if sent:
+                continue
+            session.last_reminder_at = reference_time
+            session.reminder_stage = stage
+            # Committed per driver: the stamp's UPDATE holds the row until commit, and the next driver's
+            # Telegram call must not run under it. It writes these two columns only, never the cash figures.
             db.session.commit()
+            sent += 1
 
         return {"sent": sent, "failed": failed}
 

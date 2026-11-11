@@ -342,9 +342,10 @@ async def test_an_old_button_of_the_cancelled_stop_is_refused_after_the_card_was
 async def test_another_conversation_keeps_its_draft_when_the_stop_is_cancelled(monkeypatch):
     """A push is not a driver gesture. The driver is at the cancelled stop's cash prompt and has
     also opened "Different count" on a bottle transfer. The cancel clears the stop's own at-door
-    flow only: the transfer draft survives, and the count the driver types next still confirms
-    the transfer. The active-flow mirror goes: the transfer never set it (only the flows in
-    `flow_state.ACTIVE_FLOW_MARKER_KEYS` do), so nothing is left to hold pool offers back for."""
+    flow only: the transfer draft survives, and the two counts the driver types next (full
+    bottles, then empties) still confirm the transfer. The active-flow mirror goes: the transfer
+    never set it (only the flows in `flow_state.ACTIVE_FLOW_MARKER_KEYS` do), so nothing is left
+    to hold pool offers back for."""
     async with _driver_hook(monkeypatch) as (harness, post):
         driver, _card_id = await _at_the_door(harness, CANCELLED)
         confirmed = []
@@ -375,7 +376,8 @@ async def test_another_conversation_keeps_its_draft_when_the_stop_is_cancelled(m
         assert "staff_decline_suggestion_777" in delivered.callback_data()
 
         await harness.send(driver.text("5"))
-        assert confirmed == [{"confirmed_quantity": 5}]
+        await harness.send(driver.text("1"))
+        assert confirmed == [{"confirmed_full": 5, "confirmed_empty": 1}]
 
 
 async def test_a_collection_that_owns_the_flow_mirror_keeps_it_when_the_stop_is_cancelled(monkeypatch):

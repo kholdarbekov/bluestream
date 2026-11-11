@@ -126,16 +126,26 @@ class OrderCashEditService:
 
     # ---- gating metadata for the order-detail screen ----
     def get_edit_metadata(self, order: Order) -> Dict[str, Any]:
+        """The order detail's "Edit collected cash" flags.
+
+        ``collected_cash_edit_block_code`` says why an edit that would otherwise be open is not:
+        ``event_funds_prepayment_return`` when a live prepayment return drew on the order's cash event
+        (§4.3a, the same ``live_payout_ids_for_event`` read every correction guard uses), so the screen can
+        say "undo the return first". None otherwise, including when the window or the event count already
+        rules the edit out: undoing the return would not bring it back then.
+        """
         is_cod = order.payment_method == PaymentMethod.CASH
         delivered = order.status == OrderStatus.DELIVERED
         if not (is_cod and delivered):
             return {
                 "is_collected_cash_editable": False,
+                "collected_cash_edit_block_code": None,
                 "collected_cash_edit_window_remaining_hours": None,
                 "collected_cash_event_amount": None,
             }
         remaining: Optional[float] = None
         editable = True
+        block_code: Optional[str] = None
         delivered_at = delivered_at_utc(order)
         if delivered_at is not None:
             age = (datetime.now(timezone.utc) - delivered_at).total_seconds() / 3600.0
@@ -144,8 +154,12 @@ class OrderCashEditService:
         events = self._event_query(order.id).all()
         if len(events) != 1:
             editable = False
+        elif editable and self.cash_service.live_payout_ids_for_event(events[0].id):
+            editable = False
+            block_code = "event_funds_prepayment_return"
         return {
             "is_collected_cash_editable": bool(editable),
+            "collected_cash_edit_block_code": block_code,
             "collected_cash_edit_window_remaining_hours": (round(remaining, 1) if remaining is not None else None),
             # The edit adjusts this event; payment.amount_collected may be funded from
             # another source (card transfer, prepaid credit) and would seed a wrong figure.
@@ -217,6 +231,11 @@ class OrderCashEditService:
             projection = self.cash_service.simulate_event_amount_change(
                 event=event, new_amount=new_dec, order_id=order.id
             )
+            if projection["funding_payout_ids"]:
+                blocking.append(
+                    f"event_funds_prepayment_return: prepayment return(s) {projection['funding_payout_ids']} "
+                    "drew on this collection; undo the return first"
+                )
             applied_to_order = projection["applied_to_order"]
             projected_outstanding = projection["order_outstanding_after"]
             customer_credit_delta = projection["credit_after"] - projection["credit_before"]

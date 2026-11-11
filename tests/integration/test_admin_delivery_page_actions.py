@@ -429,3 +429,153 @@ def test_a_failed_row_is_handed_to_no_driver_by_any_admin_route(
     assert reassigned == []
     assert assigned == []
     assert _listed(client, admin_claim_headers)[failed_id]["can_assign"] is False
+
+
+# ---------------------------------------------------------------------------
+# Assign is an admin assignment (spec A5): attributed to the admin, never judged on bottles.
+# ---------------------------------------------------------------------------
+
+
+def _pool_row_with_bottles(db, sample_user, sample_product, quantity):
+    from tests.unit.test_staff_error_endpoints import _order_with_bottles
+
+    order = _order_with_bottles(db, sample_user, sample_product, quantity=quantity)
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.SCHEDULED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot="anytime",
+    )
+    db.session.add(delivery)
+    db.session.commit()
+    return delivery
+
+
+def test_admin_assign_without_driver_session_succeeds(
+    client, db, monkeypatch, admin_claim_headers, admin_user, sample_user, sample_product
+):
+    from business_app.tasks.notification_tasks import send_delivery_update_task
+    from business_app.utils.staff_order_info import build_staff_order_info
+    from tests.unit.test_staff_error_endpoints import _driver
+
+    monkeypatch.setitem(client.application.config, "BOTTLE_SESSION_ENFORCEMENT_STRICT", True)
+    driver = _driver(db, "+998901000861")  # no bottle session at all
+    driver.telegram_id = "861000861"
+    db.session.commit()
+    delivery = _pool_row_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery_id, driver_id = delivery.id, driver.id
+    assigned = _task_spy(monkeypatch, notify_staff_order_assigned, "delay")
+    updates = _task_spy(monkeypatch, send_delivery_update_task, "delay")
+
+    response = client.post(f"{ASSIGN}/{delivery_id}", json={"delivery_person_id": driver_id}, headers=admin_claim_headers)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["data"]["delivery"]["id"] == delivery_id
+    db.session.expire_all()
+    row = db.session.get(Delivery, delivery_id)
+    assert (row.status, row.delivery_person_id) == (DeliveryStatus.ASSIGNED, driver_id)
+    history = DeliveryStatusHistory.query.filter_by(delivery_id=delivery_id).one()
+    assert history.changed_by == admin_user.id
+    assert history.notes == "Assigned via admin_assign"
+    assert assigned == [(("861000861", build_staff_order_info(row)), {})]
+    assert updates == [((history.id,), {})]
+
+
+def test_admin_assign_to_short_driver_succeeds(
+    client, db, monkeypatch, admin_claim_headers, sample_user, sample_product
+):
+    from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
+    from shared.enums import DriverBottleSessionStatus
+    from tests.unit.test_staff_error_endpoints import _driver
+
+    monkeypatch.setitem(client.application.config, "BOTTLE_SESSION_ENFORCEMENT_STRICT", True)
+    driver = _driver(db, "+998901000862")
+    db.session.add(
+        DriverBottleSession(
+            driver_user_id=driver.id,
+            bottles_loaded=1,
+            bottles_collected_from_customers=9,
+            status=DriverBottleSessionStatus.OPEN,
+        )
+    )
+    db.session.commit()
+    delivery = _pool_row_with_bottles(db, sample_user, sample_product, quantity=8)
+    delivery_id, order_id, driver_id = delivery.id, delivery.order_id, driver.id
+
+    response = client.post(f"{ASSIGN}/{delivery_id}", json={"delivery_person_id": driver_id}, headers=admin_claim_headers)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    db.session.expire_all()
+    assert db.session.get(Delivery, delivery_id).delivery_person_id == driver_id
+    # 1 full on board cannot cover 8: the order is not bound to that truck (the progress guard late-binds).
+    assert DriverBottleSessionOrder.query.filter_by(order_id=order_id).count() == 0
+
+
+def test_admin_assign_logs_admin_assign_source(
+    client, db, monkeypatch, caplog, admin_claim_headers, sample_user, sample_product
+):
+    from business_app.tasks.notification_tasks import send_delivery_update_task
+    from tests.unit.test_staff_error_endpoints import _driver
+
+    driver = _driver(db, "+998901000863")
+    delivery = _pool_row_with_bottles(db, sample_user, sample_product, quantity=1)
+    delivery_id, driver_id = delivery.id, driver.id
+    _task_spy(monkeypatch, notify_staff_order_assigned, "delay")
+    _task_spy(monkeypatch, send_delivery_update_task, "delay")
+
+    logger = client.application.logger
+    logger.addHandler(caplog.handler)  # the app logger does not propagate to the root caplog hooks
+    caplog.set_level("INFO", logger=logger.name)
+    try:
+        response = client.post(
+            f"{ASSIGN}/{delivery_id}", json={"delivery_person_id": driver_id}, headers=admin_claim_headers
+        )
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert f"[ASSIGN] delivery={delivery_id} driver={driver_id} source=admin_assign" in caplog.text
+    assert "source=bot_self_accept" not in caplog.text
+    # The driver did not accept anything: no driver-attributed activity row.
+    from business_app.models.staff import StaffActivityLog
+
+    assert StaffActivityLog.query.filter_by(entity_type="delivery", entity_id=delivery_id).count() == 0
+
+
+def test_admin_assign_survives_a_failed_customer_update_enqueue(
+    client, db, monkeypatch, caplog, admin_claim_headers, sample_user, sample_product
+):
+    """The assignment is already committed when the customer update is queued; a broker failure must only
+    log a warning (AdminDeliveryService.assign_delivery's except arm), never turn the Assign into a 500."""
+    from business_app.tasks.notification_tasks import send_delivery_update_task
+    from tests.unit.test_delivery_service_business_rules import _patch_task_publish
+    from tests.unit.test_staff_error_endpoints import _driver
+
+    driver = _driver(db, "+998901000864")
+    delivery = _pool_row_with_bottles(db, sample_user, sample_product, quantity=1)
+    delivery_id, driver_id = delivery.id, driver.id
+    _task_spy(monkeypatch, notify_staff_order_assigned, "delay")
+
+    def broker_down(*args, **kwargs):
+        raise ConnectionError("broker unreachable")
+
+    _patch_task_publish(monkeypatch, send_delivery_update_task, "delay", broker_down)
+
+    logger = client.application.logger
+    logger.addHandler(caplog.handler)  # the app logger does not propagate to the root caplog hooks
+    caplog.set_level("WARNING", logger=logger.name)
+    try:
+        response = client.post(
+            f"{ASSIGN}/{delivery_id}", json={"delivery_person_id": driver_id}, headers=admin_claim_headers
+        )
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    db.session.expire_all()
+    row = db.session.get(Delivery, delivery_id)
+    assert (row.status, row.delivery_person_id) == (DeliveryStatus.ASSIGNED, driver_id)
+    assert (
+        f"Failed to enqueue assigned-delivery notification for delivery {delivery_id}: broker unreachable"
+        in caplog.text
+    )

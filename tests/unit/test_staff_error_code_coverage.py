@@ -14,7 +14,8 @@ BESPOKE = {
     "LOCATION_TOO_COARSE": "location.py coarse-location copy",
     "SALES_VISIT_ALREADY_OPEN": "visit.py resume offer (also mapped)",
     "BOTTLE_SESSION_ALREADY_OPEN": "bottle_collection.py /open short copy + session menu (also mapped, for join)",
-    "BOTTLE_SESSION_REQUIRED": "orders_pool.py accept: start/join-session buttons (also mapped)",
+    "BOTTLE_SESSION_REQUIRED": "start/join-session buttons (DeliveryKeyboards.session_required_remedy): orders_pool.py "
+    "accept, and base.py API_ERROR_REMEDY_KEYBOARDS for every other refusal (also mapped)",
     "STAFF_INVALID_INVITE_TOKEN": "start.py login refusal copy (also mapped)",
 }
 
@@ -29,6 +30,7 @@ _FALLBACK = " — backend-reason fallback applies"
 
 # Raised only on paths no staff-bot route reaches. One reason per line.
 NOT_STAFF_FACING: dict[str, str] = {
+    "BOTTLE_ADJUSTMENT_KEY_CONFLICT": f"{_NOT_ON_ROUTE} (admin bottle adjustment)",
     # Customer / admin auth (middleware/auth_middleware.py is used only by /auth/*; staff routes use
     # require_staff_roles, whose codes are mapped).
     "ACCESS_DENIED": f"{_NOT_ON_ROUTE} (auth_middleware.py:269 verify_user_ownership, used by no route)",
@@ -133,6 +135,22 @@ NOT_STAFF_FACING: dict[str, str] = {
     "ADMIN_REASON_TOO_LONG": f"{_NOT_ON_ROUTE} (order_service.py require_admin_reason: admin PUT "
     "/orders/<id>/status cancel/return, admin PUT /deliveries/<id> return)",
     "CASH_SESSION_ACTIVE_CONFLICT": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py:823: admin cash edit)",
+    # Admin prepayment return (spec 2026-11-10): prepayment_payout_service.py, admin
+    # /staff/cash-reconciliation/customers/<id>/prepayment-payouts[/preview] only.
+    "PAYOUT_AMOUNT_INVALID": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_AMOUNT_OR_TARGET": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_PAID_BY_INVALID": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_DRIVER_REQUIRED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_DRIVER_NOT_ALLOWED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_PAID_AT_INVALID": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_REASON_TOO_LONG": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_IDEMPOTENCY_KEY_REQUIRED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_IDEMPOTENCY_KEY_REUSED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_BODY_INVALID": f"{_NOT_ON_ROUTE} (api/admin.py json_body_as_sent: admin prepayment payout)",
+    "PAYOUT_BLOCKED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "PAYOUT_UNDO_BLOCKED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
+    "EVENT_FUNDS_PREPAYMENT_RETURN": f"{_NOT_ON_ROUTE} (cash_collection_service.py: admin collected-cash correction)",
     "CASH_SESSION_NOT_FORCE_CLOSEABLE": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py:729: admin force-close)",
     "INVALID_REPORT_TYPE": f"{_NOT_ON_ROUTE} (admin_report_service.py:75: admin /reports/generate)",
     "UNSUPPORTED_REPORT_TYPE": f"{_NOT_ON_ROUTE} (admin_report_service.py:103: admin /reports/generate)",
@@ -161,8 +179,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     "PLACE_GROUP_LABEL_INVALID": f"{_NOT_ON_ROUTE} (customer_link_service.py: admin place groups, rename)",
     "PLACE_GROUP_MIN_ADDRESSES": f"{_NOT_ON_ROUTE} (customer_link_service.py:1588: admin place groups)",
     "PLACE_GROUP_NOT_FOUND": f"{_NOT_ON_ROUTE} (customer_link_service.py:1683/1846/1865/1887: admin place groups)",
+    "PLACE_GROUP_NOTES_INVALID": f"{_NOT_ON_ROUTE} (admin place-group write)",
     "PLACE_GROUP_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (customer_link_service.py:1837: admin place groups)",
     "PLACE_SPLIT_INVALID": f"{_NOT_ON_ROUTE} (customer_link_service.py:1756-1771: admin place-group address removal)",
+    # Admin shared-place resolve (spec 2026-11-10 §4.5): POST /admin/shared-place-cases/<id>/resolve only.
+    "SHARED_PLACE_RESOLVE_INVALID": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
+    "SHARED_PLACE_NOT_VERIFIED": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
+    "SHARED_PLACE_RESOLUTION_CONFLICT": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
     # Admin dispatch map.
     "DISPATCH_DUPLICATE_STOP": f"{_NOT_ON_ROUTE} (route_edit_service.py:75: admin dispatch)",
     "DISPATCH_ROUTE_NOT_FOUND": f"{_NOT_ON_ROUTE} (route_edit_service.py:80: admin dispatch)",

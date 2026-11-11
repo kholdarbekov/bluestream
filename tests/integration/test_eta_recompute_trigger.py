@@ -387,6 +387,21 @@ def test_opening_closing_and_transferring_a_session_request_a_recompute(
     assert recompute_requests == _one_run(app)
 
 
+@pytest.mark.parametrize("counter", ["empties_transferred_in", "empties_transferred_out"])
+def test_an_empties_counter_change_on_a_session_requests_a_recompute(app, db, monkeypatch, recompute_requests, counter):
+    """The plan reads every bottle counter of a session, the two empties counters included: moving empties between
+    drivers changes what a truck can carry, so the write requests one run."""
+    to = eleven_yesterday()
+    driver = make_driver(db)
+    session = open_session(db, driver, to - timedelta(hours=1))
+    _trigger_on(app, monkeypatch)
+
+    setattr(session, counter, 3)
+    db.session.commit()
+
+    assert recompute_requests == _one_run(app)
+
+
 @pytest.mark.parametrize(
     ("change", "requests_one"),
     [

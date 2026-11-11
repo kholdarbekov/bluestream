@@ -4,9 +4,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import contains_eager, joinedload
 
 from business_app import db
@@ -16,11 +16,14 @@ from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
     DriverCashSession,
+    CustomerCreditPayout,
+    CustomerCreditPayoutDebit,
     Payment,
 )
 from business_app.models.user import User, UserAddress
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.cod_cap import cod_cap_reached
+from business_app.utils.decorators import has_admin_permission
 from shared import business_config
 from shared.enums import (
     CashCollectionSource,
@@ -68,11 +71,16 @@ logger = logging.getLogger(__name__)
 # allocations are excluded there for the same reason, one layer down.
 #
 # Written down ONCE, here, next to the code that stamps the marker.
+#
+# B4a: a card/Click order was cancelled. The gateway is never reversed (the
+# fiscal receipt cannot be un-filed), so the money becomes credit. Stamped by
+# `credit_customer_for_dead_order_prepayment`; the grocery contract mirror of a
+# prepayment return reads it (`CorporateContractService.payout_mirror_plan`).
+ORDER_CANCEL_CREDIT_FLOW = "order_cancel_prepaid_credit"
+
 CUSTOMER_CREDIT_REBOOK_FLOWS = frozenset(
     {
-        # B4a: a card/Click order was cancelled. The gateway is never reversed
-        # (the fiscal receipt cannot be un-filed), so the money becomes credit.
-        "order_cancel_prepaid_credit",
+        ORDER_CANCEL_CREDIT_FLOW,
         # OrderEditService._cascade_cash: a paid order was edited DOWN and the
         # difference handed back as credit rather than refunded to the card.
         "order_edit_refund",
@@ -101,6 +109,54 @@ def customer_credit_rebook_event_clause():
     return or_(
         flow.in_(sorted(CUSTOMER_CREDIT_REBOOK_FLOWS)),
         key.like(f"{_LEGACY_REBOOK_IDEMPOTENCY_PREFIX}%"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Returning a customer's prepaid credit as money (spec 2026-11-10).
+# ---------------------------------------------------------------------------
+# ADMIN only (P1): no MANAGER/OPERATOR role holds this name, so only the ADMIN
+# "all" wildcard satisfies it. The routes gate on it and the history payload
+# publishes `can_return_prepayment` from it, so the button and the route agree.
+PREPAYMENT_RETURN_PERMISSIONS: Tuple[str, ...] = ("return_customer_prepayment",)
+
+# The start of the reason the Click rail restore
+# (`ClickPaymentProviderService._restore_click_rail_after_offline_settlement`)
+# stamps on every allocation it reverses. That writer builds its reason from
+# this constant, so the card/Click classifier below matches what it wrote.
+CLICK_RAIL_RESTORE_REASON_PREFIX = "Late Click debit "
+
+# Credit booked from money a card or Click gateway took (P7).
+_CARD_CLICK_CREDIT_FLOWS = ("click_late_debit", ORDER_CANCEL_CREDIT_FLOW)
+# Allocations that held credit the customer already had. When the rail restore
+# releases one, the credit it frees was never Click money.
+_PRIOR_CREDIT_ALLOCATION_MODES = ("prepaid_reservation", "prepaid_credit")
+
+
+def card_click_origin_event_clause():
+    """SQL predicate: did this event's credit come from a card or Click payment (P7)?
+
+    True for a personal card transfer's leftover, a late Click debit booked as
+    credit, a cancelled card/Click order re-booked as credit, and a Click rail
+    restore's residual: door cash whose allocation the restore reversed off an
+    order Click then paid. A reservation or pre-delivery settlement the restore
+    released is prior credit, so it does not count.
+
+    The ONE expression of the card/Click origin, stamped on each payout debit
+    row at apply time (`card_click`). Coalesced like
+    :func:`customer_credit_rebook_event_clause`, so a NULL never turns the
+    disjunction NULL.
+    """
+    flow = func.coalesce(CashCollectionEvent.proof_data["flow"].as_string(), "")
+    click_residual = exists().where(
+        CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+        func.coalesce(CashCollectionAllocation.reversal_reason, "").like(f"{CLICK_RAIL_RESTORE_REASON_PREFIX}%"),
+        CashCollectionAllocation.allocation_mode.notin_(_PRIOR_CREDIT_ALLOCATION_MODES),
+    )
+    return or_(
+        CashCollectionEvent.source == CashCollectionSource.PERSONAL_CARD_TRANSFER,
+        flow.in_(_CARD_CLICK_CREDIT_FLOWS),
+        click_residual,
     )
 
 
@@ -189,6 +245,27 @@ class CashCollectionService:
         if value is None:
             return Decimal("0.00")
         return Decimal(str(value)).quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _add_unapplied(event: CashCollectionEvent, delta: Decimal) -> None:
+        """THE one way to move an event's unapplied credit by ``delta`` (negative draws it down).
+
+        The addition happens IN SQL (``SET unapplied_amount = unapplied_amount + :delta``), on the row
+        version the UPDATE finally gets, never on a figure read earlier. Most restore writers (a cancel's
+        release, an edit-down's trim, an unlink, a Click restore) read the event without its lock: a plain
+        ``event.unapplied_amount = <read> + n`` that waited behind a prepayment return (or an undo, or a
+        delivery spending the credit) would write back the figure from before that commit and erase it,
+        turning paid-out money back into spendable credit, or losing restored credit. Adding in SQL takes
+        the same row lock at the same point as before, so no lock order changes.
+
+        Flushes, then refreshes the attribute, so every later read in this transaction sees the row this
+        UPDATE produced. An event not yet inserted is flushed first (an INSERT cannot add to itself).
+        """
+        if event.id is None:
+            db.session.flush()
+        event.unapplied_amount = CashCollectionEvent.unapplied_amount + delta
+        db.session.flush()
+        db.session.refresh(event, attribute_names=["unapplied_amount"])
 
     @staticmethod
     def _normalize_source(source: Any) -> CashCollectionSource:
@@ -1061,19 +1138,22 @@ class CashCollectionService:
         )
         return {event.id: event for event in locked}
 
-    def _locked_cluster_credit_events(self, anchor_user_id: int) -> List[CashCollectionEvent]:
+    def _locked_cluster_credit_events(
+        self, anchor_user_id: int, pool_user_ids: Optional[Sequence[int]] = None
+    ) -> List[CashCollectionEvent]:
         """Two-phase lock of the cluster's credit events (spec 5.3 / R6).
 
-        Phase 1 resolves the candidate id set with no locks; phase 2 derives the
-        consumption order IN SQL and locks all rows in ONE query ordered by id
-        ASC so concurrent posts over overlapping clusters always acquire locks
-        in the same order; the SQL-derived order is then reapplied in memory.
+        Phase 1 (:meth:`_cluster_credit_candidate_ids`, no locks) resolves the
+        candidate id set already in consumption order, derived IN SQL; phase 2
+        locks all those rows in ONE query ordered by id ASC so concurrent posts
+        over overlapping clusters always acquire locks in the same order, and
+        the phase 1 order is then reapplied in memory.
 
         Phase 2 repeats phase 1's business predicates rather than locking by id
         alone — see :meth:`_lock_credit_events_by_ids`: on this table they are a
         concurrency guard (``FOR UPDATE`` re-qualification), not just a filter,
         and dropping them lets a concurrently-voided event fund a live
-        allocation. Neither consuming loop below re-checks ``voided_at``.
+        allocation. The consuming loops of the callers do not re-check ``voided_at``.
 
         The consumption order MUST come from SQL: CashCollectionEvent.occurred_at
         is DateTime(timezone=True) and its Python value is tz-AWARE for an event
@@ -1087,10 +1167,45 @@ class CashCollectionService:
 
         ``anchor_user_id`` is the account whose wallet is being spent — always
         the BENEFICIARY payment's owner, never the poster, so a payment can only
-        ever draw on its own person's credit.
+        ever draw on its own person's credit. A caller that already resolved the
+        pool (:meth:`_credit_pool_for_anchor`) passes it as ``pool_user_ids``, so
+        it is resolved once.
         """
-        cluster_ids = self._credit_pool_for_anchor(anchor_user_id)
-        candidate_ids = [
+        ordered_ids = self._cluster_credit_candidate_ids(anchor_user_id, pool_user_ids)
+        if not ordered_ids:
+            return []
+        by_id = self._lock_credit_events_by_ids(ordered_ids)
+        return [by_id[i] for i in ordered_ids if i in by_id]
+
+    def cluster_credit_events_unlocked(
+        self, anchor_user_id: int, pool_user_ids: Optional[Sequence[int]] = None
+    ) -> List[CashCollectionEvent]:
+        """The rows :meth:`_locked_cluster_credit_events` would lock, in its order, read without a lock.
+
+        For a read that must describe exactly what a later locked write would
+        draw (the prepayment return preview): the same phase 1, so the two
+        cannot disagree about membership, predicates or order.
+        """
+        ordered_ids = self._cluster_credit_candidate_ids(anchor_user_id, pool_user_ids)
+        if not ordered_ids:
+            return []
+        by_id = {
+            event.id: event for event in CashCollectionEvent.query.filter(CashCollectionEvent.id.in_(ordered_ids)).all()
+        }
+        return [by_id[i] for i in ordered_ids if i in by_id]
+
+    def _cluster_credit_candidate_ids(
+        self, anchor_user_id: int, pool_user_ids: Optional[Sequence[int]] = None
+    ) -> List[int]:
+        """Phase 1 of the cluster credit read: the pool's spendable event ids, oldest first. No locks.
+
+        The pool is :meth:`_credit_pool_for_anchor` (or ``pool_user_ids``, when the caller already
+        resolved it); the predicates are the spendable arm :meth:`_lock_credit_events_by_ids` repeats
+        under its lock. The consumption order is derived IN SQL (see
+        :meth:`_locked_cluster_credit_events` for why never in Python).
+        """
+        cluster_ids = list(pool_user_ids) if pool_user_ids is not None else self._credit_pool_for_anchor(anchor_user_id)
+        return [
             r[0]
             for r in db.session.query(CashCollectionEvent.id)
             .filter(
@@ -1098,19 +1213,9 @@ class CashCollectionService:
                 CashCollectionEvent.voided_at.is_(None),
                 CashCollectionEvent.unapplied_amount > 0,
             )
-            .all()
-        ]
-        if not candidate_ids:
-            return []
-        ordered_ids = [
-            r[0]
-            for r in db.session.query(CashCollectionEvent.id)
-            .filter(CashCollectionEvent.id.in_(candidate_ids))
             .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
             .all()
         ]
-        by_id = self._lock_credit_events_by_ids(candidate_ids)
-        return [by_id[i] for i in ordered_ids if i in by_id]
 
     def apply_customer_prepaid_credit_to_payment(self, payment: Payment) -> Payment:
         """Auto-apply unapplied customer cash credit to a COD payment.
@@ -1285,7 +1390,7 @@ class CashCollectionService:
             amount = self._to_decimal(allocation.allocated_amount)
             event = allocation.cash_collection_event
             if event is not None:
-                event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                self._add_unapplied(event, amount)
             allocation.reversed_at = now
             allocation.reversed_by_user_id = actor_user_id
             allocation.reversal_reason = f"Reclaimed over-collection for order #{order_id} after admin edit"
@@ -1501,7 +1606,7 @@ class CashCollectionService:
                 # `allocated_amount` is left intact so the reversed row still
                 # records what had been held.
                 if event is not None:
-                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                    self._add_unapplied(event, amount)
                 allocation.reversed_at = now
                 allocation.reversed_by_user_id = actor_user_id
                 allocation.reversal_reason = "Released: payment no longer owes the reserved amount"
@@ -1515,7 +1620,7 @@ class CashCollectionService:
                 # Partially fits: shrink the row to what it can still hold and
                 # refund the rest, so the row keeps matching the money it holds.
                 if event is not None:
-                    event.unapplied_amount = self._to_decimal(event.unapplied_amount) + overflow
+                    self._add_unapplied(event, overflow)
                 allocation.allocated_amount = keep
                 released_total += overflow
 
@@ -1596,6 +1701,51 @@ class CashCollectionService:
             .all()
         )
 
+    def held_credit_by_order(self, pool_user_ids: Sequence[int]) -> Dict[int, Decimal]:
+        """order_id -> the pool's credit an order still holds. Read-only.
+
+        Held credit is out of the free balance already (its event's ``unapplied_amount`` was lowered),
+        so a return cannot touch it; this answers which orders it sits on. Two kinds count, both
+        live (not reversed) and both from non-voided events of the pool:
+
+        * a ``prepaid_reservation`` not yet consumed (``reservation_state`` != "consumed");
+        * a ``prepaid_credit`` consumed before delivery (``settled_pre_delivery``) on an order that is
+          not DELIVERED yet: a cancel would hand it back.
+
+        The JSON metadata is filtered in Python, as ``_live_reservation_sources`` callers do.
+        """
+        if not pool_user_ids:
+            return {}
+        rows = (
+            db.session.query(
+                CashCollectionAllocation.allocated_amount,
+                CashCollectionAllocation.allocation_mode,
+                CashCollectionAllocation.allocation_metadata,
+                Payment.order_id,
+                Order.status,
+            )
+            .join(CashCollectionEvent, CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id)
+            .join(Payment, CashCollectionAllocation.payment_id == Payment.id)
+            .join(Order, Payment.order_id == Order.id)
+            .filter(
+                CashCollectionEvent.customer_id.in_(list(pool_user_ids)),
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode.in_(("prepaid_reservation", "prepaid_credit")),
+            )
+            .all()
+        )
+        held: Dict[int, Decimal] = {}
+        for amount, mode, metadata, order_id, order_status in rows:
+            metadata = metadata or {}
+            if mode == "prepaid_reservation":
+                counts = metadata.get("reservation_state") != "consumed"
+            else:
+                counts = bool(metadata.get("settled_pre_delivery")) and order_status != OrderStatus.DELIVERED
+            if counts:
+                held[order_id] = held.get(order_id, Decimal("0.00")) + self._to_decimal(amount)
+        return held
+
     @staticmethod
     def _payments_allocated_by_event(event_id: int) -> List[Payment]:
         """Payments holding a live allocation from ``event_id``, id-ordered.
@@ -1644,7 +1794,7 @@ class CashCollectionService:
             amount = self._to_decimal(allocation.allocated_amount)
             event = allocation.cash_collection_event
             if event:
-                event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                self._add_unapplied(event, amount)
             allocation.reversed_at = now
             allocation.reversed_by_user_id = actor_user_id
             allocation.reversal_reason = release_reason
@@ -1724,7 +1874,7 @@ class CashCollectionService:
             if not out_of_scope:
                 continue
             amount = self._to_decimal(allocation.allocated_amount)
-            event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+            self._add_unapplied(event, amount)
             allocation.reversed_at = now
             allocation.reversal_reason = "Released: reservation out of scope after account unlink"
             metadata = dict(allocation.allocation_metadata or {})
@@ -1806,7 +1956,7 @@ class CashCollectionService:
             amount = self._to_decimal(allocation.allocated_amount)
             event = allocation.cash_collection_event
             if event is not None:
-                event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+                self._add_unapplied(event, amount)
             payment.amount_collected = self._to_decimal(payment.amount_collected) - amount
             allocation.reversed_at = now
             allocation.reversed_by_user_id = actor_user_id
@@ -2004,7 +2154,7 @@ class CashCollectionService:
                 f"Reason: {reason}"
             ),
             proof_data={
-                "flow": "order_cancel_prepaid_credit",
+                "flow": ORDER_CANCEL_CREDIT_FLOW,
                 "payment_id": payment.id,
                 "order_id": payment.order_id,
                 "payment_method": method_value,
@@ -2065,7 +2215,7 @@ class CashCollectionService:
         metadata["affects_payment_projection"] = False
         allocation.allocation_metadata = metadata
 
-        event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount  # -> customer prepaid credit
+        self._add_unapplied(event, amount)  # -> customer prepaid credit
 
         payment = allocation.payment
         if affects_projection and payment is not None:
@@ -2739,38 +2889,7 @@ class CashCollectionService:
         cluster_ids = CustomerLinkService().get_cluster_user_ids(customer_id)
         cluster_delivered_outstanding = self.get_cluster_open_cod_debt_total(customer_id)
 
-        from business_app.models.customer_link import AddressGroup
-
-        places: List[Dict[str, Any]] = []
-        grouped_addresses = UserAddress.query.filter(
-            UserAddress.user_id.in_(cluster_ids),
-            UserAddress.address_group_id.isnot(None),
-        ).all()
-        # `UserAddress` has NO `address_group` relationship (models/user.py
-        # declares only `user` and `orders`) — labels MUST come from an explicit
-        # bulk lookup, never `addr.address_group`.
-        group_labels = {}
-        if grouped_addresses:
-            group_labels = {
-                g.id: g.label
-                for g in AddressGroup.query.filter(
-                    AddressGroup.id.in_({a.address_group_id for a in grouped_addresses})
-                ).all()
-            }
-        seen_groups = set()
-        for addr in grouped_addresses:
-            if addr.address_group_id in seen_groups:
-                continue
-            seen_groups.add(addr.address_group_id)
-            places.append(
-                {
-                    "address_id": addr.id,
-                    "place_group_id": addr.address_group_id,
-                    "label": group_labels.get(addr.address_group_id),
-                    "place_open_cod_debt_total": float(self.get_place_open_cod_debt_total(addr.address_group_id)),
-                    "place_active_cod_debt_count": self.get_place_active_cod_debt_count(addr.id),
-                }
-            )
+        places = self._cluster_place_debts(cluster_ids)
 
         return {
             "customer_id": customer_id,
@@ -2816,6 +2935,45 @@ class CashCollectionService:
             "items": items,
         }
 
+    def _cluster_place_debts(self, cluster_ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """One entry per place (address group) the cluster's addresses sit in: its open delivered COD debt.
+
+        The statement's ``places`` block, and the prepayment return's place-debt warning, read it here.
+        """
+        from business_app.models.customer_link import AddressGroup
+
+        places: List[Dict[str, Any]] = []
+        grouped_addresses = UserAddress.query.filter(
+            UserAddress.user_id.in_(cluster_ids),
+            UserAddress.address_group_id.isnot(None),
+        ).all()
+        # `UserAddress` has NO `address_group` relationship (models/user.py
+        # declares only `user` and `orders`) — labels MUST come from an explicit
+        # bulk lookup, never `addr.address_group`.
+        group_labels = {}
+        if grouped_addresses:
+            group_labels = {
+                g.id: g.label
+                for g in AddressGroup.query.filter(
+                    AddressGroup.id.in_({a.address_group_id for a in grouped_addresses})
+                ).all()
+            }
+        seen_groups = set()
+        for addr in grouped_addresses:
+            if addr.address_group_id in seen_groups:
+                continue
+            seen_groups.add(addr.address_group_id)
+            places.append(
+                {
+                    "address_id": addr.id,
+                    "place_group_id": addr.address_group_id,
+                    "label": group_labels.get(addr.address_group_id),
+                    "place_open_cod_debt_total": float(self.get_place_open_cod_debt_total(addr.address_group_id)),
+                    "place_active_cod_debt_count": self.get_place_active_cod_debt_count(addr.id),
+                }
+            )
+        return places
+
     def get_customer_prepayment_history(
         self,
         customer_id: int,
@@ -2823,6 +2981,7 @@ class CashCollectionService:
         include_voided: bool = True,
         include_fully_applied: bool = True,
         limit: int = 200,
+        actor: Optional[User] = None,
     ) -> Dict[str, Any]:
         """Return a customer's full COD cash-collection ledger with allocations.
 
@@ -2843,6 +3002,11 @@ class CashCollectionService:
                 (i.e. fully consumed) when True. Default True so admins see the
                 complete history; pass False to focus on events with credit left.
             limit: Maximum number of events to return (clamped 1..1000).
+            actor: The admin reading it. ``can_return_prepayment`` says whether
+                they may record a return (``PREPAYMENT_RETURN_PERMISSIONS``),
+                the same test the return routes apply, so the button and the
+                route cannot disagree; each payout row's ``can_undo`` folds the
+                same test in for the undo route.
         """
         customer = User.query.get(customer_id)
         if not customer:
@@ -2898,11 +3062,18 @@ class CashCollectionService:
         )
         lifetime_collected = self._to_decimal(lifetime_row.lifetime_collected)
         lifetime_unapplied = self._to_decimal(lifetime_row.lifetime_unapplied)
-        lifetime_applied = lifetime_collected - lifetime_unapplied
+        # A return takes credit out without applying it to an order, so it is
+        # neither "unapplied" nor "applied": subtract it from the remainder.
+        from business_app.services.prepayment_payout_service import PrepaymentPayoutService
+
+        payout_service = PrepaymentPayoutService(cash_service=self)
+        lifetime_returned = payout_service.lifetime_returned(cluster_ids)
+        lifetime_applied = lifetime_collected - lifetime_unapplied - lifetime_returned
         if lifetime_applied < Decimal("0.00"):
             # Defensive: allocations cannot exceed collections, but keep the
             # public field non-negative if a data anomaly slips through.
             lifetime_applied = Decimal("0.00")
+        returned_by_event = payout_service.returned_by_event([event.id for event in events])
 
         serialized_events: List[Dict[str, Any]] = []
         for event in events:
@@ -2952,6 +3123,7 @@ class CashCollectionService:
                     "recorded_by_user_id": event.recorded_by_user_id,
                     "order_id": event.order_id,
                     "order_number": event.order.order_number if event.order else None,
+                    "returned_amount": float(returned_by_event.get(event.id, Decimal("0.00"))),
                     "allocations": allocations_payload,
                 }
             )
@@ -2964,8 +3136,15 @@ class CashCollectionService:
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
             "lifetime_collected": float(lifetime_collected),
             "lifetime_applied": float(lifetime_applied),
+            "lifetime_returned": float(lifetime_returned),
             "cluster_member_ids": cluster_ids,
+            "can_return_prepayment": has_admin_permission(actor, PREPAYMENT_RETURN_PERMISSIONS),
             "events": serialized_events,
+            # Not cut by `limit`: the Users card asks for 20 events and must still see every return.
+            "payouts": [
+                payout_service.serialize_payout(payout, actor=actor)
+                for payout in payout_service.pool_payouts(cluster_ids, include_voided=include_voided)
+            ],
         }
 
     def list_customers_with_prepayment_balance(
@@ -3440,8 +3619,10 @@ class CashCollectionService:
         if collector_user_id and not event.driver_cash_session_id:
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
+            # Refreshed at the end of this method, under the session row lock (MONEY-3).
             session = DriverReconciliationService().get_or_create_session(
                 driver_user_id=collector_user_id,
+                refresh=False,
             )
             event.driver_cash_session_id = session.id
 
@@ -3521,10 +3702,15 @@ class CashCollectionService:
         if event.driver_cash_session_id:
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-            session = DriverCashSession.query.get(event.driver_cash_session_id)
+            # Under the session row lock, taken here where this method writes the row anyway (after its
+            # payment locks, so the lock order is unchanged). Sums read before a prepayment return from
+            # this trip's cash commits would be written back after it, storing the on hand from before the
+            # return (MONEY-3); under the lock they include it.
+            recon = DriverReconciliationService()
+            session = recon.lock_session(event.driver_cash_session_id)
 
             if session:
-                DriverReconciliationService().refresh_expected_cash(session)
+                recon.refresh_expected_cash(session)
 
         self._refresh_legacy_cash_projections(
             delivery_id=event.delivery_id,
@@ -3970,6 +4156,33 @@ class CashCollectionService:
 
         return payment
 
+    def live_payout_ids_for_event(self, event_id: int) -> List[int]:
+        """Sorted ids of the LIVE prepayment returns that drew on this collection.
+
+        The one answer every correction guard uses (spec 2026-11-10 §4.3a): voiding or
+        re-posting such an event would hand the paid-out money back as spendable credit.
+        """
+        rows = (
+            db.session.query(CustomerCreditPayout.id)
+            .join(CustomerCreditPayoutDebit, CustomerCreditPayoutDebit.payout_id == CustomerCreditPayout.id)
+            .filter(
+                CustomerCreditPayoutDebit.cash_collection_event_id == event_id,
+                CustomerCreditPayout.is_live,
+            )
+            .distinct()
+            .order_by(CustomerCreditPayout.id)
+            .all()
+        )
+        return [r[0] for r in rows]
+
+    def _refuse_if_funds_prepayment_return(self, event_id: int) -> None:
+        payout_ids = self.live_payout_ids_for_event(event_id)
+        if payout_ids:
+            raise ValidationError(
+                f"Collection {event_id} funded prepayment return(s) {payout_ids}; undo the return first",
+                error_code="EVENT_FUNDS_PREPAYMENT_RETURN",
+            )
+
     def reverse_collection_event(
         self,
         event_id: int,
@@ -3987,6 +4200,9 @@ class CashCollectionService:
             raise ValidationError("Cash collection event is already voided")
         if not reason:
             raise ValidationError("A reversal reason is required")
+        # Before any allocation, session or contract-mirror change: a live prepayment
+        # return drew on this collection, and the reset below would re-offer that money.
+        self._refuse_if_funds_prepayment_return(event.id)
 
         now = datetime.now(UTC)
         for allocation in event.allocations:
@@ -4011,11 +4227,13 @@ class CashCollectionService:
 
         if event.driver_cash_session_id:
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
-            from business_app.models.payment import DriverCashSession
 
-            session = DriverCashSession.query.get(event.driver_cash_session_id)
+            # Under the session row lock, after the allocation and event writes above, where the refresh
+            # would write the row anyway (MONEY-3, see post_collection).
+            recon = DriverReconciliationService()
+            session = recon.lock_session(event.driver_cash_session_id)
             if session:
-                DriverReconciliationService().refresh_expected_cash(session)
+                recon.refresh_expected_cash(session)
 
         self._refresh_legacy_cash_projections(
             delivery_id=event.delivery_id,
@@ -4117,6 +4335,7 @@ class CashCollectionService:
             raise NotFoundError("Cash collection event not found")
         if event.voided_at:
             raise ValidationError("Cannot adjust a voided cash collection event")
+        self._refuse_if_funds_prepayment_return(event.id)
 
         if event.driver_cash_session_id:
             session = DriverCashSession.query.get(event.driver_cash_session_id)
@@ -4740,7 +4959,7 @@ class CashCollectionService:
         event: CashCollectionEvent,
         new_amount: Any,
         order_id: Optional[int],
-    ) -> Dict[str, Decimal]:
+    ) -> Dict[str, Any]:
         """Project adjust_event_amount(event, new_amount) without mutating anything.
 
         Mirrors the void-then-repost sequence: hand the event's live allocations back to
@@ -4824,6 +5043,7 @@ class CashCollectionService:
             "order_amount": self._to_decimal(order_payment.amount) if order_payment else Decimal("0.00"),
             "order_outstanding_before": outstanding_before,
             "order_outstanding_after": max(Decimal("0.00"), outstanding_before - applied_to_order),
+            "funding_payout_ids": self.live_payout_ids_for_event(event.id),
         }
 
     def _allocate_to_payment(
@@ -4868,7 +5088,7 @@ class CashCollectionService:
             beneficiary_user_id=payment.user_id,
         )
         db.session.add(allocation)
-        event.unapplied_amount = self._to_decimal(event.unapplied_amount) - amount
+        self._add_unapplied(event, -amount)
 
         if affect_payment_projection:
             payment.amount_collected = self._to_decimal(payment.amount_collected) + amount

@@ -5,6 +5,8 @@ interpolated value:
 
 * "Joined {name}'s session!"                 — WHOSE session did I just join?
 * "Using {name}'s session — {qty} bottles"   — whose, and how many left?
+  (since the 2026-11-09 split: the session owner, then full on truck, empties
+  on truck and free full bottles, each line its own template)
 * "{name} has been added as a co-driver"     — who did I just invite?
 
 Each fetched its copy with ``i18n.get(key, language)`` and called ``.format()``
@@ -58,7 +60,10 @@ LANGUAGES = ("en", "uz", "ru")
 KEYS = (
     "staff.bottles.joined_session",
     "staff.bottles.joined_session_info",
-    "staff.bottles.current_membership",
+    "staff.bottles.session_owner",
+    "staff.bottles.full_on_truck",
+    "staff.bottles.empties_on_truck",
+    "staff.bottles.free_full_bottles",
     "staff.bottles.current_membership_title",
     "staff.bottles.leave_session",
     "staff.bottles.codriver_invited",
@@ -146,12 +151,14 @@ def _rendered(query) -> str:
 async def test_membership_status_names_the_owner_and_counts_the_bottles(
     real_copy, handler, monkeypatch, language
 ):
+    # `serialize_membership_session_info`, every number distinct: 13 full + 24 empties = 37 on board.
     monkeypatch.setattr(
         mod, "api_client",
         _FakeClient(
-            get_current_session_membership=_ok(
-                {"owner_name": "Aziz Karimov", "current_inventory": 37}
-            )
+            get_current_session_membership=_ok({
+                "owner_name": "Aziz Karimov", "current_inventory": 37,
+                "full_bottles_on_board": 13, "empties_on_board": 24, "free_full_bottles": 8,
+            })
         ),
     )
     update, query = _callback("bottles_membership_status")
@@ -160,10 +167,12 @@ async def test_membership_status_names_the_owner_and_counts_the_bottles(
 
     text = _rendered(query)
     assert "Aziz Karimov" in text
-    assert "37" in text, (
-        "the bottle count is the number the driver is held accountable for; "
-        "dropping it makes this screen worse than useless"
-    )
+    for count in ("<b>13</b>", "<b>24</b>", "<b>8</b>"):
+        assert count in text, (
+            f"{count} missing: the truck's numbers are what the co-driver delivers from; "
+            "dropping them makes this screen worse than useless"
+        )
+    assert "37" not in text, "current_inventory counts empties; it is not bottles available"
     assert HUMANISED_MEMBERSHIP not in text
     assert "{" not in text and "}" not in text
 

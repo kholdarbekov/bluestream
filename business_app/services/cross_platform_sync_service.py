@@ -376,7 +376,7 @@ class CrossPlatformSyncService:
         """Transfer all foreign key references from secondary user to primary user."""
         # Import all models with user_id references
         from business_app.models.order import Order, OrderStatusHistory
-        from business_app.models.payment import Payment, PaymentTransaction, CreditCard
+        from business_app.models.payment import CreditCard, CustomerCreditPayout, Payment, PaymentTransaction
         from business_app.models.subscription import Subscription, SubscriptionLog
         from business_app.models.notification import Notification, PushNotificationToken
         from business_app.models.review import Review
@@ -401,6 +401,14 @@ class CrossPlatformSyncService:
         Payment.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
         PaymentTransaction.query.filter_by(initiated_by=secondary_id).update({"initiated_by": primary_id})
         CreditCard.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
+
+        # Prepayment returns: all four user FKs (customer, paying driver, recording admin, undoing
+        # admin). customer_id and driver_user_id are ON DELETE RESTRICT, so a missed re-point
+        # fails the terminal delete instead of erasing money history.
+        for payout_column in ("customer_id", "driver_user_id", "actor_user_id", "voided_by_user_id"):
+            CustomerCreditPayout.query.filter(getattr(CustomerCreditPayout, payout_column) == secondary_id).update(
+                {payout_column: primary_id}, synchronize_session=False
+            )
 
         # Subscriptions
         Subscription.query.filter_by(user_id=secondary_id).update({"user_id": primary_id})
@@ -504,6 +512,15 @@ class CrossPlatformSyncService:
         from business_app.services.reorder_reminders.actions import ReorderReminderActions
 
         ReorderReminderActions.on_users_merged(primary_id, secondary_id)
+
+        # Shared-place cases: the asked driver and the deciding admin (both ON DELETE SET NULL, but a
+        # case must keep naming the survivor, not lose who was asked or who decided).
+        from business_app.models.shared_place_case import SharedPlaceCase
+
+        for case_column in ("asked_driver_id", "decided_by_user_id"):
+            SharedPlaceCase.query.filter(getattr(SharedPlaceCase, case_column) == secondary_id).update(
+                {case_column: primary_id}, synchronize_session=False
+            )
 
         db.session.flush()
         logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")

@@ -7,6 +7,7 @@ import hashlib
 import html
 import ipaddress
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -56,6 +57,7 @@ _NOTICE_DELIVERY_SKIPPED = 'subscription_delivery_skipped'
 _NOTICE_PAID_ORDER_KEPT = 'subscription_paid_order_kept'
 _NOTICE_PAYMENT_EXPIRED = 'order_payment_expired'
 _NOTICE_SCHEDULE_CHANGED = 'subscription_schedule_changed'
+_NOTICE_PREPAYMENT_RETURNED = 'prepayment_returned'
 _CUSTOMER_NOTICE_KINDS = frozenset(
     {
         _NOTICE_ORDER_CREATED,
@@ -63,6 +65,7 @@ _CUSTOMER_NOTICE_KINDS = frozenset(
         _NOTICE_PAID_ORDER_KEPT,
         _NOTICE_PAYMENT_EXPIRED,
         _NOTICE_SCHEDULE_CHANGED,
+        _NOTICE_PREPAYMENT_RETURNED,
     }
 )
 # A paid order that stays: one copy per action that kept it (spec 2026-10-23 §2.7).
@@ -192,6 +195,10 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         return f"Unknown kind: {data.get('kind')!r}"
     if data.get('language') not in SUPPORTED_LANGUAGES:
         return f'language must be one of {", ".join(SUPPORTED_LANGUAGES)}'
+    if data['kind'] == _NOTICE_PREPAYMENT_RETURNED:
+        for field in ('amount', 'balance'):
+            if not _is_number(data.get(field)):
+                return f"{field} must be a number, not {data.get(field)!r}"
     if data['kind'] == _NOTICE_PAID_ORDER_KEPT and data.get('trigger') not in _PAID_ORDER_KEPT_KEYS:
         return f"Unknown trigger: {data.get('trigger')!r}"
     if data['kind'] == _NOTICE_SCHEDULE_CHANGED:
@@ -208,6 +215,11 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         if not isinstance(removed, list) or not all(_is_weekday(day) for day in removed):
             return f"removed_weekdays must be a list of weekdays 0-6, not {removed!r}"
     return None
+
+
+def _is_number(value) -> bool:
+    """A money figure as the backend sends it (a float); a bool, a string, NaN or an infinity is not one."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _is_weekday(value) -> bool:
@@ -362,6 +374,12 @@ def _customer_notice_text(language: str, data: dict) -> str:
             'telegram.customer_notice.schedule_changed', language,
             subscription_name=_html_escaped(data.get('subscription_name')) or '—',
             lines='\n\n'.join(lines),
+        )
+    if kind == _NOTICE_PREPAYMENT_RETURNED:
+        return i18n.get(
+            'telegram.customer_notice.prepayment_returned', language,
+            amount=format_price(float(data['amount'])),
+            balance=format_price(float(data['balance'])),
         )
     return i18n.get(
         'telegram.customer_notice.payment_expired', language,
@@ -1422,6 +1440,7 @@ class WebhookServer:
             "notice_id": "subscription-log:41",   # stable across the backend's retries: one message per id
             "kind": "subscription_order_created", # | subscription_delivery_skipped | subscription_paid_order_kept
                                                   # | order_payment_expired | subscription_schedule_changed
+                                                  # | prepayment_returned (no buttons)
             "telegram_id": "810000001",
             "language": "ru",                     # resolved by the backend; never read from the customer here
             ... the kind's facts (business_app/services/customer_notices.py documents each set) ...

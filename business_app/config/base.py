@@ -660,6 +660,10 @@ class BaseConfig:
     # channel). Converted to km once, at the single point of use.
     PLACE_SUGGESTION_RADIUS_M = business_config.PLACE_SUGGESTION_RADIUS_M
 
+    # Shared-place detection: driver-candidate channel (see business_config).
+    SHARED_PLACE_CANDIDATE_RADIUS_M = business_config.SHARED_PLACE_CANDIDATE_RADIUS_M
+    SHARED_PLACE_DRIVER_ANSWER_WINDOW_S = business_config.SHARED_PLACE_DRIVER_ANSWER_WINDOW_S
+
     # Security Configuration
     PASSWORD_MIN_LENGTH = business_config.PASSWORD_MIN_LENGTH
     MAX_LOGIN_ATTEMPTS = business_config.MAX_LOGIN_ATTEMPTS

@@ -15,7 +15,12 @@ const Login = () => {
   const location = useLocation();
   const { login, isLoading } = useAuthStore();
 
-  const from = location.state?.from?.pathname || '/dashboard';
+  // The whole URL the redirect came from, query and hash included: a deep link such as the Slack alert's
+  // `/users?tab=driver-reports&case=<id>` must reopen the same screen after the login.
+  const redirectedFrom = location.state?.from;
+  const from = redirectedFrom?.pathname
+    ? `${redirectedFrom.pathname}${redirectedFrom.search || ''}${redirectedFrom.hash || ''}`
+    : '/dashboard';
 
   const handleSubmit = async (values) => {
     const result = await login(values);

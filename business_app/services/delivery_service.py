@@ -203,12 +203,15 @@ class DeliveryService:
                         "Failed to enqueue new-order broadcast for order %s: %s", delivery.order_id, exc2
                     )
 
-    def assign_delivery_driver(self, delivery_id: int, driver_id: int) -> Delivery:
-        """Assign delivery to a driver (auto-assign / admin single-assign entrypoint).
+    def assign_delivery_driver(self, delivery_id: int, driver_id: int, *, require_session: bool = False) -> Delivery:
+        """Assign delivery to a driver (auto-assign / single-assign entrypoint).
 
         Thin wrapper over the canonical DeliveryAssignmentService.assign_driver
         SSOT; keeps this path's post-commit side-effects (driver notify + route
-        reoptimization)."""
+        reoptimization).
+
+        `require_session=True` (a session is required and its free full bottles must cover the order) is used
+        by bot accept and auto-assign, and never by admin paths."""
         from business_app.services.delivery_assignment_service import DeliveryAssignmentService
         from shared.enums import AssignmentSource
 
@@ -218,6 +221,7 @@ class DeliveryService:
             actor_id=driver_id,
             source=AssignmentSource.AUTO,
             note="Auto/admin assigned",
+            require_session=require_session,
         )
 
         delivery = result.delivery
@@ -275,7 +279,7 @@ class DeliveryService:
         ):
             from .bottle_tracking_service import BottleTrackingService
 
-            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+            BottleTrackingService().assert_driver_can_progress_delivery(delivery, to_status=new_status)
 
         # Update delivery
         old_status = delivery.status
@@ -311,8 +315,14 @@ class DeliveryService:
         actor_user_id: int = None,
         required_driver_id: int = None,
         notes: str = None,
+        enforce_bottle_capacity: bool = True,
     ) -> Delivery:
-        """Advance an assigned delivery directly to in-transit for legacy entrypoints."""
+        """Advance an assigned delivery directly to in-transit for legacy entrypoints.
+
+        The driver app's Start counts the crew's free full bottles (spec A8). The admin bulk
+        "mark in transit" passes ``enforce_bottle_capacity=False`` (A9): no count, but the
+        driver must still be on a bottle trip.
+        """
         actor_user_id = self._normalize_actor_id(actor_user_id)
         required_driver_id = self._normalize_actor_id(required_driver_id)
         # Locked and re-read: a customer may cancel an accepted (`assigned`) order since
@@ -332,7 +342,9 @@ class DeliveryService:
 
         from .bottle_tracking_service import BottleTrackingService
 
-        BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+        BottleTrackingService().assert_driver_can_progress_delivery(
+            delivery, to_status=DeliveryStatus.IN_TRANSIT, enforce_capacity=enforce_bottle_capacity
+        )
 
         now = datetime.now(timezone.utc)
         delivery.status = DeliveryStatus.IN_TRANSIT
@@ -421,7 +433,7 @@ class DeliveryService:
 
         from .bottle_tracking_service import BottleTrackingService
 
-        BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+        BottleTrackingService().assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.ARRIVED)
 
         now = datetime.now(timezone.utc)
         delivery.status = DeliveryStatus.ARRIVED

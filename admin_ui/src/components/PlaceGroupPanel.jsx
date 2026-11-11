@@ -7,6 +7,7 @@ import PlaceGroupConfirmModal from './PlaceGroupConfirmModal';
 import PlaceGroupCard from './PlaceGroupCard';
 import { placeGroupErrorMessage } from './placeGroupCopy';
 import { invalidatePlaceGroupQueries } from './placeGroupQueries';
+import { useAuthStore } from '../stores/authStore';
 
 const { Text } = Typography;
 
@@ -31,6 +32,7 @@ export default function PlaceGroupPanel({ user, onGroupChanged }) {
   const { t } = useTranslation('users');
   const queryClient = useQueryClient();
   const userId = user?.id;
+  const canManage = useAuthStore().hasPermission('can_manage_users');
 
   // action: { kind: 'create' | 'dismiss', payload } — add/remove live on PlaceGroupCard
   const [action, setAction] = useState(null);
@@ -177,11 +179,13 @@ export default function PlaceGroupPanel({ user, onGroupChanged }) {
         ))
       )}
 
-      <div style={{ marginTop: 8 }}>
-        <Button size="small" type="dashed" onClick={startManualCreate}>
-          {t('ui.users.place_groups.create_action', 'New place group')}
-        </Button>
-      </div>
+      {canManage && (
+        <div style={{ marginTop: 8 }}>
+          <Button size="small" type="dashed" onClick={startManualCreate}>
+            {t('ui.users.place_groups.create_action', 'New place group')}
+          </Button>
+        </div>
+      )}
 
       <Divider style={{ margin: '12px 0' }} />
 
@@ -202,7 +206,7 @@ export default function PlaceGroupPanel({ user, onGroupChanged }) {
           renderItem={(suggestion) => (
             <List.Item
               key={suggestion.address_ids.join('-')}
-              actions={[
+              actions={!canManage ? [] : [
                 <Button
                   key="group"
                   size="small"

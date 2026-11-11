@@ -21,7 +21,9 @@ from shared import business_config
 from shared.user_names import GENERATED_TELEGRAM_NAME
 from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DOMAIN_LOCAL, is_deliverable_email
 from business_app.services.session_revocation_service import REVOKED_BY_PASSWORD_RESET, SessionRevocationService
+from business_app.services.shared_place.permissions import SHARED_PLACE_REVIEW_PERMISSIONS
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
+from business_app.utils.decorators import has_admin_permission
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
@@ -1534,6 +1536,8 @@ class AuthService:
             # The delivery-time accuracy report (honest-ETA Phase 2, R16): the admin UI's nav item and route guard
             # read this; `manager_or_higher_required` on GET /admin/eta/accuracy states the same rule.
             "can_view_eta_accuracy": False,
+            # Shared-place reports (spec 2026-11-10 §4.7): derived below, never set by a role branch.
+            "can_review_shared_places": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1546,7 +1550,6 @@ class AuthService:
             permissions.update(
                 {
                     "can_view_analytics": True,
-                    "can_manage_users": True,
                     "can_manage_products": True,
                     "can_manage_orders": True,
                     "can_manage_delivery": True,
@@ -1574,6 +1577,16 @@ class AuthService:
                     "can_view_admin_panel": True,
                 }
             )
+
+        # Derived from the route guards' own test, never hand-set per role (spec 2026-11-10 §4.7, §9), so a flag
+        # cannot promise a button its route refuses. Only ADMIN holds `manage_users` today; a MANAGER does not.
+        # - can_manage_users: the link and place-group write buttons read it (LinkedAccountsPanel,
+        #   GroupedAddressesPanel, PlaceGroupPanel, PlaceGroupCard, PlaceGroupConfirmModal);
+        #   `validate_admin_action(["manage_users"])` guards those link and place-group routes.
+        permissions["can_manage_users"] = has_admin_permission(user, ("manage_users",))
+        # - can_review_shared_places: the Users page's Driver reports tab and the Users menu badge read it;
+        #   `validate_admin_action(list(SHARED_PLACE_REVIEW_PERMISSIONS))` guards every /admin/shared-place-cases route.
+        permissions["can_review_shared_places"] = has_admin_permission(user, SHARED_PLACE_REVIEW_PERMISSIONS)
 
         return permissions
 

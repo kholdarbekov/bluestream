@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence
 
 from flask import current_app
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import OperationalError
 
 from business_app import db
@@ -56,12 +56,32 @@ def _place_group_survives(address_count: int) -> bool:
     return address_count >= MIN_PLACE_GROUP_ADDRESSES
 
 
+# Sentinel: "the caller did not mention the note" (None means "clear it").
+_KEEP = object()
+
 # Ids per IN list in the batched place reads below.
 _PLACE_BATCH = 500
 
 
 class CustomerLinkService:
     """Resolve a user/address to its canonical cluster / address group."""
+
+    @staticmethod
+    def is_eligible_individual_customer(user) -> bool:
+        """The one eligibility rule: an individual, customer-role, non-grocery account.
+
+        Python twin of ``eligible_individual_customer_clause`` (``is_grocery_store``
+        is a @property, so the SQL form cannot test it; grocery stores are ENTITY
+        and the clause already excludes them). Values are normalised enum-or-str.
+        """
+        u_type = user.user_type.value if hasattr(user.user_type, "value") else user.user_type
+        u_role = user.role.value if hasattr(user.role, "value") else user.role
+        return u_type == UserType.INDIVIDUAL.value and u_role == UserRole.CUSTOMER.value and not user.is_grocery_store
+
+    @staticmethod
+    def eligible_individual_customer_clause():
+        """SQL twin of ``is_eligible_individual_customer`` (see its docstring)."""
+        return and_(User.user_type == UserType.INDIVIDUAL, User.role == UserRole.CUSTOMER)
 
     def user_exists(self, user_id: int) -> bool:
         """Cheap existence probe for admin read routes.
@@ -140,6 +160,28 @@ class CustomerLinkService:
         if address_id is None:
             return None
         return db.session.query(UserAddress.address_group_id).filter(UserAddress.id == address_id).scalar()
+
+    def is_in_live_place_group(self, address_id: int) -> bool:
+        """The address is in a place group that still exists now (`_place_group_survives`: two or more addresses).
+
+        The ONE answer to "is this address grouped" for shared-place cases: the case screen's `grouping_done` and the
+        resolve call's A/B verification both read it, so the screen never offers a "Confirm" the resolve refuses.
+        """
+        if self.get_address_place_group_id(address_id) is None:
+            return False
+        return _place_group_survives(len(self.get_address_group_member_ids(address_id)))
+
+    def same_place(self, address_id_a: int, address_id_b: int) -> bool:
+        """Both addresses are in one place group now. An ungrouped or missing address shares a place with nobody."""
+        group_id = self.get_address_place_group_id(address_id_a)
+        return group_id is not None and group_id == self.get_address_place_group_id(address_id_b)
+
+    def are_linked(self, user_id_a: int, user_id_b: int) -> bool:
+        """Two different accounts that share one canonical customer now (an unlinked account has none)."""
+        if user_id_a == user_id_b:
+            return False
+        canonical_id = self.resolve_canonical(user_id_a)
+        return canonical_id is not None and canonical_id == self.resolve_canonical(user_id_b)
 
     def can_view_address_history(self, requester_user_id: int, address_id: int) -> bool:
         """Three-arm customer authorization for per-address bottle history
@@ -283,9 +325,7 @@ class CustomerLinkService:
                 )
 
         for u in (primary, secondary):
-            u_type = u.user_type.value if hasattr(u.user_type, "value") else u.user_type
-            u_role = u.role.value if hasattr(u.role, "value") else u.role
-            if u_type != UserType.INDIVIDUAL.value or u_role != UserRole.CUSTOMER.value:
+            if not self.is_eligible_individual_customer(u):
                 raise ValidationError(
                     "Only individual customer accounts can be linked",
                     error_code="CUSTOMER_LINK_NOT_INDIVIDUAL",
@@ -677,6 +717,7 @@ class CustomerLinkService:
         return {
             "place_group_id": group.id,
             "label": group.label,
+            "notes": group.notes,
             "place_balance": place_balance,
             "members": members,
             # The server's answer to "would removing one address dissolve this
@@ -831,8 +872,9 @@ class CustomerLinkService:
         row_limit = max(1, min(int(limit or 20), 50))
         pattern = f"%{text_query}%"
         query = (
-            db.session.query(UserAddress, User)
+            db.session.query(UserAddress, User, AddressGroup.label)
             .join(User, User.id == UserAddress.user_id)
+            .outerjoin(AddressGroup, AddressGroup.id == UserAddress.address_group_id)
             .filter(
                 or_(
                     User.phone.ilike(pattern),
@@ -852,6 +894,7 @@ class CustomerLinkService:
                 "title": addr.title,
                 "full_address": addr.full_address,
                 "address_group_id": addr.address_group_id,
+                "address_group_label": group_label,
                 "owner": {
                     "id": owner.id,
                     "first_name": owner.first_name,
@@ -859,7 +902,7 @@ class CustomerLinkService:
                     "phone": owner.phone,
                 },
             }
-            for addr, owner in rows
+            for addr, owner, group_label in rows
         ]
 
     @staticmethod
@@ -940,9 +983,7 @@ class CustomerLinkService:
                     "Grocery-store accounts cannot join place groups",
                     error_code="PLACE_GROUP_GROCERY_MEMBER",
                 )
-            o_type = owner.user_type.value if hasattr(owner.user_type, "value") else owner.user_type
-            o_role = owner.role.value if hasattr(owner.role, "value") else owner.role
-            if o_type != UserType.INDIVIDUAL.value or o_role != UserRole.CUSTOMER.value:
+            if not self.is_eligible_individual_customer(owner):
                 raise ValidationError(
                     "Only individual customer addresses can join place groups",
                     error_code="PLACE_GROUP_ENTITY_MEMBER",
@@ -1692,6 +1733,30 @@ class CustomerLinkService:
             payload["resulting_balance"] = str(stated)
         return payload
 
+    @staticmethod
+    def _normalise_place_label(label: Optional[str], *, required: bool) -> Optional[str]:
+        """Strip a place label; blank is None when optional, 1-100 characters otherwise. Not text: refused."""
+        if label is not None and not isinstance(label, str):
+            raise ValidationError("Place label must be 1 to 100 characters", error_code="PLACE_GROUP_LABEL_INVALID")
+        cleaned = (label or "").strip()
+        if not cleaned and not required:
+            return None
+        if not 1 <= len(cleaned) <= 100:
+            raise ValidationError("Place label must be 1 to 100 characters", error_code="PLACE_GROUP_LABEL_INVALID")
+        return cleaned
+
+    @staticmethod
+    def _normalise_place_notes(notes: Optional[str]) -> Optional[str]:
+        """Strip the admin-only place note; blank is None, over 1000 characters or not text is refused."""
+        if notes is not None and not isinstance(notes, str):
+            raise ValidationError("Place note must be at most 1000 characters", error_code="PLACE_GROUP_NOTES_INVALID")
+        cleaned = (notes or "").strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 1000:
+            raise ValidationError("Place note must be at most 1000 characters", error_code="PLACE_GROUP_NOTES_INVALID")
+        return cleaned
+
     def create_place_group(
         self,
         address_ids: list,
@@ -1701,6 +1766,7 @@ class CustomerLinkService:
         excluded_ledger_entry_ids: list = None,
         resulting_balance=None,
         preview_entry_ids: list = None,
+        notes: Optional[str] = None,
     ) -> AddressGroup:
         """Create an ownerless place group from >= 2 addresses (any owners).
 
@@ -1714,6 +1780,8 @@ class CustomerLinkService:
                 "A place group needs at least two addresses",
                 error_code="PLACE_GROUP_MIN_ADDRESSES",
             )
+        label = self._normalise_place_label(label, required=False)
+        normalised_notes = self._normalise_place_notes(notes)
         addresses = self._load_addresses(address_ids)
         self._assert_place_group_eligible(addresses)
 
@@ -1729,6 +1797,7 @@ class CustomerLinkService:
         )
 
         group = AddressGroup(canonical_customer_id=None, label=label)
+        group.notes = normalised_notes
         db.session.add(group)
         db.session.flush()
         # RUNG 0 is VACUOUS here, and that is an EXISTENCE argument, not an
@@ -1904,17 +1973,23 @@ class CustomerLinkService:
                 error_code="PLACE_GROUP_DISSOLVED",
             )
 
-    def rename_place_group(self, group_id: int, label: str, acting_admin_id: int, reason: str) -> AddressGroup:
-        """Change a place group's label; the old and new label land on the audit trail."""
+    def rename_place_group(
+        self, group_id: int, label: Optional[str], acting_admin_id: int, reason: str, *, notes=_KEEP
+    ) -> AddressGroup:
+        """Change a place group's label and/or admin note; the changes land on the audit trail.
+
+        ``label=None`` keeps the current label; ``notes`` left out keeps the note.
+        """
         from business_app.services.bottle_tracking_service import BottleTrackingService
 
         if not (reason or "").strip():
             raise ValidationError(
                 "A reason is required to rename a place group", error_code="PLACE_GROUP_REASON_REQUIRED"
             )
-        new_label = (label or "").strip()
-        if not 1 <= len(new_label) <= 100:
+        new_label = None if label is None else self._normalise_place_label(label, required=True)
+        if label is None and notes is _KEEP:
             raise ValidationError("Place label must be 1 to 100 characters", error_code="PLACE_GROUP_LABEL_INVALID")
+        new_notes = _KEEP if notes is _KEEP else self._normalise_place_notes(notes)
 
         BottleTrackingService._apply_scope_lock_timeout()
         try:
@@ -1928,11 +2003,18 @@ class CustomerLinkService:
         self._assert_group_has_members(group)
 
         old_label = group.label
-        if old_label == new_label:
+        label_changed = new_label is not None and old_label != new_label
+        notes_changed = new_notes is not _KEEP and group.notes != new_notes
+        if not label_changed and not notes_changed:
             return group
 
-        group.label = new_label
-        marker = f' | "{old_label}" \u2192 "{new_label}"' if old_label else f' | \u2014 \u2192 "{new_label}"'
+        marker = ""
+        if label_changed:
+            group.label = new_label
+            marker = f' | "{old_label}" \u2192 "{new_label}"' if old_label else f' | \u2014 \u2192 "{new_label}"'
+        if notes_changed:
+            group.notes = new_notes
+            marker += " | note updated"
         base = f"[group {group_id}] {reason.strip()}"
         db.session.add(
             CustomerLinkEvent(
@@ -1941,7 +2023,7 @@ class CustomerLinkService:
                 acting_admin_id=acting_admin_id,
                 member_user_ids=self.get_place_group_user_ids(group_id),
                 reason=base[: 500 - len(marker)] + marker,
-                event_metadata={"old_label": old_label, "new_label": new_label},
+                event_metadata={"old_label": old_label, "new_label": group.label, "notes_changed": notes_changed},
             )
         )
         db.session.commit()
@@ -2394,8 +2476,7 @@ class CustomerLinkService:
             .filter(
                 UserAddress.latitude.isnot(None),
                 UserAddress.longitude.isnot(None),
-                User.user_type == UserType.INDIVIDUAL,
-                User.role == UserRole.CUSTOMER,
+                CustomerLinkService.eligible_individual_customer_clause(),
             )
         )
 
@@ -2503,8 +2584,7 @@ class CustomerLinkService:
                 UserAddress.latitude.isnot(None),
                 UserAddress.longitude.isnot(None),
                 UserAddress.address_group_id.is_(None),
-                User.user_type == UserType.INDIVIDUAL,
-                User.role == UserRole.CUSTOMER,
+                CustomerLinkService.eligible_individual_customer_clause(),
             )
         )
 

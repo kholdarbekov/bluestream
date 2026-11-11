@@ -599,7 +599,7 @@ def complete_delivery(delivery_id):
         from business_app.services.bottle_tracking_service import BottleTrackingService
 
         try:
-            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+            BottleTrackingService().assert_driver_can_progress_delivery(delivery, to_status=DeliveryStatus.DELIVERED)
         except ValidationError as ve:
             return (
                 jsonify({"error": str(ve), "error_code": getattr(ve, "error_code", None)}),

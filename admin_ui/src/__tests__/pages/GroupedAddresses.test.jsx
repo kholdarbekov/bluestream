@@ -7,6 +7,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import Users from '../../pages/Users';
 import adminService from '../../services/adminService';
+import { useAuthStore } from '../../stores/authStore';
 import staffService from '../../services/staffService';
 
 vi.mock('../../services/adminService');
@@ -152,6 +153,10 @@ const openTab = async (user) => {
 describe('Users "Grouped Addresses" tab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The Users tabs live in the URL (`?tab=`), and BrowserRouter writes the real
+    // jsdom URL: start every test on the List tab, not where the last one clicked.
+    window.history.replaceState(null, '', '/users');
+    useAuthStore.setState({ permissions: { can_manage_users: true } });
 
     adminService.getUsers.mockResolvedValue({
       data: {
@@ -364,7 +369,7 @@ describe('Users "Grouped Addresses" tab', () => {
     // tests/unit/test_admin_ui_payload_fixture_contracts.py); these lists mirror
     // them on purpose and are checked both ways (no invented key, no missing key).
     const EXPECTED_DETAIL_KEYS = [
-      'place_group_id', 'label', 'place_balance', 'members', 'cod',
+      'place_group_id', 'label', 'notes', 'place_balance', 'members', 'cod',
       'removal_dissolves_group', 'events',
     ];
     const EXPECTED_MEMBER_KEYS = [
@@ -380,6 +385,7 @@ describe('Users "Grouped Addresses" tab', () => {
     const detail = assertDetailKeys({
       place_group_id: 12,
       label: 'Office A',
+      notes: null,
       place_balance: 4,
       members: [
         {

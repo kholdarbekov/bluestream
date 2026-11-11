@@ -11,6 +11,7 @@ from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from staff_bot.handlers.base import BaseHandler
+from staff_bot.handlers.delivery import shared_place
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
@@ -416,18 +417,39 @@ class StatusUpdateHandler(BaseHandler):
         if notes:
             message += f"\n💬 {notes}"
 
+        screen = None
+        if bottles_returned:
+            # A SECOND client block: the PUT's own block closed above, and the
+            # delivery never waits on this step (`question_screen` is best-effort
+            # end to end, the fetch and the drawing alike).
+            async with api_client as client:
+                screen = await shared_place.question_screen(client, token, delivery_id, language)
+
+        reply_markup = CommonKeyboards.back_button(language, "staff_active_deliveries")
+        pending_note = None
+        if screen is not None:
+            text, reply_markup, pending_note = screen
+            message = f"{message}\n\n{text}"
+
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 message,
-                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
+                reply_markup=reply_markup,
                 parse_mode='HTML',
             )
+            shown_on = update.callback_query.message
         else:
-            await update.message.reply_text(
+            shown_on = await update.message.reply_text(
                 message,
-                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
+                reply_markup=reply_markup,
                 parse_mode='HTML',
             )
+        if pending_note is not None and shown_on is not None:
+            context.user_data[shared_place.PENDING_NOTE_KEY] = {
+                **pending_note,
+                'chat_id': shown_on.chat_id,
+                'message_id': shown_on.message_id,
+            }
         return ConversationHandler.END
 
     @require_auth
@@ -462,6 +484,9 @@ class StatusUpdateHandler(BaseHandler):
                 'new_status': new_status,
                 'flow_address_id': flow_address_id,
             }
+            # A new status step ends the previous stop's shared-place note prompt:
+            # the next text belongs to this stop's screens.
+            context.user_data.pop(shared_place.PENDING_NOTE_KEY, None)
 
             # Special handling for different statuses
             if new_status == 'failed':

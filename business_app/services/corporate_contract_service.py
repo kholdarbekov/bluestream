@@ -1,9 +1,10 @@
 """Corporate contract and prepayment accounting workflows."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import joinedload
@@ -19,8 +20,10 @@ from business_app.models.corporate import (
     CorporatePrepaymentLedger,
 )
 from business_app.models.order import Order, OrderItem
+from business_app.models.payment import CashCollectionEvent
 from business_app.models.product import Product
 from business_app.models.user import User
+from business_app.services.cash_collection_service import ORDER_CANCEL_CREDIT_FLOW
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from shared.enums import PaymentMethod, UserType
 from business_app.utils.exceptions import NotFoundError, ValidationError
@@ -63,6 +66,23 @@ def contract_price_for_method(
         if value is not None:
             return Decimal(str(value)), column_and_source[1]
     return Decimal(str(fallback_price)), PRICING_SOURCE_FALLBACK
+
+
+# `entry_metadata["kind"]` of the ADJUSTMENT a prepayment return posts on a money contract, and of its undo.
+PAYOUT_MIRROR_KIND = "prepayment_payout"
+PAYOUT_MIRROR_REVERSAL_KIND = "prepayment_payout_reversal"
+
+
+@dataclass(frozen=True)
+class MirrorPlan:
+    """What a prepayment return posts on grocery money (AMOUNT-mode) contracts, and what blocks it.
+
+    ``postings`` maps contract id → the amount to post (+, outstanding up: the contract credit shrinks by
+    the money handed back). ``blocking_reasons`` are ``"<code>: <text>"`` strings that join the return's own.
+    """
+
+    postings: Dict[int, Decimal]
+    blocking_reasons: List[str]
 
 
 class CorporateContractService:
@@ -1070,7 +1090,19 @@ class CorporateContractService:
             )
 
     def _get_or_create_locked_account(self, contract_id: int) -> CorporatePrepaymentAccount:
-        account = CorporatePrepaymentAccount.query.filter_by(contract_id=contract_id).with_for_update().first()
+        """The contract's prepayment account under its row lock, as the database holds it once locked.
+
+        ``populate_existing``: a writer that loaded the account earlier in its transaction (the manual
+        adjustment route reads the contract with its account first) would otherwise get its identity-map copy
+        back after waiting on the lock, with the figures from before the writer it waited on, and post on top
+        of them, erasing that writer's entry (a prepayment return's contract posting, or its undo).
+        """
+        account = (
+            CorporatePrepaymentAccount.query.filter_by(contract_id=contract_id)
+            .with_for_update()
+            .populate_existing()
+            .first()
+        )
         if account:
             return account
 
@@ -2120,7 +2152,7 @@ class CorporateContractService:
         reason: Optional[str],
     ) -> Optional[CorporatePrepaymentLedger]:
         """Undo one AMOUNT-mode COLLECT row (inverse of ``record_money_collection``)."""
-        idempotency_key = f"reverse:collect:{source.id}"
+        idempotency_key = self._collect_reversal_key(source.id)
         if CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first():
             return None
 
@@ -2201,17 +2233,257 @@ class CorporateContractService:
         db.session.add(entry)
         return entry
 
+    @staticmethod
+    def _collect_reversal_key(collect_entry_id: int) -> str:
+        """The key of the row that takes one COLLECT row back off its contract; the row is live while none exists."""
+        return f"reverse:collect:{collect_entry_id}"
+
+    # ---- the grocery mirror of a prepayment return (spec 2026-11-10 §4.2) ----
+    def payout_mirror_plan(self, drawn: Sequence[Tuple[CashCollectionEvent, Decimal]], *, lock: bool) -> MirrorPlan:
+        """Where a return of the ``drawn`` credit, as (credit event, amount drawn), posts on grocery money contracts.
+
+        A credit event's contract mirror is its live COLLECT rows: ``collect:cash_event:{id}:%`` and, for a
+        cancelled card/Click order re-booked as credit (``post_collection`` suppresses that event's own mirror),
+        the payment's ``collect:payment:{payment_id}``. A row is live while no ``reverse:collect:{row id}`` row
+        exists. The amount drawn is posted on THAT row's contract, never on the store's "active" one: a leaving
+        store's contract may be closed. Per event:
+
+        * no live COLLECT row: nothing to post (credit that was never mirrored);
+        * live rows on more than one contract: ``ambiguous_contract_mirror``;
+        * a units top-up mirror (``topup:cash_event:{id}:%``, or the re-booked payment's ``topup:payment:{id}:%``):
+          ``units_contract_mirror``, because prepaid bottles cannot mirror a money return.
+
+        A contract without a prepayment account blocks with ``contract_account_missing``; none is ever created.
+        With ``lock`` (the apply) the accounts are locked FOR UPDATE in contract-id order: lock 2 of a return,
+        after its credit events and before the driver's session, the order ``post_collection`` takes them in.
+        """
+        postings: Dict[int, Decimal] = {}
+        blocking: List[str] = []
+        events = [event for event, _ in drawn]
+        live_collect_rows = self._live_collect_rows_by_event(events)
+        units_mirrored = self._units_mirrored_event_ids(events)
+        for event, amount in drawn:
+            if event.id in units_mirrored:
+                blocking.append(
+                    f"units_contract_mirror: credit event {event.id} funded prepaid bottles on a units contract, "
+                    "which a money return cannot mirror; adjust the contract instead"
+                )
+                continue
+            contract_ids = sorted({row.contract_id for row in live_collect_rows[event.id]})
+            if len(contract_ids) > 1:
+                blocking.append(
+                    f"ambiguous_contract_mirror: credit event {event.id} is mirrored on contracts "
+                    f"{', '.join(str(cid) for cid in contract_ids)}, so there is no single contract to post the "
+                    "return on"
+                )
+            elif contract_ids:
+                postings[contract_ids[0]] = postings.get(contract_ids[0], Decimal("0.00")) + Decimal(str(amount))
+
+        accounts = self._payout_mirror_accounts(postings, lock=lock)
+        blocking.extend(
+            f"contract_account_missing: contract {contract_id} has no prepayment account to post the return on"
+            for contract_id in sorted(postings)
+            if contract_id not in accounts
+        )
+        return MirrorPlan(postings=postings, blocking_reasons=blocking)
+
+    def post_payout_mirror(
+        self, payout_id: int, postings: Dict[int, Decimal], *, actor_user_id: int
+    ) -> List[CorporatePrepaymentLedger]:
+        """Post a return's contract entries: +amount per contract, keyed ``payout:{payout_id}:contract:{cid}``.
+
+        The return's apply calls it inside its own transaction, after the debits and under lock 2, so the two
+        ledgers commit together or not at all. A key already posted posts nothing.
+        """
+        return [
+            self._post_payout_mirror_entry(
+                contract_id,
+                postings[contract_id],
+                idempotency_key=self._payout_mirror_key(payout_id, contract_id),
+                metadata={"kind": PAYOUT_MIRROR_KIND, "payout_id": payout_id},
+                reason=f"Prepayment returned to the customer (payout {payout_id})",
+                actor_user_id=actor_user_id,
+            )
+            for contract_id in sorted(postings)
+        ]
+
+    def lock_payout_mirror_accounts(self, payout_id: int) -> List[CorporatePrepaymentLedger]:
+        """Lock 2 of a return's undo: the accounts its contract entries sit on, FOR UPDATE in contract-id order.
+
+        Returns the return's contract entries it read to know which accounts, for :meth:`reverse_payout_mirror`.
+        """
+        rows = self._payout_mirror_rows(payout_id)
+        self._payout_mirror_accounts({row.contract_id for row in rows}, lock=True)
+        return rows
+
+    def reverse_payout_mirror(
+        self, payout_id: int, rows: Sequence[CorporatePrepaymentLedger], *, actor_user_id: int
+    ) -> List[CorporatePrepaymentLedger]:
+        """Undo a return's contract entries (``rows``, from :meth:`lock_payout_mirror_accounts`): −amount of
+        each, keyed ``reverse:payout:{payout_id}:contract:{cid}``.
+
+        The forward rows stay (the ledger is append-only); a reversal already posted posts nothing.
+        """
+        return [
+            self._post_payout_mirror_entry(
+                row.contract_id,
+                -Decimal(str(row.amount)),
+                idempotency_key=f"reverse:{row.idempotency_key}",
+                metadata={"kind": PAYOUT_MIRROR_REVERSAL_KIND, "payout_id": payout_id, "reversal_of_entry_id": row.id},
+                reason=f"Prepayment return undone (payout {payout_id})",
+                actor_user_id=actor_user_id,
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _payout_mirror_key(payout_id: int, contract_id: Union[int, str]) -> str:
+        return f"payout:{payout_id}:contract:{contract_id}"
+
+    def _payout_mirror_rows(self, payout_id: int) -> List[CorporatePrepaymentLedger]:
+        return (
+            CorporatePrepaymentLedger.query.filter(
+                CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.ADJUSTMENT,
+                CorporatePrepaymentLedger.idempotency_key.like(self._payout_mirror_key(payout_id, "%")),
+            )
+            .order_by(CorporatePrepaymentLedger.contract_id.asc())
+            .all()
+        )
+
+    def _post_payout_mirror_entry(
+        self,
+        contract_id: int,
+        amount: Decimal,
+        *,
+        idempotency_key: str,
+        metadata: Dict[str, Any],
+        reason: str,
+        actor_user_id: int,
+    ) -> CorporatePrepaymentLedger:
+        """One return entry, on an account that already exists: ``post_money_adjustment`` would create a missing one."""
+        contract = self.get_contract_by_id(contract_id)
+        if CorporatePrepaymentAccount.query.filter_by(contract_id=contract_id).first() is None:
+            raise NotFoundError(f"Contract {contract_id} has no prepayment account to post the return on")
+        return self.post_money_adjustment(
+            contract, amount, actor_user_id, reason, idempotency_key=idempotency_key, metadata=metadata
+        )
+
+    @staticmethod
+    def _payout_mirror_accounts(contract_ids: Iterable[int], *, lock: bool) -> Dict[int, CorporatePrepaymentAccount]:
+        """The existing prepayment accounts of ``contract_ids`` by contract id; with ``lock``, FOR UPDATE in
+        contract-id order and refreshed (``populate_existing``), so the figures posted on are the locked ones."""
+        if not contract_ids:
+            return {}
+        query = CorporatePrepaymentAccount.query.filter(
+            CorporatePrepaymentAccount.contract_id.in_(sorted(contract_ids))
+        ).order_by(CorporatePrepaymentAccount.contract_id.asc())
+        if lock:
+            query = query.with_for_update(of=CorporatePrepaymentAccount).populate_existing()
+        return {account.contract_id: account for account in query.all()}
+
+    @staticmethod
+    def _rebooked_payment_id(event: CashCollectionEvent) -> Optional[int]:
+        """The card/Click payment a cancelled order's credit was re-booked from; None for any other credit."""
+        proof = event.proof_data or {}
+        return proof.get("payment_id") if proof.get("flow") == ORDER_CANCEL_CREDIT_FLOW else None
+
+    def _mirror_rows_by_event(
+        self, events: Sequence[CashCollectionEvent], *, event_type: CorporatePrepaymentEventType, prefix: str
+    ) -> Dict[int, List[CorporatePrepaymentLedger]]:
+        """The ``event_type`` ledger rows that mirror each event, for ALL ``events`` in ONE query.
+
+        An event's rows are keyed ``{prefix}:cash_event:{id}:%`` and, for a cancelled card/Click order
+        re-booked as credit, by the payment: ``collect:payment:{payment_id}`` (exact) or
+        ``topup:payment:{payment_id}:%``. The query ORs every event's key stems; the rows are then split per
+        event by the same stems in Python (a stem ends in ``:``, so id 1 never claims id 12).
+        """
+        collect = event_type == CorporatePrepaymentEventType.COLLECT
+        stems: Dict[int, List[Tuple[str, bool]]] = {}  # event id → (key stem, the key must equal it)
+        for event in events:
+            stems[event.id] = [(f"{prefix}:cash_event:{event.id}:", False)]
+            payment_id = self._rebooked_payment_id(event)
+            if payment_id is not None:
+                stems[event.id].append(
+                    (f"{prefix}:payment:{payment_id}", True) if collect else (f"{prefix}:payment:{payment_id}:", False)
+                )
+
+        def matches(key: str, stem: str, exact: bool) -> bool:
+            return key == stem if exact else key.startswith(stem)
+
+        by_event: Dict[int, List[CorporatePrepaymentLedger]] = {event_id: [] for event_id in stems}
+        if not stems:
+            return by_event
+        key_column = CorporatePrepaymentLedger.idempotency_key
+        rows = (
+            CorporatePrepaymentLedger.query.filter(
+                CorporatePrepaymentLedger.event_type == event_type,
+                or_(
+                    *(
+                        key_column == stem if exact else key_column.like(f"{stem}%")
+                        for event_stems in stems.values()
+                        for stem, exact in event_stems
+                    )
+                ),
+            )
+            .order_by(CorporatePrepaymentLedger.id.asc())
+            .all()
+        )
+        for row in rows:
+            for event_id, event_stems in stems.items():
+                if any(matches(row.idempotency_key, stem, exact) for stem, exact in event_stems):
+                    by_event[event_id].append(row)
+        return by_event
+
+    def _live_collect_rows_by_event(
+        self, events: Sequence[CashCollectionEvent]
+    ) -> Dict[int, List[CorporatePrepaymentLedger]]:
+        """Each event's live COLLECT rows (no ``reverse:collect:{row id}`` row yet): two queries however many
+        events are drawn, the COLLECT rows and then the reversal keys of those rows."""
+        by_event = self._mirror_rows_by_event(events, event_type=CorporatePrepaymentEventType.COLLECT, prefix="collect")
+        all_rows = [row for rows in by_event.values() for row in rows]
+        if not all_rows:
+            return by_event
+        reversal_keys = [self._collect_reversal_key(row.id) for row in all_rows]
+        reversed_keys = {
+            key
+            for (key,) in db.session.query(CorporatePrepaymentLedger.idempotency_key)
+            .filter(CorporatePrepaymentLedger.idempotency_key.in_(reversal_keys))
+            .all()
+        }
+        return {
+            event_id: [row for row in rows if self._collect_reversal_key(row.id) not in reversed_keys]
+            for event_id, rows in by_event.items()
+        }
+
+    def _units_mirrored_event_ids(self, events: Sequence[CashCollectionEvent]) -> set:
+        """The ids of the events that funded a units top-up (one TOPUP query over all of them)."""
+        return {
+            event_id
+            for event_id, rows in self._mirror_rows_by_event(
+                events, event_type=CorporatePrepaymentEventType.TOPUP, prefix="topup"
+            ).items()
+            if rows
+        }
+
     def post_money_adjustment(
         self,
         contract: CorporateContract,
         amount: Decimal,
         actor_user_id: Optional[int] = None,
         reason: Optional[str] = None,
+        *,
+        idempotency_key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> CorporatePrepaymentLedger:
-        """Post a manual ADJUSTMENT entry on an AMOUNT-mode contract.
+        """Post an ADJUSTMENT entry on an AMOUNT-mode contract.
 
         Positive `amount` increases outstanding (customer owes more);
         negative `amount` decreases outstanding (write-off / credit).
+        `lifetime_collected` is never touched.
+
+        With `idempotency_key`, a key that already exists returns that row and
+        posts nothing; without one, every call posts (the manual adjustment).
+        `metadata` merges into `entry_metadata` beside `outstanding_after`.
         """
         self._require_amount_contract(contract)
         amount_decimal = Decimal(str(amount))
@@ -2219,6 +2491,10 @@ class CorporateContractService:
             raise ValidationError("Adjustment amount must be non-zero")
         if not reason:
             raise ValidationError("Adjustment reason is required")
+        if idempotency_key is not None:
+            existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
+            if existing is not None:
+                return existing
 
         account = self._get_or_create_locked_account(contract.id)
         account.outstanding_amount = Decimal(str(account.outstanding_amount or 0)) + amount_decimal
@@ -2235,8 +2511,10 @@ class CorporateContractService:
             amount=amount_decimal,
             currency=contract.currency,
             notes=reason,
-            idempotency_key=f"adjustment:contract:{contract.id}:{datetime.now(timezone.utc).timestamp()}",
-            entry_metadata={"outstanding_after": float(account.outstanding_amount)},
+            idempotency_key=(
+                idempotency_key or f"adjustment:contract:{contract.id}:{datetime.now(timezone.utc).timestamp()}"
+            ),
+            entry_metadata={**(metadata or {}), "outstanding_after": float(account.outstanding_amount)},
         )
         db.session.add(ledger_entry)
         db.session.flush()

@@ -6,6 +6,7 @@ import { message } from 'antd';
 
 import PlaceGroupPanel from './PlaceGroupPanel';
 import adminService from '../services/adminService';
+import { useAuthStore } from '../stores/authStore';
 
 vi.mock('../services/adminService');
 
@@ -84,6 +85,7 @@ const USER = { id: 11, first_name: 'Alice', last_name: 'Tester', phone: '+998900
 const GROUP_DETAIL_KEYS = new Set([
   'place_group_id',
   'label',
+  'notes',
   'place_balance',
   'members',
   // Opaque on purpose: `cod` is CashCollectionService.get_place_cod_statement,
@@ -302,6 +304,7 @@ const clickSuggestionAction = async (user, actionPattern) => {
 describe('PlaceGroupPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useAuthStore.setState({ permissions: { can_manage_users: true } });
 
     adminService.getUserAddresses.mockResolvedValue({
       data: {
@@ -314,6 +317,7 @@ describe('PlaceGroupPanel', () => {
 
     adminService.getPlaceGroup.mockResolvedValue({
       data: placeGroupDetail({
+        notes: null,
         place_group_id: 7,
         label: 'Acme office',
         place_balance: 5,
@@ -458,6 +462,7 @@ describe('PlaceGroupPanel', () => {
   it('renders the place-group audit trail without the internal [group N] reason prefix', async () => {
     adminService.getPlaceGroup.mockResolvedValue({
       data: placeGroupDetail({
+        notes: null,
         place_group_id: 7,
         label: 'Acme office',
         place_balance: 0,
@@ -514,6 +519,7 @@ describe('PlaceGroupPanel', () => {
   it("shows a rename in the group history in the admin's language", async () => {
     adminService.getPlaceGroup.mockResolvedValue({
       data: placeGroupDetail({
+        notes: null,
         place_group_id: 7,
         label: 'Acme HQ',
         place_balance: 0,
@@ -773,6 +779,7 @@ describe('PlaceGroupPanel', () => {
     });
     adminService.getPlaceGroup.mockResolvedValue({
       data: placeGroupDetail({
+        notes: null,
         place_group_id: 7,
         label: 'Acme office',
         // An over-returned place sits BELOW zero, so the cap is max(0, place):
@@ -1092,6 +1099,7 @@ describe('PlaceGroupPanel', () => {
     const user = userEvent.setup();
     adminService.getPlaceGroup.mockResolvedValue({
       data: placeGroupDetail({
+        notes: null,
         place_group_id: 7,
         label: 'Acme office',
         place_balance: 5,

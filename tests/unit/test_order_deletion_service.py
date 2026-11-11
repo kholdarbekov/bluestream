@@ -12,6 +12,8 @@ from business_app.models.order import Order, OrderItem, OrderStatusHistory
 from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
+    CustomerCreditPayout,
+    CustomerCreditPayoutDebit,
     Payment,
     PaymentFiscalization,
     PaymentTransaction,
@@ -23,7 +25,13 @@ from business_app.models.sales_pay import (
     SalesPayPlanRate,
     SalesPayPlanVersion,
 )
-from business_app.services.order_deletion_service import PROTECTED_REFUSAL, PROTECTED_TABLES, OrderDeletionService
+from business_app.services.order_deletion_service import (
+    PAYOUT_PROTECTED_REFUSAL,
+    PROTECTED_REFUSAL,
+    PROTECTED_REFUSALS,
+    PROTECTED_TABLES,
+    OrderDeletionService,
+)
 from business_app.utils.constants import (
     LoyaltyTransactionType,
     NotificationChannel,
@@ -357,7 +365,14 @@ def _post_credit_line(*, order: Order, agent_id: int, admin_id: int) -> SalesPay
 
 
 def test_the_protected_tables_and_the_refusal_text_are_the_contracts():
-    assert PROTECTED_TABLES == ('sales_pay_ledger_lines',)
+    assert PROTECTED_TABLES == ('sales_pay_ledger_lines', 'customer_credit_payout_debits')
+    assert PROTECTED_REFUSALS == {
+        'sales_pay_ledger_lines': PROTECTED_REFUSAL,
+        'customer_credit_payout_debits': PAYOUT_PROTECTED_REFUSAL,
+    }
+    assert PAYOUT_PROTECTED_REFUSAL == (
+        "prepayment returns drew on this order's cash collections; the order cannot be hard-deleted"
+    )
     assert PROTECTED_REFUSAL == (
         'sales-agent pay ledger lines reference this order; a credited order cannot be hard-deleted'
     )
@@ -433,3 +448,56 @@ def test_an_uncredited_order_is_not_refused(db, sample_user):
     result = service.delete_order_by_number('SA_000778_26', apply_changes=True)
     assert result['applied'] is True
     assert Order.query.filter_by(id=order_id).first() is None
+
+
+@pytest.mark.parametrize('voided', [False, True])
+def test_order_whose_cash_funds_a_payout_is_undeletable(db, sample_user, voided):
+    """A debit row, live or undone, makes the order that funded the event undeletable."""
+    order = _create_order(user_id=sample_user.id, order_number='PO_000778_26', amount=Decimal('50000.00'))
+    event = CashCollectionEvent(
+        customer_id=sample_user.id,
+        order_id=order.id,
+        amount=Decimal('50000.00'),
+        currency='UZS',
+        source=CashCollectionSource.ADMIN_ADJUSTMENT,
+        occurred_at=datetime.now(UTC),
+        unapplied_amount=Decimal('20000.00'),
+    )
+    payout = CustomerCreditPayout(
+        customer_id=sample_user.id,
+        amount=Decimal('30000.00'),
+        paid_by='office',
+        reason='paid back in cash',
+        paid_at=datetime.now(UTC),
+        actor_user_id=sample_user.id,
+        idempotency_key=f'del-{voided}',
+        voided_at=datetime.now(UTC) if voided else None,
+        voided_by_user_id=sample_user.id if voided else None,
+        void_reason='entered twice' if voided else None,
+    )
+    db.session.add_all([event, payout])
+    db.session.flush()
+    db.session.add(
+        CustomerCreditPayoutDebit(
+            payout_id=payout.id,
+            cash_collection_event_id=event.id,
+            amount=Decimal('30000.00'),
+            revenue_counted=False,
+            card_click=False,
+        )
+    )
+    db.session.commit()
+    order_id = order.id
+
+    service = OrderDeletionService()
+    dry_run = service.delete_order_by_number('PO_000778_26', apply_changes=False)
+    assert dry_run['refused'] == PAYOUT_PROTECTED_REFUSAL
+    assert dry_run['rows_by_table']['customer_credit_payout_debits'] == 1
+
+    with pytest.raises(RuntimeError) as exc_info:
+        service.delete_order_by_number('PO_000778_26', apply_changes=True)
+    assert str(exc_info.value) == PAYOUT_PROTECTED_REFUSAL
+
+    db.session.expire_all()
+    assert Order.query.filter_by(id=order_id).count() == 1
+    assert CustomerCreditPayoutDebit.query.count() == 1

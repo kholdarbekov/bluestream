@@ -57,17 +57,17 @@ class TestCustomerHasDeliveredOrder:
         address = _address_for(db, sample_user)
         _make_order(db, sample_user, address, OrderStatus.DELIVERED, "ORD-DLV-1")
 
-        assert OrderService()._customer_has_delivered_order(sample_user.id) is True
+        assert OrderService.customer_has_delivered_order(sample_user.id) is True
 
     def test_false_when_user_has_no_orders(self, app, db, sample_user):
-        assert OrderService()._customer_has_delivered_order(sample_user.id) is False
+        assert OrderService.customer_has_delivered_order(sample_user.id) is False
 
     def test_false_when_user_has_only_non_delivered_orders(self, app, db, sample_user):
         address = _address_for(db, sample_user)
         _make_order(db, sample_user, address, OrderStatus.CANCELLED, "ORD-CAN-1")
         _make_order(db, sample_user, address, OrderStatus.PENDING, "ORD-PEN-1")
 
-        assert OrderService()._customer_has_delivered_order(sample_user.id) is False
+        assert OrderService.customer_has_delivered_order(sample_user.id) is False
 
 
 def _cod_order_data(product, address, payment_method="cash"):
@@ -234,7 +234,7 @@ class TestInstantCodConfirmation:
             "business_app.services.corporate_contract_service.CorporateContractService.reserve_for_order",
             return_value=None,
         ), patch.object(
-            OrderService, "_customer_has_delivered_order", side_effect=RuntimeError("db down")
+            OrderService, "customer_has_delivered_order", side_effect=RuntimeError("db down")
         ):
             order = service.create_order(
                 sample_user.id, _cod_order_data(sample_product, address)

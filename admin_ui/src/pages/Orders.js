@@ -1664,6 +1664,15 @@ const Orders = () => {
                   ? ` (${selectedOrder.collected_cash_edit_window_remaining_hours.toFixed(1)}h left)`
                   : ''}
               </Button>
+            ) : isAdmin() && selectedOrder.collected_cash_edit_block_code === 'event_funds_prepayment_return' ? (
+              // Not hidden silently: the backend names the return that drew on this collection.
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginTop: 8 }}
+                data-testid="cash-edit-blocked-by-return"
+                message={describeCashEditWarning(selectedOrder.collected_cash_edit_block_code, t)}
+              />
             ) : null}
 
             <Divider>{t('ui.orders.fiscalization', 'Fiscalization')}</Divider>
@@ -3008,7 +3017,7 @@ const Orders = () => {
             </Descriptions>
             <Alert type="info" showIcon style={{ marginBottom: 6 }} message={cashEditScopeCopy} />
             {(cashEditPreview?.blocking_reasons || []).map((r, i) => (
-              <Alert key={i} type="error" showIcon message={r} style={{ marginBottom: 6 }} />
+              <Alert key={i} type="error" showIcon message={describeCashEditWarning(r, t)} style={{ marginBottom: 6 }} />
             ))}
             {(cashEditPreview?.warnings || []).map((w, i) => (
               <Alert

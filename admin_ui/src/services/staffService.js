@@ -246,6 +246,45 @@ class StaffServiceClass {
     );
   }
 
+  /**
+   * Preview returning a customer's free prepayment (no write).
+   * @param {number} customerId
+   * @param {{ amount?: number, target_balance?: number, paid_by: string, driver_user_id?: number, paid_at?: string }} payload
+   */
+  previewPrepaymentPayout(customerId, payload, config) {
+    return api.post(
+      `/admin/staff/cash-reconciliation/customers/${customerId}/prepayment-payouts/preview`,
+      payload,
+      config,
+    );
+  }
+
+  /**
+   * Return a customer's prepayment: the preview body plus `reason` and `idempotency_key`.
+   * @param {number} customerId
+   * @param {Object} payload
+   */
+  returnPrepayment(customerId, payload, config) {
+    return api.post(
+      `/admin/staff/cash-reconciliation/customers/${customerId}/prepayment-payouts`,
+      payload,
+      config,
+    );
+  }
+
+  /**
+   * Undo a recorded prepayment return.
+   * @param {number} payoutId
+   * @param {{ reason: string }} payload
+   */
+  undoPrepaymentPayout(payoutId, payload, config) {
+    return api.post(
+      `/admin/staff/cash-reconciliation/prepayment-payouts/${payoutId}/undo`,
+      payload,
+      config,
+    );
+  }
+
   getOrderPaymentTimeline(orderId) {
     return api.get(`/admin/staff/cash-reconciliation/orders/${orderId}/timeline`);
   }

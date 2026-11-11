@@ -4,6 +4,7 @@ import logging
 import math
 import uuid
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -26,6 +27,7 @@ from staff_bot.utils.formatters import (
     escape_html,
     format_currency,
     format_quantity,
+    format_truck_bottle_lines,
     format_user_card,
 )
 from staff_bot.utils.search import detect_search_type
@@ -43,8 +45,11 @@ BOTTLES_RETURNED_WH_INPUT = 114
 BOTTLE_SESSION_LOADED_QTY_INPUT = 120
 BOTTLE_SESSION_RETURNED_QTY_INPUT = 121
 BOTTLE_TRANSFER_DRIVER_SELECT = 122
-BOTTLE_TRANSFER_QTY_INPUT = 123
-BOTTLE_TRANSFER_CONFIRM_QTY_INPUT = 124
+BOTTLE_TRANSFER_FULL_QTY_INPUT = 123
+BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT = 124
+BOTTLE_TRANSFER_SEND_CHOICE = 125
+BOTTLE_TRANSFER_EMPTY_QTY_INPUT = 126
+BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT = 127
 
 
 class BottleCollectionHandler(BaseHandler):
@@ -160,7 +165,7 @@ class BottleCollectionHandler(BaseHandler):
         drew is still sitting in the driver's scrollback with live-looking
         buttons on it. The flow behind it, though, is gone the moment the driver
         taps a main-menu button: `flow_state.clear_pending_flows` drops
-        `pending_bottle_collection_flow` / `pending_transfer_available` and the
+        `pending_bottle_collection_flow` / `pending_transfer_flow` and the
         guards below then refuse the tap.
 
         Refusing it SILENTLY — a bare `query.answer()` with no `text=` — is what
@@ -169,7 +174,7 @@ class BottleCollectionHandler(BaseHandler):
         toast plus a screen that no longer offers the dead buttons is the whole
         fix, and it is written once here because "this tap belongs to a flow
         that ended" is one rule with several call sites (the collection quantity
-        picker, the transfer driver picker).
+        picker, the transfer driver picker and send screen).
 
         The picker is neutralised on the TAP rather than when the flow clears:
         `clear_pending_flows` is the SSOT for leaving a flow and it deliberately
@@ -1143,13 +1148,22 @@ class BottleCollectionHandler(BaseHandler):
 
     @staticmethod
     def _format_session(session: dict, language: str) -> str:
-        """Format a DriverBottleSession as an HTML summary block."""
+        """Format a DriverBottleSession as an HTML summary block.
+
+        Every number is a field the backend publishes (spec 2026-11-09 §4.4):
+        the transfers split into full and empties, the truck's full bottles,
+        empties and free full bottles (U1), and `current_inventory`, the total
+        the warehouse expects back (the return screen shows this block). The
+        bot adds nothing up.
+        """
         status = session.get('status', 'open')
         loaded = session.get('bottles_loaded', 0)
         delivered = session.get('bottles_delivered', 0)
         collected = session.get('bottles_collected_from_customers', 0)
-        transferred_out = session.get('bottles_transferred_out', 0)
-        transferred_in = session.get('bottles_transferred_in', 0)
+        full_out = session.get('bottles_transferred_out', 0)
+        empties_out = session.get('empties_transferred_out', 0)
+        full_in = session.get('bottles_transferred_in', 0)
+        empties_in = session.get('empties_transferred_in', 0)
         current = session.get('current_inventory', 0)
         returned = session.get('bottles_returned_to_warehouse')
         discrepancy = session.get('discrepancy')
@@ -1161,8 +1175,6 @@ class BottleCollectionHandler(BaseHandler):
         loaded_label = i18n.get('staff.delivery.bottles_loaded_label', language)
         delivered_label = i18n.get('staff.delivery.bottles_delivered_label', language)
         collected_label = i18n.get('staff.delivery.bottles_collected_label', language)
-        transferred_out_label = i18n.get('staff.delivery.bottles_transferred_out_label', language)
-        transferred_in_label = i18n.get('staff.delivery.bottles_transferred_in_label', language)
         on_truck_label = i18n.get('staff.delivery.bottles_on_truck_label', language)
         returned_wh_label = i18n.get('staff.delivery.bottles_returned_wh_label', language)
         discrepancy_label = i18n.get('staff.delivery.discrepancy_label', language)
@@ -1179,12 +1191,24 @@ class BottleCollectionHandler(BaseHandler):
             f"🚚 {delivered_label}:            <b>{delivered}</b>",
             f"♻️ {collected_label}:            <b>{collected}</b>",
         ]
-        if transferred_out or transferred_in:
+        if full_out or empties_out or full_in or empties_in:
             lines += [
-                f"📤 {transferred_out_label}:      <b>{transferred_out}</b>",
-                f"📥 {transferred_in_label}:       <b>{transferred_in}</b>",
+                "📤 " + i18n.get(
+                    'staff.delivery.bottles_transferred_out_split', language,
+                    full=f"<b>{full_out}</b>", empty=f"<b>{empties_out}</b>",
+                ),
+                "📥 " + i18n.get(
+                    'staff.delivery.bottles_transferred_in_split', language,
+                    full=f"<b>{full_in}</b>", empty=f"<b>{empties_in}</b>",
+                ),
             ]
         lines.append("─" * 30)
+        lines += format_truck_bottle_lines(
+            language,
+            full=session.get('full_bottles_on_board', 0),
+            empties=session.get('empties_on_board', 0),
+            free_full=session.get('free_full_bottles', 0),
+        )
         lines.append(f"🚚 {on_truck_label}:         <b>{current}</b>")
         if returned is not None:
             lines.append(f"🏢 {returned_wh_label}:       <b>{returned}</b>")
@@ -1484,6 +1508,93 @@ class BottleCollectionHandler(BaseHandler):
     # ------------------------------------------------------------------
     # Transfer: Sender side
     # ------------------------------------------------------------------
+    # A transfer moves full bottles and empties (spec 2026-11-09 T1-T3): the
+    # sender picks a colleague, then sends everything on the truck or chooses
+    # both numbers. `pending_transfer_flow` keeps the flow alive. It is stamped
+    # when the picker opens with the backend's transferable numbers (what the
+    # send screen shows) and registered with `flow_state`, so walking away drops
+    # it and every button left in the chat is refused out loud. It caps nothing:
+    # the backend caps each number, and its refusal says which one was too high.
+
+    # What the transfer itself drops when it starts over or ends; every key is also in
+    # `flow_state.PENDING_FLOW_USER_DATA_KEYS`, so leaving by a menu tap drops them too.
+    TRANSFER_FLOW_KEYS = ('pending_transfer_flow', 'pending_transfer_receiver_id', 'pending_transfer_full_qty')
+    # The receiver's "Different count" draft: the transfer, and the full count typed before the empties.
+    CONFIRM_FLOW_KEYS = ('pending_confirm_transfer_id', 'pending_confirm_transfer_full')
+    # Both conversations sit in handler group 0 with the send registered first, so while both are armed a
+    # typed number goes to the send whichever prompt is on screen. Entering either one drops the other's
+    # draft; the displaced one then answers its next message as timed out (`_answer_gone_flow`) and ends,
+    # and its timeout drops only its own keys (bot.py `_flow_timeout(own_keys=...)`).
+
+    # Refusals of the amounts themselves. The colleague is still right, so the send screen is drawn again
+    # under the refusal, with the numbers on the truck now.
+    SEND_SCREEN_REFUSALS = frozenset({'BOTTLE_TRANSFER_EXCEEDS_INVENTORY', 'BOTTLE_TRANSFER_NOTHING_TO_SEND'})
+
+    @staticmethod
+    def _drop(context: ContextTypes.DEFAULT_TYPE, keys) -> None:
+        for key in keys:
+            context.user_data.pop(key, None)
+
+    @staticmethod
+    def _transfer_flow_from(session: dict) -> dict:
+        """What the send screen shows: the backend's transferable numbers, as published."""
+        return {
+            'transferable_full': session.get('transferable_full', 0),
+            'transferable_empties': session.get('transferable_empties', 0),
+        }
+
+    @staticmethod
+    def _send_screen(language: str, flow: dict, *, refusal: Optional[str] = None):
+        """The send screen's text and buttons: Send all, or Choose amounts. `refusal` goes above it."""
+        full, empties = flow['transferable_full'], flow['transferable_empties']
+        lines = [
+            i18n.get('staff.delivery.transfer_send_prompt', language),
+            *format_truck_bottle_lines(language, full=full, empties=empties),
+        ]
+        if refusal:
+            lines = [refusal, "", *lines]
+        return "\n".join(lines), DeliveryKeyboards.transfer_send_choice(language, full, empties)
+
+    @staticmethod
+    def _parse_transfer_count(raw_text) -> Optional[int]:
+        """A bottle count typed on the transfer screens, or None for a keypad slip.
+
+        Zero is a real answer (a driver hands over only empties, or counted no
+        full bottles). The only upper bound is what the ledger column can hold:
+        how many bottles may move is the backend's call.
+        """
+        try:
+            count = int((raw_text or '').strip())
+        except ValueError:
+            return None
+        return count if 0 <= count <= BOTTLE_RETURN_COLUMN_CEILING else None
+
+    @staticmethod
+    async def _show(update: Update, text: str, reply_markup=None):
+        """Put `text` on screen: edit the tapped message, or answer the typed one."""
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
+
+    async def _live_transfer_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str, *,
+                                  receiver_required: bool) -> Optional[dict]:
+        """The sender's flow if this tap still belongs to it; otherwise refuse the tap and return None.
+
+        Gone means the driver left (`flow_state.clear_pending_flows` owns the
+        keys) or the transfer was already sent, so the tap is a stale button in
+        the scrollback. A send-screen button also needs the colleague picked in
+        this flow: one from an earlier send screen, tapped while a new flow is
+        still at its picker, names nobody.
+        """
+        flow = context.user_data.get('pending_transfer_flow')
+        if flow is None or (receiver_required and context.user_data.get('pending_transfer_receiver_id') is None):
+            await self._refuse_stale_tap(
+                update, language,
+                reply_markup=DeliveryKeyboards.bottle_session_menu(language),
+            )
+            return None
+        return flow
 
     @require_auth
     @require_delivery_driver
@@ -1496,6 +1607,12 @@ class BottleCollectionHandler(BaseHandler):
         if not token:
             await self._handle_auth_error(update, language)
             return ConversationHandler.END
+
+        # A fresh flow: nothing an earlier, abandoned one picked or typed carries
+        # over, and its send screen stays dead even if this one stops early. A
+        # "Different count" being typed is abandoned too: its prompt sits behind
+        # this flow, and a number that reaches it must not count a transfer.
+        self._drop(context, self.TRANSFER_FLOW_KEYS + self.CONFIRM_FLOW_KEYS)
 
         # Must have open session
         try:
@@ -1513,17 +1630,14 @@ class BottleCollectionHandler(BaseHandler):
                 )
                 return ConversationHandler.END
 
-            session = response.data
-            available = session.get('current_inventory', 0)
-            if available <= 0:
+            flow = self._transfer_flow_from(response.data)
+            if not flow['transferable_full'] and not flow['transferable_empties']:
                 await query.edit_message_text(
                     i18n.get('staff.delivery.no_bottles_to_transfer', language),
                     reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                     parse_mode='HTML',
                 )
                 return ConversationHandler.END
-
-            context.user_data['pending_transfer_available'] = available
         except Exception as exc:
             logger.error("Error checking session for transfer: %s", exc, exc_info=True)
             await self._handle_error(update, context)
@@ -1547,8 +1661,9 @@ class BottleCollectionHandler(BaseHandler):
             )
             return ConversationHandler.END
 
+        context.user_data['pending_transfer_flow'] = flow
         await query.edit_message_text(
-            i18n.get('staff.delivery.select_transfer_driver', language, available=available),
+            i18n.get('staff.delivery.select_transfer_receiver', language),
             reply_markup=DeliveryKeyboards.driver_select_for_transfer(language, drivers),
             parse_mode='HTML',
         )
@@ -1557,24 +1672,12 @@ class BottleCollectionHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def receive_transfer_driver_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Store selected receiver driver and prompt for quantity."""
+        """Store the colleague and show the send screen: Send all, or Choose amounts."""
         query = update.callback_query
         language = await self._get_language(update, context)
 
-        # `pending_transfer_available` IS the flow: `start_transfer_bottles`
-        # stamps it from the open session and it is the ceiling
-        # `receive_transfer_quantity` enforces. Gone means the driver left
-        # (`flow_state.clear_pending_flows` owns it), so this tap is a stale
-        # picker in the scrollback. Prompting anyway asked for a quantity
-        # against an "available: 0" the driver cannot satisfy, on a message with
-        # no buttons — a dead end. Refuse it out loud and put the session menu
-        # back instead.
-        available = context.user_data.get('pending_transfer_available')
-        if available is None:
-            await self._refuse_stale_tap(
-                update, language,
-                reply_markup=DeliveryKeyboards.bottle_session_menu(language),
-            )
+        flow = await self._live_transfer_flow(update, context, language, receiver_required=False)
+        if flow is None:
             return ConversationHandler.END
         await query.answer()
 
@@ -1586,66 +1689,145 @@ class BottleCollectionHandler(BaseHandler):
             return ConversationHandler.END
 
         context.user_data['pending_transfer_receiver_id'] = receiver_id
-
-        await query.edit_message_text(
-            i18n.get('staff.delivery.enter_transfer_qty', language, available=available),
-            parse_mode='HTML',
-        )
-        return BOTTLE_TRANSFER_QTY_INPUT
+        await self._show(update, *self._send_screen(language, flow))
+        return BOTTLE_TRANSFER_SEND_CHOICE
 
     @require_auth
     @require_delivery_driver
-    async def receive_transfer_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Send transfer and notify result."""
+    async def send_all_bottles(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """"Send all": the backend sends whatever is on the truck when it books the transfer (T3)."""
+        query = update.callback_query
         language = await self._get_language(update, context)
-        token = await self._get_auth_token(update, context)
-        if not token:
-            await self._handle_auth_error(update, language)
+        if await self._live_transfer_flow(update, context, language, receiver_required=True) is None:
+            return ConversationHandler.END
+        await query.answer()
+        return await self._submit_transfer(update, context, language, send_all=True)
+
+    @require_auth
+    @require_delivery_driver
+    async def choose_transfer_amounts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """"Choose amounts": ask full bottles first, then empties, each with the backend's maximum."""
+        query = update.callback_query
+        language = await self._get_language(update, context)
+        flow = await self._live_transfer_flow(update, context, language, receiver_required=True)
+        if flow is None:
+            return ConversationHandler.END
+        await query.answer()
+
+        context.user_data.pop('pending_transfer_full_qty', None)
+        await query.edit_message_text(
+            i18n.get('staff.delivery.enter_transfer_full_qty', language, max=flow['transferable_full']),
+            parse_mode='HTML',
+        )
+        return BOTTLE_TRANSFER_FULL_QTY_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_transfer_full_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Keep the full count, then ask for the empties."""
+        language = await self._get_language(update, context)
+        flow = context.user_data.get('pending_transfer_flow')
+        if flow is None or context.user_data.get('pending_transfer_receiver_id') is None:
+            await self._answer_gone_flow(update, context, 'pending_transfer_flow')
             return ConversationHandler.END
 
+        full = self._parse_transfer_count(update.message.text)
+        if full is None:
+            await update.message.reply_text(i18n.get('staff.delivery.invalid_bottle_count', language))
+            return BOTTLE_TRANSFER_FULL_QTY_INPUT
+
+        context.user_data['pending_transfer_full_qty'] = full
+        await update.message.reply_text(
+            i18n.get('staff.delivery.enter_transfer_empty_qty', language, max=flow['transferable_empties']),
+            parse_mode='HTML',
+        )
+        return BOTTLE_TRANSFER_EMPTY_QTY_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_transfer_empty_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Send the two numbers the driver typed."""
+        language = await self._get_language(update, context)
+        full = context.user_data.get('pending_transfer_full_qty')
+        if full is None or context.user_data.get('pending_transfer_receiver_id') is None:
+            await self._answer_gone_flow(update, context, 'pending_transfer_flow')
+            return ConversationHandler.END
+
+        empties = self._parse_transfer_count(update.message.text)
+        if empties is None:
+            await update.message.reply_text(i18n.get('staff.delivery.invalid_bottle_count', language))
+            return BOTTLE_TRANSFER_EMPTY_QTY_INPUT
+
+        return await self._submit_transfer(
+            update, context, language, full_quantity=full, empty_quantity=empties,
+        )
+
+    async def _submit_transfer(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str,
+                               **amounts) -> int:
+        """POST the transfer. The receipt names what the backend recorded.
+
+        A refusal of the amounts (`SEND_SCREEN_REFUSALS`) keeps the colleague and returns to the send screen,
+        redrawn with the numbers on the truck now. Every other answer ends the flow.
+        """
         receiver_id = context.user_data.get('pending_transfer_receiver_id')
-        available = context.user_data.get('pending_transfer_available', 0)
-
+        next_state = ConversationHandler.END
         try:
-            qty = int(update.message.text.strip())
-            if qty <= 0:
-                raise ValueError("non-positive")
-            if qty > available:
-                await update.message.reply_text(
-                    i18n.get('staff.delivery.transfer_qty_exceeds_available', language, available=available)
-                )
-                return BOTTLE_TRANSFER_QTY_INPUT
-        except (TypeError, ValueError):
-            await update.message.reply_text(
-                i18n.get('staff.delivery.invalid_bottle_count', language)
-            )
-            return BOTTLE_TRANSFER_QTY_INPUT
+            token = await self._get_auth_token(update, context)
+            if not token:
+                await self._handle_auth_error(update, language)
+                return next_state
 
-        try:
             async with api_client as client:
-                response = await client.initiate_bottle_transfer(token, receiver_id, qty)
+                response = await client.initiate_bottle_transfer(token, receiver_id, **amounts)
 
             if not response.success:
-                await self._handle_api_response_error(update, response, language)
-                return ConversationHandler.END
+                if response.error_code in self.SEND_SCREEN_REFUSALS:
+                    next_state = await self._send_screen_after_refusal(update, context, language, token, response)
+                if next_state == ConversationHandler.END:
+                    await self._handle_api_response_error(update, response, language)
+                return next_state
 
             transfer = response.data or {}
+            full, empties = DeliveryKeyboards.transfer_declared_counts(transfer)
             ref = (transfer.get('transfer_ref') or '')[:8]
-            await update.message.reply_text(
+            await self._show(
+                update,
                 i18n.get(
-                    'staff.delivery.bottle_transfer_initiated', language,
-                    qty=qty, ref=escape_html(ref),
+                    'staff.delivery.bottle_transfer_sent', language,
+                    full=full, empty=empties, ref=escape_html(ref),
                 ),
                 reply_markup=DeliveryKeyboards.bottle_session_menu(language),
-                parse_mode='HTML',
             )
-            context.user_data.pop('pending_transfer_receiver_id', None)
-            context.user_data.pop('pending_transfer_available', None)
-            return ConversationHandler.END
+            return next_state
         except Exception as exc:
             logger.error("Error initiating bottle transfer: %s", exc, exc_info=True)
             await self._handle_error(update, context)
+            next_state = ConversationHandler.END
+            return next_state
+        finally:
+            if next_state == ConversationHandler.END:
+                self._drop(context, self.TRANSFER_FLOW_KEYS)
+
+    async def _send_screen_after_refusal(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str,
+                                         token: str, refusal) -> int:
+        """Redraw the send screen under the backend's refusal of the amounts, with the truck as it is now.
+
+        Returns BOTTLE_TRANSFER_SEND_CHOICE, or END when there is no screen to draw: the session cannot be
+        read again, or nothing is left to send. The caller then shows the refusal with its remedy button.
+        """
+        async with api_client as client:
+            response = await client.get_current_bottle_session(token)
+        if not response.success or not response.data:
             return ConversationHandler.END
+        flow = self._transfer_flow_from(response.data)
+        if not flow['transferable_full'] and not flow['transferable_empties']:
+            return ConversationHandler.END
+
+        context.user_data['pending_transfer_flow'] = flow
+        context.user_data.pop('pending_transfer_full_qty', None)
+        reason = f"❌ {self._resolve_response_error(language, refusal, html=True)}"
+        await self._show(update, *self._send_screen(language, flow, refusal=reason))
+        return BOTTLE_TRANSFER_SEND_CHOICE
 
     # ------------------------------------------------------------------
     # Transfer: Receiver confirmation
@@ -1683,11 +1865,11 @@ class BottleCollectionHandler(BaseHandler):
             lines = [i18n.get('staff.delivery.pending_transfers_title', language) + "\n"]
             for t in transfers:
                 ref = (t.get('transfer_ref') or '')[:8]
-                qty = t.get('declared_quantity', 0)
+                full, empties = DeliveryKeyboards.transfer_declared_counts(t)
                 sender = t.get('sender_name') or i18n.get('staff.common.unknown_driver', language)
                 lines.append(i18n.get(
-                    'staff.delivery.pending_transfer_line', language,
-                    sender=escape_html(sender), qty=qty, ref=escape_html(ref),
+                    'staff.delivery.pending_transfer_split_line', language,
+                    sender=escape_html(sender), full=full, empty=empties, ref=escape_html(ref),
                 ))
 
             await query.edit_message_text(
@@ -1702,7 +1884,7 @@ class BottleCollectionHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def start_transfer_custom_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Entry point: receiver taps 'Different count' — prompt for actual qty."""
+        """Entry point: receiver taps 'Different count' — ask for the full bottles, then the empties."""
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
@@ -1715,73 +1897,102 @@ class BottleCollectionHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+        # A send being chosen or typed is abandoned: its prompt sits ahead of this one, and a
+        # number meant for this count must never reach it and post a transfer.
+        self._drop(context, self.TRANSFER_FLOW_KEYS)
         context.user_data['pending_confirm_transfer_id'] = transfer_id
-        language = await self._get_language(update, context)
+        context.user_data.pop('pending_confirm_transfer_full', None)
         await query.edit_message_text(
-            i18n.get('staff.delivery.enter_actual_received_qty', language),
+            i18n.get('staff.delivery.enter_received_full_qty', language),
             parse_mode='HTML',
         )
-        return BOTTLE_TRANSFER_CONFIRM_QTY_INPUT
+        return BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
 
     @require_auth
     @require_delivery_driver
     async def receive_transfer_confirm_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle callback when receiver taps 'Confirm N' on a transfer."""
+        """The receiver's one tap: confirm the transfer as declared, both numbers.
+
+        callback_data is `staff_transfer_confirm_<id>`, or `staff_transfer_confirm_<id>_<qty>` on a message sent
+        before the full / empties split. Both confirm as declared: the backend takes the numbers off the row, never
+        the old button's quantity.
+        """
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
 
-        # callback_data: staff_transfer_confirm_<transfer_id>_<qty>
-        data = query.data
-        parts = data.split('_')
         try:
-            transfer_id = int(parts[-2])
-            qty = int(parts[-1])
+            transfer_id = int(query.data.split('_')[3])
         except (ValueError, IndexError):
             await self._handle_error(update, context)
             return
 
-        context.user_data['pending_confirm_transfer_id'] = transfer_id
-        context.user_data['pending_confirm_transfer_qty'] = qty
-        # Direct confirm with declared qty
-        await self._do_confirm_transfer(update, context, transfer_id, qty, language)
+        await self._do_confirm_transfer(update, context, transfer_id, language, confirm_as_declared=True)
 
     @require_auth
     @require_delivery_driver
     async def receive_transfer_custom_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Receive a custom quantity from the receiver and confirm the transfer."""
+        """Keep the full bottles the receiver counted, then ask for the empties."""
         language = await self._get_language(update, context)
+        if not context.user_data.get('pending_confirm_transfer_id'):
+            await self._answer_gone_flow(update, context, 'pending_confirm_transfer_id')
+            return ConversationHandler.END
+
+        full = self._parse_transfer_count(update.message.text)
+        if full is None:
+            await update.message.reply_text(i18n.get('staff.delivery.invalid_bottle_count', language))
+            return BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
+
+        context.user_data['pending_confirm_transfer_full'] = full
+        await update.message.reply_text(
+            i18n.get('staff.delivery.enter_received_empty_qty', language),
+            parse_mode='HTML',
+        )
+        return BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_transfer_custom_confirm_empties(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Confirm the transfer with the two numbers the receiver counted."""
+        language = await self._get_language(update, context)
+        transfer_id = context.user_data.get('pending_confirm_transfer_id')
+        full = context.user_data.get('pending_confirm_transfer_full')
+        if not transfer_id or full is None:
+            await self._answer_gone_flow(update, context, 'pending_confirm_transfer_id')
+            return ConversationHandler.END
+
+        empties = self._parse_transfer_count(update.message.text)
+        if empties is None:
+            await update.message.reply_text(i18n.get('staff.delivery.invalid_bottle_count', language))
+            return BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT
+
+        try:
+            await self._do_confirm_transfer(
+                update, context, transfer_id, language, confirmed_full=full, confirmed_empty=empties,
+            )
+        finally:
+            # The count was this draft's; it is spent whatever the backend answered.
+            self._drop(context, self.CONFIRM_FLOW_KEYS)
+        return ConversationHandler.END
+
+    async def _do_confirm_transfer(self, update, context, transfer_id: int, language: str, **count):
+        """API call to confirm/dispute a transfer and show result.
+
+        `count` is `confirm_as_declared=True`, or the two numbers the receiver typed. Every number on the reply is
+        the backend's. A disputed reply says an admin was notified only when the backend reports one was
+        (`admins_alerted`); otherwise it asks the driver to tell one (spec 2026-11-09 §4.4).
+
+        It leaves the "Different count" draft alone: the typed count drops its own draft, and a one-tap Confirm
+        on another transfer's push must not take the count the driver is typing for this one.
+        """
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
-            return ConversationHandler.END
-
-        transfer_id = context.user_data.get('pending_confirm_transfer_id')
-        if not transfer_id:
-            return ConversationHandler.END
-
-        try:
-            qty = int(update.message.text.strip())
-            if qty < 0:
-                raise ValueError("negative")
-        except (TypeError, ValueError):
-            await update.message.reply_text(
-                i18n.get('staff.delivery.invalid_bottle_count', language)
-            )
-            return BOTTLE_TRANSFER_CONFIRM_QTY_INPUT
-
-        await self._do_confirm_transfer(update, context, transfer_id, qty, language)
-        return ConversationHandler.END
-
-    async def _do_confirm_transfer(self, update, context, transfer_id: int, qty: int, language: str):
-        """API call to confirm/dispute a transfer and show result."""
-        token = await self._get_auth_token(update, context)
-        if not token:
             return
 
         try:
             async with api_client as client:
-                response = await client.confirm_bottle_transfer(token, transfer_id, qty)
+                response = await client.confirm_bottle_transfer(token, transfer_id, **count)
 
             if not response.success:
                 # The reason, not a fixed "failed": already handled and sent
@@ -1801,31 +2012,28 @@ class BottleCollectionHandler(BaseHandler):
                 return
 
             transfer = response.data or {}
-            status = transfer.get('status', 'confirmed')
-            declared = transfer.get('declared_quantity', 0)
-
-            if status == 'confirmed':
-                text = i18n.get('staff.delivery.transfer_confirmed', language, qty=qty)
-            else:
+            counted = {
+                'cfull': transfer.get('confirmed_full') or 0,
+                'cempty': transfer.get('confirmed_empty') or 0,
+            }
+            if transfer.get('status', 'confirmed') == 'confirmed':
                 text = i18n.get(
-                    'staff.delivery.transfer_disputed', language,
-                    declared=declared, qty=qty,
-                )
-
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text,
-                    reply_markup=DeliveryKeyboards.bottle_session_menu(language),
-                    parse_mode='HTML',
+                    'staff.delivery.transfer_confirmed_split', language,
+                    full=counted['cfull'], empty=counted['cempty'],
                 )
             else:
-                await update.message.reply_text(
-                    text,
-                    reply_markup=DeliveryKeyboards.bottle_session_menu(language),
-                    parse_mode='HTML',
-                )
-            context.user_data.pop('pending_confirm_transfer_id', None)
-            context.user_data.pop('pending_confirm_transfer_qty', None)
+                dfull, dempty = DeliveryKeyboards.transfer_declared_counts(transfer)
+                if transfer.get('admins_alerted'):
+                    text = i18n.get(
+                        'staff.delivery.transfer_disputed_split', language, dfull=dfull, dempty=dempty, **counted
+                    )
+                else:
+                    text = i18n.get(
+                        'staff.delivery.transfer_disputed_split_no_admin', language,
+                        dfull=dfull, dempty=dempty, **counted,
+                    )
+
+            await self._show(update, text, reply_markup=DeliveryKeyboards.bottle_session_menu(language))
         except Exception as exc:
             logger.error("Error confirming bottle transfer: %s", exc, exc_info=True)
             await self._handle_error(update, context)

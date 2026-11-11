@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from pydantic import ValidationError as PydanticValidationError
 
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
@@ -1713,7 +1714,7 @@ def get_pending_bottle_transfers():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def initiate_bottle_transfer():
-    """Driver initiates a mid-route bottle transfer to another driver."""
+    """Driver initiates a mid-route transfer of full bottles and empties to another driver (or sends all)."""
     from business_app.serializers.bottle_serializers import (
         DriverBottleTransferCreateRequest,
         serialize_bottle_transfer,
@@ -1734,7 +1735,9 @@ def initiate_bottle_transfer():
     transfer = service.initiate_bottle_transfer(
         sender_driver_id=current_user_id,
         receiver_driver_id=payload.receiver_driver_id,
-        declared_quantity=payload.quantity,
+        full_quantity=payload.full_quantity,
+        empty_quantity=payload.empty_quantity,
+        send_all=payload.send_all,
         notes=payload.notes,
     )
     return success_response(serialize_bottle_transfer(transfer), status_code=201)
@@ -1745,7 +1748,14 @@ def initiate_bottle_transfer():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def confirm_bottle_transfer(transfer_id: int):
-    """Receiver confirms (or disputes) a pending bottle transfer."""
+    """Receiver confirms (or disputes) a pending bottle transfer.
+
+    `data` is the counted transfer (`serialize_bottle_transfer`) plus `admins_alerted` (bool): True only when the
+    count was disputed and the admins' Slack alerts channel took the dispute alert; False for a confirmed count, and
+    for a dispute Slack did not take (no webhook configured, or the post failed). The receiver's reply says an admin
+    was notified only when it is True (spec 2026-11-09 §4.4). Once the count has committed this answers 200 with it,
+    whatever the steps after the commit (auto-close, messages, alert, pool re-offer) did.
+    """
     from business_app.serializers.bottle_serializers import (
         DriverBottleTransferConfirmRequest,
         serialize_bottle_transfer,
@@ -1763,10 +1773,64 @@ def confirm_bottle_transfer(transfer_id: int):
         return validation_error_response(exc.errors())
 
     service = BottleTrackingService()
-    transfer = service.confirm_bottle_transfer(
+    counted = service.confirm_bottle_transfer(
         transfer_id=transfer_id,
         receiver_driver_id=current_user_id,
-        confirmed_quantity=payload.confirmed_quantity,
+        confirmed_full=payload.confirmed_full,
+        confirmed_empty=payload.confirmed_empty,
+        confirm_as_declared=payload.confirm_as_declared,
         notes=payload.notes,
     )
-    return success_response(serialize_bottle_transfer(transfer))
+    return success_response({**serialize_bottle_transfer(counted.transfer), "admins_alerted": counted.admins_alerted})
+
+
+def _shared_place_body(model):
+    """The request body as `model`, or the 400 the driver bot maps to its invalid-input copy."""
+    try:
+        return model.model_validate(request.get_json(silent=True))
+    except PydanticValidationError as exc:
+        raise ValidationError("Invalid shared-place request", error_code="SHARED_PLACE_ANSWER_INVALID") from exc
+
+
+@staff_bp.route("/delivery/<int:delivery_id>/shared-place-question", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def get_shared_place_question(delivery_id):
+    """The one question owed to this driver for this delivery, or `{"ask": false}`."""
+    from business_app.services.shared_place.driver_step import SharedPlaceDriverStep
+
+    return success_response(SharedPlaceDriverStep.question_for_delivery(delivery_id, int(get_jwt_identity())))
+
+
+@staff_bp.route("/shared-place-cases/<int:case_id>/answer", methods=["PUT"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def answer_shared_place_case(case_id):
+    """The driver's answer (and optional note) to a shared-place case. Replaying it is a no-op."""
+    from business_app.serializers.shared_place_serializers import SharedPlaceAnswerRequest
+    from business_app.services.shared_place.driver_step import SharedPlaceDriverStep
+
+    body = _shared_place_body(SharedPlaceAnswerRequest)
+    result = SharedPlaceDriverStep.answer(
+        case_id,
+        int(get_jwt_identity()),
+        answer=body.answer,
+        candidate_index=body.candidate_index,
+        note=body.note,
+    )
+    return success_response(result)
+
+
+@staff_bp.route("/shared-place-cases/<int:case_id>/note", methods=["PUT"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def note_shared_place_case(case_id):
+    """The driver's write-once note on a shared-place case."""
+    from business_app.serializers.shared_place_serializers import SharedPlaceNoteRequest
+    from business_app.services.shared_place.driver_step import SharedPlaceDriverStep
+
+    body = _shared_place_body(SharedPlaceNoteRequest)
+    return success_response(SharedPlaceDriverStep.add_note(case_id, int(get_jwt_identity()), body.note))

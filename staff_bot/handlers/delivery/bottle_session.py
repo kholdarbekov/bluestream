@@ -18,12 +18,32 @@ from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
-from staff_bot.utils.formatters import escape_html
+from staff_bot.utils.formatters import escape_html, format_truck_bottle_lines
 
 logger = logging.getLogger(__name__)
 
 # Conversation state (used when join flow is a ConversationHandler)
 JOIN_SESSION_CONFIRM = 200
+
+
+def _owner_truck_lines(language: str, row: dict) -> list:
+    """The session owner and their truck in the backend's numbers (spec 2026-11-09 U1), one HTML line each.
+
+    Shared by the join screens (the joinable list, the join confirm screen) and the membership screen. `row` is
+    `serialize_joinable_session` or `serialize_membership_session_info`; both publish the capacity fields. The
+    free full bottles are what orders accepted on this session can be filled from. `current_inventory` counts
+    empties too, so it is never shown here as bottles available.
+    """
+    owner_name = row.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
+    return [
+        f"👤 {i18n.get('staff.bottles.session_owner', language)}: <b>{escape_html(owner_name)}</b>",
+        *format_truck_bottle_lines(
+            language,
+            full=row.get('full_bottles_on_board', 0),
+            empties=row.get('empties_on_board', 0),
+            free_full=row.get('free_full_bottles', 0),
+        ),
+    ]
 
 
 class BottleSessionMembershipHandler(BaseHandler):
@@ -68,15 +88,14 @@ class BottleSessionMembershipHandler(BaseHandler):
                     await update.message.reply_text(text, reply_markup=keyboard)
                 return
 
-            # Build session list buttons
+            # Each truck's numbers sit in the text, where all three fit; a button holds only the owner's name.
+            lines = [f"<b>{i18n.get('staff.bottles.choose_session_to_join', language)}</b>"]
             buttons = []
             for s in sessions:
+                lines += ["", *_owner_truck_lines(language, s)]
                 owner_name = s.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
-                inventory = s.get('current_inventory', 0)
-                loaded = s.get('bottles_loaded', 0)
-                label = f"📦 {owner_name} — {inventory}/{loaded}"
                 buttons.append([
-                    InlineKeyboardButton(label, callback_data=f"bottles_join_confirm_{s['session_id']}")
+                    InlineKeyboardButton(f"📦 {owner_name}", callback_data=f"bottles_join_confirm_{s['session_id']}")
                 ])
             buttons.append([
                 InlineKeyboardButton(
@@ -85,7 +104,7 @@ class BottleSessionMembershipHandler(BaseHandler):
                 )
             ])
 
-            text = f"<b>{i18n.get('staff.bottles.choose_session_to_join', language)}</b>"
+            text = "\n".join(lines)
             keyboard = InlineKeyboardMarkup(buttons)
             if query:
                 await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
@@ -138,16 +157,13 @@ class BottleSessionMembershipHandler(BaseHandler):
                 )
                 return
 
-            owner_name = session_info.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
-            inventory = session_info.get('current_inventory', 0)
-            loaded = session_info.get('bottles_loaded', 0)
-
-            text = (
-                f"🤝 <b>{i18n.get('staff.bottles.join_session_confirm_title', language)}</b>\n\n"
-                f"👤 {i18n.get('staff.bottles.session_owner', language)}: <b>{escape_html(owner_name)}</b>\n"
-                f"📦 {i18n.get('staff.bottles.bottles_on_truck', language)}: <b>{inventory}</b> / {loaded}\n\n"
-                f"{i18n.get('staff.bottles.join_session_confirm_note', language)}"
-            )
+            text = "\n".join([
+                f"🤝 <b>{i18n.get('staff.bottles.join_session_confirm_title', language)}</b>",
+                "",
+                *_owner_truck_lines(language, session_info),
+                "",
+                i18n.get('staff.bottles.join_session_confirm_note', language),
+            ])
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
                     f"✅ {i18n.get('staff.bottles.confirm_join', language)}",
@@ -330,21 +346,15 @@ class BottleSessionMembershipHandler(BaseHandler):
                     await update.message.reply_text(text, reply_markup=keyboard)
                 return
 
-            m = response.data or {}
-            owner_name = m.get('owner_name') or i18n.get('staff.common.unknown_driver', language)
-            inventory = m.get('current_inventory', 0)
-
-            membership_line = i18n.get(
-                'staff.bottles.current_membership', language,
-                name=escape_html(owner_name), qty=inventory,
-            )
-            text = (
-                f"🤝 <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>\n\n"
-                + membership_line
-            )
+            text = "\n".join([
+                f"🤝 <b>{i18n.get('staff.bottles.current_membership_title', language)}</b>",
+                "",
+                *_owner_truck_lines(language, response.data or {}),
+            ])
             keyboard = InlineKeyboardMarkup([
+                # The copy carries its own 🚪.
                 [InlineKeyboardButton(
-                    f"🚪 {i18n.get('staff.bottles.leave_session', language)}",
+                    i18n.get('staff.bottles.leave_session', language),
                     callback_data='bottles_leave_session',
                 )],
                 [InlineKeyboardButton(

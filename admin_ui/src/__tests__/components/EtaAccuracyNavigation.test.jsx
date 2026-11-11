@@ -27,7 +27,11 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('../../services/adminService', () => ({
   __esModule: true,
-  default: { getReorderReminderSummary: vi.fn().mockResolvedValue({ counts: { follow_up: 0 } }) },
+  default: {
+    getReorderReminderSummary: vi.fn().mockResolvedValue({ counts: { follow_up: 0 } }),
+    // The Users item's shared-place badge (every flag is granted here).
+    listSharedPlaceCases: vi.fn().mockResolvedValue({ open_count: 0 }),
+  },
 }));
 vi.mock('../../services/salesService', () => ({
   __esModule: true,

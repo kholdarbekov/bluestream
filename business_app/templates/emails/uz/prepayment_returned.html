@@ -1,0 +1,22 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Oldindan to'langan qoldiq qaytarildi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Oldindan to'langan qoldiq qaytarildi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>Oldindan to'langan qoldig'ingizdan <strong>{{ amount }}</strong> so'm sizga qaytarildi.</p>
+    <p>Oldindan to'langan qoldiq endi: <strong>{{ balance }}</strong> so'm</p>
+</div>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizda yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

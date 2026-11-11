@@ -1813,6 +1813,27 @@
     "rule": "/api/v1/admin/send-announcement"
   },
   {
+    "endpoint": "admin_shared_place.list_shared_place_cases",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/shared-place-cases"
+  },
+  {
+    "endpoint": "admin_shared_place.get_shared_place_case",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/shared-place-cases/<int:case_id>"
+  },
+  {
+    "endpoint": "admin_shared_place.resolve_shared_place_case",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/shared-place-cases/<int:case_id>/resolve"
+  },
+  {
     "endpoint": "admin.get_cash_reconciliation_report",
     "methods": [
       "GET"
@@ -1832,6 +1853,20 @@
       "GET"
     ],
     "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-history"
+  },
+  {
+    "endpoint": "admin.return_prepayment_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-payouts"
+  },
+  {
+    "endpoint": "admin.preview_prepayment_payout_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-payouts/preview"
   },
   {
     "endpoint": "admin.get_customer_cod_statement_admin",
@@ -1860,6 +1895,13 @@
       "GET"
     ],
     "rule": "/api/v1/admin/staff/cash-reconciliation/orders/<int:order_id>/timeline"
+  },
+  {
+    "endpoint": "admin.undo_prepayment_payout_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/prepayment-payouts/<int:payout_id>/undo"
   },
   {
     "endpoint": "admin.get_cash_reconciliation_session",
@@ -4005,6 +4047,13 @@
     "rule": "/api/v1/staff/delivery/<int:delivery_id>/location"
   },
   {
+    "endpoint": "staff.get_shared_place_question",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/<int:delivery_id>/shared-place-question"
+  },
+  {
     "endpoint": "staff.update_delivery_status",
     "methods": [
       "PUT"
@@ -4367,6 +4416,20 @@
       "GET"
     ],
     "rule": "/api/v1/staff/sales/visits/current"
+  },
+  {
+    "endpoint": "staff.answer_shared_place_case",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/shared-place-cases/<int:case_id>/answer"
+  },
+  {
+    "endpoint": "staff.note_shared_place_case",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/shared-place-cases/<int:case_id>/note"
   },
   {
     "endpoint": "staff_tryouts.accept_tryout_task",

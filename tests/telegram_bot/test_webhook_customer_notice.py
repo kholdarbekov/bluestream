@@ -66,6 +66,7 @@ CONTRACT_KEYS = {
     "subscription_paid_order_kept": ENVELOPE
     | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date", "subscription_id", "actions"},
     "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline", "subscription_id", "actions"},
+    "prepayment_returned": ENVELOPE | {"payout_id", "amount", "balance"},
     "subscription_schedule_changed": ENVELOPE
     | {
         "subscription_id",
@@ -157,7 +158,17 @@ SCHEDULE_CHANGED = {
     "time_kind": "any_time",
     "timestamp": "2027-01-06T04:00:00+00:00",
 }
-ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED, SCHEDULE_CHANGED]
+PREPAYMENT_RETURNED = {
+    "notice_id": "prepayment_returned:12",
+    "kind": "prepayment_returned",
+    "telegram_id": "810000001",
+    "language": "en",
+    "payout_id": 12,
+    "amount": 35000.0,
+    "balance": 15000.0,
+    "timestamp": "2027-01-07T07:15:00+00:00",
+}
+ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED, SCHEDULE_CHANGED, PREPAYMENT_RETURNED]
 CLICK = dict(ORDER_CREATED, payment="online_unpaid", amount_due=None, deadline="2027-01-07T12:00:00+05:00")
 
 # The same payloads as a backend from before Task 17a queued them (for one release the bot still renders them):
@@ -855,3 +866,51 @@ async def test_every_notice_renders_in_the_language_the_backend_resolved(ws, mon
         [key] = [words[prefix] for prefix in words if data.startswith(prefix)]
         assert text == BACKEND_TRANSLATIONS[key][language]
     ws_module.i18n.get_user_language.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_prepayment_returned_renders_formatted_amounts(ws, monkeypatch):
+    _use_real_i18n(monkeypatch)
+
+    resp = await ws.customer_notice_handler(_make_request(PREPAYMENT_RETURNED))
+
+    assert resp.status == 200
+    kwargs = _sent(ws)
+    assert kwargs["text"] == (
+        "✅ We returned 35,000 UZS of your prepaid balance to you.\n💳 Prepaid balance now: 15,000 UZS"
+    )
+    assert kwargs["reply_markup"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_prepayment_returned_prints_a_zero_balance(ws, monkeypatch):
+    _use_real_i18n(monkeypatch)
+
+    await ws.customer_notice_handler(_make_request(dict(PREPAYMENT_RETURNED, balance=0.0)))
+
+    assert _sent(ws)["text"].endswith("Prepaid balance now: 0 UZS")
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"amount": "lots"},
+        {"balance": None},
+        {"amount": True},
+        {"balance": "1,5"},
+        {"amount": float("nan")},
+        {"balance": float("inf")},
+        {"amount": float("-inf")},
+    ],
+)
+async def test_prepayment_returned_with_a_non_numeric_amount_is_refused_before_the_claim(ws, change):
+    resp = await ws.customer_notice_handler(_make_request(dict(PREPAYMENT_RETURNED, **change)))
+
+    assert resp.status == 400
+    assert "Unknown kind" not in json.loads(resp.body)["message"]
+    ws.bot_app.bot.send_message.assert_not_awaited()
+    assert _redis(ws).store == {}

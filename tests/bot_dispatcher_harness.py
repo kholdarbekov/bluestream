@@ -640,6 +640,21 @@ class UpdateFactory:
             "message": self._message_envelope(**extra),
         })
 
+    def video_note(self, file_id: str = "video-note-file-id") -> Update:
+        """A round video message. Telegram sends no mime_type and no caption for one."""
+        return self._build({
+            "update_id": self._next_update_id(),
+            "message": self._message_envelope(
+                video_note={
+                    "file_id": file_id,
+                    "file_unique_id": "u-video-note",
+                    "length": 384,
+                    "duration": 9,
+                    "file_size": 734003,
+                }
+            ),
+        })
+
     def sticker(self, file_id: str = "sticker-file-id") -> Update:
         """A sticker — matches none of PHOTO/Document/VIDEO/etc, so this is
         what exercises the UNSUPPORTED branch of `build_support_payload`."""

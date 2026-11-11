@@ -2,8 +2,9 @@
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic.alias_generators import to_camel
+from pydantic_core import PydanticCustomError
 
 from shared.staff_constants import BOTTLE_RETURN_COLUMN_CEILING, MAX_BOTTLES_PER_SESSION
 
@@ -126,23 +127,73 @@ class AdminForceCloseSessionRequest(BaseModel):
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
 
 
+# Every transfer count below lands in a 4-byte PostgreSQL integer (the transfer row and the sessions' transfer
+# counters), so each count field carries the same STORAGE bound as the return count, `BOTTLE_RETURN_COLUMN_CEILING`:
+# it refuses no count a truck could carry, only a typo (a phone number in a quantity box) that would otherwise reach
+# the write as a DataError 500. The bound belongs to the field, so every body that carries one of these counts names it.
+
+
 class DriverBottleTransferCreateRequest(BaseModel):
+    """A hand-off of full bottles and empties (spec 2026-11-09 T1): both numbers, or `send_all`.
+
+    `quantity` is the running staff_bot's body (full bottles only), kept for the restart window (spec "Old data in
+    flight"): it is read as `full_quantity`. The backend decides "nothing to send" and each component's cap.
+    """
+
     receiver_driver_id: int
-    quantity: int = Field(..., gt=0)
+    full_quantity: int = Field(default=0, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    empty_quantity: int = Field(default=0, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    send_all: bool = False
+    quantity: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _one_way_to_send(self):
+        if self.quantity is not None:
+            if self.full_quantity or self.empty_quantity or self.send_all:
+                # A custom error carries no exception object, so the 400 body stays JSON.
+                raise PydanticCustomError("transfer_legacy_mixed", "quantity is the old name for fullQuantity")
+            self.full_quantity = self.quantity
+        if self.send_all and (self.full_quantity or self.empty_quantity):
+            raise PydanticCustomError("transfer_send_all_mixed", "sendAll sends everything; give no amounts with it")
+        return self
 
 
 class DriverBottleTransferConfirmRequest(BaseModel):
-    confirmed_quantity: int = Field(..., ge=0)
+    """The receiver's count: `confirm_as_declared`, or both numbers.
+
+    `confirmed_quantity` is the running staff_bot's body (spec "Old data in flight"): a full count with no empties, so
+    a transfer that also declared empties comes out DISPUTED for an admin to settle.
+    """
+
+    confirmed_full: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    confirmed_empty: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    confirm_as_declared: bool = False
+    confirmed_quantity: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
 
+    @model_validator(mode="after")
+    def _exactly_one_count(self):
+        numbers = (self.confirmed_full, self.confirmed_empty)
+        ways = (self.confirm_as_declared, numbers != (None, None), self.confirmed_quantity is not None)
+        if sum(ways) != 1:
+            raise PydanticCustomError(
+                "transfer_count_ambiguous", "send confirmAsDeclared, or confirmedFull and confirmedEmpty"
+            )
+        if self.confirmed_quantity is not None:
+            self.confirmed_full, self.confirmed_empty = self.confirmed_quantity, 0
+        elif not self.confirm_as_declared and None in numbers:
+            raise PydanticCustomError("transfer_count_incomplete", "confirmedFull and confirmedEmpty go together")
+        return self
+
 
 class AdminResolveTransferRequest(BaseModel):
-    resolved_quantity: int = Field(..., ge=0)
+    resolved_full: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    resolved_empty: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     resolution_notes: str
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
@@ -265,6 +316,24 @@ def serialize_customer_place_ledger_entry(entry, viewer_user_id: int) -> Dict[st
     }
 
 
+def _free_full_bottles(session) -> int:
+    """The session's one capacity number; needs a query, so it is read here and not in `to_dict`."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    return BottleTrackingService().free_full_bottles_for_session(session)
+
+
+def _capacity_fields(session) -> Dict[str, int]:
+    """The five capacity keys every session payload shares."""
+    return {
+        "free_full_bottles": _free_full_bottles(session),
+        "full_bottles_on_board": session.full_bottles_on_board,
+        "empties_on_board": session.empties_on_board,
+        "transferable_full": session.transferable_full,
+        "transferable_empties": session.transferable_empties,
+    }
+
+
 def serialize_bottle_session(
     session,
     *,
@@ -277,6 +346,7 @@ def serialize_bottle_session(
         return None
 
     data = session.to_dict()
+    data["free_full_bottles"] = _free_full_bottles(session)
 
     if session.driver:
         data["driver_name"] = f"{session.driver.first_name or ''} {session.driver.last_name or ''}".strip()
@@ -346,8 +416,24 @@ def serialize_bottle_session(
 
 
 def serialize_bottle_transfer(transfer) -> Dict[str, Any]:
-    """Serialize a DriverBottleTransfer with driver names."""
+    """Serialize a DriverBottleTransfer with driver names and its full / empty split (spec 2026-11-09 §4.3).
+
+    The `*_full` / `*_empty` / `*_total` keys are what the bot and the admin page read. A row confirmed before the
+    split has no empties count (NULL), and it moved full bottles only, so it reads 0 empties. Not yet counted reads
+    None for the three confirmed keys.
+    """
     data = transfer.to_dict()
+    declared_empty = transfer.declared_empty_quantity or 0
+    confirmed_full = transfer.confirmed_quantity
+    confirmed_empty = transfer.confirmed_empty_quantity
+    if confirmed_empty is None and confirmed_full is not None:
+        confirmed_empty = 0
+    data["declared_full"] = transfer.declared_quantity
+    data["declared_empty"] = declared_empty
+    data["declared_total"] = transfer.declared_quantity + declared_empty
+    data["confirmed_full"] = confirmed_full
+    data["confirmed_empty"] = confirmed_empty
+    data["confirmed_total"] = None if confirmed_full is None else confirmed_full + confirmed_empty
 
     if transfer.sender_driver:
         data["sender_name"] = (
@@ -413,6 +499,7 @@ def serialize_joinable_session(session) -> Dict[str, Any]:
         "owner_phone": owner.phone if owner else None,
         "bottles_loaded": session.bottles_loaded,
         "current_inventory": session.current_inventory,
+        **_capacity_fields(session),
         "bottles_delivered": session.bottles_delivered,
         "started_at": session.started_at.isoformat() if session.started_at else None,
         "active_members_count": sum(1 for m in (session.memberships or []) if m.status.value == "active"),
@@ -431,6 +518,7 @@ def serialize_membership_session_info(membership, session) -> Dict[str, Any]:
         "owner_name": owner_name,
         "owner_phone": owner.phone if owner else None,
         "current_inventory": session.current_inventory,
+        **_capacity_fields(session),
         "bottles_loaded": session.bottles_loaded,
         "started_at": session.started_at.isoformat() if session.started_at else None,
         "joined_at": membership.joined_at.isoformat() if membership.joined_at else None,

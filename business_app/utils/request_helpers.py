@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict, Tuple, Type, Union
 
 from flask import Response, request
@@ -5,6 +6,7 @@ from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from business_app.utils.api_responses import validation_error_response
+from business_app.utils.exceptions import ValidationError
 
 _TRUE_VALUES = ("true", "1", "yes", "on")
 
@@ -42,3 +44,28 @@ def validated_json_payload(schema_cls: Type[BaseModel]) -> Union[Dict[str, Any],
         return schema_cls(**payload).model_dump(exclude_unset=True)
     except PydanticValidationError as exc:
         return validation_error_response(exc.errors())
+
+
+def json_body_as_sent(*, error_code: str) -> Dict[str, Any]:
+    """The request's JSON object exactly as the client sent it. No body at all is an empty object.
+
+    `TimezoneMiddleware.before_request` rewrites the datetime-named fields (`paid_at`, `created_at`, ...)
+    of the cached `request.get_json()` in place: it reads a NAIVE value as the user's local time and
+    rewrites every listed field to a UTC +00:00 string, so a route that must refuse naive values (an
+    explicit offset required) reads the raw body here, from the bytes the middleware leaves untouched.
+
+    Text that is not JSON, or JSON that is not an object (an array, a string, a number, null), raises a
+    ``ValidationError`` carrying the caller's ``error_code``: a broken body is named as one, rather than
+    read as empty and refused for whichever field happens to be checked first.
+    """
+    raw = request.get_data(cache=True, as_text=True)
+    if not raw.strip():
+        return {}
+    invalid = ValidationError("The request body must be a JSON object", error_code=error_code)
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        raise invalid
+    if not isinstance(body, dict):
+        raise invalid
+    return body

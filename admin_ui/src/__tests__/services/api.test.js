@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, CanceledError } from 'axios';
 import toast from 'react-hot-toast';
 
 vi.mock('react-hot-toast', () => ({
@@ -147,5 +147,48 @@ describe('api response interceptor', () => {
 
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('Pay period not found');
+  });
+});
+
+// The Support Inbox downloads a customer's video (up to 20 MB) through the Pi; the instance-wide
+// 10 s cut an 11 MB video off four times in production. The longer limit is the attachment
+// request's own, and the inbox aborts it when the admin leaves the conversation.
+describe('support attachment downloads', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('an attachment gets 60 s and the caller\'s signal; every other request keeps the 10 s default', async () => {
+    const seen = [];
+    api.defaults.adapter = (config) => {
+      seen.push(config);
+      return Promise.resolve({ data: new Blob(['x']), status: 200, statusText: 'OK', headers: {}, config });
+    };
+    const controller = new AbortController();
+
+    await adminService.getSupportAttachmentBlob(1001, { signal: controller.signal });
+    await api.get('/admin/support/conversations');
+
+    expect(seen[0]).toMatchObject({
+      url: '/admin/support/messages/1001/attachment', method: 'get', responseType: 'blob', timeout: 60000,
+    });
+    expect(seen[0].signal).toBe(controller.signal);
+    expect(seen[1]).toMatchObject({ url: '/admin/support/conversations', timeout: 10000 });
+  });
+
+  it('an attachment download aborted mid-flight rejects as a cancel, without a toast', async () => {
+    let downloadStarted;
+    const started = new Promise((resolve) => { downloadStarted = resolve; });
+    // Rejects the way axios's xhr adapter does on abort: CanceledError(message, config, request).
+    api.defaults.adapter = (config) => new Promise((_, reject) => {
+      config.signal.addEventListener('abort', () => reject(new CanceledError(null, config)));
+      downloadStarted();
+    });
+    const controller = new AbortController();
+
+    const pending = adminService.getSupportAttachmentBlob(1001, { signal: controller.signal });
+    await started; // The request is on the wire before the admin walks away.
+    controller.abort();
+
+    await expect(pending).rejects.toBeInstanceOf(CanceledError);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

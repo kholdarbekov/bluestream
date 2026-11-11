@@ -428,3 +428,13 @@ def test_revenue_trend_agrees_with_the_summary_it_sits_under(app, db, sample_use
         "the chart and the summary above it must report the same money"
     )
     assert float(trend_total) == 12000.0
+
+
+@pytest.mark.unit
+def test_prepayment_return_lines_are_zero_when_nothing_was_returned(app, db):
+    with app.app_context():
+        summary = _report()["summary"]
+
+        assert summary["prepayment_returns_revenue_counted"] == 0.0
+        assert summary["prepayments_returned_to_customers"] == 0.0
+        assert summary["net_revenue"] == summary["total_revenue"] - summary["total_refunds"]

@@ -78,7 +78,11 @@ def _satellite_keys():
     "fixing" the phantom gap broke five place-contract tests.
     """
     keys = set()
-    for name in ("seed_place_group_staff_translations", "seed_staff_over_returned_translations"):
+    for name in (
+        "seed_place_group_staff_translations",
+        "seed_staff_over_returned_translations",
+        "seed_staff_shared_place_translations",
+    ):
         path = ROOT / "scripts" / f"{name}.py"
         if not path.exists():
             continue

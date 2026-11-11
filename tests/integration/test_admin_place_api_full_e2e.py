@@ -394,7 +394,7 @@ def _bottle_write_routes(*, address_id, user_id, session_id, fine_id, transfer_i
         ("post", f"{API}/bottles/reconcile/{address_id}", None),
         ("post", f"{API}/bottles/sessions/{session_id}/force-close", {"reason": "abandoned"}),
         ("post", f"{API}/bottles/transfers/{transfer_id}/resolve",
-         {"resolved_quantity": 1, "resolution_notes": "x"}),
+         {"resolvedFull": 1, "resolvedEmpty": 0, "resolutionNotes": "x"}),
     ]
 
 

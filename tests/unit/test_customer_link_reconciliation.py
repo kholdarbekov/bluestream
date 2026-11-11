@@ -23,6 +23,7 @@ BACKSTOP for a direct DB edit, a restore from a pre-re-scoping dump, or a future
 write path that bypasses that helper. The tests below manufacture the row
 directly, which is exactly the shape the backstop has to keep catching.
 """
+import itertools
 from datetime import datetime, UTC
 from decimal import Decimal
 
@@ -32,7 +33,13 @@ from business_app.models.user import User, UserAddress
 from business_app.models.customer_link import CanonicalCustomer, AddressGroup, CustomerLinkEvent
 from business_app.models.bottle import BottleBalance, BottleLedger
 from business_app.models.order import Order
-from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent, Payment
+from business_app.models.payment import (
+    CashCollectionAllocation,
+    CashCollectionEvent,
+    CustomerCreditPayout,
+    CustomerCreditPayoutDebit,
+    Payment,
+)
 from business_app.tasks.customer_link_tasks import reconcile_customer_link_invariants
 from shared.enums import (
     BottleLedgerEventType, CashCollectionSource, EntitySubtype, OrderStatus, PaymentMethod,
@@ -415,3 +422,85 @@ class TestReconciliation:
 
         assert broken.id in report["event_conservation_violations"]
         assert ok.id not in report["event_conservation_violations"]
+
+
+_payout_keys = itertools.count(1)
+
+
+def _payout_debit(db, user, event, amount, *, voided=False):
+    payout = CustomerCreditPayout(
+        customer_id=user.id, amount=Decimal(amount), paid_by="office", reason="paid back in cash",
+        paid_at=datetime.now(UTC), actor_user_id=user.id, idempotency_key=f"k-{next(_payout_keys)}",
+        voided_at=datetime.now(UTC) if voided else None,
+        voided_by_user_id=user.id if voided else None,
+        void_reason="entered twice" if voided else None,
+    )
+    db.session.add(payout); db.session.flush()
+    db.session.add(CustomerCreditPayoutDebit(
+        payout_id=payout.id, cash_collection_event_id=event.id, amount=Decimal(amount),
+        revenue_counted=False, card_click=False))
+    db.session.commit()
+
+
+@pytest.mark.unit
+class TestPayoutConservation:
+    def test_payout_drained_event_is_conserved(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        event = _event(db, u.id, "50000.00", "20000.00")
+        _payout_debit(db, u, event, "30000.00")
+
+        report = reconcile_customer_link_invariants()
+
+        assert report["event_conservation_violations"] == []
+
+    def test_undone_payout_debit_does_not_count(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        event = _event(db, u.id, "50000.00", "20000.00")
+        _payout_debit(db, u, event, "30000.00", voided=True)
+
+        report = reconcile_customer_link_invariants()
+
+        assert report["event_conservation_violations"] == [event.id]
+
+    def test_two_payouts_on_one_event_are_summed(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        # 50000 = 10000 + 20000 returned by two live payouts + 20000 still unapplied
+        event = _event(db, u.id, "50000.00", "20000.00")
+        _payout_debit(db, u, event, "10000.00")
+        _payout_debit(db, u, event, "20000.00")
+
+        assert reconcile_customer_link_invariants()["event_conservation_violations"] == []
+
+    def test_one_undone_payout_among_two_is_the_only_one_left_out(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        event = _event(db, u.id, "50000.00", "20000.00")  # the live 30000 balances it; the undone 10000 must not count
+        _payout_debit(db, u, event, "30000.00")
+        _payout_debit(db, u, event, "10000.00", voided=True)
+
+        assert reconcile_customer_link_invariants()["event_conservation_violations"] == []
+
+    def test_a_payout_and_a_live_allocation_share_one_event(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        payment = _payment(db, u, "ORD-PAYOUT-ALLOC")
+        # 50000 = 15000 allocated to an order + 20000 returned + 15000 unapplied
+        event = _event(db, u.id, "50000.00", "15000.00")
+        db.session.add(CashCollectionAllocation(
+            cash_collection_event_id=event.id, payment_id=payment.id,
+            allocated_amount=Decimal("15000.00"), allocation_order=1))
+        db.session.commit()
+        _payout_debit(db, u, event, "20000.00")
+
+        assert reconcile_customer_link_invariants()["event_conservation_violations"] == []
+
+    def test_a_payout_does_not_hide_a_lost_allocation(self, db):
+        u = _user(db, "a@example.com", "+998900000001")
+        payment = _payment(db, u, "ORD-PAYOUT-LOST")
+        # the same shape with the unapplied credit 5000 short: the debit must not paper over it
+        event = _event(db, u.id, "50000.00", "10000.00")
+        db.session.add(CashCollectionAllocation(
+            cash_collection_event_id=event.id, payment_id=payment.id,
+            allocated_amount=Decimal("15000.00"), allocation_order=1))
+        db.session.commit()
+        _payout_debit(db, u, event, "20000.00")
+
+        assert reconcile_customer_link_invariants()["event_conservation_violations"] == [event.id]

@@ -43,6 +43,7 @@ from business_app.models.translation import Translation
 # from business_app.services.admin_service import AdminService
 from business_app.utils.service_factory import get_notification_service, get_corporate_contract_service
 from business_app.services.order_address_change_service import ADDRESS_CHANGE_PERMISSIONS
+from business_app.services.cash_collection_service import PREPAYMENT_RETURN_PERMISSIONS
 from business_app.services import subscription_schedule
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.payment_service import PaymentService
@@ -55,7 +56,7 @@ from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
-from business_app.services.customer_link_service import CustomerLinkService
+from business_app.services.customer_link_service import _KEEP, CustomerLinkService
 from business_app.services.delivery_time_slot_service import DeliveryTimeSlotService
 from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 from business_app.serializers.admin_serializers import (
@@ -133,7 +134,7 @@ from business_app.utils.api_responses import (
 )
 from business_app.utils.bot_webhook import trigger_translation_reload
 from business_app.utils.pydantic_helpers import dump_changes, validate_json_with_model
-from business_app.utils.request_helpers import parse_bool_arg
+from business_app.utils.request_helpers import json_body_as_sent, parse_bool_arg
 from business_app.utils.staff_order_info import build_staff_order_info as _build_staff_order_info
 from business_app.serializers.subscription_serializers import (
     CLEARABLE_SUBSCRIPTION_FIELDS,
@@ -12552,9 +12553,9 @@ def admin_assign_delivery(delivery_id):
         data = request.get_json()
         delivery_person_id = data["delivery_person_id"]
 
-        from business_app.services.staff_service import StaffService
-
-        delivery = StaffService.accept_order(delivery_id, delivery_person_id)
+        delivery = AdminDeliveryService.assign_delivery(
+            delivery_id, delivery_person_id, actor_id=int(get_jwt_identity())
+        )
 
         # Notify assigned delivery person via staff bot, if linked Telegram exists.
         try:
@@ -13048,6 +13049,7 @@ def get_customer_prepayment_history_admin(customer_id):
             include_voided=include_voided,
             include_fully_applied=include_fully_applied,
             limit=limit,
+            actor=g.current_user,
         )
         return success_response(data=history)
     except NotFoundError:
@@ -13055,6 +13057,194 @@ def get_customer_prepayment_history_admin(customer_id):
     except Exception as e:
         current_app.logger.error(f"Get customer prepayment history error: {e}")
         return internal_error_response("Failed to load customer prepayment history")
+
+
+@admin_bp.route(
+    "/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-payouts/preview",
+    methods=["POST"],
+)
+@jwt_required()
+@validate_admin_action(list(PREPAYMENT_RETURN_PERMISSIONS))
+def preview_prepayment_payout_admin(customer_id):
+    """Preview a return of the customer's free prepaid credit as money (ADMIN only). Writes nothing.
+
+    Body: {amount?, target_balance?, paid_by, driver_user_id?, paid_at?}. Give the amount to return
+    (omitted: the whole free balance) or the balance to leave (`target_balance`), not both.
+    `paid_by` is `office`, `driver_current_session` (out of the driver's current trip cash) or
+    `driver_settled`; a driver is named by his USER id. `paid_at` is an ISO-8601 date-time with its
+    offset, not in the future (default: now). Answers the plan: free balance, amount, the credit
+    events drawn oldest first with their card/Click and revenue-counted flags, `session_effect` (a
+    current-trip return: the driver's open session, on hand before/after, handed in, the cap, and
+    whether it closes), `contract_effect` (a grocery store on a money contract: [{contract_id, amount}],
+    the entry posted on each contract that mirrored the drawn credit) and `blocking_reasons`
+    ("<code>: <text>"). A blocked plan is still a 200.
+    Every rule lives in `PrepaymentPayoutService`, which the apply route runs too. All three payout routes
+    read the body as sent (`json_body_as_sent`), so TimezoneMiddleware never re-reads a naive `paid_at` as
+    local time, and a body that is not a JSON object is refused as one (PAYOUT_BODY_INVALID).
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - name: customer_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: The plan, with blocking_reasons and is_applicable
+      400:
+        description: Invalid input (data.error_code PAYOUT_BODY_INVALID, PAYOUT_AMOUNT_INVALID,
+          PAYOUT_AMOUNT_OR_TARGET, PAYOUT_PAID_BY_INVALID, PAYOUT_DRIVER_REQUIRED, PAYOUT_DRIVER_NOT_ALLOWED or
+          PAYOUT_PAID_AT_INVALID)
+      403:
+        description: Not an admin
+      404:
+        description: Customer not found
+    """
+    try:
+        from business_app.services.prepayment_payout_service import PrepaymentPayoutService
+
+        data = json_body_as_sent(error_code="PAYOUT_BODY_INVALID")
+        plan = PrepaymentPayoutService().preview(
+            customer_id=customer_id,
+            amount=data.get("amount"),
+            target_balance=data.get("target_balance"),
+            paid_by=data.get("paid_by"),
+            driver_user_id=data.get("driver_user_id"),
+            paid_at=data.get("paid_at"),
+        )
+        return success_response(data=plan.to_summary())
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Customer", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(exc.message, error_code=exc.error_code)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("prepayment return preview failed for customer %s", customer_id)
+        return internal_error_response("Failed to preview the prepayment return")
+
+
+@admin_bp.route(
+    "/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-payouts",
+    methods=["POST"],
+)
+@jwt_required()
+@validate_admin_action(list(PREPAYMENT_RETURN_PERMISSIONS))
+def return_prepayment_admin(customer_id):
+    """Record a return of the customer's free prepaid credit as money (ADMIN only).
+
+    Body: the preview's body plus `reason` (5 to 500 characters) and `idempotency_key` (the
+    client's token, at most 64 characters). It runs the preview's plan under the credit locks (and,
+    for a current-trip return, the driver's session lock) and writes it: the payout and one debit per
+    drawn credit event; a current-trip return also lowers what the driver holds, and closes his
+    session when nothing is left to hand in. Nothing in the past is rewritten.
+    Answers 201 {payout, available_prepayment_balance, driver_cash_session (the funding session, or
+    null), next_session_id (the driver's new session when it closed), replayed: false}; a key already
+    used for this same return (customer, amount or balance to leave, payer, driver) answers that payout
+    again with 200 and replayed: true, and one used for a different return is refused with 400
+    PAYOUT_IDEMPOTENCY_KEY_REUSED.
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - name: customer_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Replay of a key already used (replayed true); nothing written
+      201:
+        description: The payout and the balance left
+      400:
+        description: Invalid input (the preview's codes, PAYOUT_REASON_REQUIRED, PAYOUT_REASON_TOO_LONG,
+          PAYOUT_IDEMPOTENCY_KEY_REQUIRED, PAYOUT_IDEMPOTENCY_KEY_REUSED) or a blocked plan (PAYOUT_BLOCKED, the
+          reasons as the message)
+      403:
+        description: Not an admin
+      404:
+        description: Customer not found
+    """
+    try:
+        from business_app.services.prepayment_payout_service import PrepaymentPayoutService
+
+        data = json_body_as_sent(error_code="PAYOUT_BODY_INVALID")
+        service = PrepaymentPayoutService()
+        result = service.apply(
+            customer_id=customer_id,
+            amount=data.get("amount"),
+            target_balance=data.get("target_balance"),
+            paid_by=data.get("paid_by"),
+            driver_user_id=data.get("driver_user_id"),
+            paid_at=data.get("paid_at"),
+            reason=data.get("reason"),
+            idempotency_key=data.get("idempotency_key"),
+            actor_user_id=int(get_jwt_identity()),
+        )
+        return success_response(
+            data=service.result_payload(result, actor=g.current_user), status_code=200 if result.replayed else 201
+        )
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Customer", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(exc.message, error_code=exc.error_code)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("prepayment return failed for customer %s", customer_id)
+        return internal_error_response("Failed to record the prepayment return")
+
+
+@admin_bp.route("/staff/cash-reconciliation/prepayment-payouts/<int:payout_id>/undo", methods=["POST"])
+@jwt_required()
+@validate_admin_action(list(PREPAYMENT_RETURN_PERMISSIONS))
+def undo_prepayment_payout_admin(payout_id):
+    """Undo a recorded prepayment return (ADMIN only): its credit comes back on the same events.
+
+    Body: {reason} (5 to 500 characters). Refused with 400 PAYOUT_UNDO_BLOCKED (message starts with the
+    code: already_undone, funding_event_voided, session_checked) when it cannot be undone; the history
+    row's `can_undo` / `undo_block_code` publish the same answer. Credit held on pending orders is not
+    re-reserved and the customer is not told.
+    Answers 200 {payout, available_prepayment_balance, driver_cash_session (the funding session, or null)}.
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - name: payout_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: The payout (void), the balance after and the funding session
+      400:
+        description: PAYOUT_BODY_INVALID, PAYOUT_REASON_REQUIRED, PAYOUT_REASON_TOO_LONG or PAYOUT_UNDO_BLOCKED
+      403:
+        description: Not an admin
+      404:
+        description: Return not found
+    """
+    try:
+        from business_app.services.prepayment_payout_service import PrepaymentPayoutService
+
+        data = json_body_as_sent(error_code="PAYOUT_BODY_INVALID")
+        service = PrepaymentPayoutService()
+        payout = service.undo(
+            payout_id=payout_id,
+            reason=data.get("reason"),
+            actor_user_id=int(get_jwt_identity()),
+        )
+        return success_response(data=service.undo_payload(payout, actor=g.current_user))
+    except NotFoundError as exc:
+        return not_found_response(resource_type="Prepayment return", message=str(exc))
+    except ValidationError as exc:
+        return validation_error_response(exc.message, error_code=exc.error_code)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("prepayment return undo failed for payout %s", payout_id)
+        return internal_error_response("Failed to undo the prepayment return")
 
 
 @admin_bp.route("/staff/cash-reconciliation/orders/<int:order_id>/timeline", methods=["GET"])
@@ -14134,6 +14324,7 @@ def create_place_group_admin():
             acting_admin_id=_acting_admin_id(),
             reason=reason,
             label=body.get("label"),
+            notes=body.get("notes"),
             **_merge_review_kwargs(body),
         )
         return created_response(
@@ -14173,6 +14364,7 @@ def get_place_group_detail(group_id):
             data={
                 "place_group_id": detail["place_group_id"],
                 "label": detail["label"],
+                "notes": detail["notes"],
                 "place_balance": float(detail["place_balance"]),
                 "members": [
                     {**m, "suggested_bottles_leaving": float(m["suggested_bottles_leaving"])} for m in detail["members"]
@@ -14236,7 +14428,11 @@ def add_place_group_addresses(group_id):
 @jwt_required()
 @validate_admin_action(["manage_users"])
 def rename_place_group_admin(group_id):
-    """Rename a place group (body: label, reason)."""
+    """Rename a place group and/or edit its admin note (body: label?, notes?, reason).
+
+    Which keys are PRESENT decides: an absent ``label`` keeps it, an absent ``notes`` keeps it,
+    a ``notes`` of null/blank clears it. A body with neither key is refused.
+    """
     try:
         body = request.get_json(silent=True) or {}
         reason = (body.get("reason") or "").strip()
@@ -14244,12 +14440,13 @@ def rename_place_group_admin(group_id):
             return validation_error_response("reason is required")
         group = CustomerLinkService().rename_place_group(
             group_id,
-            label=body.get("label"),
+            label=body["label"] if "label" in body else None,
             acting_admin_id=_acting_admin_id(),
             reason=reason,
+            notes=body["notes"] if "notes" in body else _KEEP,
         )
         return success_response(
-            data={"place_group_id": group.id, "label": group.label},
+            data={"place_group_id": group.id, "label": group.label, "notes": group.notes},
             message="Place group renamed",
         )
     except ValidationError as e:

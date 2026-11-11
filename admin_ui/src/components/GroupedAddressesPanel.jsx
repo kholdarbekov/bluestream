@@ -7,6 +7,7 @@ import PlaceGroupCard from './PlaceGroupCard';
 import PlaceGroupConfirmModal from './PlaceGroupConfirmModal';
 import { placeGroupErrorMessage } from './placeGroupCopy';
 import { invalidatePlaceGroupQueries } from './placeGroupQueries';
+import { useAuthStore } from '../stores/authStore';
 import { formatMoney } from '../utils/formatMoney';
 
 const { Text } = Typography;
@@ -32,13 +33,15 @@ const SUGGESTION_LIMIT = 20;
  * lists seven distinct ways that fails dangerously), and grouping two addresses
  * has money consequences the moment place-scoped COD collection is on.
  *
- * Each existing group row has an Edit action that opens a drawer holding the
- * shared `PlaceGroupCard` — the same add/remove card and confirm flow the
- * per-customer panel uses, so a group is edited one way from every surface.
+ * Each existing group row has an Edit action (View for a reader) that opens a
+ * drawer holding the shared `PlaceGroupCard` — the same add/remove card and
+ * confirm flow the per-customer panel uses, so a group is edited one way from
+ * every surface.
  */
 export default function GroupedAddressesPanel() {
   const { t } = useTranslation('users');
   const queryClient = useQueryClient();
+  const canManage = useAuthStore().hasPermission('can_manage_users');
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -182,11 +185,15 @@ export default function GroupedAddressesPanel() {
       key: 'bottle_exposure',
     },
     {
+      // Always a way into the place card: its reads (members, COD, history) are for every viewer, and the card
+      // hides its own write buttons from a viewer without `can_manage_users`.
       title: t('ui.users.grouped_addresses.col_actions', 'Actions'),
       key: 'actions',
       render: (_, row) => (
         <Button size="small" onClick={() => setEditingGroupId(row.id)}>
-          {t('ui.users.grouped_addresses.edit_action', 'Edit')}
+          {canManage
+            ? t('ui.users.grouped_addresses.edit_action', 'Edit')
+            : t('ui.users.grouped_addresses.view_action', 'View')}
         </Button>
       ),
     },
@@ -218,7 +225,7 @@ export default function GroupedAddressesPanel() {
       // Per ROW, always. Anything that acted on more than one candidate at a
       // time would be auto-grouping wearing a button.
       render: (_, suggestion) => (
-        <Space>
+        canManage && <Space>
           <Button size="small" type="primary" onClick={() => startCreateFromSuggestion(suggestion)}>
             {t('ui.users.place_groups.group_action', 'Group as same place')}
           </Button>
@@ -294,7 +301,9 @@ export default function GroupedAddressesPanel() {
         open={editingGroupId !== null}
         width={640}
         destroyOnHidden
-        title={t('ui.users.grouped_addresses.edit_title', 'Edit place group')}
+        title={canManage
+          ? t('ui.users.grouped_addresses.edit_title', 'Edit place group')
+          : t('ui.users.grouped_addresses.view_title', 'Place group')}
         onClose={() => setEditingGroupId(null)}
       >
         <PlaceGroupCard

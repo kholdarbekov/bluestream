@@ -5,7 +5,6 @@ Registered in tasks/celery_app.py `include`; unrouted (default queue).
 
 import logging
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Optional
 
 from celery import shared_task
@@ -189,48 +188,25 @@ def _send_manager_in_app(
     exclude_user_ids: Iterable[int] = (),
 ) -> int:
     """IN_APP SYSTEM_ALERT to every active admin and manager except `exclude_user_ids`; returns how
-    many were notified (S-33). The one admin-and-manager fan-out of the sales tasks.
+    many the in-app channel accepted (S-33). The one admin-and-manager fan-out of the sales tasks.
 
-    Both keys must be MARKUP-FREE rows: the admin UI renders a notification's `content` as plain
-    text. `fields` fill the content row; the subject row has none. One bad recipient must not cost
-    the rest their alert, so each gets its own try.
+    This picks the recipients; `in_app_alerts.send_in_app_alert` renders, sends and counts. Both
+    keys must be MARKUP-FREE rows: the admin UI renders a notification's `content` as plain text.
+    `fields` fill the content row; the subject row has none.
     """
     from business_app.models.user import User
-    from business_app.services.notification_service import NotificationService
-    from business_app.utils.constants import NotificationChannel, NotificationType
-    from business_app.utils.translations import get_translation
+    from business_app.services.in_app_alerts import send_in_app_alert
     from shared.enums import UserRole
 
     excluded = {int(user_id) for user_id in exclude_user_ids}
     managers = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == "active").all()
-    notified = 0
-    for manager in managers:
-        if manager.id in excluded:
-            continue
-        try:
-            language = getattr(manager, "preferred_language", None) or "en"
-
-            def _get_translated(field_name, lang, _language=language):
-                target = lang or _language
-                if field_name == "subject":
-                    return get_translation(subject_key, language=target)
-                return get_translation(content_key, language=target, **fields)
-
-            NotificationService().send_notification(
-                user_id=manager.id,
-                notification_type=NotificationType.SYSTEM_ALERT,
-                channels=[NotificationChannel.IN_APP],
-                template_data=dict(template_data),
-                template_override=SimpleNamespace(
-                    subject=_get_translated("subject", language),
-                    content=_get_translated("content", language),
-                    get_translated=_get_translated,
-                ),
-            )
-            notified += 1
-        except Exception:  # noqa: BLE001 — one bad recipient must not block the rest
-            logger.exception("Failed to send manager %s the in-app alert %s", manager.id, subject_key)
-    return notified
+    return send_in_app_alert(
+        [manager for manager in managers if manager.id not in excluded],
+        subject_key,
+        content_key,
+        fields=fields,
+        template_data=template_data,
+    )
 
 
 @shared_task(name="sales.notify_managers_activation_requested", bind=True)

@@ -12,6 +12,7 @@ export const PLACE_GROUP_QUERY_KEYS = [
   ['placeGroup'],
   ['placeGroupSuggestions'],
   ['customerMapPins'],
+  ['sharedPlaceCases'],
 ];
 
 export function invalidatePlaceGroupQueries(queryClient) {

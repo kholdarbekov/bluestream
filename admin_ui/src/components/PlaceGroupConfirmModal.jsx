@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import adminService from '../services/adminService';
 import { placeGroupErrorMessage } from './placeGroupCopy';
+import { useAuthStore } from '../stores/authStore';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -93,16 +94,21 @@ const projectedBalance = (preview) =>
  *             remove : { groupId, addressId, placeBalance, suggestedBottlesLeaving,
  *                        removalDissolvesGroup }
  *             dismiss: { addressIdA, addressIdB }
- *             rename : { groupId, currentLabel }       label input pre-filled from currentLabel
+ *             rename : { groupId, currentLabel, notes? } label input pre-filled from currentLabel;
+ *                      OK once the label or the note changed (a label is never cleared)
  *   pending - the caller's mutation is in flight
  *   onConfirm({ addressIds, label, reason, bottlesLeaving, merge })
  *   onCancel()
  */
 export default function PlaceGroupConfirmModal({ action, pending = false, onConfirm, onCancel }) {
   const { t } = useTranslation('users');
+  const canManage = useAuthStore().hasPermission('can_manage_users');
 
   const [reason, setReason] = useState('');
   const [label, setLabel] = useState('');
+  // The place note. Only a caller that opts in (`payload.notes` defined) shows
+  // the field, so a flow that never saves it never displays it.
+  const [notes, setNotes] = useState('');
   const [pickedIds, setPickedIds] = useState([]);
   const [searchOptions, setSearchOptions] = useState([]);
   // Spec 7.1: how many of the place's bottles leave WITH the departing address.
@@ -143,8 +149,13 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
     setOpenedAction(action);
     if (action) {
       const payload = action.payload || {};
-      setReason('');
-      setLabel(action.kind === 'rename' ? payload.currentLabel || '' : '');
+      setReason(payload.reason || '');
+      setLabel(
+        action.kind === 'rename' || payload.currentLabel !== undefined || payload.label !== undefined
+          ? payload.currentLabel ?? payload.label ?? ''
+          : ''
+      );
+      setNotes(payload.notes ?? '');
       setPickedIds(payload.addressIds || []);
       // Pre-fill the picker so the admin sees exactly what will be grouped and
       // can still widen the set before confirming.
@@ -315,9 +326,12 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
     resetMergeDialog();
   };
 
+  const notesShown = action?.payload?.notes !== undefined;
+  const addLabelShown = action?.kind === 'add' && action?.payload?.currentLabel !== undefined;
+
   const handleConfirm = () => {
     const trimmedReason = reason.trim();
-    if (!action || !trimmedReason) {
+    if (!action || !trimmedReason || !canManage) {
       return;
     }
     onConfirm({
@@ -326,15 +340,22 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
       reason: trimmedReason,
       bottlesLeaving: numberOrZero(bottlesLeaving),
       merge: mergeReview || {},
+      ...(notesShown ? { notes: notes.trim() } : {}),
     });
   };
 
+  // Rename (spec §9): OK once the label OR the note changed. A label can be changed but never cleared, so an
+  // unlabeled place can still take a note alone (the caller then sends `label: null`, "keep the label").
+  const renameLabelChanged = label.trim() !== (action?.payload?.currentLabel || '');
+  const renameNoteChanged = notesShown && notes.trim() !== (action?.payload?.notes ?? '').trim();
+
   const confirmDisabled =
+    !canManage ||
     !reason.trim() ||
     (action?.kind === 'create' && pickedIds.length < 2) ||
     (action?.kind === 'add' && pickedIds.length < 1) ||
     (action?.kind === 'rename' &&
-      (!label.trim() || label.trim() === (action.payload?.currentLabel || '')));
+      ((renameLabelChanged && !label.trim()) || (!renameLabelChanged && !renameNoteChanged)));
 
   const modalTitle = () => {
     if (action?.kind === 'dismiss') {
@@ -406,13 +427,30 @@ export default function PlaceGroupConfirmModal({ action, pending = false, onConf
               )}
             />
           )}
-          {(action?.kind === 'create' || action?.kind === 'rename') && (
+          {(action?.kind === 'create' || action?.kind === 'rename' || addLabelShown) && (
             <Input
               value={label}
               onChange={(event) => setLabel(event.target.value)}
               placeholder={t('ui.users.place_groups.label_placeholder', 'Label (e.g. Acme office)')}
               maxLength={100}
             />
+          )}
+          {notesShown && (
+            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+              <TextArea
+                rows={2}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder={t('ui.users.shared_place_reports.place_note', 'Place note (optional)')}
+                maxLength={1000}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t(
+                  'ui.users.shared_place_reports.place_note_hint',
+                  "Visible to admins on this place's card; drivers and customers never see it."
+                )}
+              </Text>
+            </Space>
           )}
           {action?.kind === 'remove' && action.payload?.removalDissolvesGroup && (
             <Alert

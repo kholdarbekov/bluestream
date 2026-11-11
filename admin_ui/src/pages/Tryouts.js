@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -35,7 +35,7 @@ import dayjs from 'dayjs';
 
 import adminService from '../services/adminService';
 import { fetchAllPages } from '../utils/pagination';
-import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../utils/constants';
+import { BULK_LOAD_PAGE_SIZE, DEFAULT_PAGE_SIZE, TRYOUT_LINK_PARAM } from '../utils/constants';
 import AddressMapPicker from '../components/AddressMapPicker';
 import tryoutService from '../services/tryoutService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
@@ -325,6 +325,31 @@ const Tryouts = () => {
     setDetailOpen(true);
   };
 
+  // `?tryout_id=<id>` opens that try-out's drawer (the shared-place case screen links here, to the
+  // Adjust Bottles tool). Read from window.location, not a router hook: the page also renders without
+  // a Router. Closing the drawer strips the param, so a reload does not reopen it.
+  useEffect(() => {
+    const linkedId = Number(new URLSearchParams(window.location.search).get(TRYOUT_LINK_PARAM));
+    if (Number.isInteger(linkedId) && linkedId > 0) {
+      // A failed read is already toasted by the api interceptor; the page stays on the list.
+      openDetails({ id: linkedId }).catch(() => {});
+    }
+  }, []);
+
+  const closeDetails = () => {
+    setDetailOpen(false);
+    const params = new URLSearchParams(window.location.search);
+    if (params.has(TRYOUT_LINK_PARAM)) {
+      params.delete(TRYOUT_LINK_PARAM);
+      const query = params.toString();
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      );
+    }
+  };
+
   const openEdit = async (record) => {
     const tryout = record?.tasks ? record : await tryoutService.getTryout(record.id);
     setSelectedTryout(tryout);
@@ -600,7 +625,7 @@ const Tryouts = () => {
         title={selectedTryout?.tryout_number || t('tryout_fallback', { defaultValue: 'Try-out' })}
         open={detailOpen}
         width={760}
-        onClose={() => setDetailOpen(false)}
+        onClose={closeDetails}
         extra={(
             <Space>
               <Button onClick={() => openEdit(selectedTryout)}>

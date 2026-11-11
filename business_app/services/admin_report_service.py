@@ -15,6 +15,7 @@ from business_app.models.product import Product
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.cash_collection_service import customer_credit_rebook_event_clause
+from business_app.services.prepayment_payout_service import PrepaymentPayoutService
 from business_app.utils.payment_projection import open_receivable_clause
 from business_app.utils.api_responses import success_response
 from shared.enums import (
@@ -632,6 +633,9 @@ class AdminReportService:
         ]
 
         total_collected = Decimal(str(electronic_total or 0)) + cash_collected_total
+        # Prepayment handed back as money (owner P9): the part that was already counted as revenue comes OFF
+        # net revenue once; the never-revenue part is only shown.
+        payout_totals = PrepaymentPayoutService.period_totals(start_dt, end_dt)
 
         return {
             "summary": {
@@ -640,7 +644,11 @@ class AdminReportService:
                 "total_electronic_collected": float(electronic_total or 0),
                 "delivered_order_revenue": float(delivered_revenue_total),
                 "total_refunds": float(total_refunds),
-                "net_revenue": float(total_collected - Decimal(str(total_refunds or 0))),
+                "prepayment_returns_revenue_counted": float(payout_totals.revenue_counted),
+                "prepayments_returned_to_customers": float(payout_totals.never_revenue),
+                "net_revenue": float(
+                    total_collected - Decimal(str(total_refunds or 0)) - payout_totals.revenue_counted
+                ),
                 "outstanding_cod_total": float(outstanding_total),
                 "outstanding_cod_count": len(outstanding_rows),
             },

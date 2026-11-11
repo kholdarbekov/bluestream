@@ -21,11 +21,17 @@ class ErrorDetailCopy:
     (``format_delivery_status``); unnamed values are shown as-is. Used only when
     EVERY field is present, so an older backend that sends no details falls back
     to the plain key.
+
+    ``when`` maps a ``details`` field to the value it must hold for this copy to
+    apply, for one code whose sentence depends on what the backend names (a
+    transfer refused for its full bottles or for its empties). A refusal that
+    lacks the field, or holds another value, falls through to the next spec.
     """
 
     key: str
     placeholders: Mapping[str, str]
     formats: Mapping[str, str] = field(default_factory=dict)
+    when: Mapping[str, Any] = field(default_factory=dict)
 
 
 def _format_value(value: Any, fmt: Optional[str], language: str) -> str:
@@ -43,6 +49,8 @@ def _format_value(value: Any, fmt: Optional[str], language: str) -> str:
 def render_detail_copy(spec: ErrorDetailCopy, details: Any, language: str, *, html: bool = False) -> Optional[str]:
     """``spec``'s copy filled from ``details``, or None when a field is missing."""
     if not isinstance(details, Mapping):
+        return None
+    if any(details.get(detail_field) != expected for detail_field, expected in spec.when.items()):
         return None
     values = {}
     for placeholder, detail_field in spec.placeholders.items():

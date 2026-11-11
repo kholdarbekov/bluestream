@@ -51,9 +51,10 @@ import pytest
 from flask_jwt_extended import create_access_token
 
 from business_app.models.delivery import DeliveryPerson
-from business_app.models.payment import CashCollectionEvent, DriverCashHandoff
+from business_app.models.payment import CashCollectionEvent, DriverCashHandoff, DriverCashSession
+from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.driver_reconciliation_service import DriverReconciliationService
-from shared.enums import CashCollectionSource
+from shared.enums import CashCollectionSource, DriverCashSessionStatus
 from staff_bot.api_client import APIResponse
 from staff_bot.handlers.delivery import status_update as status_update_module
 from staff_bot.handlers.delivery.status_update import StatusUpdateHandler
@@ -505,3 +506,58 @@ def test_the_typed_amount_path_records_what_the_driver_typed(app, db, bot, drive
     asyncio.run(bot.receive_reconciliation_declared_cash(_update(text="40000"), context))
 
     assert recorded_amounts(db, session_id) == [Decimal("40000")]
+
+
+# ---------------------------------------------------------------------------
+# A prepayment the driver handed back out of his trip cash (spec 2026-11-10 §4.3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_handoff_button_names_on_hand_minus_handed_after_a_return(
+    app, db, bot, driver, customer, client, admin_claim_headers
+):
+    """100,000 collected on this trip, 40,000 of it handed back to the leaving
+    customer and recorded by the admin as "from his current trip's cash".
+
+    The driver holds 60,000, so that is what the button must name, and what the
+    tap must record. A button reading 100,000 would book a 40,000 shortfall
+    against a driver who is short of nothing.
+    """
+    context = _Ctx()
+    event = CashCollectionService().post_collection(
+        customer_id=customer.id,
+        amount=Decimal("100000.00"),
+        source="standalone_meeting",
+        collector_user_id=driver.id,
+        recorded_by_user_id=driver.id,
+        notes="Paid ahead to the driver",
+    )
+    db.session.commit()
+    session_id = event.driver_cash_session_id
+    returned = client.post(
+        f"/api/v1/admin/staff/cash-reconciliation/customers/{customer.id}/prepayment-payouts",
+        json={
+            "amount": 40000,
+            "paid_by": "driver_current_session",
+            "driver_user_id": driver.id,
+            "reason": "Customer moved away",
+            "idempotency_key": "handoff-after-return",
+        },
+        headers=admin_claim_headers,
+    )
+    assert returned.status_code == 201, returned.get_json()
+
+    text, markup = open_the_screen(bot, context)
+    button = handoff_button(markup)
+    assert button is not None, f"the driver still holds 60,000 and is offered no handoff: {text!r}"
+    shown = figure_a_human_reads(button.text)
+    assert shown == Decimal("60000"), f"the button reads {button.text!r}"
+    assert "60,000" in text, f"the screen does not show what the driver holds: {text!r}"
+
+    tap(bot, context, button)
+
+    assert recorded_amounts(db, session_id) == [shown]
+    session = db.session.get(DriverCashSession, session_id)
+    assert session.status == DriverCashSessionStatus.SUBMITTED
+    assert Decimal(str(session.declared_variance)) == Decimal("0.00")

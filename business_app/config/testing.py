@@ -109,6 +109,10 @@ class TestingConfig(BaseConfig):
 
     # Disable external services for testing
     SENTRY_DSN = None
+    # BaseConfig reads the webhook from /run/secrets or SLACK_WEBHOOK_URL, i.e. the live #alerts-prod channel
+    # wherever those exist. Tests never post to it (owner rule 2026-11-10); a test that drives the post sets its
+    # own fake URL in app.config and mocks the HTTP call.
+    SLACK_ALERTS_WEBHOOK_URL = None
     METRICS_ENABLED = False
     HEALTH_CHECK_ENABLED = False
 

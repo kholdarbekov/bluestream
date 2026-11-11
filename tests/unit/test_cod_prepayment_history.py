@@ -365,18 +365,21 @@ class TestPrepaymentAdminRoutes:
     ):
         captured = {}
 
-        def _fake_history(self, customer_id, *, include_voided, include_fully_applied, limit):
+        def _fake_history(self, customer_id, *, include_voided, include_fully_applied, limit, actor):
             captured.update(
                 customer_id=customer_id,
                 include_voided=include_voided,
                 include_fully_applied=include_fully_applied,
                 limit=limit,
+                actor_id=actor.id,
             )
             return {
                 'customer_id': customer_id,
                 'available_prepayment_balance': 30000.0,
                 'lifetime_collected': 102000.0,
                 'lifetime_applied': 72000.0,
+                'lifetime_returned': 0.0,
+                'payouts': [],
                 'events': [],
             }
 
@@ -396,11 +399,15 @@ class TestPrepaymentAdminRoutes:
         body = response.get_json()
         data = body.get('data', body)
         assert data['available_prepayment_balance'] == 30000.0
+        # The new return fields pass through the route untouched.
+        assert (data['lifetime_returned'], data['payouts']) == (0.0, [])
         assert captured == {
             'customer_id': sample_user.id,
             'include_voided': False,
             'include_fully_applied': True,
             'limit': 25,
+            # The reader, so the payload's can_return_prepayment answers for them.
+            'actor_id': admin_user.id,
         }
 
     def test_history_endpoint_404_for_unknown_customer(

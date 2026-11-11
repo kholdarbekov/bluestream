@@ -1379,6 +1379,7 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "kept_order_note": "Your order for 11 January stays as it is.",
             "time_kind": "window",
         },
+        "prepayment_returned": {"payout_id": 5, "amount": 35000.0, "balance": 0.0},
     }[kind]
 
     with app.app_context():
@@ -1393,13 +1394,15 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
     site = app.config["COMPANY_WEBSITE"].rstrip("/")
     content = rendered["content"]
     has_pay = kind == "subscription_order_created"  # the only facts above whose published Pay is allowed
-    sub_id = facts["subscription_id"]
+    sub_id = facts.get("subscription_id")  # prepayment_returned names no subscription
     if sub_id is None:
         assert "/my-subscriptions" not in content
     else:
         assert f'href="{site}/my-subscriptions?sub={sub_id}"' in content
     assert (f'href="{site}/order-tracking?order_id=7"' in content) == ("order_id" in facts)
     assert has_pay == (content.count('class="btn-primary"') == 1)
+    if kind == "prepayment_returned":
+        assert "<strong>35,000</strong>" in content and "<strong>0</strong>" in content
     if kind == "subscription_order_created":
         assert "07.01.2027" in rendered["content"] or "01/07/2027" in rendered["content"]
     if kind == "subscription_schedule_changed":

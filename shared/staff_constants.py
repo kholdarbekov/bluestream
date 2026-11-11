@@ -158,11 +158,17 @@ SALES_EVENTS = (
 # business_app/services/bottle_notifications.py; rendered by
 # staff_bot/webhook_server.py::_render_bottle_event, which reads its copy by literal key.
 BOTTLE_EVENT_TRANSFER_RECEIVED = 'transfer_received'
+# The sender's answer once the receiver has counted (spec 2026-11-09 T4, T5); payloads documented on
+# bottle_notifications.notify_transfer_outcome_to_sender.
+BOTTLE_EVENT_TRANSFER_CONFIRMED = 'transfer_confirmed'
+BOTTLE_EVENT_TRANSFER_DISPUTED = 'transfer_disputed'
 BOTTLE_EVENT_JOIN_REQUESTED = 'join_requested'
 BOTTLE_EVENT_JOIN_APPROVED = 'join_approved'
 BOTTLE_EVENT_JOIN_DECLINED = 'join_declined'
 BOTTLE_EVENTS = (
     BOTTLE_EVENT_TRANSFER_RECEIVED,
+    BOTTLE_EVENT_TRANSFER_CONFIRMED,
+    BOTTLE_EVENT_TRANSFER_DISPUTED,
     BOTTLE_EVENT_JOIN_REQUESTED,
     BOTTLE_EVENT_JOIN_APPROVED,
     BOTTLE_EVENT_JOIN_DECLINED,
@@ -227,5 +233,7 @@ MAX_BOTTLES_PER_SESSION = 500
 # keypad, where the driver can still be told what was wrong with what they
 # typed, and `DriverBottleSessionCloseRequest` / `AdminForceCloseSessionRequest`
 # refuse it at the HTTP boundary, so a direct API call, a replayed request or
-# any future client is bounded too.
+# any future client is bounded too. The driver-to-driver transfer bodies' count
+# fields (send, count, admin resolve) carry it as well, for the same storage
+# reason: each count lands in a 4-byte transfer or session column.
 BOTTLE_RETURN_COLUMN_CEILING = 2_147_483_647 - MAX_BOTTLES_PER_SESSION

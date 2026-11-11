@@ -353,6 +353,18 @@ CUSTOMER_LINK_SHARED_GEO_DAMPEN_CUTOFF = _int("CUSTOMER_LINK_SHARED_GEO_DAMPEN_C
 # (spec 2.1/2.2). Widening this never creates a group by itself.
 PLACE_SUGGESTION_RADIUS_M = _float("PLACE_SUGGESTION_RADIUS_M", 10.0)
 
+# ─── Shared-place detection (first-order customer hands back empties) ───
+# Driver-candidate channel: how near another customer's pin must be to be offered
+# to the driver as "the place this customer's empties came from", and how long the
+# driver has to answer before the admin is alerted. Unrelated to the 10 m place
+# suggestion radius above and the 50 m link-suggestion radius.
+SHARED_PLACE_CANDIDATE_RADIUS_M = _float("SHARED_PLACE_CANDIDATE_RADIUS_M", 50.0)
+SHARED_PLACE_DRIVER_ANSWER_WINDOW_S = _int("SHARED_PLACE_DRIVER_ANSWER_WINDOW_S", 900)
+# The longest note a driver may leave on a case (characters, after stripping). The staff
+# bot refuses a longer one before sending it and the backend refuses it again, so both
+# read this one value. Not env-driven: the two processes must never disagree.
+SHARED_PLACE_DRIVER_NOTE_MAX_CHARS = 500
+
 # ─── Place COD attribution (Plan E) ─────────────────────────────────────
 # ON by default (owner ruling A2, 2026-08-04). When enabled:
 #   * the staff bot's place screen collects DIRECTLY — no coworker selection —

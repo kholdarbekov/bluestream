@@ -1136,13 +1136,9 @@ class OrderEditService:
                 session = DriverBottleSession.query.get(affected_session_id)
                 if session is not None:
                     # bottle_delta > 0  → more bottles delivered to customer
-                    # bottle_delta < 0  → fewer bottles delivered (some come back)
-                    delivered_delta = int(bottle_delta)
-                    if delivered_delta > 0:
-                        session.bottles_delivered = (session.bottles_delivered or 0) + delivered_delta
-                    elif delivered_delta < 0:
-                        # Reduce previously-counted deliveries.
-                        session.bottles_delivered = max(0, (session.bottles_delivered or 0) + delivered_delta)
+                    # bottle_delta < 0  → fewer bottles delivered (some come back); the tally never goes below 0.
+                    # Added in SQL, like every Delivered: the trip may be taking a crew member's delivery right now.
+                    self.bottle_service.add_to_session_tallies(session, delivered=int(bottle_delta))
 
             adjustments.append(
                 {

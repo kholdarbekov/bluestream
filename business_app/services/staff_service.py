@@ -1762,6 +1762,7 @@ class StaffService:
         *,
         acting_driver_id: Optional[int] = None,
         expected_address_id: Optional[int] = None,
+        enforce_bottle_capacity: bool = True,
     ) -> Delivery:
         """
         Update delivery status with transition validation and order status sync.
@@ -1781,6 +1782,9 @@ class StaffService:
                 Checked only on the driver endpoint and only for
                 ``ADDRESS_BOUND_DELIVERY_STATUSES``. None (an older bot build, or a
                 flow the driver left) is not checked.
+            enforce_bottle_capacity: False on the admin Delivery page (spec A9):
+                the move skips the free-full-bottle count, but the driver must
+                still be on a bottle trip. The driver's own taps keep the count.
 
         Returns:
             Updated Delivery object
@@ -1940,7 +1944,8 @@ class StaffService:
         # Bottle-session continuity guard. For any post-assignment transition
         # on an order that carries returnable bottles, the driver's effective
         # session must still match the session the order was bound to at
-        # accept time. Strict mode raises; legacy mode logs a warning.
+        # accept time, and Picked up / On the way must find enough free full
+        # bottles on it (spec A6, A8). Strict mode raises; legacy mode logs a warning.
         # "failed" is deliberately excluded: a failed attempt delivers no
         # bottles (nothing to tally), so it needs no session continuity — and
         # the failed branch below releases the binding outright. Running the
@@ -1949,7 +1954,9 @@ class StaffService:
         if new_status in ("picked_up", "in_transit", "arrived", "delivered"):
             from business_app.services.bottle_tracking_service import BottleTrackingService
 
-            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+            BottleTrackingService().assert_driver_can_progress_delivery(
+                delivery, to_status=new_status_enum, enforce_capacity=enforce_bottle_capacity
+            )
 
         cod_debt_limit_breached = False
 
@@ -2070,6 +2077,9 @@ class StaffService:
                             notes=metadata.get("notes", "Delivered via staff bot"),
                             bottles_returned=metadata.get("bottles_returned"),
                             commit=False,
+                            # The shared-place question goes to the driver at the door. The admin Delivery
+                            # page passes no acting driver, so its moves never ask one (spec 2026-11-10 §4.1).
+                            asked_driver_id=acting_driver_id,
                         )
                 else:
                     from business_app.services.order_service import OrderService

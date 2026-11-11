@@ -33,6 +33,7 @@ from business_app.services.sales import notifications, pay_rules
 from business_app.services.staff_service import StaffService
 from business_app.utils.delivery_cadence import typical_interval_days
 from business_app.utils.delivery_window import local_now, parse_window_time, validate_schedule
+from business_app.utils.district_text import DISTRICT_SUFFIX_TOKENS, fold_district
 from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from business_app.utils.geo_validation import ensure_within_delivery_zone, is_in_delivery_zone
 from business_app.utils.helpers import calculate_distance, format_phone_number
@@ -127,18 +128,6 @@ def user_display_name(user: User) -> str:
     return user.company_name or user.full_name or user.phone or f"#{user.id}"
 
 
-# Locale words a geocoder appends to a district NAME: "Chilanzar District",
-# "Chilonzor Tumani", "Чиланзарский район". Stripped before the name match is
-# retried, never instead of it.
-_DISTRICT_SUFFIX_TOKENS = ("district", "tumani", "район", "rayon")
-
-# Every apostrophe a name can be spelled with. Uzbek needs one -- "Ulug'bek",
-# "Shayxontohur" -- and nobody agrees which codepoint it is: our own constants
-# use U+0027, live Nominatim answers "Mirzo Ulug‘bek Tumani" with U+2018, and
-# the Uzbek orthographic character is U+02BB. Folded away on BOTH sides so the
-# match is about the letters, never about which quote mark a provider chose.
-_APOSTROPHES = "'’‘ʻʼ`"
-
 # Provider spellings that survive folding and still name no district. Kept as a
 # tiny explicit table rather than fuzzy matching: a wrong district is worse than
 # no district, and an entry here is a decision someone made on real evidence.
@@ -149,18 +138,10 @@ _DISTRICT_ALIASES = {
 }
 
 
-def _fold_district(raw: Optional[str]) -> str:
-    """Lowercase and drop every apostrophe variant. The comparison form."""
-    text = (raw or "").strip().lower()
-    for apostrophe in _APOSTROPHES:
-        text = text.replace(apostrophe, "")
-    return text.strip()
-
-
 def _district_display_names() -> Dict[str, str]:
     """Every en/uz/ru display name, in comparison form, mapped to its canonical key."""
     return {
-        _fold_district(names.get(language)): key
+        fold_district(names.get(language)): key
         for key, names in TASHKENT_DISTRICTS.items()
         for language in ("en", "uz", "ru")
         if names.get(language)
@@ -197,7 +178,7 @@ def _canonical_district(raw: Optional[str]) -> Optional[str]:
 
     Pure: no session, no config, no I/O.
     """
-    text = _fold_district(raw)
+    text = fold_district(raw)
     if not text:
         return None
     if text in TASHKENT_DISTRICTS:
@@ -209,7 +190,7 @@ def _canonical_district(raw: Optional[str]) -> Optional[str]:
         return _DISTRICT_ALIASES[text]
 
     parts = text.split()
-    if len(parts) > 1 and parts[-1] in _DISTRICT_SUFFIX_TOKENS:
+    if len(parts) > 1 and parts[-1] in DISTRICT_SUFFIX_TOKENS:
         stripped = " ".join(parts[:-1])
         if stripped in TASHKENT_DISTRICTS:
             return stripped

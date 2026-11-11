@@ -106,4 +106,22 @@ describe('Cash reconciliation tab report window', () => {
 
     await waitFor(() => expect(lastParams()).toEqual({ page: 3, per_page: 20 }));
   });
+
+  it('shows the gross collected and what the driver must hand in, side by side', async () => {
+    const payload = cashPayload(1);
+    payload.data.data.sessions = [{
+      id: 5, driver_name: 'Aziz', session_started_at: '2026-03-02T09:00:00', status: 'open',
+      expected_cash: 150000, expected_cash_on_hand: 90000, declared_cash: null, verified_cash: null,
+    }];
+    staffService.getCashReconciliation.mockResolvedValue(payload);
+    await openCashTab();
+
+    const header = await screen.findByRole('columnheader', { name: 'To hand in' });
+    expect(header).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Collected (gross)' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Expected Cash' })).toBeNull();
+    const row = screen.getByRole('row', { name: /Aziz/ });
+    expect(within(row).getByText('150,000 UZS')).toBeInTheDocument();
+    expect(within(row).getByText('90,000 UZS')).toBeInTheDocument();
+  });
 });

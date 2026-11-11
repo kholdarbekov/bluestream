@@ -23,8 +23,16 @@ BOTTLE_LEDGER_TABLE_NAME = "bottle_ledger"
 # and for these it must not. A pay ledger line is commission the business already owes an
 # agent. Deleted with its order, the commission would stand forever, because the ledger sync
 # can no longer see the order to reverse it. Refuse, never cascade.
-PROTECTED_TABLES = ("sales_pay_ledger_lines",)
+# A payout debit is the same: the walk would delete the row that records which credit a prepayment
+# return drew, and the event's conservation (allocations + payout debits + unapplied) would break.
+# Live or undone, any debit row makes its order undeletable.
+PROTECTED_TABLES = ("sales_pay_ledger_lines", "customer_credit_payout_debits")
 PROTECTED_REFUSAL = "sales-agent pay ledger lines reference this order; a credited order cannot be hard-deleted"
+PAYOUT_PROTECTED_REFUSAL = "prepayment returns drew on this order's cash collections; the order cannot be hard-deleted"
+PROTECTED_REFUSALS: Dict[str, str] = {
+    "sales_pay_ledger_lines": PROTECTED_REFUSAL,
+    "customer_credit_payout_debits": PAYOUT_PROTECTED_REFUSAL,
+}
 
 
 class OrderDeletionService:
@@ -102,7 +110,7 @@ class OrderDeletionService:
             "rows_by_table": rows_by_table,
             "deletion_order": deletion_order,
             "total_rows": sum(rows_by_table.values()),
-            "refused": PROTECTED_REFUSAL if any(table in rows_by_table for table in PROTECTED_TABLES) else None,
+            "refused": next((PROTECTED_REFUSALS[table] for table in PROTECTED_TABLES if table in rows_by_table), None),
             "_row_keys_by_table": normalized_row_keys_by_table,
         }
 

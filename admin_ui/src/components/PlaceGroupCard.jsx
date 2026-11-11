@@ -7,6 +7,7 @@ import adminService from '../services/adminService';
 import PlaceGroupConfirmModal from './PlaceGroupConfirmModal';
 import { placeGroupErrorMessage, placeGroupEventText } from './placeGroupCopy';
 import { invalidatePlaceGroupQueries } from './placeGroupQueries';
+import { useAuthStore } from '../stores/authStore';
 
 const { Text } = Typography;
 
@@ -26,6 +27,7 @@ const displayReason = (reason) => (reason || '').replace(/^\[group \d+\]\s*/, ''
 export default function PlaceGroupCard({ groupId, onChanged, onDissolved }) {
   const { t } = useTranslation('users');
   const queryClient = useQueryClient();
+  const canManage = useAuthStore().hasPermission('can_manage_users');
 
   // action: { kind: 'add' | 'remove' | 'rename', payload }
   const [action, setAction] = useState(null);
@@ -83,14 +85,21 @@ export default function PlaceGroupCard({ groupId, onChanged, onDissolved }) {
   });
 
   const renameMutation = useMutation({
-    mutationFn: ({ label, actionReason }) =>
-      adminService.renamePlaceGroup(groupId, label, actionReason),
+    // The note rides as a 4th argument ONLY when it changed, so a label-only
+    // rename stays the exact 3-argument call it always was.
+    mutationFn: ({ label, actionReason, notes }) =>
+      notes === undefined
+        ? adminService.renamePlaceGroup(groupId, label, actionReason)
+        : adminService.renamePlaceGroup(groupId, label, actionReason, { notes }),
     onSuccess: onMutationSuccess('ui.users.place_groups.rename_success', 'Place group renamed'),
     onError: onMutationError,
   });
 
   const startRename = () =>
-    setAction({ kind: 'rename', payload: { groupId, currentLabel: group?.label || '' } });
+    setAction({
+      kind: 'rename',
+      payload: { groupId, currentLabel: group?.label || '', notes: group?.notes ?? '' },
+    });
 
   const startAdd = () => setAction({ kind: 'add', payload: { groupId } });
 
@@ -113,9 +122,16 @@ export default function PlaceGroupCard({ groupId, onChanged, onDissolved }) {
     });
   };
 
-  const handleConfirm = ({ addressIds, label, reason, bottlesLeaving, merge }) => {
+  const handleConfirm = ({ addressIds, label, reason, bottlesLeaving, merge, notes }) => {
     if (action.kind === 'rename') {
-      renameMutation.mutate({ label, actionReason: reason });
+      const noteChanged = notes !== undefined && notes !== (action.payload.notes ?? '').trim();
+      // `null` keeps the label (rename_place_group, spec §9), so a note alone never sends a blank label.
+      const labelChanged = (label || '') !== (action.payload.currentLabel || '');
+      renameMutation.mutate({
+        label: labelChanged ? label : null,
+        actionReason: reason,
+        ...(noteChanged ? { notes } : {}),
+      });
     } else if (action.kind === 'add') {
       addMutation.mutate({ addressIds, actionReason: reason, merge });
     } else if (action.kind === 'remove') {
@@ -168,13 +184,25 @@ export default function PlaceGroupCard({ groupId, onChanged, onDissolved }) {
           value={group.cod?.active_cod_debt_count ?? 0}
           valueStyle={{ fontSize: 16 }}
         />
-        <Button size="small" onClick={startRename}>
-          {t('ui.users.place_groups.rename_action', 'Rename')}
-        </Button>
-        <Button size="small" onClick={startAdd}>
-          {t('ui.users.place_groups.add_action', 'Add address')}
-        </Button>
+        {canManage && (
+          <>
+            <Button size="small" onClick={startRename}>
+              {t('ui.users.place_groups.rename_action', 'Rename')}
+            </Button>
+            <Button size="small" onClick={startAdd}>
+              {t('ui.users.place_groups.add_action', 'Add address')}
+            </Button>
+          </>
+        )}
       </Space>
+
+      {/* The admin-only place note, read-only for every viewer of the card (never a driver or customer surface). */}
+      {group.notes && (
+        <Space size={6} align="start" style={{ display: 'flex', marginTop: 8 }}>
+          <Text type="secondary">{t('ui.users.shared_place_reports.place_note_label', 'Note')}</Text>
+          <Text style={{ whiteSpace: 'pre-wrap' }}>{group.notes}</Text>
+        </Space>
+      )}
 
       <List
         size="small"
@@ -185,7 +213,7 @@ export default function PlaceGroupCard({ groupId, onChanged, onDissolved }) {
         renderItem={(member) => (
           <List.Item
             key={member.address_id}
-            actions={[
+            actions={!canManage ? [] : [
               <Button key="remove" size="small" danger onClick={() => startRemove(member)}>
                 {t('ui.users.place_groups.remove', 'Remove')}
               </Button>,

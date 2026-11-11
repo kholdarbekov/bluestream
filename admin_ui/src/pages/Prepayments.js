@@ -20,10 +20,12 @@ import {
   SearchOutlined,
   WalletOutlined,
 } from '@ant-design/icons';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import staffService from '../services/staffService';
+import PayoutRows from '../components/prepayments/PayoutRows';
+import ReturnPrepaymentModal from '../components/prepayments/ReturnPrepaymentModal';
 import { formatLocaleDateTime } from '../utils/dateUtils';
 import { extractApiErrorMessage } from '../utils/apiError';
 
@@ -53,12 +55,14 @@ const Prepayments = () => {
   const { t } = useTranslation('common');
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
 
   const [searchText, setSearchText] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [includeVoided, setIncludeVoided] = useState(false);
   const [includeFullyApplied, setIncludeFullyApplied] = useState(true);
+  const [returnOpen, setReturnOpen] = useState(false);
 
   // Allow deep-linking from Users.js: /staff/prepayments?customer_id=123
   useEffect(() => {
@@ -133,6 +137,12 @@ const Prepayments = () => {
     : (selectedRow
       ? `${selectedRow.first_name || ''} ${selectedRow.last_name || ''}`.trim()
       : '');
+
+  // A return or an undo moves the balance, the events' unapplied amounts and the list row.
+  const refreshAfterPayout = () => {
+    queryClient.invalidateQueries({ queryKey: ['prepayment-history'] });
+    queryClient.invalidateQueries({ queryKey: ['prepayment-customers'] });
+  };
 
   const handleSearchSubmit = () => setActiveSearch(searchText.trim());
 
@@ -221,6 +231,11 @@ const Prepayments = () => {
           {row.voided_at && (
             <Tag color="red" style={{ marginTop: 2 }}>
               {t('ui.prepayments.voided', 'Voided')}
+            </Tag>
+          )}
+          {Number(row.returned_amount) > 0 && (
+            <Tag color="orange" style={{ marginTop: 2 }}>
+              {t('ui.prepayments.returned', 'Returned')}
             </Tag>
           )}
         </Space>
@@ -400,6 +415,11 @@ const Prepayments = () => {
         open={Boolean(selectedCustomerId)}
         onClose={handleCloseDrawer}
         destroyOnClose
+        extra={historyResponse?.can_return_prepayment ? (
+          <Button type="primary" onClick={() => setReturnOpen(true)}>
+            {t('ui.prepayments.return_button', 'Return prepayment')}
+          </Button>
+        ) : null}
       >
         {historyQuery.isLoading ? (
           <div style={{ textAlign: 'center', padding: 24 }}>
@@ -408,7 +428,7 @@ const Prepayments = () => {
         ) : historyResponse ? (
           <>
             <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title={t('ui.prepayments.balance', 'Prepayment balance')}
@@ -419,7 +439,7 @@ const Prepayments = () => {
                   />
                 </Card>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title={t('ui.prepayments.lifetime_collected', 'Lifetime collected')}
@@ -429,7 +449,7 @@ const Prepayments = () => {
                   />
                 </Card>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={12} md={6}>
                 <Card size="small">
                   <Statistic
                     title={t('ui.prepayments.lifetime_applied', 'Lifetime applied')}
@@ -439,7 +459,19 @@ const Prepayments = () => {
                   />
                 </Card>
               </Col>
+              <Col xs={24} sm={12} md={6}>
+                <Card size="small">
+                  <Statistic
+                    title={t('ui.prepayments.lifetime_returned', 'Lifetime returned')}
+                    value={historyResponse.lifetime_returned || 0}
+                    precision={0}
+                    suffix="UZS"
+                  />
+                </Card>
+              </Col>
             </Row>
+
+            <PayoutRows payouts={historyResponse.payouts} onChanged={refreshAfterPayout} />
 
             <Card size="small" style={{ marginBottom: 12 }}>
               <Space size="large" wrap>
@@ -491,6 +523,17 @@ const Prepayments = () => {
           <Empty description={t('ui.prepayments.no_history', 'No prepayment activity for this customer.')} />
         )}
       </Drawer>
+
+      {/* Mounted only while open: a fresh form (and the balance of THIS open) every time. */}
+      {returnOpen && (
+        <ReturnPrepaymentModal
+          open
+          customerId={selectedCustomerId}
+          freeBalance={historyResponse?.available_prepayment_balance || 0}
+          onClose={() => setReturnOpen(false)}
+          onDone={refreshAfterPayout}
+        />
+      )}
     </div>
   );
 };

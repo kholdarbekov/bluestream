@@ -3291,7 +3291,25 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # subscriptions.remove_subscription_item). Unrelated to place-merge; only the estate-wide count moved.
     # 652 -> 653: GET /api/v1/admin/eta/accuracy (admin_eta.get_eta_accuracy), the delivery-time accuracy report
     # (honest-ETA Phase 2, Task 9). Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 653
+    # 653 -> 656: prepayment return (plan 2026-11-10) added POST
+    # /api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-payouts/preview
+    # (admin.preview_prepayment_payout_admin), POST .../customers/<int:customer_id>/prepayment-payouts
+    # (admin.return_prepayment_admin) and POST /api/v1/admin/staff/cash-reconciliation/prepayment-payouts/
+    # <int:payout_id>/undo (admin.undo_prepayment_payout_admin). Unrelated to place-merge; only the
+    # estate-wide count moved.
+    # 656 -> 659: the driver's shared-place calls (plan 2026-11-11, Task 8) added GET
+    # /api/v1/staff/delivery/<int:delivery_id>/shared-place-question (staff.get_shared_place_question), PUT
+    # /api/v1/staff/shared-place-cases/<int:case_id>/answer (staff.answer_shared_place_case) and PUT
+    # /api/v1/staff/shared-place-cases/<int:case_id>/note (staff.note_shared_place_case). Unrelated to
+    # place-merge; only the estate-wide count moved.
+    # 659 -> 661: the admin's shared-place review (plan 2026-11-11, Task 11) added GET
+    # /api/v1/admin/shared-place-cases (admin_shared_place.list_shared_place_cases) and GET
+    # /api/v1/admin/shared-place-cases/<int:case_id> (admin_shared_place.get_shared_place_case). Unrelated to
+    # place-merge; only the estate-wide count moved.
+    # 661 -> 662: the admin's shared-place resolve (plan 2026-11-11, Task 12) added POST
+    # /api/v1/admin/shared-place-cases/<int:case_id>/resolve (admin_shared_place.resolve_shared_place_case).
+    # Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 662
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

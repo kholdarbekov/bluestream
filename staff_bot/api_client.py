@@ -31,22 +31,22 @@ logger = logging.getLogger('api_client')
 # plus PUT (the customer bot does NOT add PUT: its saves carry expected_state).
 #
 # PUT IS INCLUDED, and that is a verified claim, not an RFC assumption. Two of
-# the three PUTs this client issues are guarded state-machine transitions whose
+# the five PUTs this client issues are guarded state-machine transitions whose
 # guard runs BEFORE any write:
 #   * PUT /staff/delivery/{id}/status  -> business_app/services/staff_service.py
-#     :1162-1167 raises STAFF_INVALID_STATUS_TRANSITION, and NO status in
-#     shared/status_transitions.py:30-49 lists itself as an allowed next, so
-#     every replay is refused before the `try:` at :1198. `delivery_attempts`
-#     (:1223) lives inside that block and cannot be reached by a replay.
-#   * PUT /staff/orders/{id}/preparing -> staff_service.py:1701-1705 raises
+#     :1920-1929 raises STAFF_INVALID_STATUS_TRANSITION, and NO status in
+#     shared/status_transitions.py:30-62 lists itself as an allowed next, so
+#     every replay is refused before the `try:` at :1963. `delivery_attempts`
+#     (:1988) lives inside that block and cannot be reached by a replay.
+#   * PUT /staff/orders/{id}/preparing -> staff_service.py:2633-2636 raises
 #     STAFF_ORDER_STATUS_INVALID_FOR_PREPARING before any write, and the
-#     customer-facing Telegram notification at :1716-1719 fires only on success.
+#     customer-facing Telegram notification at :2652-2657 fires only on success.
 # Replay of either is zero writes + a deterministic 400, and
-# `staff_bot/handlers/delivery/status_update.py:317-340` DEPENDS on that 400:
+# `staff_bot/handlers/delivery/status_update.py:372-405` DEPENDS on that 400:
 # it is the idempotent acknowledgement that stops a completed at-door delivery
 # from being reported to the driver as a failure. Removing PUT from this set
 # re-opens that bug.
-# The third is an idempotent SET, safe to replay for a different reason:
+# The other three are idempotent SETs, safe to replay for a different reason:
 #   * PUT /staff/sales/outlets/{id}/primary-phone -> `OutletService.
 #     set_primary_phone` writes the number onto the outlet's primary contact
 #     and creates a contact only when the outlet has none, so a replay that
@@ -56,6 +56,13 @@ logger = logging.getLogger('api_client')
 #     retry landing while the timed-out original is still running) can each
 #     create one, as nothing locks the outlet row. The duplicate is benign --
 #     both rows carry the number the agent sent.
+#   * PUT /staff/shared-place-cases/{id}/answer -> `SharedPlaceDriverStep.
+#     answer` stores the answer once; the same answer again is a 200 no-op and
+#     a DIFFERENT one is refused with SHARED_PLACE_ANSWER_REFUSED (409) before
+#     any write, so a replay after a lost ack never double-writes.
+#   * PUT /staff/shared-place-cases/{id}/note -> `SharedPlaceDriverStep.
+#     add_note` is write-once: the same note again is a 200 no-op, a different
+#     one (or a settled case) is refused with the same 409 and writes nothing.
 #
 # POST is excluded, with NO per-endpoint exception list (owner ruling): the
 # rule stays a pure function of the verb so no future endpoint can opt into
@@ -70,10 +77,10 @@ logger = logging.getLogger('api_client')
 #   * {delivery}/optimize-route     — ditto
 #   * {delivery}/me/location        — ditto
 # Three of the other 21 carry money or inventory and now rely on a manual
-# re-tap when a response is lost — /staff/cash-collections (:754),
-# /staff/reconciliation/session/submit (:771) and /staff/bottles/session/close
-# (:899). Unlike session/open, session/close has no friendly-conflict arm
-# (`bottle_collection.py:1332-1334` vs `:1240-1246`), so a lost response there
+# re-tap when a response is lost — /staff/cash-collections (:1195),
+# /staff/reconciliation/session/submit (:1212) and /staff/bottles/session/close
+# (:1366). Unlike session/open, session/close has no friendly-conflict arm
+# (`bottle_collection.py:1478-1481` vs `:1330-1345`), so a lost response there
 # surfaces as a generic error. That is the intended behaviour — an auto-retried
 # money POST is the bug — but it is the sharp edge of this ruling, not a
 # footnote.
@@ -825,6 +832,37 @@ class StaffAPIClient:
             token=token
         )
 
+    # --- Shared-place question (the one question on the Delivered screen) ---
+
+    async def get_shared_place_question(self, token: str, delivery_id: int) -> APIResponse:
+        """The question owed for this delivery: `{"ask": false}` or `{"ask": true, ...}`."""
+        return await self._make_request(
+            'GET', f'/api/v1/staff/delivery/{delivery_id}/shared-place-question',
+            token=token
+        )
+
+    async def answer_shared_place_case(
+        self, token: str, case_id: int, answer: str, *,
+        candidate_index: Optional[int] = None, note: Optional[str] = None,
+    ) -> APIResponse:
+        """File the driver's answer. The body carries only the keys that are set."""
+        body: Dict[str, Any] = {'answer': answer}
+        if candidate_index is not None:
+            body['candidate_index'] = candidate_index
+        if note is not None:
+            body['note'] = note
+        return await self._make_request(
+            'PUT', f'/api/v1/staff/shared-place-cases/{case_id}/answer',
+            token=token, data=body
+        )
+
+    async def note_shared_place_case(self, token: str, case_id: int, note: str) -> APIResponse:
+        """Add the driver's write-once note to a case."""
+        return await self._make_request(
+            'PUT', f'/api/v1/staff/shared-place-cases/{case_id}/note',
+            token=token, data={'note': note}
+        )
+
     # --- Sales Operations ---
     #
     # Paths are written out as literals (no `config.business_api.*_endpoint`
@@ -1369,16 +1407,35 @@ class StaffAPIClient:
     async def get_transfer_recipients(self, token: str) -> APIResponse:
         return await self._make_request('GET', '/api/v1/staff/bottles/transfers/recipients', token=token)
 
-    async def initiate_bottle_transfer(self, token: str, receiver_driver_id: int, quantity: int, notes: str = None) -> APIResponse:
-        data = {'receiver_driver_id': receiver_driver_id, 'quantity': quantity}
-        if notes:
-            data['notes'] = notes
+    async def initiate_bottle_transfer(
+        self, token: str, receiver_driver_id: int, *,
+        full_quantity: int = 0, empty_quantity: int = 0, send_all: bool = False,
+    ) -> APIResponse:
+        """Hand full bottles and empties to a colleague: both numbers, or `send_all` (spec 2026-11-09 T1).
+
+        With `send_all` the backend sends whatever is on the truck when it books the transfer, so no numbers go
+        with it. The backend caps each number and refuses a total of 0.
+        """
+        data = {'receiver_driver_id': receiver_driver_id}
+        if send_all:
+            data['send_all'] = True
+        else:
+            data.update(full_quantity=full_quantity, empty_quantity=empty_quantity)
         return await self._make_request('POST', '/api/v1/staff/bottles/transfers', token=token, data=data)
 
-    async def confirm_bottle_transfer(self, token: str, transfer_id: int, confirmed_quantity: int, notes: str = None) -> APIResponse:
-        data = {'confirmed_quantity': confirmed_quantity}
-        if notes:
-            data['notes'] = notes
+    async def confirm_bottle_transfer(
+        self, token: str, transfer_id: int, *,
+        confirmed_full: int = None, confirmed_empty: int = None, confirm_as_declared: bool = False,
+    ) -> APIResponse:
+        """The receiver's count: `confirm_as_declared`, or both numbers he counted.
+
+        The answer carries `admins_alerted`: True only when a disputed count's alert was accepted by the admins'
+        Slack alerts channel.
+        """
+        if confirm_as_declared:
+            data = {'confirm_as_declared': True}
+        else:
+            data = {'confirmed_full': confirmed_full, 'confirmed_empty': confirmed_empty}
         return await self._make_request(
             'POST', f'/api/v1/staff/bottles/transfers/{transfer_id}/confirm', token=token, data=data
         )

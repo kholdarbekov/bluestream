@@ -13,6 +13,7 @@ from typing import Optional
 from flask import current_app
 
 from business_app import db
+from business_app.models.bottle import DriverBottleSessionOrder
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.state_validators import assert_delivery_person_for_status
@@ -111,9 +112,22 @@ class DeliveryAssignmentService:
                 error_code="STAFF_DELIVERY_ALREADY_TAKEN",
             )
 
-        # 5. Resolve + lock the driver by user_id (NOT DeliveryPerson.id).
-        dp = DeliveryPerson.query.filter_by(user_id=driver_user_id, is_active=True).with_for_update().first()
-        if not dp:
+        # 5. Resolve + lock the driver by user_id (NOT DeliveryPerson.id), together with the driver losing the
+        #    delivery: step 11 writes both rows (their workload counters). One statement, in user-id order, the
+        #    order the progress guard's crew lock takes them in. Locking the new driver's row here and writing the
+        #    old one's at step 11 deadlocked with a co-driver's On the way tap, which holds the lower id and waits
+        #    for the higher.
+        locked = {
+            row.user_id: row
+            for row in DeliveryPerson.query.filter(
+                DeliveryPerson.user_id.in_([uid for uid in {driver_user_id, old_person_id} if uid is not None])
+            )
+            .order_by(DeliveryPerson.user_id)
+            .with_for_update()
+            .all()
+        }
+        dp = locked.get(driver_user_id)
+        if not dp or not dp.is_active:
             raise NotFoundError("Driver not found", error_code="STAFF_DRIVER_NOT_FOUND")
 
         # 6. COD-block check for CASH orders.
@@ -129,26 +143,25 @@ class DeliveryAssignmentService:
                     error_code="STAFF_DRIVER_COD_BLOCKED",
                 )
 
-        # 7. Bottle binding: (re)bind the order onto the driver's open session.
-        #    Strictness depends on require_session (see below); anything not bound
-        #    here defers to the progress-time guard (assert_driver_can_progress_delivery).
+        # 7. Bottle binding: the order follows the driver's session only when that session's FREE FULL bottles
+        #    (full on board minus the stops already under way, this delivery excluded) cover the load.
         #
-        #    require_session=True  (bot self-accept): session missing → raise
-        #    BOTTLE_SESSION_REQUIRED; session present but cannot cover the load →
-        #    raise BOTTLE_SESSION_CAPACITY_EXCEEDED. [strict]
+        #    require_session=True  (bot accept, auto-assign -- never an admin path): session missing →
+        #    BOTTLE_SESSION_REQUIRED; free full short of the need → BOTTLE_SESSION_CAPACITY_EXCEEDED.
         #
-        #    require_session=False (auto/admin/bulk/reassign): bind ONLY when a
-        #    session exists AND it can cover the load; otherwise skip silently —
-        #    the progress-time guard enforces capacity/binding when the driver
-        #    actually progresses. [best-effort — restores old assign_delivery_driver]
-        if order:
+        #    require_session=False (admin assign / reassign / dispatch move / bulk): never refuses on bottles.
+        #    It binds when a session exists AND free full covers the need. Otherwise a binding the order
+        #    holds to some other session than the new driver's is dropped: the load it was counted against
+        #    is no longer the one on this order's truck. The progress-time guard late-binds later.
+        #    A finished order (delivered/cancelled/returned) keeps its binding untouched: it is the closed trip's
+        #    historical tally, and reassigning the delivery record must not rewrite it.
+        if order and not BottleTrackingService.order_binding_is_historical(order):
             bottle_svc = BottleTrackingService()
             bottles_needed = bottle_svc.calculate_bottles_for_order(order)
             if bottles_needed > 0:
+                needed = int(bottles_needed)
                 session = bottle_svc.get_effective_session(driver_user_id)
-                if session is not None and session.current_inventory >= int(bottles_needed):
-                    bottle_svc.rebind_order_to_session(order.id, session.id, accepted_by_driver_id=driver_user_id)
-                elif require_session:
+                if require_session:
                     if session is None:
                         raise ValidationError(
                             "A bottle session is required to accept this order. "
@@ -156,9 +169,19 @@ class DeliveryAssignmentService:
                             error_code="BOTTLE_SESSION_REQUIRED",
                         )
                     bottle_svc.assert_delivery_within_session_capacity(
-                        session, int(bottles_needed)
+                        session, needed, exclude_delivery_id=delivery.id
                     )  # raises CAPACITY_EXCEEDED
-                # else require_session=False and (no session or insufficient capacity): best-effort skip
+                    covered = True
+                else:
+                    covered = session is not None and needed <= bottle_svc.free_full_bottles_for_session(
+                        session, exclude_delivery_id=delivery.id
+                    )
+                if covered:
+                    bottle_svc.rebind_order_to_session(order.id, session.id, accepted_by_driver_id=driver_user_id)
+                else:
+                    held = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+                    if held is not None and (session is None or held.session_id != session.id):
+                        bottle_svc.unbind_order(order.id)
 
         # 8. Compute the new status: pool→ASSIGNED; in-progress reassign keeps status.
         new_status = DeliveryStatus.ASSIGNED if old_status in StaffService.CLAIMABLE_DELIVERY_STATUSES else old_status

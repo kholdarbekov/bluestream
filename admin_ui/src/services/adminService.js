@@ -1,5 +1,9 @@
 import api, { getCookie } from './api';
 
+// A customer's video (up to Telegram's 20 MB) comes through the Pi and Telegram; the instance-wide
+// 10 s cut an 11 MB one off mid-download in production.
+const SUPPORT_ATTACHMENT_TIMEOUT_MS = 60000;
+
 const TIMEFRAME_TO_PERIOD = {
   '7d': 'week',
   '30d': 'month',
@@ -423,8 +427,13 @@ class AdminService {
   // previewEntryIds }` — and defaults to `{}` so a plain join stays byte for
   // byte the request it always was. Widened, never re-ordered: every existing
   // call site keeps working unchanged.
-  async createPlaceGroup(addressIds, label, reason, merge = {}) {
-    const response = await api.post('/admin/place-groups', { addressIds, label, reason, ...merge });
+  //
+  // `notes` (the place note) rides only when the caller states it, so a plain
+  // create keeps its exact body.
+  async createPlaceGroup(addressIds, label, reason, merge = {}, { notes } = {}) {
+    const body = { addressIds, label, reason, ...merge };
+    if (notes !== undefined) body.notes = notes;
+    const response = await api.post('/admin/place-groups', body);
     return response.data;
   }
 
@@ -469,9 +478,33 @@ class AdminService {
 
   // Rename is reason-gated like every other group edit; the backend trims the
   // label and records the old -> new pair in the group history.
-  async renamePlaceGroup(groupId, label, reason) {
-    const response = await api.patch(`/admin/place-groups/${groupId}`, { label, reason });
+  // `notes` is sent only when stated; a missing key means "keep" server-side.
+  async renamePlaceGroup(groupId, label, reason, { notes } = {}) {
+    const body = { label, reason };
+    if (notes !== undefined) body.notes = notes;
+    const response = await api.patch(`/admin/place-groups/${groupId}`, body);
     return response.data;
+  }
+
+  // Shared-place cases (a first-order customer handed back empties): the
+  // review queue, one case's detail, and the admin's resolution.
+  async listSharedPlaceCases({ status = 'open', page = 1, perPage = 20 } = {}) {
+    const response = await api.get('/admin/shared-place-cases', {
+      params: { status, page, per_page: perPage },
+    });
+    return response.data?.data;
+  }
+
+  async getSharedPlaceCase(caseId) {
+    const response = await api.get(`/admin/shared-place-cases/${caseId}`);
+    return response.data?.data;
+  }
+
+  async resolveSharedPlaceCase(caseId, payload, { handledErrorCodes } = {}) {
+    const response = await api.post(`/admin/shared-place-cases/${caseId}/resolve`, payload, {
+      handledErrorCodes,
+    });
+    return response.data?.data;
   }
 
   // The merged bottle history an admin reviews before joining (spec 7.4). The
@@ -1599,9 +1632,12 @@ class AdminService {
     return response.data;
   }
 
-  async getSupportAttachmentBlob(messageId) {
+  // `signal` lets the inbox abort a download the admin walked away from.
+  async getSupportAttachmentBlob(messageId, { signal } = {}) {
     const response = await api.get(`/admin/support/messages/${messageId}/attachment`, {
       responseType: 'blob',
+      timeout: SUPPORT_ATTACHMENT_TIMEOUT_MS,
+      signal,
     });
     return response.data;
   }

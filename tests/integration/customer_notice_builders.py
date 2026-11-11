@@ -53,6 +53,7 @@ CONTRACT_KEYS = {
     "subscription_paid_order_kept": ENVELOPE
     | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date", "subscription_id", "actions"},
     "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline", "subscription_id", "actions"},
+    "prepayment_returned": ENVELOPE | {"payout_id", "amount", "balance"},
     # A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5).
     "subscription_schedule_changed": ENVELOPE
     | {

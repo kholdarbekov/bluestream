@@ -71,6 +71,24 @@ def format_quantity(value: Any) -> str:
     return text or '0'
 
 
+def format_truck_bottle_lines(language: str, *, full, empties, free_full=None) -> List[str]:
+    """The truck's bottles as the bottle screens show them (spec 2026-11-09 U1), one HTML line each.
+
+    Every number is a field the backend published (full / empties on board, free full bottles, or the two
+    transferable numbers on the send screen), shown as it came: the bot adds nothing up. `free_full` is left
+    out where a screen has no use for it.
+    """
+    lines = [
+        f"💧 {i18n.get('staff.bottles.full_on_truck', language, n=f'<b>{escape_html(full)}</b>')}",
+        f"♻️ {i18n.get('staff.bottles.empties_on_truck', language, n=f'<b>{escape_html(empties)}</b>')}",
+    ]
+    if free_full is not None:
+        lines.append(
+            f"✅ {i18n.get('staff.bottles.free_full_bottles', language, n=f'<b>{escape_html(free_full)}</b>')}"
+        )
+    return lines
+
+
 def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:
     """Extract reserved COD prepayment and expected cash-to-collect values from payload."""
     reserved_prepayment = float(payload.get('cod_reserved_prepayment_amount') or 0)

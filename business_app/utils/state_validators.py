@@ -99,6 +99,19 @@ DELIVERY_WITH_DRIVER_STATES: FrozenSet[DeliveryStatus] = frozenset(
 )
 
 
+# Delivery: the stops whose bottles the crew has already promised off the truck: the driver is on
+# the way (IN_TRANSIT) or at the door (ARRIVED). ASSIGNED and PICKED_UP stops do not reserve a
+# bottle yet. Its own set, never DELIVERY_WITH_DRIVER_STATES (which carries PICKED_UP, for the
+# customer-cancel copy). `BottleTrackingService.promised_stops_query` is its one reader (the crew's
+# free full bottles, and the refusal of a co-driver's leave while he owns such a stop).
+DELIVERY_BOTTLES_PROMISED_STATES: FrozenSet[DeliveryStatus] = frozenset(
+    {
+        DeliveryStatus.IN_TRANSIT,
+        DeliveryStatus.ARRIVED,
+    }
+)
+
+
 # Delivery: left out of a driver's stats (owner, 2026-10-22). A cancel is the customer's or an
 # admin's decision, not a driver outcome; FAILED stays counted, even when the order is cancelled later.
 DELIVERY_EXCLUDED_FROM_DRIVER_STATS_STATES: FrozenSet[DeliveryStatus] = frozenset({DeliveryStatus.CANCELLED})
@@ -120,6 +133,15 @@ ACTIVE_ORDER_STATUSES: FrozenSet[OrderStatus] = frozenset(
         OrderStatus.OUT_FOR_DELIVERY,
     }
 )
+
+
+# Orders a driver can hold a stop on: the live ones above, less the unconfirmed. A pickup moves the
+# order to OUT_FOR_DELIVERY (DELIVERY_TO_ORDER_STATUS_SYNC), so a confirmed/preparing-only set would
+# drop every stop on the road. An order closed on the Orders page (RETURNED, say) while its delivery
+# stayed on the road is no longer held. The one definition read by the ETA engine
+# (`eta_plan.scope.driver_held_rows_filter`, R7) and by the crew's promised stops
+# (`BottleTrackingService.promised_stops_query`), so the two cannot disagree on a dead order.
+DRIVER_HELD_ORDER_STATUSES: FrozenSet[OrderStatus] = ACTIVE_ORDER_STATUSES - {OrderStatus.PENDING}
 
 
 def _coerce_order_status(value) -> Optional[OrderStatus]:

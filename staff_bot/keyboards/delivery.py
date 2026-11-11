@@ -28,6 +28,24 @@ class DeliveryKeyboards:
             )
         ]])
 
+    # Start a bottle trip, or join a colleague's: (label key, callback_data). The fix for a
+    # BOTTLE_SESSION_REQUIRED refusal, wherever the driver meets it.
+    SESSION_REQUIRED_REMEDY_BUTTONS: Tuple[Tuple[str, str], ...] = (
+        ('staff.bottles.start_session', 'bottles_start_session'),
+        ('staff.bottles.join_session', 'bottles_join_session'),
+    )
+
+    @staticmethod
+    def session_required_remedy(language: str, back_callback: Optional[str] = None) -> InlineKeyboardMarkup:
+        """Start a trip / Join a colleague's, one per row, then Back to ``back_callback`` when given."""
+        rows = [
+            [InlineKeyboardButton(i18n.get(label_key, language), callback_data=callback_data)]
+            for label_key, callback_data in DeliveryKeyboards.SESSION_REQUIRED_REMEDY_BUTTONS
+        ]
+        if back_callback:
+            rows.append([InlineKeyboardButton(i18n.get('staff.back', language), callback_data=back_callback)])
+        return InlineKeyboardMarkup(rows)
+
     @staticmethod
     def accept_confirm(language: str, delivery_id: int) -> InlineKeyboardMarkup:
         """Confirm order acceptance"""
@@ -657,23 +675,52 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
+    def transfer_send_choice(language: str, full: int, empties: int) -> InlineKeyboardMarkup:
+        """The sender's two ways to send (spec 2026-11-09 T1): everything on the truck, or two numbers.
+
+        `full` / `empties` are the backend's `transferable_full` / `transferable_empties`, shown as they are.
+        """
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"📦 {i18n.get('staff.delivery.transfer_send_all_button', language, full=full, empty=empties)}",
+                callback_data="staff_transfer_send_all",
+            )],
+            [InlineKeyboardButton(
+                i18n.get('staff.delivery.transfer_choose_amounts_button', language),
+                callback_data="staff_transfer_choose",
+            )],
+            [InlineKeyboardButton(f"⬅️ {i18n.get('staff.back', language)}", callback_data="staff_cash_hub")],
+        ])
+
+    @staticmethod
+    def transfer_declared_counts(transfer: Dict) -> Tuple[int, int]:
+        """(full, empties) a transfer declared, read the same way from an inbox row, a push and a send's answer.
+
+        All three carry `declared_quantity` (the full bottles) and `declared_empty_quantity`. A push queued before
+        the split has no empties field, and it declared none.
+        """
+        return transfer.get('declared_quantity') or 0, transfer.get('declared_empty_quantity') or 0
+
+    @staticmethod
     def pending_transfer_list(language: str, transfers: List[Dict]) -> InlineKeyboardMarkup:
-        """Confirm / enter different count for each pending transfer."""
+        """Confirm as declared / enter a different count, for each pending transfer.
+
+        Confirm carries only the transfer id: the backend takes the declared numbers off the row, so a button
+        drawn before a change can never confirm a count of its own. Older messages carry
+        `staff_transfer_confirm_<id>_<qty>`; that pattern stays registered and does the same.
+        """
         keyboard = []
         for t in transfers[:5]:
             transfer_id = t.get('id')
-            qty = t.get('declared_quantity', 0)
-            sender = (t.get('sender_name') or i18n.get('staff.common.unknown_driver', language))[:15]
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"✅ {i18n.get('staff.delivery.transfer_confirm_button', language, qty=qty, sender=sender)}",
-                    callback_data=f"staff_transfer_confirm_{transfer_id}_{qty}"
-                ),
-                InlineKeyboardButton(
-                    f"✏️ {i18n.get('staff.delivery.transfer_custom_count_button', language)}",
-                    callback_data=f"staff_transfer_custom_{transfer_id}"
-                ),
-            ])
+            full, empties = DeliveryKeyboards.transfer_declared_counts(t)
+            keyboard.append([InlineKeyboardButton(
+                f"✅ {i18n.get('staff.delivery.transfer_confirm_split_button', language, full=full, empty=empties)}",
+                callback_data=f"staff_transfer_confirm_{transfer_id}",
+            )])
+            keyboard.append([InlineKeyboardButton(
+                f"✏️ {i18n.get('staff.delivery.transfer_custom_count_button', language)}",
+                callback_data=f"staff_transfer_custom_{transfer_id}",
+            )])
         keyboard.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_cash_hub"

@@ -40,6 +40,7 @@ import pytest
 # resolve to the BOT's modules; see tests/telegram_bot/conftest.py.
 from handlers.products import min_order_shortfall
 from shared.business_config import MIN_ORDER_AMOUNT
+from shared.constants import get_delivery_statement
 
 from tests.telegram_bot.menu_keyboard_helpers import (
     assert_no_edit_carries_a_reply_keyboard,
@@ -238,6 +239,9 @@ class Shop:
         # minted (`payment_url`). A test turns it off for the "order stands, no
         # link" screen.
         self.order_payment_url = True
+        # `serialize_order`'s `show_delivery_statement` for a non-online order: True is the backend's answer for a
+        # fresh undated order. A test sets False, or None for an answer that carries no key at all.
+        self.order_shows_statement = True
 
         # (METHOD, endpoint) -> a whole APIResponse, returned untouched.
         # `FakeBackend.route` can only express success-with-body or
@@ -446,6 +450,9 @@ class Shop:
                 for item in self.cart_envelope()["data"]["cart"]["cart_items"]
             ],
         }
+        if self.order_shows_statement is not None:
+            # An online order's customer reads the statement in the payment-confirmed message instead.
+            order["show_delivery_statement"] = self.order_shows_statement and not online
         self.orders.append(order)
         data = {"order": order}
         if online and self.order_payment_url:
@@ -1320,6 +1327,7 @@ async def test_a_tax_committee_outage_offers_a_cash_rescue_that_revives_the_same
         lambda call: {"data": {"order": {
             "id": 7101, "order_number": "BS-7101", "total_amount": 45000,
             "status": "pending", "created_at": "2026-08-21T09:15:00+00:00",
+            "show_delivery_statement": True,
         }}},
     )
 
@@ -1845,3 +1853,136 @@ async def test_cancel_on_the_zero_address_keyboard_puts_the_menu_back_and_return
     assert cart_screen is not carrier and "cart_checkout" in cart_screen.callback_data()
     assert "address_flow_origin" not in user_data(bot)
     assert shop.cart == {BOTTLE_19L: 3}
+
+
+# ---------------------------------------------------------------------------
+# The delivery statement on the order-placed screens
+# ---------------------------------------------------------------------------
+
+
+def _statement(language):
+    return " ".join(get_delivery_statement(language))
+
+
+@pytest.mark.parametrize("language", ["uz", "ru", "en"])
+async def test_a_cash_order_screen_ends_with_the_delivery_statement(bot, shop, user, language):
+    bot.database.user["preferred_language"] = language
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="cash")
+
+    await bot.send(user.tap("confirm_order"))
+
+    success = bot.telegram.last_shown()
+    assert success.text.endswith("\n\n" + _statement(language))
+    assert success.text.count(_statement(language)) == 1
+    assert "parse_mode" not in success.params
+    assert_no_swallowed_crash(bot)
+
+
+async def test_a_bank_transfer_order_screen_carries_the_statement_once(bot, shop, user):
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="business_account")
+
+    await bot.send(user.tap("confirm_order"))
+
+    success = bot.telegram.last_shown()
+    assert success.text.endswith("\n\n" + _statement("uz"))
+    assert success.text.count(_statement("uz")) == 1
+    assert_no_swallowed_crash(bot)
+
+
+async def test_the_card_pay_link_message_does_not_carry_the_statement(bot, shop, user):
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+
+    await bot.send(user.tap("confirm_order"))
+
+    assert bot.telegram.last_shown().text.startswith(f"Pay order BS-{shop.orders[-1]['id']}")
+    assert all(
+        sentence not in call.text
+        for call in bot.telegram.shown
+        for sentence in get_delivery_statement("uz")
+    )
+
+
+async def test_the_cash_rescue_screen_carries_the_statement_once(bot, shop, user):
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+    shop.raw_responses[("POST", "/api/v1/orders")] = api_failure_with_body(
+        "Asl belgisi unavailable", 503,
+        {
+            "message": "Asl belgisi unavailable",
+            "data": {"cancelled_order_id": 7101, "payment_restrictions": {"cod_restricted": False}},
+        },
+    )
+    await bot.send(user.tap("confirm_order"))
+    bot.backend.route(
+        "POST", "/api/v1/orders/7101/retry-with-cash",
+        lambda call: {"data": {"order": {
+            "id": 7101, "order_number": "BS-7101", "total_amount": 45000,
+            "status": "pending", "created_at": "2026-08-21T09:15:00+00:00",
+            "show_delivery_statement": True,
+        }}},
+    )
+
+    await bot.send(user.tap("select_payment_cash"))
+
+    rescued = bot.telegram.last_shown()
+    assert "Order BS-7101" in rescued.text
+    assert rescued.text.endswith("\n\n" + _statement("uz"))
+    assert rescued.text.count(_statement("uz")) == 1
+    assert "parse_mode" not in rescued.params
+
+
+def _no_statement_shown(bot) -> bool:
+    return all(sentence not in call.text for call in bot.telegram.shown for sentence in get_delivery_statement("uz"))
+
+
+@pytest.mark.parametrize("published", [False, None], ids=["false", "missing"])
+async def test_an_order_the_backend_gives_no_statement_is_placed_without_it(bot, shop, user, published):
+    """The backend decides (`serialize_order`'s `show_delivery_statement`, from `customer_delivery_expectation`): an
+    order it gives no statement, such as one dated after today, gets none on the order-placed screen. A missing key
+    means no."""
+    shop.order_shows_statement = published
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="cash")
+
+    await bot.send(user.tap("confirm_order"))
+
+    success = bot.telegram.last_shown()
+    assert "Placed success" in success.text and f"Order BS-{shop.orders[-1]['id']}" in success.text
+    assert _no_statement_shown(bot)
+    assert_no_swallowed_crash(bot)
+
+
+@pytest.mark.parametrize("published", [{"show_delivery_statement": False}, {}], ids=["false", "missing"])
+async def test_a_cash_rescue_the_backend_gives_no_statement_is_placed_without_it(bot, shop, user, published):
+    add_address(bot, 900, "Uy", "Chilonzor 15")
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await reach_confirmation(bot, user, 900, payment="card")
+    shop.raw_responses[("POST", "/api/v1/orders")] = api_failure_with_body(
+        "Asl belgisi unavailable", 503,
+        {
+            "message": "Asl belgisi unavailable",
+            "data": {"cancelled_order_id": 7101, "payment_restrictions": {"cod_restricted": False}},
+        },
+    )
+    await bot.send(user.tap("confirm_order"))
+    bot.backend.route(
+        "POST", "/api/v1/orders/7101/retry-with-cash",
+        lambda call: {"data": {"order": {
+            "id": 7101, "order_number": "BS-7101", "total_amount": 45000,
+            "status": "pending", "created_at": "2026-08-21T09:15:00+00:00", **published,
+        }}},
+    )
+
+    await bot.send(user.tap("select_payment_cash"))
+
+    rescued = bot.telegram.last_shown()
+    assert "Placed success" in rescued.text and "Order BS-7101" in rescued.text
+    assert _no_statement_shown(bot)

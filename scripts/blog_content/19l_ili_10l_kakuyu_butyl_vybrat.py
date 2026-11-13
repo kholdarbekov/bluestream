@@ -5,6 +5,7 @@ Milestone 2, post 3/8. Bottom-funnel SKU decision content; convert
 buyers comparing Aqua Element's two formats.
 """
 
+# NATIVE-READ (2026-11-12): the uz and ru sentences changed for the price-and-delivery plan await a native read.
 ARTICLE = {
     "slug": "19l-ili-10l-kakuyu-butyl-vybrat",
     "category": "lifestyle",
@@ -60,7 +61,7 @@ ARTICLE = {
         <tr>
             <td>Возвратная тара</td>
             <td>Да, забирается курьером при следующей доставке</td>
-            <td>Удобный формат; уточнить условия возврата на текущей этикетке или через <a href="/contact">/contact</a></td>
+            <td>Нет, остаётся у вас</td>
         </tr>
         <tr>
             <td>Лучше всего подходит</td>
@@ -112,13 +113,13 @@ ARTICLE = {
     <li>Курьер привозит полную бутыль и забирает пустую с предыдущей доставки.</li>
     <li>Пустая тара поступает на участок мойки: внешняя и внутренняя обработка, ополаскивание, осмотр на сколы и микротрещины.</li>
     <li>Бутыль санитарно обрабатывается, проверяется на герметичность, заполняется свежей водой, запечатывается термоусадочным колпачком и снова идёт в доставку.</li>
-    <li>Если тара повреждена — она выводится из оборота. Поликарбонат принимается на переработку.</li>
+    <li>Если при осмотре на производстве на бутыли находят износ — она выводится из оборота. Поликарбонат принимается на переработку.</li>
 </ol>
 
 <p>Возвратная схема выигрывает у одноразовой по двум причинам. <strong>Экологически</strong>: одна 19-литровая бутыль в среднем заменяет десятки одноразовых ПЭТ-упаковок за свой жизненный цикл. <strong>Экономически</strong>: цена литра в возвратной бутыли ниже, потому что вы не оплачиваете новую тару при каждой доставке.</p>
 
 <h2>Стоимость литра: почему 19 л обычно выгоднее</h2>
-<p>Без конкретных цифр (актуальные цены — на странице <a href="/shop">/shop</a>) логика такая. У каждой доставки есть фиксированная часть: сама бутыль, транспорт, время курьера. Эта часть почти не зависит от объёма. Когда вы платите за 19 л, фикс «размазывается» на 19 литров; когда за 10 л — на 10. Поэтому удельная стоимость литра в 19-литровом формате обычно ниже.</p>
+<p>Актуальные цены показаны в блоке «цена и доставка» под этой статьёй; логика такая. У каждой доставки есть фиксированная часть: сама бутыль, транспорт, время курьера. Эта часть почти не зависит от объёма. Когда вы платите за 19 л, фикс «размазывается» на 19 литров; когда за 10 л — на 10. Поэтому удельная стоимость литра в 19-литровом формате обычно ниже.</p>
 
 <p>Но «дешевле за литр» — не единственный критерий. Если вы один человек и не успеваете выпить 19 л за рекомендуемый срок после вскрытия, экономии нет: вода теряет свежесть. Тогда 10 л выигрывает по фактическому потреблению, даже если на бумаге литр чуть дороже.</p>
 
@@ -166,14 +167,11 @@ ARTICLE = {
 <h3>Продаёте ли вы кулеры?</h3>
 <p>Аренду и продажу оборудования (кулеры, помпы, диспенсеры) уточняйте на странице <a href="/shop">/shop</a> и в Telegram-боте — ассортимент периодически обновляется.</p>
 
-<h3>Можно ли подписаться только на одну 19 л в неделю?</h3>
-<p>Да. Минимальная подписка — одна бутыль за доставку. Расписание (раз в неделю, раз в 10 дней, раз в 2 недели) выбираете вы.</p>
-
 <h3>Что делать, если бутыль протекает?</h3>
 <p>Не используйте такую тару, перезвоните в службу поддержки или напишите в Telegram-бот. Мы заменим бутыль на ближайшей доставке без дополнительных условий.</p>
 
 <h3>Возвращается ли 10-литровая бутыль?</h3>
-<p>10 л позиционируется как удобный формат для кухни и одного-двух человек. Возвратность зависит от текущей операционной политики — актуальные условия указаны на этикетке партии или их можно уточнить через <a href="/contact">/contact</a>.</p>
+<p>10 л позиционируется как удобный формат для кухни и одного-двух человек. Бутыль 10 л остаётся у вас — возвращать её не нужно.</p>
 
 <h3>Можно ли смешивать 19 л и 10 л в одной подписке?</h3>
 <p>Да. В подписке настраивается любая комбинация форматов и количества за доставку.</p>
@@ -200,9 +198,8 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "Сколько весит полная 19-литровая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "Около 20 килограммов: 19 кг воды и примерно 1 кг поликарбонатной тары. Курьер сам поднимает бутыль на этаж, а на кулер её удобнее ставить с помпой или подставкой."}},
     {"@type": "Question", "name": "Продаёте ли вы кулеры?", "acceptedAnswer": {"@type": "Answer", "text": "Аренду и продажу оборудования уточняйте на /shop и в Telegram-боте — ассортимент обновляется."}},
-    {"@type": "Question", "name": "Можно ли подписаться только на одну 19-литровую бутыль в неделю?", "acceptedAnswer": {"@type": "Answer", "text": "Да. Минимальная подписка — одна бутыль за доставку, расписание выбирается клиентом."}},
     {"@type": "Question", "name": "Что делать, если бутыль протекает?", "acceptedAnswer": {"@type": "Answer", "text": "Не используйте тару, свяжитесь с поддержкой или Telegram-ботом. Мы заменим бутыль на ближайшей доставке."}},
-    {"@type": "Question", "name": "Возвращается ли 10-литровая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "10 л — удобный формат для кухни и небольших домохозяйств. Возвратность зависит от текущей операционной политики, актуальные условия указаны на этикетке или уточняются через /contact."}},
+    {"@type": "Question", "name": "Возвращается ли 10-литровая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "10 л — удобный формат для кухни и небольших домохозяйств. Бутыль 10 л остаётся у вас — возвращать её не нужно."}},
     {"@type": "Question", "name": "Можно ли смешивать 19 л и 10 л в одной подписке?", "acceptedAnswer": {"@type": "Answer", "text": "Да, подписка позволяет любую комбинацию форматов и количества за одну доставку."}},
     {"@type": "Question", "name": "Сколько хранится вскрытая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "Мы рекомендуем выпить воду в пределах 7–10 дней после вскрытия, держать бутыль закрытой и хранить вертикально в прохладном месте."}},
     {"@type": "Question", "name": "Доставка только по Ташкенту?", "acceptedAnswer": {"@type": "Answer", "text": "Aqua Element обслуживает Ташкент и Ташкентскую область. По остальным регионам пока не работаем."}},
@@ -259,7 +256,7 @@ ARTICLE = {
         <tr>
             <td>Qaytariladigan tara</td>
             <td>Ha, keyingi yetkazib berishda kuryer oladi</td>
-            <td>Qulay format; qaytarish shartlarini joriy yorliqda yoki <a href="/contact">/contact</a> orqali aniqlang</td>
+            <td>Yo'q, sizda qoladi</td>
         </tr>
         <tr>
             <td>Eng mos keladigan</td>
@@ -311,13 +308,13 @@ ARTICLE = {
     <li>Kuryer to'la butilkani olib keladi va oldingi yetkazib berishdan bo'sh butilkani oladi.</li>
     <li>Bo'sh tara yuvish uchastkasiga tushadi: tashqi va ichki ishlov, chayish, yoriq va mikroyoriqlar bo'yicha tekshirish.</li>
     <li>Butilka sanitar ishlovdan o'tkaziladi, germetiklik tekshiriladi, yangi suv bilan to'ldiriladi, termoshrink qopqoq bilan yopiladi va yana yetkazib berishga jo'natiladi.</li>
-    <li>Tara shikastlangan bo'lsa — muomaladan chiqariladi. Polikarbonat qayta ishlashga topshiriladi.</li>
+    <li>Zavoddagi tekshiruvda butilkada eskirish aniqlansa — u muomaladan chiqariladi. Polikarbonat qayta ishlashga topshiriladi.</li>
 </ol>
 
 <p>Qaytariladigan tizim bir martalikdan ikki sababga ko'ra ustun. <strong>Ekologik jihatdan</strong>: bitta 19 l butilka o'z umri davomida o'rtacha o'nlab bir martalik PET qadoqni almashtiradi. <strong>Iqtisodiy jihatdan</strong>: qaytariladigan butilkadagi litr narxi pastroq, chunki har bir yetkazib berishda yangi tara uchun pul to'lamaysiz.</p>
 
 <h2>Litr narxi: nega 19 l odatda foydaliroq</h2>
-<p>Aniq raqamlarsiz (joriy narxlar — <a href="/shop">/shop</a> sahifasida) mantiq quyidagicha. Har bir yetkazib berishda qat'iy qism mavjud: butilkaning o'zi, transport, kuryer vaqti. Bu qism hajmga deyarli bog'liq emas. Siz 19 l uchun to'laganingizda, qat'iy qism 19 litrga "tarqaladi"; 10 l uchun — 10 litrga. Shuning uchun 19-litrli formatda solishtirma litr narxi odatda pastroq.</p>
+<p>Joriy narxlar shu maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; mantiq quyidagicha. Har bir yetkazib berishda qat'iy qism mavjud: butilkaning o'zi, transport, kuryer vaqti. Bu qism hajmga deyarli bog'liq emas. Siz 19 l uchun to'laganingizda, qat'iy qism 19 litrga "tarqaladi"; 10 l uchun — 10 litrga. Shuning uchun 19-litrli formatda solishtirma litr narxi odatda pastroq.</p>
 
 <p>Lekin "litr bo'yicha arzonroq" yagona mezon emas. Agar yolg'iz yashasangiz va 19 l ni tavsiya etilgan muddat ichida ichib ulgurmasangiz, tejam yo'q: suv yangiligini yo'qotadi. Shu paytda 10 l haqiqiy iste'mol bo'yicha yutadi, hatto qog'ozda litr biroz qimmatroq bo'lsa ham.</p>
 
@@ -365,14 +362,11 @@ ARTICLE = {
 <h3>Kulerlarni sotasizmi?</h3>
 <p>Jihozlarni (kulerlar, pompalar, dispenserlar) ijaraga olish va sotish bo'yicha shartlarni <a href="/shop">/shop</a> sahifasida va Telegram-botda aniqlang — assortiment vaqti-vaqti bilan yangilanadi.</p>
 
-<h3>Haftada faqat bitta 19 l ga obuna bo'lish mumkinmi?</h3>
-<p>Ha. Minimal obuna — bitta yetkazib berishga bitta butilka. Jadvalni (haftada bir marta, 10 kunda bir marta, ikki haftada bir marta) o'zingiz tanlaysiz.</p>
-
 <h3>Butilka oqayotgan bo'lsa nima qilish kerak?</h3>
 <p>Bunday tarani ishlatmang, qo'llab-quvvatlash xizmatiga qo'ng'iroq qiling yoki Telegram-botga yozing. Biz butilkani yaqin yetkazib berishda qo'shimcha shartlarsiz almashtiramiz.</p>
 
 <h3>10 litrlik butilka qaytariladimi?</h3>
-<p>10 l oshxona va 1–2 kishilik xonadon uchun qulay format sifatida taqdim etiladi. Qaytarilish joriy operatsion siyosatga bog'liq — joriy shartlar partiya yorlig'ida ko'rsatilgan yoki <a href="/contact">/contact</a> orqali aniqlanishi mumkin.</p>
+<p>10 l oshxona va 1–2 kishilik xonadon uchun qulay format sifatida taqdim etiladi. 10 l butilka sizda qoladi — qaytarish shart emas.</p>
 
 <h3>Bir obunada 19 l va 10 l ni aralashtirish mumkinmi?</h3>
 <p>Ha. Obunada formatlarning va yetkazib berishdagi miqdorning har qanday kombinatsiyasi sozlanadi.</p>
@@ -399,9 +393,8 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "To'la 19 litrlik butilka qancha og'ir?", "acceptedAnswer": {"@type": "Answer", "text": "Taxminan 20 kilogramm: 19 kg suv va taxminan 1 kg polikarbonat tara. Kuryer butilkani qavatga o'zi ko'taradi, kulerga pompa yoki tagi bilan o'rnatish qulay."}},
     {"@type": "Question", "name": "Kulerlarni sotasizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Jihozlar bo'yicha shartlarni /shop sahifasida va Telegram-botda aniqlang — assortiment yangilanib turadi."}},
-    {"@type": "Question", "name": "Haftada faqat bitta 19 litrlik butilkaga obuna bo'lish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Minimal obuna — bitta yetkazib berishga bitta butilka, jadvalni mijoz tanlaydi."}},
     {"@type": "Question", "name": "Butilka oqayotgan bo'lsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Bunday tarani ishlatmang, qo'llab-quvvatlash yoki Telegram-botga murojaat qiling. Yaqin yetkazib berishda butilkani almashtiramiz."}},
-    {"@type": "Question", "name": "10 litrlik butilka qaytariladimi?", "acceptedAnswer": {"@type": "Answer", "text": "10 l — oshxona va kichik xonadonlar uchun qulay format. Qaytarilish joriy operatsion siyosatga bog'liq, shartlar etiketkada yoki /contact orqali aniqlanadi."}},
+    {"@type": "Question", "name": "10 litrlik butilka qaytariladimi?", "acceptedAnswer": {"@type": "Answer", "text": "10 l — oshxona va kichik xonadonlar uchun qulay format. 10 l butilka sizda qoladi — qaytarish shart emas."}},
     {"@type": "Question", "name": "Bir obunada 19 l va 10 l ni aralashtirish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, obuna bir yetkazib berishda formatlar va miqdorning har qanday kombinatsiyasini imkon beradi."}},
     {"@type": "Question", "name": "Ochilgan butilka qancha saqlanadi?", "acceptedAnswer": {"@type": "Answer", "text": "Ochilgandan keyin 7–10 kun ichida ishlatish, butilkani yopiq saqlash va salqin joyda tik holatda turishni tavsiya qilamiz."}},
     {"@type": "Question", "name": "Yetkazib berish faqat Toshkent boyichami?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, Aqua Element Toshkent shahri va Toshkent viloyatida xizmat ko'rsatadi, boshqa hududlarda hozircha emas."}},
@@ -458,7 +451,7 @@ ARTICLE = {
         <tr>
             <td>Returnable</td>
             <td>Yes, collected on next delivery</td>
-            <td>Convenience format; check current label or contact <a href="/contact">/contact</a> for current return policy</td>
+            <td>No, yours to keep</td>
         </tr>
         <tr>
             <td>Best for</td>
@@ -510,13 +503,13 @@ ARTICLE = {
     <li>The courier delivers the full bottle and collects the empty one from the previous drop.</li>
     <li>The empty tare goes through the wash line: external and internal cleaning, rinsing, inspection for chips and microcracks.</li>
     <li>The bottle is sanitised, leak-tested, refilled with fresh water, sealed with a heat-shrink cap and routed back to delivery.</li>
-    <li>If the bottle is damaged, it is taken out of circulation. Polycarbonate goes to recycling.</li>
+    <li>If our inspection finds a bottle worn out, it is taken out of circulation. Polycarbonate goes to recycling.</li>
 </ol>
 
 <p>A returnable system beats single-use packaging on two fronts. <strong>Environmentally</strong>: a single 19 L bottle replaces dozens of single-use PET containers over its lifetime. <strong>Economically</strong>: per-litre cost is lower because you do not pay for new packaging on every delivery.</p>
 
 <h2>Per-litre cost: why 19 L is usually cheaper</h2>
-<p>Without quoting numbers (current prices live on <a href="/shop">/shop</a>), the logic is straightforward. Every delivery has a fixed component: the bottle itself, transport, the courier's time. That fixed part barely depends on volume. When you pay for 19 L, that fixed part is spread across 19 litres; for 10 L, across 10. So unit cost per litre tends to be lower in the 19 L format.</p>
+<p>Current prices are shown in the price and delivery block under this article; the logic is straightforward. Every delivery has a fixed component: the bottle itself, transport, the courier's time. That fixed part barely depends on volume. When you pay for 19 L, that fixed part is spread across 19 litres; for 10 L, across 10. So unit cost per litre tends to be lower in the 19 L format.</p>
 
 <p>But "cheaper per litre" is not the only criterion. If you live alone and cannot finish 19 L within the recommended window after opening, there is no real saving — the water loses freshness. In that case 10 L wins on actual consumption even if the per-litre price is slightly higher on paper.</p>
 
@@ -564,14 +557,11 @@ ARTICLE = {
 <h3>Do you sell coolers?</h3>
 <p>Equipment rental and sales (coolers, pumps, dispensers) — check <a href="/shop">/shop</a> and the Telegram bot, the line-up is updated periodically.</p>
 
-<h3>Can I subscribe to just one 19 L per week?</h3>
-<p>Yes. The minimum subscription is one bottle per delivery. You pick the cadence (weekly, every ten days, fortnightly).</p>
-
 <h3>What if my bottle is leaking?</h3>
 <p>Do not use it. Call support or message the Telegram bot. We will replace the bottle on the next delivery without extra conditions.</p>
 
 <h3>Is the 10 L bottle returnable?</h3>
-<p>The 10 L is positioned as a convenience format for kitchens and 1–2-person households. Its returnability follows current operational policy — actual conditions are printed on the batch label or can be confirmed via <a href="/contact">/contact</a>.</p>
+<p>The 10 L is positioned as a convenience format for kitchens and 1–2-person households. The 10 L bottle is yours to keep; there is nothing to return.</p>
 
 <h3>Can I mix 19 L and 10 L in one subscription?</h3>
 <p>Yes. The subscription supports any combination of formats and quantities per delivery.</p>
@@ -598,9 +588,8 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "How heavy is a full 19-litre bottle?", "acceptedAnswer": {"@type": "Answer", "text": "About 20 kilograms: 19 kg of water plus roughly 1 kg of polycarbonate. The courier carries it to your floor, and on a cooler it is most comfortable to mount with a pump or stand."}},
     {"@type": "Question", "name": "Do you sell coolers?", "acceptedAnswer": {"@type": "Answer", "text": "Equipment rental and sales (coolers, pumps, dispensers) — check /shop and the Telegram bot, the line-up updates periodically."}},
-    {"@type": "Question", "name": "Can I subscribe to just one 19 L per week?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Minimum subscription is one bottle per delivery, with the cadence chosen by the customer."}},
     {"@type": "Question", "name": "What if my bottle is leaking?", "acceptedAnswer": {"@type": "Answer", "text": "Do not use it. Contact support or the Telegram bot. We replace the bottle on the next delivery without extra conditions."}},
-    {"@type": "Question", "name": "Is the 10 L bottle returnable?", "acceptedAnswer": {"@type": "Answer", "text": "The 10 L is a convenience format for kitchens and small households. Returnability depends on current operational policy; conditions are printed on the label or confirmed via /contact."}},
+    {"@type": "Question", "name": "Is the 10 L bottle returnable?", "acceptedAnswer": {"@type": "Answer", "text": "The 10 L is a convenience format for kitchens and small households. The 10 L bottle is yours to keep; there is nothing to return."}},
     {"@type": "Question", "name": "Can I mix 19 L and 10 L in one subscription?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, subscriptions support any combination of formats and quantities per delivery."}},
     {"@type": "Question", "name": "How long can I keep an opened bottle?", "acceptedAnswer": {"@type": "Answer", "text": "Use within 7–10 days after opening, keep the cap on between uses, and store the bottle upright in a cool place away from sunlight."}},
     {"@type": "Question", "name": "Do you deliver only inside Tashkent?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, Aqua Element serves Tashkent city and Tashkent Region only."}},

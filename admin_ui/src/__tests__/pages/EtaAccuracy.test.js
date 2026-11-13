@@ -68,6 +68,7 @@ it('renders every report figure from the API payload', async () => {
     .toBeInTheDocument();
   expect(screen.getByText('Delivered the same day as promised: 67%')).toBeInTheDocument();
   expect(screen.getByText('Promised tomorrow but delivered the same day: 100%')).toBeInTheDocument();
+  expect(screen.getByText('Orders placed before 13:00 and delivered the same day: 75% over 4')).toBeInTheDocument();
   expect(screen.getByText('Arrived before the window opened: 67%, by a median 563 min')).toBeInTheDocument();
   expect(screen.getByText('One driver working: 67% kept, median window 120 min. Two or more: 100%, 120 min'))
     .toBeInTheDocument();
@@ -86,11 +87,12 @@ it('renders every report figure from the API payload', async () => {
 
 it('names the thresholds the report publishes in its definitions, never its own', async () => {
   answer(copy(REPORT, {
-    definitions: { morning_ends: '10:30', daytime_from: '08:00', daytime_to: '16:00', s2_tolerance_minutes: 20 },
+    definitions: { morning_ends: '10:30', daytime_from: '08:00', daytime_to: '16:00', first_half_ends: '12:30', s2_tolerance_minutes: 20 },
   }));
   renderPage();
 
   expect(await screen.findByText('Orders placed before 10:30: 75% over 4')).toBeInTheDocument();
+  expect(screen.getByText('Orders placed before 12:30 and delivered the same day: 75% over 4')).toBeInTheDocument();
   expect(screen.getByText('Median window: 120 min overall, 120 min for orders placed 08:00–16:00 (aim: 3 hours)'))
     .toBeInTheDocument();
   expect(screen.getByText(
@@ -130,6 +132,7 @@ it('shows a dash, never NaN or 0%, for a missing figure', async () => {
     median_window_minutes: { overall: null, placed_7_to_15: null },
     early_share: null,
     median_minutes_early: null,
+    first_half_day_same_day: { n: 0, same_day: 0, share: null },
     s2: { ...REPORT.s2, google_median_error_minutes: null, engine_median_error_minutes: null, within_15_share: null },
     s2_stale_estimate: { n: 0, kept_share: null, within_15_share: null, engine_median_error_minutes: null },
     by_bucket: [{ stops_ahead_band: '0', started: true, n: 2, kept_share: null, median_window_minutes: null }],
@@ -141,6 +144,7 @@ it('shows a dash, never NaN or 0%, for a missing figure', async () => {
   expect(screen.getByText('Orders placed before 11:00: — over 0')).toBeInTheDocument();
   expect(screen.getByText('Median window: — overall, — for orders placed 07:00–15:00 (aim: 3 hours)'))
     .toBeInTheDocument();
+  expect(screen.getByText('Orders placed before 13:00 and delivered the same day: — over 0')).toBeInTheDocument();
   expect(screen.getByText('Arrived before the window opened: —, by a median —')).toBeInTheDocument();
   expect(screen.getByText('On the way: kept 50%, within 15 minutes —, median error Google — vs our engine —'))
     .toBeInTheDocument();
@@ -151,6 +155,16 @@ it('shows a dash, never NaN or 0%, for a missing figure', async () => {
   expect(screen.queryByText('Stop time against the curve', { exact: false })).toBeNull();
   const cells = within(screen.getByRole('table')).getAllByRole('row')[1];
   expect(within(cells).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(['0', 'Yes', '2', '—', '—']);
+  expect(document.body.textContent).not.toMatch(/NaN|undefined|null/);
+});
+
+it('shows dashes for a report from an older backend', async () => {
+  const { first_half_day_same_day: _omitted, ...older } = REPORT;
+  const { first_half_ends: _omittedHour, ...definitions } = REPORT.definitions;
+  answer({ ...older, definitions });
+  renderPage();
+
+  expect(await screen.findByText('Orders placed before — and delivered the same day: — over —')).toBeInTheDocument();
   expect(document.body.textContent).not.toMatch(/NaN|undefined|null/);
 });
 

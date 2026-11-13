@@ -387,6 +387,10 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             # F15: what the customer is shown, either the wait for a new date or the
             # status itself. The bot and the web label this and never work the wait out.
             "display_status": OrderScheduleService.customer_display_status(order),
+            # Whether the bot's order-placed screen appends the delivery statement. The bot never works it out.
+            "show_delivery_statement": OrderScheduleService.bot_message_shows_delivery_statement(
+                order, rail=order.payment_method, payment_confirmed=False
+            ),
             "tax_amount": float(getattr(order, "tax_amount", 0)),
             "delivery_fee": float(getattr(order, "delivery_fee", 0)),
             "discount_amount": float(getattr(order, "discount_amount", 0)),

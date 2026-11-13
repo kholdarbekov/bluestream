@@ -9121,7 +9121,6 @@ def get_system_settings():
             "delivery": {
                 "delivery_radius_km": current_app.config.get("DELIVERY_RADIUS_KM", 50),
                 "delivery_slots_enabled": current_app.config.get("DELIVERY_SLOTS_ENABLED", True),
-                "same_day_delivery_cutoff_hour": current_app.config.get("SAME_DAY_DELIVERY_CUTOFF_HOUR", 14),
                 "avg_delivery_time_minutes": current_app.config.get("AVG_DELIVERY_TIME_MINUTES", 60),
             },
             # Loyalty config is NOT exposed here: it lives in LoyaltyProgram rows
@@ -9242,8 +9241,6 @@ def update_system_settings():
                     if category == "delivery":
                         if key == "delivery_radius_km" and value <= 0:
                             return validation_error_response("Delivery radius must be positive")
-                        if key == "same_day_delivery_cutoff_hour" and (value < 0 or value > 23):
-                            return validation_error_response("Cutoff hour must be between 0 and 23")
 
                     if category == "security":
                         if key == "password_min_length" and value < 6:
@@ -9317,7 +9314,7 @@ def get_system_settings_categories():
             {
                 "key": "delivery",
                 "name": "Delivery Settings",
-                "description": "Delivery radius, time slots, same-day delivery cutoff",
+                "description": "Delivery radius, time slots",
             },
             # Loyalty Program Settings removed (loyalty SSOT, Phase 2): managed via
             # the dedicated admin loyalty programs/tiers/rewards endpoints.
@@ -9390,7 +9387,6 @@ def reset_system_settings():
             "ORDERS_ORDER_NUMBER_PREFIX": "ORD",
             "DELIVERY_DELIVERY_RADIUS_KM": 50,
             "DELIVERY_DELIVERY_SLOTS_ENABLED": True,
-            "DELIVERY_SAME_DAY_DELIVERY_CUTOFF_HOUR": 14,
             "DELIVERY_AVG_DELIVERY_TIME_MINUTES": 60,
             # Loyalty defaults removed (loyalty SSOT, Phase 2) — managed via LoyaltyProgram.
             "NOTIFICATIONS_SMS_ENABLED": True,

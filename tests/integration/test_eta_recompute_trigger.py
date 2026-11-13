@@ -44,6 +44,7 @@ from shared.enums import PaymentMethod, UserStatus
 from shared.redis_keyspace import RedisKeyspace
 from staff_bot.api_client import StaffAPIClient
 from tests.integration.contract_pricing_factory import customer_headers as bearer
+from tests.integration.dispatch_builders import calls_to, sql_inside
 from tests.integration.eta_plan_builders import (  # noqa: F401 -- the fixtures
     add_fit,
     dated_order,
@@ -96,30 +97,6 @@ def _trigger_on(app, monkeypatch) -> None:
 def _one_run(app) -> List[int]:
     """What a write that touched the plan publishes: one run, ETA_RECOMPUTE_COUNTDOWN_SECONDS out."""
     return [app.config["ETA_RECOMPUTE_COUNTDOWN_SECONDS"]]
-
-
-def _sql_inside_the_detector(monkeypatch) -> List[List[str]]:
-    """The SQL statements each call of the detector's body (`_touches_the_plan`) ran, one list per call, in order. The
-    real body runs; the statements are read off the engine while it does. The detector must run none."""
-    real_detector = eta_recompute_dispatch._touches_the_plan
-    calls: List[List[str]] = []
-
-    def watched_detector(session):
-        statements: List[str] = []
-
-        def on_statement(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-            statements.append(statement)
-
-        engine = _db.engine
-        event.listen(engine, "before_cursor_execute", on_statement)
-        try:
-            return real_detector(session)
-        finally:
-            event.remove(engine, "before_cursor_execute", on_statement)
-            calls.append(statements)
-
-    monkeypatch.setattr(eta_recompute_dispatch, "_touches_the_plan", watched_detector)
-    return calls
 
 
 def _trigger_failures(caplog) -> List[str]:
@@ -263,7 +240,7 @@ def test_an_address_change_requests_a_recompute(app, db, monkeypatch, recompute_
     order = order_at_km(db, 3.0, created_at=eleven_yesterday())
     customer, address_id = order.user, order.delivery_address_id
     latitude, longitude = point_at_km(5.0)
-    detector_sql = _sql_inside_the_detector(monkeypatch)
+    detector_sql = sql_inside(monkeypatch, eta_recompute_dispatch, "_touches_the_plan")
     if change == "the-admin-moves-the-order":
         office = UserAddress(
             user_id=customer.id,
@@ -614,14 +591,7 @@ def test_the_kill_switch_stops_the_detector(app, db, monkeypatch, recompute_requ
     unavailable requests nothing. Switched on, making them available again requests one recompute."""
     person = person_of(make_driver(db))
     form = _edit_form(person)
-    looked: List = []
-    real_detector = eta_recompute_dispatch._touches_the_plan
-
-    def watched_detector(session):
-        looked.append(session)
-        return real_detector(session)
-
-    monkeypatch.setattr(eta_recompute_dispatch, "_touches_the_plan", watched_detector)
+    looked = calls_to(monkeypatch, eta_recompute_dispatch, "_touches_the_plan")
     monkeypatch.setitem(app.config, "ETA_SHADOW_ENGINE_ENABLED", False)
 
     _ok(

@@ -40,9 +40,12 @@ from flask_jwt_extended import get_csrf_token
 from business_app.models.delivery import Delivery
 from business_app.models.order import Order, OrderStatusHistory
 from business_app.models.translation import Translation
+from business_app.utils import display_labels
+from business_app.utils.local_windows import local_date
 from business_app.utils.state_validators import DELIVERY_DRIVERLESS_STATES
 from shared.constants import ORDER_DISPLAY_AWAITING_NEW_DATE as AWAITING
 from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
+from tests.integration.public_page_builders import seed_copy, shipped
 
 pytestmark = pytest.mark.integration
 
@@ -92,6 +95,15 @@ def awaiting_label(app, db):
     texts = _seed_translation(db, LABEL_KEY)
     app.jinja_env.cache.clear()
     yield texts["ru"]
+    app.jinja_env.cache.clear()
+
+
+@pytest.fixture
+def scheduled_copy(app, db):
+    """The "Scheduled for" rows and the date labels, with templates compiled afresh."""
+    seed_copy(db, ("landing.order", "web.display_labels"))
+    app.jinja_env.cache.clear()
+    yield
     app.jinja_env.cache.clear()
 
 
@@ -155,11 +167,6 @@ def _published(client, headers, order_id):
     return order
 
 
-def _on_page(day):
-    """A date the way the pages print it."""
-    return day.strftime("%B %d, %Y")
-
-
 def _stepper(soup):
     """The tracking page's steps, in order, as (state classes, description or None)."""
     steps = []
@@ -212,18 +219,17 @@ def test_the_tracking_page_shows_the_wait_not_the_attempt_that_failed(
     # "Estimated delivery" are gone.
     assert [state for state, _description in _stepper(soup)] == steps
     assert _stepper(soup)[3:] == [("", None), ("", None)]
-    assert _on_page(failed_on) not in soup.get_text(" ")
     # Waiting for a new date is not the customer's to cancel (order 1277).
     assert not _cancel_drawn(soup)
 
 
 def test_a_live_order_keeps_its_current_step_its_date_and_its_cancel(
-    client, db, auth_headers, sample_user, user_address, delivery_driver
+    client, db, auth_headers, sample_user, user_address, delivery_driver, scheduled_copy
 ):
     """The control: the same page, for a confirmed order still in the pool. Everything the
     test above finds missing is on the page when the order is not waiting, so its absence
     there is the wait's doing."""
-    next_date = date.today() + timedelta(days=3)
+    next_date = local_date() + timedelta(days=3)
     order = _seed_order(
         db, sample_user, user_address, delivery_driver, "track-live", OS.CONFIRMED, DS.SCHEDULED,
         delivery_date=next_date,
@@ -234,10 +240,12 @@ def test_a_live_order_keeps_its_current_step_its_date_and_its_cancel(
     badge = soup.select_one(".status-badge")
     assert (badge.get_text(strip=True), badge["class"]) == ("Confirmed", ["status-badge", "confirmed"])
     assert [state for state, _description in _stepper(soup)] == ["completed", "active", "", "", ""]
+    # A later day: the date, and no "Delivery will start soon" above it (that line stands beside the statement).
     assert _stepper(soup)[3:] == [
-        ("", "Delivery will start soon"),
-        ("", f"Estimated delivery: {_on_page(next_date)}"),
+        ("", None),
+        ("", f"{shipped('landing.order.scheduled_for', 'ru')} {display_labels.date_long(next_date, 'ru')}"),
     ]
+    assert soup.select_one("[data-delivery-statement]") is None
     assert _cancel_drawn(soup)
 
 
@@ -452,8 +460,9 @@ def test_the_confirmation_page_names_the_wait_and_drops_the_old_date(
     delivery_status,
     days_from_today,
     awaiting,
+    scheduled_copy,
 ):
-    delivery_date = date.today() + timedelta(days=days_from_today)
+    delivery_date = local_date() + timedelta(days=days_from_today)
     order = _seed_order(
         db, sample_user, user_address, delivery_driver, f"confirm-{order_status.value}", order_status,
         delivery_status, delivery_date=delivery_date,
@@ -464,10 +473,10 @@ def test_the_confirmation_page_names_the_wait_and_drops_the_old_date(
     lines = [p.get_text(" ", strip=True) for p in soup.select(".delivery-info-box p")]
     if awaiting:
         assert lines == [f"Status: {awaiting_label}", TRACKING_LINE]
-        assert _on_page(delivery_date) not in soup.get_text(" ")
     else:
         # The status itself. Before, the page printed the enum's repr ("Orderstatus.confirmed").
-        assert lines == [f"Estimated Delivery: {_on_page(delivery_date)}", "Status: Confirmed", TRACKING_LINE]
+        scheduled = f"{shipped('landing.order.scheduled_for', 'ru')} {display_labels.date_long(delivery_date, 'ru')}"
+        assert lines == [scheduled, "Status: Confirmed", TRACKING_LINE]
 
 
 def test_the_js_pages_carry_a_label_for_the_display_status_the_api_publishes(

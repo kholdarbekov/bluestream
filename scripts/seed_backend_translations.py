@@ -10048,6 +10048,11 @@ WEB_DISPLAY_LABEL_TRANSLATIONS = {
     },
     'web.display_labels.day_month': {'en': '{day} {month}', 'uz': '{day}-{month}', 'ru': '{day} {month}'},
     'web.display_labels.money': {'en': "{amount}\u00a0so'm", 'uz': "{amount}\u00a0so'm", 'ru': '{amount}\u00a0сум'},
+    'web.display_labels.litres': {
+        'en': '{amount}\u00a0L',
+        'uz': '{amount}\u00a0l',  # NATIVE-READ
+        'ru': '{amount}\u00a0л',  # NATIVE-READ
+    },
     'web.display_labels.today': {'en': 'today', 'uz': 'bugun', 'ru': 'сегодня'},
     'web.display_labels.tomorrow': {'en': 'tomorrow', 'uz': 'ertaga', 'ru': 'завтра'},
     'web.display_labels.in_days.one': {'en': 'in {count} day', 'uz': '{count} kundan keyin', 'ru': 'через {count} день'},
@@ -13241,6 +13246,234 @@ HONEST_ETA_PUBLIC_COPY = {
     },
 }
 BACKEND_TRANSLATIONS.update(HONEST_ETA_PUBLIC_COPY)
+
+# The public offer block (plan 2026-11-12, "live price and same-day delivery visibility"). No value here may hold a
+# price figure (R1): the figure is filled in from the product at render time.
+OFFER_BLOCK_TRANSLATIONS = {
+    'landing.offer.price_line': {
+        'en': '{name}, {size} — price {price} (UZS).',
+        'uz': '{name}, {size} — narxi {price}.',  # NATIVE-READ
+        'ru': '{name}, {size} — цена {price}.',  # NATIVE-READ
+    },
+    'landing.offer.heading': {
+        'en': 'Aqua Element: price and delivery — normally same day or next day',
+        'uz': 'Aqua Element: narx va yetkazib berish — odatda shu kuni yoki ertasiga',  # NATIVE-READ
+        'ru': 'Aqua Element: цена и доставка — как правило, в день заказа или на следующий день',  # NATIVE-READ
+    },
+    'landing.offer.list_price': {
+        'en': 'Was {price}.',
+        'uz': 'Avvalgi narxi {price}.',  # NATIVE-READ
+        'ru': 'Прежняя цена {price}.',  # NATIVE-READ
+    },
+    'landing.offer.smallest_order': {
+        'en': 'Smallest order: {qty} × {size} = {total}.',
+        'uz': 'Eng kichik buyurtma: {qty} ta {size} — jami {total}.',  # NATIVE-READ
+        'ru': 'Минимальный заказ: {qty} × {size} = {total}.',  # NATIVE-READ
+    },
+    'landing.offer.no_deposit': {
+        'en': 'No deposit for the returnable bottle: the courier collects the empty at your next delivery.',
+        'uz': 'Qaytariladigan idish uchun garov puli yo‘q: bo‘sh idishni kuryer keyingi yetkazib berishda almashtirib oladi.',  # NATIVE-READ
+        'ru': 'Залога за возвратную бутыль нет: пустую бутыль курьер заберёт при следующей доставке.',  # NATIVE-READ
+    },
+    'landing.offer.free_delivery': {
+        'en': 'Delivery is free.',
+        'uz': 'Yetkazib berish bepul.',  # NATIVE-READ
+        'ru': 'Доставка бесплатная.',  # NATIVE-READ
+    },
+    'landing.offer.delivery_fee': {
+        'en': 'Delivery costs {fee}.',
+        'uz': 'Yetkazib berish narxi: {fee}.',  # NATIVE-READ
+        'ru': 'Стоимость доставки: {fee}.',  # NATIVE-READ
+    },
+    'landing.offer.every_day': {
+        'en': 'We deliver every day, Sunday included.',
+        'uz': 'Har kuni yetkazamiz, yakshanba kuni ham.',  # NATIVE-READ
+        'ru': 'Доставляем каждый день, включая воскресенье.',  # NATIVE-READ
+    },
+    'landing.offer.as_of': {
+        'en': 'Prices as of {date}.',
+        'uz': 'Narxlar {date} holatiga ko‘ra.',  # NATIVE-READ
+        'ru': 'Цены указаны на {date}.',  # NATIVE-READ
+    },
+    'landing.offer.price_label': {
+        'en': 'Price:',
+        'uz': 'Narxi:',  # NATIVE-READ
+        'ru': 'Цена:',  # NATIVE-READ
+    },
+    'landing.offer.title_home': {
+        'en': 'Aqua Element — artesian drinking water delivered across Tashkent',
+        'uz': 'Aqua Element — kuler uchun artezian ichimlik suvi, Toshkent bo‘ylab yetkazib berish',  # NATIVE-READ
+        'ru': 'Aqua Element — артезианская питьевая вода с доставкой по Ташкенту',  # NATIVE-READ
+    },
+    'landing.offer.meta_home': {
+        'en': 'Aqua Element — artesian drinking water in Tashkent: {prices}.',
+        'uz': 'Aqua Element — Toshkentda artezian ichimlik suvi: {prices}.',  # NATIVE-READ
+        'ru': 'Aqua Element — артезианская питьевая вода в Ташкенте: {prices}.',  # NATIVE-READ
+    },
+    'landing.offer.faq.price_q': {
+        'en': 'How much does Aqua Element water cost?',
+        'uz': 'Aqua Element suvining narxi qancha?',  # NATIVE-READ
+        'ru': 'Сколько стоит вода Aqua Element?',  # NATIVE-READ
+    },
+    'landing.offer.faq.sizes_q': {
+        'en': 'Which bottle sizes are available?',
+        'uz': 'Qanday hajmdagi idishlar bor?',  # NATIVE-READ
+        'ru': 'Какие объёмы бутылей доступны?',  # NATIVE-READ
+    },
+    'landing.offer.faq.sizes_a': {
+        'en': 'We currently sell {sizes} bottles.',
+        'uz': 'Hozir {sizes} hajmdagi idishlar mavjud.',  # NATIVE-READ
+        'ru': 'Сейчас доступны бутыли объёмом {sizes}.',  # NATIVE-READ
+    },
+    'landing.offer.faq.minimum_q': {
+        'en': 'What is the smallest order?',
+        'uz': 'Eng kichik buyurtma qancha?',  # NATIVE-READ
+        'ru': 'Какой минимальный заказ?',  # NATIVE-READ
+    },
+    'landing.offer.faq.deposit_q': {
+        'en': 'Is there a deposit for the bottle?',
+        'uz': 'Idish uchun garov puli kerakmi?',  # NATIVE-READ
+        'ru': 'Нужен ли залог за бутыль?',  # NATIVE-READ
+    },
+    'landing.offer.faq.same_day_q': {
+        'en': 'Does Aqua Element deliver water the same day?',
+        'uz': 'Aqua Element suvni shu kuni yetkazib beradimi?',  # NATIVE-READ
+        'ru': 'Доставляет ли Aqua Element воду в день заказа?',  # NATIVE-READ
+    },
+    'landing.offer.faq.empties_q': {
+        'en': 'How are empty bottles exchanged?',
+        'uz': 'Bo‘sh idishlar qanday almashtiriladi?',  # NATIVE-READ
+        'ru': 'Как обмениваются пустые бутыли?',  # NATIVE-READ
+    },
+    'landing.pricing_policy.title': {
+        'en': 'Pricing policy',
+        'uz': 'Narx siyosati',  # NATIVE-READ
+        'ru': 'Ценовая политика',  # NATIVE-READ
+    },
+    'landing.offer.own_bottles': {
+        'en': 'At each delivery the courier exchanges your empty Aqua Element bottles for full ones. We exchange our own bottles only.',
+        'uz': 'Kuryer har yetkazib berishda bo‘sh Aqua Element idishlarini to‘lasiga almashtiradi. Biz faqat o‘zimizning idishlarni almashtiramiz.',  # NATIVE-READ
+        'ru': 'При каждой доставке курьер меняет пустые бутыли Aqua Element на полные. Мы обмениваем только собственные бутыли.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(OFFER_BLOCK_TRANSLATIONS)
+
+DELIVERY_PAGE_TRANSLATIONS = {
+    'landing.delivery_page.title': {
+        'en': 'Water delivery in Tashkent — same day or next day',
+        'uz': 'Toshkentda suv yetkazib berish — shu kuni yoki ertasiga',  # NATIVE-READ
+        'ru': 'Доставка воды по Ташкенту — в день заказа или на следующий день',  # NATIVE-READ
+    },
+    'landing.delivery_page.title_free_suffix': {
+        'en': ', free',
+        'uz': ', bepul',  # NATIVE-READ
+        'ru': ', бесплатно',  # NATIVE-READ
+    },
+    'landing.delivery_page.heading_how': {
+        'en': 'How delivery works',
+        'uz': 'Yetkazib berish qanday ishlaydi',  # NATIVE-READ
+        'ru': 'Как устроена доставка',  # NATIVE-READ
+    },
+    'landing.delivery_page.live_arrival': {
+        'en': 'Once the courier sets off to you, the Telegram bot shows your arrival time.',
+        'uz': 'Kuryer yo‘lga chiqqach, Telegram bot yetib kelish vaqtini ko‘rsatadi.',  # NATIVE-READ
+        'ru': 'Когда курьер выезжает к вам, Telegram-бот показывает время прибытия.',  # NATIVE-READ
+    },
+    'landing.delivery_page.bottle_terms': {
+        'en': 'Returnable bottle terms',
+        'uz': 'Qaytariladigan idishlar shartlari',  # NATIVE-READ
+        'ru': 'Условия по возвратным бутылям',  # NATIVE-READ
+    },
+    'landing.delivery_page.order_anytime': {
+        'en': 'Order at any time, in our Telegram bot or on the website.',
+        'uz': 'Buyurtmani Telegram botimiz yoki sayt orqali istalgan vaqtda berishingiz mumkin.',  # NATIVE-READ
+        'ru': 'Оформить заказ можно в любое время — в нашем Telegram-боте или на сайте.',  # NATIVE-READ
+    },
+    'landing.delivery_page.choose_date': {
+        'en': 'On the website you can choose a delivery date up to {days} days ahead.',
+        'uz': 'Saytda yetkazib berish sanasini {days} kungacha oldindan tanlash mumkin.',  # NATIVE-READ
+        'ru': 'На сайте можно выбрать дату доставки на срок до {days} дней вперёд.',  # NATIVE-READ
+    },
+    'landing.delivery_page.payment': {
+        'en': 'Pay in cash on delivery or online by Click.',
+        'uz': 'To‘lov — yetkazib berilganda naqd pulda yoki Click orqali onlayn.',  # NATIVE-READ
+        'ru': 'Оплата — наличными при получении или онлайн через Click.',  # NATIVE-READ
+    },
+    'landing.delivery_page.support': {
+        'en': 'A question about a delivery? Write to us in the Telegram bot.',
+        'uz': 'Yetkazib berish bo‘yicha savol bormi? Telegram botimizga yozing.',  # NATIVE-READ
+        'ru': 'Есть вопрос по доставке? Напишите нам в Telegram-бот.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(DELIVERY_PAGE_TRANSLATIONS)
+
+FAQ_DELIVERY_TRANSLATIONS = {
+    'landing.faq.delayed_a': {
+        'en': 'Write to us in the Telegram bot and we will check your delivery and tell you what happens next.',
+        'uz': 'Telegram botimizga yozing — yetkazib berishni tekshirib, keyingi qadamni aytamiz.',  # NATIVE-READ
+        'ru': 'Напишите нам в Telegram-бот — мы проверим доставку и подскажем, что дальше.',  # NATIVE-READ
+    },
+    'landing.faq.help': {
+        'en': 'Still need help? Write to us in the Telegram bot.',
+        'uz': 'Yordam kerakmi? Telegram botimizga yozing.',  # NATIVE-READ
+        'ru': 'Нужна помощь? Напишите нам в Telegram-бот.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(FAQ_DELIVERY_TRANSLATIONS)
+
+
+# The row lived only in the production database, so no deploy could replace its live "Fast and reliable water
+# delivery ..." text. Adopted here; the seed run prints `Updating:` for it.
+DELIVERY_COPY_CORRECTIONS = {
+    'landing.services.home_delivery.description': {
+        'en': 'Water delivered to your home or office, every day.',
+        'uz': 'Suvni uyingiz yoki ofisingizga har kuni yetkazamiz.',  # NATIVE-READ
+        'ru': 'Привозим воду домой и в офис каждый день.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(DELIVERY_COPY_CORRECTIONS)
+
+ORDER_AND_TERMS_TRANSLATIONS = {
+    'landing.order.scheduled_for': {
+        'en': 'Scheduled for:',
+        'uz': 'Rejalashtirilgan sana:',  # NATIVE-READ
+        'ru': 'Доставка назначена на:',  # NATIVE-READ
+    },
+    'landing.terms.bottles_heading': {
+        'en': 'Returnable bottles',
+        'uz': 'Qaytariladigan idishlar',  # NATIVE-READ
+        'ru': 'Возвратные бутыли',  # NATIVE-READ
+    },
+    'landing.terms.bottles_body': {
+        'en': 'The returnable bottles belong to Blue Stream Group. We lend them with no deposit and exchange an empty bottle for a full one at each delivery. If a bottle is lost or damaged, the customer covers its cost.',
+        'uz': 'Qaytariladigan idishlar Blue Stream Group mulki hisoblanadi. Biz ularni garov pulisiz beramiz va har yetkazib berishda bo‘sh idishni to‘lasiga almashtiramiz. Idish yo‘qolsa yoki shikastlansa, mijoz uning qiymatini qoplaydi.',  # NATIVE-READ
+        'ru': 'Возвратные бутыли принадлежат Blue Stream Group. Мы передаём их без залога и при каждой доставке меняем пустую бутыль на полную. Если бутыль утрачена или повреждена, покупатель возмещает её стоимость.',  # NATIVE-READ
+    },
+    # The footer of every page points to the bot chat (owner, 2026-11-13). The prompt is printed as
+    # order_prompt + <span>order_prompt_bot</span>, the span first in Uzbek; the three rows it replaces
+    # (landing.footer.cta_prefix, landing.footer.cta_suffix, landing.common.call_us) are database-only and unread.
+    'landing.footer.order_prompt': {
+        'en': 'Order water or write to us',
+        'uz': 'suv buyurtma qiling yoki bizga yozing',  # NATIVE-READ
+        'ru': 'Закажите воду или напишите нам',  # NATIVE-READ
+    },
+    'landing.footer.order_prompt_bot': {
+        'en': 'in our Telegram bot',
+        'uz': 'Telegram botimizda',  # NATIVE-READ
+        'ru': 'в нашем Telegram-боте',  # NATIVE-READ
+    },
+    'landing.footer.open_bot': {
+        'en': 'Open the bot',
+        'uz': 'Botni ochish',  # NATIVE-READ
+        'ru': 'Открыть бот',  # NATIVE-READ
+    },
+    'landing.footer.phone_label': {
+        'en': 'Phone:',
+        'uz': 'Telefon:',  # NATIVE-READ
+        'ru': 'Телефон:',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(ORDER_AND_TERMS_TRANSLATIONS)
 
 
 def main():

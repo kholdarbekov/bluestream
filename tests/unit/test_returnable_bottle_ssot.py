@@ -44,7 +44,7 @@ def returnable_19l(db, sample_category):
         name="19 litrlik suv",
         category_id=sample_category.id,
         size=ProductSizeEnum.SIZE_19L,
-        volume=19.0,
+        volume=18.9,
         volume_unit="L",
         base_price=Decimal("15000.00"),
         stock_quantity=500,

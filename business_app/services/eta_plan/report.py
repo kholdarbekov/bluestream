@@ -36,6 +36,9 @@ local, `work_day_bounds`) and returns the finished figures as JSON-ready values;
   - `by_drivers_working`: kept share and median window with one car working when the promise was made, and with two
     or more (spec §9, capacity). A promise made while no car worked (0: the early-morning set stood in, spec §4.2)
     falls into neither;
+  - `first_half_day_same_day`: of the judged orders placed before 13:00 local (the delivery statement's "first half
+    of the day") that have an arrival or whose placing day is over, the share delivered on the local day they were
+    placed; an order never delivered is a miss, one placed this morning and not delivered yet is not counted yet;
   - `change_messages`: the share of orders the §4.9 rule (`changes.messages_that_would_send`) would message none, and
     at most once, over their engine rows while they waited: up to the first in_transit tap (R12), else the arrival,
     else now.
@@ -49,7 +52,7 @@ local, `work_day_bounds`) and returns the finished figures as JSON-ready values;
 - `latest_fit`: when the fit the engine reads now (`params.latest_fit`) was made, the window of plan days it read, and
   its monitoring ratios. None before the first fit.
 - `definitions`: the thresholds above, for the page's copy: `morning_ends` (11:00), `daytime_from` and `daytime_to`
-  (07:00 and 15:00) as local "HH:MM", and `s2_tolerance_minutes` (15).
+  (07:00 and 15:00) and `first_half_ends` (13:00) as local "HH:MM", and `s2_tolerance_minutes` (15).
 
 A share with nothing to count is None. No key is one the `TimezoneMiddleware` rewrites: the instants of `latest_fit`
 are sent as UTC ISO strings and the range as ISO dates, and they cross it unchanged.
@@ -92,6 +95,8 @@ EXCLUDED = (DATED, NO_WINDOW, CANCELLED, RETURNED, NON_DRIVER_CLOSE, OPEN)
 # the orders placed 07:00-15:00 local.
 _MORNING_ENDS = time(11, 0)
 _DAYTIME = (time(7, 0), time(15, 0))
+# The delivery statement promises "the first half of the day" for orders placed before this local time.
+_FIRST_HALF_ENDS = time(13, 0)
 # Spec §9: an "on the way" promise is kept "within ±15 minutes".
 _S2_WITHIN_MINUTES = 15
 # The thresholds above, as the report publishes them for the page's copy: the page names them, it never states them.
@@ -99,6 +104,7 @@ _DEFINITIONS = {
     "morning_ends": _MORNING_ENDS.strftime("%H:%M"),
     "daytime_from": _DAYTIME[0].strftime("%H:%M"),
     "daytime_to": _DAYTIME[1].strftime("%H:%M"),
+    "first_half_ends": _FIRST_HALF_ENDS.strftime("%H:%M"),
     "s2_tolerance_minutes": _S2_WITHIN_MINUTES,
 }
 
@@ -171,6 +177,7 @@ class EtaAccuracyReport:
             },
             "today_delivered_today_share": _delivered_the_day_promised(judged, DAY_KIND_TODAY),
             "tomorrow_delivered_same_day_share": _delivered_the_day_promised(judged, DAY_KIND_TOMORROW),
+            "first_half_day_same_day": _first_half_same_day(judged, now),
             **_early(judged),
             "by_drivers_working": {
                 "one": _group([judged_order for judged_order in judged if judged_order.first.drivers_working == 1]),
@@ -320,6 +327,27 @@ def _delivered_the_day_promised(judged: Sequence[_Judged], label: str) -> Option
         and local_date(judged_order.arrival) == local_date(judged_order.first.computed_at)
     ]
     return _share(len(same_day), len(promises))
+
+
+def _first_half_same_day(judged: Sequence[_Judged], now: datetime) -> Dict[str, Any]:
+    """Of the judged orders placed before 13:00 local, how many were delivered on the local day they were placed.
+
+    Counted: an order with an arrival, or whose placing day is over (never delivered is a miss, not dropped). An order
+    placed today and not delivered yet is not counted yet."""
+    counted = [
+        judged_order
+        for judged_order in judged
+        if _placed_at(judged_order) < _FIRST_HALF_ENDS
+        and (
+            judged_order.arrival is not None or local_date(ensure_utc(judged_order.order.created_at)) < local_date(now)
+        )
+    ]
+    same_day = sum(
+        judged_order.arrival is not None
+        and local_date(judged_order.arrival) == local_date(ensure_utc(judged_order.order.created_at))
+        for judged_order in counted
+    )
+    return {"n": len(counted), "same_day": same_day, "share": _share(same_day, len(counted))}
 
 
 def _early(judged: Sequence[_Judged]) -> Dict[str, Optional[float]]:

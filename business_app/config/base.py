@@ -520,8 +520,6 @@ class BaseConfig:
     # Opening hours in schema.org day-time spec format. Comma-separated for
     # multiple specs. Example: "Mo-Sa 09:00-21:00,Su 10:00-18:00".
     COMPANY_OPENING_HOURS = os.environ.get("COMPANY_OPENING_HOURS", "")
-    # Price range hint (schema.org enum-ish). Common values: "$", "$$", "$$$".
-    COMPANY_PRICE_RANGE = os.environ.get("COMPANY_PRICE_RANGE", "$$")
     # External brand-identity links — Wikidata is the single highest-leverage
     # GEO signal. Fill once Milestone 3 (off-site authority) is shipped.
     COMPANY_WIKIDATA_ID = os.environ.get("COMPANY_WIKIDATA_ID", "")  # e.g. "Q123456789"
@@ -541,6 +539,8 @@ class BaseConfig:
     GOOGLE_SITE_VERIFICATION = os.environ.get("GOOGLE_SITE_VERIFICATION", "")
     YANDEX_SITE_VERIFICATION = os.environ.get("YANDEX_SITE_VERIFICATION", "")
     BING_SITE_VERIFICATION = os.environ.get("BING_SITE_VERIFICATION", "")
+    # IndexNow: submit the public URLs after a product's public details change. The key is the .txt file in static/.
+    INDEXNOW_ENABLED = os.environ.get("INDEXNOW_ENABLED", "false").lower() == "true"
 
     # Tax Committee (Asl Belgisi / xTrace) Configuration
     TAX_COMMITTEE_API_URL = os.environ.get("TAX_COMMITTEE_API_URL", "https://xtrace.aslbelgisi.uz")

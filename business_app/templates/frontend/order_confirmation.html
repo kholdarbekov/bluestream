@@ -290,12 +290,11 @@
                                 <i class="far fa-truck"></i>
                                 {{ 'Delivery Information'|t }}
                             </h5>
-                            {# F15: the old date belonged to the attempt that failed, and there is no new one yet. #}
-                            {% if display_status != 'awaiting_new_date' %}
-                            <p><strong>{{ 'Estimated Delivery'|t }}:</strong> {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</p>
-                            {% endif %}
+                            {# The backend decides (customer_delivery_expectation): a later date, or the statement, or neither. #}
+                            {% if scheduled_for_label %}<p><strong>{{ 'landing.order.scheduled_for'|t }}</strong> {{ scheduled_for_label }}</p>{% endif %}
                             <p><strong>{{ 'Status'|t }}:</strong> {{ order_status_label(display_status) }}</p>
                             <p><strong>{{ 'Tracking'|t }}:</strong> {{ 'We will notify you when your order is on the way'|t }}</p>
+                            {% if delivery_statement %}<p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>{% endif %}
                         </div>
 
                         <!-- Order Details -->

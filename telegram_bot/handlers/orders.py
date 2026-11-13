@@ -27,6 +27,7 @@ from utils import (
 from shared import eta_copy
 from shared.constants import (
     ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE, ETA_STAGE_ARRIVED, ETA_STAGE_ON_THE_WAY,
+    get_delivery_statement,
 )
 from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD, MIN_ORDER_AMOUNT
 from handlers.base import BaseHandler
@@ -455,6 +456,17 @@ class OrderHandlers(BaseHandler):
                 active_debt_count=active_debt_count,
             )
         return i18n.get('telegram.orders.cod_restricted_unavailable', language)
+
+    @staticmethod
+    def _delivery_statement_block(order: Dict[str, Any], language: str) -> str:
+        """The delivery statement for an order-placed screen: plain text, the
+        constant's whole sentences. Only when the backend published
+        `show_delivery_statement` as True on the order (a missing key means
+        no): the bot never works out which order gets it. Removed when
+        customers see their own delivery window (honest-ETA phase 3)."""
+        if order.get('show_delivery_statement') is not True:
+            return ""
+        return "\n\n" + " ".join(get_delivery_statement(language))
 
     @staticmethod
     def _build_cod_prepayment_brief(cart: Dict[str, Any], order_total: float, language: str) -> str:
@@ -1613,6 +1625,8 @@ class OrderHandlers(BaseHandler):
                     language=language,
                 )
 
+            success_text += self._delivery_statement_block(order, language)
+
             # Render through the shared helper: it treats "message is not
             # modified" as success and REPLACES a bubble it cannot edit
             # ("message to edit not found" — both appear in this project's
@@ -1697,6 +1711,7 @@ class OrderHandlers(BaseHandler):
             success_text = i18n.get('telegram.orders.placed_success', language) + "\n\n"
             success_text += MessageBuilder.build_order_summary(order, language)
             success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
+            success_text += self._delivery_statement_block(order, language)
 
             await self._edit_or_replace_callback_message(query, success_text)
             await self._ack(query, i18n.get('telegram.orders.placed_success', language))

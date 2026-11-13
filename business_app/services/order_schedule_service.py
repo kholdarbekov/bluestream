@@ -373,6 +373,42 @@ class OrderScheduleService:
         return order.status.value
 
     @classmethod
+    def customer_delivery_expectation(cls, order: Order) -> Dict[str, Any]:
+        """What the customer is told about WHEN, as `{"scheduled_for": date | None, "show_statement": bool}`.
+
+        Read by the website's order-confirmation and order-tracking pages and, through
+        `bot_message_shows_delivery_statement`, by the bot's order-placed screen and the payment-confirmation push,
+        so none of them works it out again. First match wins:
+        1. an order that is not live, or waits for a new date: neither (its delivery failed and nobody has set a
+           new day, so the statement would read as a promise for a day that does not exist);
+        2. an order dated after today: that date, no statement;
+        3. otherwise (today, or no date): the statement, no date.
+
+        This is not `is_awaiting_release`, which answers "is this order held back from drivers": that is False for
+        an unpaid order dated next week and True for a today order placed before the first shift.
+        """
+        from business_app.utils.local_windows import local_date
+
+        if order.status not in ACTIVE_ORDER_STATUSES or cls.awaiting_new_date(order):
+            return {"scheduled_for": None, "show_statement": False}
+        if order.delivery_date is not None and order.delivery_date > local_date():
+            return {"scheduled_for": order.delivery_date, "show_statement": False}
+        return {"scheduled_for": None, "show_statement": True}
+
+    @classmethod
+    def bot_message_shows_delivery_statement(cls, order: Order, *, rail: Any, payment_confirmed: bool) -> bool:
+        """Does this bot message carry the delivery statement? The customer reads it once: an online rail's customer
+        is sent to pay and never sees the order-placed screen, so the payment-confirmed message carries it; on every
+        other rail the order-placed screen does. Neither does when the order gets no statement
+        (`customer_delivery_expectation`).
+
+        Published as `show_delivery_statement` in the order payload (`serialize_order`, the order-placed screen) and in
+        the payment-confirmed push (`PaymentService.dispatch_payment_confirmation`)."""
+        from business_app.utils.payment_projection import is_online_rail
+
+        return is_online_rail(rail) == payment_confirmed and cls.customer_delivery_expectation(order)["show_statement"]
+
+    @classmethod
     def assert_can_advance(cls, order: Order) -> None:
         """Refuse to move an order that awaits a new date forward (F18).
 

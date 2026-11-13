@@ -120,19 +120,19 @@ KEYS = {
         "ru": "Корректировка",
     },
     "telegram.bottles.event.fine_issued": {
-        "en": "Fine issued",
-        "uz": "Jarima belgilandi",
-        "ru": "Начислен штраф",
+        "en": "Bottle charge added",
+        "uz": "Idish qiymati hisoblandi",  # NATIVE-READ
+        "ru": "Начислена стоимость бутыли",  # NATIVE-READ
     },
     "telegram.bottles.event.fine_reversed": {
-        "en": "Fine reversed",
-        "uz": "Jarima bekor qilindi",
-        "ru": "Штраф отменён",
+        "en": "Bottle charge cancelled",
+        "uz": "Idish qiymati bekor qilindi",  # NATIVE-READ
+        "ru": "Стоимость бутыли отменена",  # NATIVE-READ
     },
     "telegram.bottles.event.fine_paid": {
-        "en": "Fine paid",
-        "uz": "Jarima to'landi",
-        "ru": "Штраф оплачен",
+        "en": "Bottle charge paid",
+        "uz": "Idish qiymati to‘landi",  # NATIVE-READ
+        "ru": "Стоимость бутыли оплачена",  # NATIVE-READ
     },
     "telegram.bottles.event.initial_balance": {
         "en": "Opening balance",

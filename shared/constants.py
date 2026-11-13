@@ -379,6 +379,35 @@ DELIVERY_COVERAGE_REGION_NOTE = {
     "ru": "прилегающие районы Ташкентской области",
 }
 
+# The one delivery statement for every surface (website, feed, llms.txt, bots).
+# Printed as whole sentences, never re-worded. "free" and "every day" are
+# deliberately not part of it. Reviewed on DELIVERY_STATEMENT_REVIEWED_ON.
+# Spec: docs/superpowers/specs/2026-11-11-llm-price-and-delivery-visibility-design.md section 5.3.
+DELIVERY_STATEMENT_REVIEWED_ON = "2026-11-12"
+DELIVERY_STATEMENT = {
+    "uz": (
+        "Toshkent shahrida Aqua Element kunning birinchi yarmida berilgan buyurtmalarni odatda shu kunning o‘zida yetkazib beradi.",  # NATIVE-READ
+        "Kechroq berilgan buyurtmalar odatda shu kuni kechqurun yoki ertasi kuni yetib boradi.",  # NATIVE-READ
+        "Toshkent viloyatining qo‘shni hududlariga odatda buyurtma berilgan kuni yoki ertasi kuni yetkazamiz.",  # NATIVE-READ
+    ),
+    "ru": (
+        "В Ташкенте Aqua Element, как правило, доставляет воду в тот же день, если заказ оформлен в первой половине дня.",  # NATIVE-READ
+        "Более поздние заказы обычно приезжают тем же вечером или на следующий день.",  # NATIVE-READ
+        "В соседние районы Ташкентской области обычно доставляем в день заказа или на следующий день.",  # NATIVE-READ
+    ),
+    "en": (
+        "In Tashkent city, Aqua Element normally delivers the same day when you order in the first half of the day.",
+        "Later orders normally arrive the same evening or the next day.",
+        "In the neighbouring areas of Tashkent Region we normally deliver on the day you order or the next day.",
+    ),
+}
+
+
+def get_delivery_statement(language: str = "en") -> tuple[str, str, str]:
+    """The approved delivery statement sentences for ``language`` (en fallback)."""
+    lang = language if language in ("en", "uz", "ru") else "en"
+    return DELIVERY_STATEMENT[lang]
+
 
 def get_delivery_coverage(language: str = "en") -> dict:
     """Single source of truth for the *published* delivery coverage zone.

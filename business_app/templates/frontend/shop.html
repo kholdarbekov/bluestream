@@ -1,4 +1,6 @@
 {% extends "frontend/base.html" %}
+{% set offer_q = {} %}{% for item in offer_faq %}{% set _ = offer_q.update({item.id: item}) %}{% endfor %}
+{% set same_day_faq = {'q': 'landing.offer.faq.same_day_q'|t, 'a': offer_facts.delivery.statement[current_language]|join(' ')} %}
 {% set selected_category = namespace(name='') %}
 {% if current_category %}
     {% for category in categories %}
@@ -26,22 +28,31 @@
 {% endif %}
 {% if current_language == 'ru' %}
     {% set shop_faq_items = [
-        {'q': 'Как быстро осуществляется доставка воды?', 'a': 'В большинстве районов доставляем в тот же день в доступные временные интервалы.'},
-        {'q': 'Как выбрать подходящий объем воды?', 'a': 'Для дома обычно выбирают 5L или 10L, для офиса и семей чаще подходит формат 19L.'},
+        same_day_faq,
+        offer_q.get('price'),
+        offer_q.get('sizes'),
+        offer_q.get('minimum'),
+        offer_q.get('deposit'),
         {'q': 'Что даёт подписка?', 'a': 'Подписка сама оформляет заказы по расписанию, поэтому вода не закончится в неподходящий момент. Доставка всегда бесплатная, а доставки по подписке оплачиваются по обычной цене.'}
-    ] %}
+    ]|select|list %}
 {% elif current_language == 'en' %}
     {% set shop_faq_items = [
-        {'q': 'How fast is water delivery?', 'a': 'Most areas are served the same day within available delivery windows.'},
-        {'q': 'How do I choose the right water size?', 'a': '5L or 10L is common for home use, while 19L is usually best for offices and larger households.'},
+        same_day_faq,
+        offer_q.get('price'),
+        offer_q.get('sizes'),
+        offer_q.get('minimum'),
+        offer_q.get('deposit'),
         {'q': 'What does a subscription give me?', 'a': 'A subscription places each order for you on schedule, so you never run out of water. Delivery is always free, and subscription deliveries are billed at the regular price.'}
-    ] %}
+    ]|select|list %}
 {% else %}
     {% set shop_faq_items = [
-        {'q': 'Suv yetkazib berish qancha vaqtda amalga oshiriladi?', 'a': 'Ko‘p hududlarda buyurtmalar mavjud vaqt oralig‘ida shu kunning o‘zida yetkaziladi.'},
-        {'q': 'Qaysi hajmdagi suvni tanlagan ma’qul?', 'a': 'Uy uchun odatda 5L yoki 10L, ofis va katta oilalar uchun esa ko‘pincha 19L qulay bo‘ladi.'},
+        same_day_faq,
+        offer_q.get('price'),
+        offer_q.get('sizes'),
+        offer_q.get('minimum'),
+        offer_q.get('deposit'),
         {'q': 'Obuna nima beradi?', 'a': 'Obuna buyurtmalarni jadval bo‘yicha o‘zi beradi, shuning uchun suv tugab qolmaydi. Yetkazib berish doim bepul, obuna bo‘yicha yetkazishlar esa oddiy narxda hisoblanadi.'}
-    ] %}
+    ]|select|list %}
 {% endif %}
 
 {% block title %}
@@ -286,6 +297,7 @@
 
                             <div class="row clearfix product-grid">
                                 {% for product in products.items %}
+                                {% set offer = offer_by_id.get(product.id) %}
                                 <div class="col-lg-4 col-md-6 col-sm-12 shop-block">
                                     <div class="shop-block-one">
                                         <div class="inner-box">
@@ -296,26 +308,21 @@
                                                 {% else %}
                                                     <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.get('name', 'Product') }}">
                                                 {% endif %}
-                                                {% set discount_pct = product.get('pricing', {}).get('discount_percentage', 0) %}
-                                                {% if discount_pct > 0 %}
-                                                <div class="sale-tag">-{{ discount_pct }}%</div>
+                                                {% if offer and offer.discount_percent %}
+                                                <div class="sale-tag">-{{ offer.discount_percent }}%</div>
                                                 {% endif %}
                                             </figure>
                                             <div class="lower-content">
                                                 <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                                {% set volume = product.get('specifications', {}).get('volume', product.get('volume', 'N/A')) %}
-                                                {% set volume_unit = product.get('specifications', {}).get('volume_unit', 'L') %}
                                                 {% set category_name = product.get('category', {}).get('name', 'Water') if product.get('category') else 'Water' %}
-                                                <span>{{ volume }}{{ volume_unit }} - {{ category_name }}</span>
+                                                <span>{% if offer %}{{ offer.size_text[current_language] }} - {% endif %}{{ category_name }}</span>
                                                 <h4><a href="{% if product.get('slug') %}{{ url_for('frontend.product_detail_slug', slug=product.get('slug')) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">{{ product.get('name', 'Product') }}</a></h4>
                                                 <div class="price">
-                                                    {% set base_price = product.get('pricing', {}).get('base_price', product.get('base_price', 0)) %}
-                                                    {% set discount_price = product.get('pricing', {}).get('discount_price', 0) %}
-                                                    {% if discount_price and discount_price > 0 %}
-                                                    <span class="old-price">{{ base_price|format_price }} UZS</span>
-                                                    <span class="new-price">{{ discount_price|format_price }} UZS</span>
-                                                    {% else %}
-                                                    <h6>{{ base_price|format_price }} UZS</h6>
+                                                    {% if offer and offer.list_price_text %}
+                                                    <span class="old-price">{{ offer.list_price_text[current_language] }}</span>
+                                                    <span class="new-price">{{ offer.price_text[current_language] }}</span>
+                                                    {% elif offer %}
+                                                    <h6>{{ offer.price_text[current_language] }}</h6>
                                                     {% endif %}
                                                 </div>
                                                 {% set description = product.get('short_description', product.get('description', '')) %}
@@ -384,6 +391,8 @@
                             {{ 'landing.shop.all_products'|t }} {{ company_name }}.
                         {% endif %}
                     </p>
+                    {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+                    {{ offer_facts_block(offer_facts, current_language, heading_tag='h3') }}
                     <ul class="shop-faq-list">
                         {% for faq in shop_faq_items %}
                         <li>

@@ -20,11 +20,9 @@ approved wording, so an edit to the seed has to be an edit here too.
 import re
 
 import pytest
-from bs4 import BeautifulSoup
 
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig
-from business_app.models.translation import Translation
-from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from tests.integration.public_page_builders import flat as _flat, page as _page, shipped as _shipped
 
 LANGS = ("en", "uz", "ru")
 
@@ -81,35 +79,6 @@ PLATINUM_PERK = {
 }
 
 
-def _flat(text: str) -> str:
-    """The text as a visitor reads it: NBSP, tabs and newlines folded into single plain spaces."""
-    return " ".join(text.split())
-
-
-def _shipped(key: str, lang: str) -> str:
-    """The text the seed ships for `key`; a key the seed does not own fails here, not in a missing-row render."""
-    row = BACKEND_TRANSLATIONS.get(key)
-    assert row is not None, f"{key} is DB-only: the seed must ship it, or a deploy never replaces it"
-    return row.get(lang) or row["en"]
-
-
-def _page(app, db, path: str, lang: str, prefix: str) -> BeautifulSoup:
-    """GET `path` in `lang` as a visitor does, with every `prefix*` row the seed ships in the database."""
-    for key, row in BACKEND_TRANSLATIONS.items():
-        if key.startswith(prefix):
-            for language in LANGS:
-                value = row.get(language) or row["en"]
-                db.session.add(
-                    Translation(key=key, language=language, value=value, category=_category_for(key), is_active=True)
-                )
-    db.session.commit()
-    app.jinja_env.cache.clear()
-    # `?lang=` stores the language in the session and redirects: follow it on ONE fresh client.
-    response = app.test_client().get(f"{path}?lang={lang}", follow_redirects=True)
-    assert response.status_code == 200, response.get_data(as_text=True)[:500]
-    return BeautifulSoup(response.get_data(as_text=True), "html.parser")
-
-
 @pytest.fixture
 def loyalty_tiers(db):
     """The four tiers the guide prints. `display_order` (0-3) is the number the perk keys are looked up by."""
@@ -153,7 +122,7 @@ def loyalty_tiers(db):
 @pytest.mark.parametrize("lang", LANGS)
 def test_the_landing_call_to_action_makes_no_time_promise(app, db, lang):
     shipped = _shipped(CTA_KEY, lang)
-    soup = _page(app, db, "/", lang, "landing.")
+    soup = _page(app, db, "/", lang, ("landing.",))
 
     paragraph = soup.select_one("section.cta-section .text p")
     assert paragraph is not None, "the call to action lost its paragraph"
@@ -177,7 +146,7 @@ def test_the_landing_call_to_action_makes_no_time_promise(app, db, lang):
 @pytest.mark.parametrize("lang", LANGS)
 def test_the_footer_says_every_day_not_24_7(app, db, lang):
     shipped = _shipped(FOOTER_KEY, lang)
-    soup = _page(app, db, "/", lang, "landing.")
+    soup = _page(app, db, "/", lang, ("landing.",))
 
     lines = [_flat(item.get_text(" ")) for item in soup.select(".schedule-box li")]
     assert _flat(shipped) in lines, f"/?lang={lang} footer does not show the shipped delivery line: {lines}"
@@ -189,7 +158,7 @@ def test_the_footer_says_every_day_not_24_7(app, db, lang):
 @pytest.mark.api
 @pytest.mark.parametrize("lang", LANGS)
 def test_the_loyalty_guide_promises_no_faster_or_express_delivery(app, db, loyalty_tiers, lang):
-    soup = _page(app, db, "/loyalty-guide", lang, "loyalty_guide.")
+    soup = _page(app, db, "/loyalty-guide", lang, ("loyalty_guide.",))
 
     perks = {
         card.select_one(".lg-tier__name").get_text(strip=True): [

@@ -35,11 +35,17 @@
  "definitions": {
   "daytime_from": "07:00",
   "daytime_to": "15:00",
+  "first_half_ends": "13:00",
   "morning_ends": "11:00",
   "s2_tolerance_minutes": 15
  },
  "early_share": 0.6666666666666666,
  "end_date": "2026-11-03",
+ "first_half_day_same_day": {
+  "n": 4,
+  "same_day": 3,
+  "share": 0.75
+ },
  "gate": {
   "before_eleven": {
    "kept": 3,

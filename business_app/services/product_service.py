@@ -208,7 +208,7 @@ class ProductService:
         if quantity < 1:
             raise ValidationError("Quantity must be >= 1")
 
-        product = Product.query.get(product_id)
+        product = Product.query.filter_by(id=product_id, is_active=True).first()
         if not product:
             raise NotFoundError(f"Product with ID {product_id} not found")
 
@@ -216,8 +216,8 @@ class ProductService:
         base_price = float(product.base_price)
         discount_price = float(product.discount_price) if product.discount_price else None
 
-        # Start with best available price
-        unit_price = discount_price if discount_price else base_price
+        # Start from what an order is charged for one unit (the discount price when one is set)
+        unit_price = float(product.catalogue_unit_price)
 
         # Apply price rules (volume discounts, customer type discounts, etc.)
         price_rule_discount = self._calculate_price_rule_discount(product, quantity, user)
@@ -468,7 +468,7 @@ class ProductService:
                     "id": product.id,
                     "name": product.get_translated("name", language),
                     "sku": product.sku,
-                    "price": float(product.base_price),
+                    "price": float(product.catalogue_unit_price),
                     "image": product.images[0] if product.images else None,
                 }
             )

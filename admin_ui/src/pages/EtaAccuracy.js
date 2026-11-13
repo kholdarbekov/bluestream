@@ -145,6 +145,14 @@ const EtaAccuracy = () => {
             })}
           </Text>
           <Text>
+            {t('eta_acc_first_half_same_day', {
+              defaultValue: 'Orders placed before {{first_half_ends}} and delivered the same day: {{share}} over {{n}}',
+              first_half_ends: threshold(definitions?.first_half_ends),
+              share: percent(report.first_half_day_same_day?.share),
+              n: count(report.first_half_day_same_day?.n),
+            })}
+          </Text>
+          <Text>
             {t('eta_acc_early', {
               defaultValue: 'Arrived before the window opened: {{share}}, by a median {{minutes}}',
               share: percent(report.early_share),

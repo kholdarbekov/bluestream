@@ -516,6 +516,7 @@ def test_the_report_publishes_the_thresholds_its_copy_names(client, db, manager_
         "morning_ends": "11:00",
         "daytime_from": "07:00",
         "daytime_to": "15:00",
+        "first_half_ends": "13:00",
         "s2_tolerance_minutes": 15,
     }
 
@@ -702,6 +703,38 @@ def test_a_driver_gets_403_and_a_manager_gets_the_report(
         )
 
 
+def test_first_half_same_day_counts_judged_orders_placed_before_thirteen(client, db, manager_claim_headers, driver):
+    for placed_at, delivered_at in (
+        (at(9), at(16, 30)),  # delivered the same local day: counted, same day
+        (at(12, 59), at(10, day=TODAY)),  # delivered the next day: counted, not same day
+        (at(13), at(17)),  # placed at 13:00: not counted
+        (at(10), None),  # never delivered, its day is over: counted, not same day
+        # Placed before 05:00 local, the UTC date is the day before: the comparisons must read the LOCAL day.
+        (at(2, day=TODAY), at(9, day=TODAY)),  # delivered the same local day: counted, same day
+        (at(3, day=TODAY), None),  # never delivered, placed on the local today: not counted yet
+    ):
+        order = placed(db, driver, placed_at=placed_at)
+        promised(
+            db, order, placed_at + timedelta(minutes=5), placed_at + timedelta(hours=1), placed_at + timedelta(hours=3)
+        )
+        if delivered_at is not None:
+            delivered(db, order, delivered_at)
+
+    figures = report(client, manager_claim_headers, **ONE_DAY)
+
+    assert figures["first_half_day_same_day"] == {"n": 4, "same_day": 2, "share": 0.5}
+
+
+def test_an_undelivered_order_placed_this_morning_is_not_counted_yet(client, db, manager_claim_headers, driver):
+    order = placed(db, driver, placed_at=at(9, day=TODAY))
+    promised(db, order, at(9, 5, day=TODAY), at(10, day=TODAY), at(12, day=TODAY))  # window ended before 15:00: judged
+
+    figures = report(client, manager_claim_headers, start_date=TODAY.isoformat(), end_date=TODAY.isoformat())
+
+    assert figures["gate"]["n"] == 1
+    assert figures["first_half_day_same_day"] == {"n": 0, "same_day": 0, "share": None}
+
+
 def test_without_a_range_the_report_covers_the_last_fourteen_days(client, db, manager_claim_headers):
     payload = report(client, manager_claim_headers)
 
@@ -714,6 +747,7 @@ def test_the_admin_page_fixture_is_this_scenarios_report(client, db, manager_cla
 
     payload = report(client, manager_claim_headers, **ONE_DAY)
 
+    assert payload["first_half_day_same_day"] == {"n": 4, "same_day": 3, "share": 0.75}
     gate = payload["gate"]
     assert gate["n"] and gate["kept_share"] is not None and gate["before_eleven"]["kept_share"] is not None
     assert all(count == 1 for count in gate["excluded"].values()) and isinstance(gate["passes"], bool)

@@ -40,6 +40,7 @@ ws_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ws_module)
 
 from keyboards import PaymentKeyboards  # noqa: E402  (the bot's module, after `bot` claimed its deps)
+from shared.constants import get_delivery_statement  # noqa: E402
 from shared.redis_keyspace import RedisKeyspace  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -57,6 +58,8 @@ PAYLOAD = {
     "currency": "UZS",
     "timestamp": "2026-11-02T12:23:40+00:00",
 }
+# The backend's answer for a live order with no later date paid on an online rail (an older backend sends no key).
+FLAGGED = {**PAYLOAD, "show_delivery_statement": True}
 CLAIM = RedisKeyspace.bot_webhook_dedup("payment-success", REQUEST_ID)
 # A failed send is remembered for a day, so only its first failure is logged as an error.
 FAILED_BEFORE = RedisKeyspace.bot_webhook_dedup("payment-success-failed", REQUEST_ID)
@@ -115,8 +118,8 @@ async def push(bot, monkeypatch):
 
     async with test_utils.TestClient(test_utils.TestServer(server.app)) as client:
 
-        async def _push(request_id=REQUEST_ID):
-            raw = json.dumps(PAYLOAD).encode("utf-8")
+        async def _push(request_id=REQUEST_ID, payload=None):
+            raw = json.dumps(PAYLOAD if payload is None else payload).encode("utf-8")
             signature = hmac.new(SECRET.encode("utf-8"), raw, hashlib.sha256).hexdigest()
             response = await client.post(
                 ROUTE,
@@ -140,6 +143,10 @@ def _keyboard(language="uz"):
 def _sends(bot):
     """Every sendMessage the bot made: (chat, buttons, what Telegram refused it with, or None)."""
     return [(call.params["chat_id"], call.callback_data(), call.refused) for call in bot.telegram.of("sendMessage")]
+
+
+def _statement(language):
+    return " ".join(get_delivery_statement(language))
 
 
 async def test_a_delivered_confirmation_keeps_its_claim_for_a_day_and_a_replay_is_already_processed(bot, redis, push):
@@ -237,3 +244,37 @@ async def test_a_blocked_customer_whose_payment_message_cannot_be_edited_is_answ
         "Forbidden: bot was blocked by the user"
     ] * 2
     assert CLAIM not in redis.store
+
+
+# The backend decides whether the confirmation ends with the delivery statement (`show_delivery_statement`); the bot
+# holds the words: the constant's whole sentences, in plain text.
+
+
+@pytest.mark.parametrize("language", ["uz", "ru", "en"])
+async def test_a_flagged_confirmation_ends_with_the_delivery_statement(bot, push, language):
+    bot.database.user["preferred_language"] = language
+
+    assert await push(payload=FLAGGED) == (200, SENT)
+
+    (sent,) = bot.telegram.of("sendMessage")
+    assert sent.text.endswith("\n\n" + _statement(language)) and sent.text.count(_statement(language)) == 1
+    assert "parse_mode" not in sent.params
+
+
+async def test_the_edited_payment_message_carries_the_statement_too(bot, redis, push):
+    redis.store[PAYMENT_MESSAGE] = "5077"
+
+    assert await push(payload=FLAGGED) == (200, SENT)
+
+    (edit,) = bot.telegram.of("editMessageText")
+    assert edit.text.endswith("\n\n" + _statement("uz")) and "parse_mode" not in edit.params
+
+
+@pytest.mark.parametrize(
+    "body", [PAYLOAD, {**PAYLOAD, "show_delivery_statement": False}], ids=["an-older-backend", "not-flagged"]
+)
+async def test_an_unflagged_confirmation_says_nothing_about_delivery(bot, push, body):
+    assert await push(payload=body) == (200, SENT)
+
+    (sent,) = bot.telegram.of("sendMessage")
+    assert all(sentence not in sent.text for sentence in get_delivery_statement("uz"))

@@ -59,6 +59,7 @@ from staff_bot.keyboards.operator import OperatorKeyboards
 
 
 BASE_PRICE = Decimal("15000.00")
+DISCOUNT_PRICE = Decimal("12345.00")
 QUANTITY = 3
 
 
@@ -139,9 +140,22 @@ def operator(db):
 def priced_product(db, sample_product):
     """No discount price, no price rules — the plain configuration in which the
     published effective price and the charged price are the SAME number, so a
-    mismatch can only come from the bot."""
+    mismatch can only come from the bot. A discount price is the same number
+    too (see ``discounted_product``)."""
     sample_product.base_price = BASE_PRICE
     sample_product.discount_price = None
+    db.session.commit()
+    return sample_product
+
+
+@pytest.fixture
+def discounted_product(db, sample_product):
+    """A discount price below the base. An order is charged the discount price
+    (``Product.catalogue_unit_price``), and since 2026-11-13 the published
+    effective price starts from that same figure (final review P4), so the two
+    are still the SAME number."""
+    sample_product.base_price = BASE_PRICE
+    sample_product.discount_price = DISCOUNT_PRICE
     db.session.commit()
     return sample_product
 
@@ -290,6 +304,24 @@ def test_the_served_product_payload_has_no_top_level_price_key(
         "order in CreateOrderHandler._display_unit_price"
     )
     assert payload["pricing"]["current_price"] == float(BASE_PRICE)
+
+
+@pytest.mark.integration
+def test_a_discount_price_is_served_and_charged_as_one_number(
+    app, db, client, operator, sample_user, discounted_product, client_address
+):
+    """The served catalogue figure (what the operator screen falls back to before a client quote, and what the
+    customer bot and the website cart page show) is the unit price the phone order charges, with a discount set."""
+    served = _served_products(client, app, operator)
+    payload = next(item for item in served["items"] if item["id"] == discounted_product.id)
+
+    order = _charge(operator, sample_user, discounted_product, QUANTITY, client_address)
+    charged_unit = float(order.subtotal) / QUANTITY
+    assert charged_unit == float(DISCOUNT_PRICE), "fixture must charge the discount price"
+
+    assert payload["pricing"]["current_price"] == charged_unit
+    assert payload["pricing"]["is_discounted"] is True
+    assert CreateOrderHandler._display_unit_price(payload) == charged_unit
 
 
 # ---------------------------------------------------------------------------

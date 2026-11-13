@@ -1,0 +1,28 @@
+{#- The offer block: every active product's price, smallest order and terms, then the delivery line. Prints nothing
+    without a product. Layout is inline: static CSS is cached for hours. The text is always visible. -#}
+{% macro offer_facts_block(facts, language, product_id=None, heading_tag='h2') -%}
+{%- set shown = facts.products | selectattr('id', 'equalto', product_id) | list if product_id is not none else facts.products -%}
+{%- if shown %}
+<section data-offer-facts style="max-width:760px;margin:24px auto;text-align:left">
+    <{{ heading_tag }} data-offer-heading>{{ 'landing.offer.heading'|t(language) }}</{{ heading_tag }}>
+    <ul style="margin:0 0 12px;padding-left:18px">
+        {%- for p in shown %}
+        <li data-offer-product="{{ p.id }}" style="margin-bottom:8px">
+            <span data-offer-line="price" style="display:block">{{ offer_price_sentence(p, language) }}</span>
+            {%- if p.list_price_text %}
+            <span data-offer-line="list-price" style="display:block">{{ 'landing.offer.list_price'|t(language, price=p.list_price_text[language]) }}</span>
+            {%- endif %}
+            <span data-offer-line="smallest-order" style="display:block">{{ offer_smallest_order_sentence(p, language) }}</span>
+            {%- if p.no_deposit %}
+            <span data-offer-line="no-deposit" style="display:block">{{ 'landing.offer.no_deposit'|t(language) }}</span>
+            {%- endif %}
+        </li>
+        {%- endfor %}
+    </ul>
+    <p data-delivery-statement>{{ facts.delivery.statement[language] | join(' ') }}</p>
+    <p data-offer-line="delivery">{{ facts.delivery.line[language] }}</p>
+    <p data-offer-line="every-day">{{ 'landing.offer.every_day'|t(language) }}</p>
+    <p data-offer-line="as-of">{{ 'landing.offer.as_of'|t(language, date=facts.as_of) }}</p>
+</section>
+{%- endif %}
+{%- endmacro %}

@@ -232,7 +232,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
         know the payment rail.
 
         Public because it is the SSOT for schema.org / feed availability too:
-        callers holding a Product (frontend.routes._build_dual_sku_product_group)
+        callers holding a Product (services.public_offer_service.product_offer_facts)
         read it directly, callers holding a serialized dict read the same answer
         from to_dict()["stock_caps_purchase"].
         """

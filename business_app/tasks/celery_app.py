@@ -88,6 +88,7 @@ def make_celery(app=None):
             "business_app.tasks.sales_agent_tasks",
             "business_app.tasks.heartbeat_tasks",
             "business_app.tasks.reorder_reminder_tasks",
+            "business_app.tasks.seo_tasks",
         ],
     )
 

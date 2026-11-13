@@ -483,6 +483,9 @@
             {% endfor %}
         </div>
 
+        {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+        {{ offer_facts_block(offer_facts, current_language) }}
+
         {# ---- CTA ---- #}
         <div class="cta-box">
             <h2>{{ i18n.cta_heading }}</h2>

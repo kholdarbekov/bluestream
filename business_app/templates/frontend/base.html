@@ -496,13 +496,13 @@
                     <div class="line-shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-11.png') }});"></div>
                     <div class="text pull-left">
                         {% if current_language == 'uz' %}
-                        <h2>{{ 'landing.footer.cta_suffix'|t }} <span>{{ 'landing.common.call_us'|t }}</span> {{ 'landing.footer.cta_prefix'|t }}</h2>
+                        <h2><span>{{ 'landing.footer.order_prompt_bot'|t }}</span> {{ 'landing.footer.order_prompt'|t }}</h2>{# NATIVE-READ #}
                         {% else %}
-                        <h2>{{ 'landing.footer.cta_prefix'|t }} <span>{{ 'landing.common.call_us'|t }}</span> {{ 'landing.footer.cta_suffix'|t }}</h2>
+                        <h2>{{ 'landing.footer.order_prompt'|t }} <span>{{ 'landing.footer.order_prompt_bot'|t }}</span></h2>
                         {% endif %}
                     </div>
                     <div class="support-box pull-right">
-                        <a href="tel:{{ company_phone }}"><i class="fas fa-phone"></i>{{ company_phone }}</a>
+                        <a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane"></i>{{ 'landing.footer.open_bot'|t }}</a>
                     </div>
                 </div>
                 <div class="widget-section">
@@ -530,7 +530,7 @@
                                 <div class="widget-content">
                                     <ul class="info-list clearfix">
                                         <li><i class="fal fa-map-marker-alt"></i>{{ 'landing.contact.location'|t }}</li>
-                                        <li><i class="fal fa-phone"></i>{{ 'landing.common.call_us'|t }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
+                                        <li><i class="fal fa-phone"></i>{{ 'landing.footer.phone_label'|t }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
                                         <li><i class="fal fa-envelope-open-text"></i><a href="mailto:{{ company_email }}">{{ company_email }}</a></li>
                                     </ul>
                                 </div>

@@ -8,7 +8,7 @@ Every key is page-unique (`eta_acc_` prefix): `translations` is unique on (key, 
 `Translation.bulk_create_or_update` re-assigns `category` on every upsert, so a bare key another seed also writes would
 move that page's row. tests/unit/test_admin_ui_seed_key_ownership.py fails if this seed shares a key with another one.
 Values with `{{token}}` placeholders keep the page's token names in all three languages. The thresholds the copy names
-(`{{morning_ends}}`, `{{daytime_from}}`, `{{daytime_to}}`, `{{tolerance}}`) come from the report's `definitions`, so no
+(`{{morning_ends}}`, `{{daytime_from}}`, `{{daytime_to}}`, `{{first_half_ends}}`, `{{tolerance}}`) come from the report's `definitions`, so no
 value here states them.
 
 The menu label (`ui.nav.eta_accuracy`) is seeded by scripts/seed_backend_translations.py, not here.
@@ -42,6 +42,7 @@ UI_ETA_ACCURACY_TRANSLATIONS = {
         "eta_acc_median_window": "Median window: {{minutes}} overall, {{minutes_day}} for orders placed {{daytime_from}}–{{daytime_to}} (aim: 3 hours)",
         "eta_acc_same_day": "Delivered the same day as promised: {{share}}",
         "eta_acc_tomorrow_same_day": "Promised tomorrow but delivered the same day: {{share}}",
+        "eta_acc_first_half_same_day": "Orders placed before {{first_half_ends}} and delivered the same day: {{share}} over {{n}}",
         "eta_acc_early": "Arrived before the window opened: {{share}}, by a median {{minutes}}",
         "eta_acc_drivers": "One driver working: {{kept}} kept, median window {{minutes}}. Two or more: {{kept2}}, {{minutes2}}",
         "eta_acc_updates": "Updates per order: none {{zero}}, at most one {{one}}",
@@ -69,6 +70,7 @@ UI_ETA_ACCURACY_TRANSLATIONS = {
         "eta_acc_median_window": "O'rtacha oraliq: umuman {{minutes}}, soat {{daytime_from}}–{{daytime_to}} da berilgan buyurtmalar uchun {{minutes_day}} (maqsad: 3 soat)",  # NATIVE-READ
         "eta_acc_same_day": "Va'da qilingan kunning o'zida yetkazildi: {{share}}",  # NATIVE-READ
         "eta_acc_tomorrow_same_day": "Ertaga deb va'da qilingan, lekin o'sha kuni yetkazilgan: {{share}}",  # NATIVE-READ
+        "eta_acc_first_half_same_day": "Soat {{first_half_ends}} gacha berilgan va shu kuni yetkazilgan buyurtmalar: {{n}} tadan {{share}}",  # NATIVE-READ
         "eta_acc_early": "Oraliq ochilishidan oldin yetib keldi: {{share}}, o'rtacha {{minutes}} ga",  # NATIVE-READ
         "eta_acc_drivers": "Bitta haydovchi ishlaganda: {{kept}} bajarilgan, o'rtacha oraliq {{minutes}}. Ikki va undan ko'p: {{kept2}}, {{minutes2}}",  # NATIVE-READ
         "eta_acc_updates": "Har bir buyurtma bo'yicha xabarlar: hech qanday {{zero}}, ko'pi bilan bitta {{one}}",  # NATIVE-READ
@@ -96,6 +98,7 @@ UI_ETA_ACCURACY_TRANSLATIONS = {
         "eta_acc_median_window": "Медианное окно: {{minutes}} в целом, {{minutes_day}} для заказов, оформленных с {{daytime_from}} до {{daytime_to}} (цель: 3 часа)",  # NATIVE-READ
         "eta_acc_same_day": "Доставлено в тот же день, что обещано: {{share}}",  # NATIVE-READ
         "eta_acc_tomorrow_same_day": "Обещано на завтра, но доставлено в тот же день: {{share}}",  # NATIVE-READ
+        "eta_acc_first_half_same_day": "Заказы, оформленные до {{first_half_ends}} и доставленные в тот же день: {{share}} из {{n}}",  # NATIVE-READ
         "eta_acc_early": "Приехали до начала окна: {{share}}, в среднем (медиана) на {{minutes}}",  # NATIVE-READ
         "eta_acc_drivers": "Один водитель на линии: выполнено {{kept}}, медианное окно {{minutes}}. Два и более: {{kept2}}, {{minutes2}}",  # NATIVE-READ
         "eta_acc_updates": "Сообщений на заказ: ни одного {{zero}}, не более одного {{one}}",  # NATIVE-READ

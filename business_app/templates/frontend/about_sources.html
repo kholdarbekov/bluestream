@@ -331,6 +331,9 @@
         <p><code class="feed-url"><a href="{{ url_for('frontend.public_products_feed', _external=True) }}">{{ url_for('frontend.public_products_feed', _external=True) }}</a></code></p>
         <p>{{ i18n.machine_p2 }}</p>
 
+        {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+        {{ offer_facts_block(offer_facts, current_language) }}
+
         {# ---- Internal pillar references ---- #}
         <h2>{{ i18n.pillar_link_label }}</h2>
         <p>{{ i18n.pillar_link_desc }}</p>

@@ -14,7 +14,7 @@ Redis' dedupe key, and the provider POST (Telegram sendMessage, Brevo).
 """
 
 import inspect
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -25,10 +25,12 @@ from flask_jwt_extended import create_access_token
 from business_app.models.payment import Payment
 from business_app.models.subscription import Subscription
 from business_app.services.cash_collection_service import CashCollectionService
+from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.order_service import OrderService
 from business_app.services.payment_service import PaymentService
 from business_app.tasks import notification_tasks
 from business_app.tasks.payment_tasks import process_payment_confirmation, reconcile_completed_payment_side_effects
+from business_app.utils.local_windows import local_date
 from shared.enums import (
     OrderStatus,
     PaymentMethod,
@@ -126,8 +128,10 @@ def _pay_by_click(client, order, trans_id):
     assert complete.get_json()["error"] == 0, complete.get_json()
 
 
-def _push(user, order, payment):
-    """The one bot push a paid order gets, with the bot's own dedupe id."""
+def _push(user, order, payment, *, show_delivery_statement=True):
+    """The one bot push a paid order gets, with the bot's own dedupe id. `show_delivery_statement` is the backend's
+    answer to "does this confirmation end with the delivery statement": True for a live order with no later date paid
+    on an online rail, which every case here pays unless it says otherwise."""
     return (
         PAYMENT_SUCCESS,
         f"payment-confirm:{payment.id}",
@@ -138,6 +142,7 @@ def _push(user, order, payment):
             "order_number": order.order_number,
             "amount": float(order.total_amount),
             "currency": "UZS",
+            "show_delivery_statement": show_delivery_statement,
         },
     )
 
@@ -316,6 +321,83 @@ def test_the_sweep_running_between_a_click_completes_two_commits_sends_nothing(
     assert (swept[0]["scanned"], swept[0]["confirmation_redispatched"], swept[0]["errors"]) == (1, 0, 0)
     expected = ([_push(customer, order, payment)], []) if bot else ([], [((payment.id,), {})])
     assert (channels.pushes, channels.email_tasks) == expected
+    assert PaymentService.payment_confirmation_dispatched(db.session.get(Payment, payment.id)) is True
+
+
+# --------------------------------------------------------------------------- the delivery statement in the push
+# The push fires for every online payment, whatever the order's state. The backend decides whether the bot ends the
+# confirmation with the delivery statement (`OrderScheduleService.customer_delivery_expectation`); the bot holds the
+# words (tests/telegram_bot/test_webhook_payment_success.py).
+
+
+def test_a_click_payment_for_an_order_dated_later_asks_for_no_statement(
+    matrix_client, db, sample_user, order_with_address, no_fiscalization, channels
+):
+    customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
+    order = order_with_address
+    order.order_source = "telegram"
+    order.delivery_date = local_date() + timedelta(days=2)
+    db.session.commit()
+    payment = _seed_click_payment(db, order)
+
+    _pay_by_click(matrix_client, order, "917021")
+
+    unflagged = _push(customer, order, payment, show_delivery_statement=False)
+    assert (channels.pushes, channels.email_tasks) == ([unflagged], [])
+
+
+def test_a_late_click_payment_for_a_delivered_order_asks_for_no_statement(
+    matrix_client, db, sample_user, order_with_address, no_fiscalization, channels
+):
+    """The customer took delivery without paying; the order's Click link stays open (case B)."""
+    customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
+    order = order_with_address
+    order.order_source = "telegram"
+    order.status = OrderStatus.DELIVERED
+    order.is_paid = False
+    db.session.commit()
+    payment = _seed_click_payment(db, order)
+
+    _pay_by_click(matrix_client, order, "917022")
+
+    assert channels.pushes == [_push(customer, order, payment, show_delivery_statement=False)]
+
+
+def test_a_business_account_confirmation_asks_for_no_statement(db, sample_user, order_with_address, channels):
+    """Driven at the method and its after-commit publish: a real business-account order needs a funded workplace
+    contract, and the customer has just read the order-placed screen."""
+    customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
+    order = order_with_address
+    payment = _seed_click_payment(db, order)
+    payment.payment_method = order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+    payment.status = PaymentStatus.COMPLETED
+    db.session.commit()
+
+    assert PaymentService().dispatch_payment_confirmation(payment) is True
+    db.session.commit()
+
+    assert channels.pushes == [_push(customer, order, payment, show_delivery_statement=False)]
+
+
+def test_a_statement_that_cannot_be_decided_drops_the_sentence_never_the_confirmation(
+    matrix_client, db, sample_user, order_with_address, no_fiscalization, channels, monkeypatch
+):
+    """A Payme confirmation is never re-swept, so a failure to decide the statement must not cost the message."""
+    customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
+    order = order_with_address
+    order.order_source = "telegram"
+    db.session.commit()
+    payment = _seed_click_payment(db, order)
+
+    def the_schedule_cannot_answer(cls, order):
+        raise RuntimeError("the schedule could not be read")
+
+    monkeypatch.setattr(OrderScheduleService, "customer_delivery_expectation", classmethod(the_schedule_cannot_answer))
+
+    _pay_by_click(matrix_client, order, "917023")
+
+    unflagged = _push(customer, order, payment, show_delivery_statement=False)
+    assert (channels.pushes, channels.email_tasks) == ([unflagged], [])
     assert PaymentService.payment_confirmation_dispatched(db.session.get(Payment, payment.id)) is True
 
 

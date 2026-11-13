@@ -15,20 +15,36 @@ exporting a single ``ARTICLE`` dict (schema documented in
 2. Validates each article's ``ARTICLE`` dict against the M2 quality bar
    (word counts, HTML well-formed-ness, mandatory internal links, FAQPage
    JSON-LD presence).
-3. Upserts a ``BlogPost`` row by slug, writing the default-language (``uz``)
-   values directly to the columns and the ``ru`` / ``en`` values through
-   ``set_translations`` (matches how product/category seeding works
-   elsewhere in the codebase — see ``business_app/models/translatable.py``).
-4. Marks the post ``PUBLISHED`` with ``published_at = now`` (or preserves
-   an earlier ``published_at`` if the row already existed) so blog_list and
-   the sitemap pick it up immediately.
+3. Writes the five text fields (``title``, ``excerpt``, ``content``,
+   ``meta_title``, ``meta_description``) in uz, ru and en through
+   ``set_translations``; the uz values also go to the columns (the page reads
+   the uz translation row before the column, and the admin editor writes both).
+4. A LIVE article is updated: only those text fields are written. Its
+   category, tags, featured image, image alt text, featured flag and sort
+   order stay as they are, so what the owner set in Admin, Blog survives.
+   An article that is not live (no row, or not published) is left alone
+   unless ``BLOG_SEED_ALLOW_CREATE=1``: then a missing one is created with
+   every field from its module and published now, and an unpublished one
+   gets its text and is published again (an earlier ``published_at`` is kept).
 
-Run inside the business_app container::
+Run (``scripts/`` is neither in the image nor mounted, so copy it in; never
+pipe it over stdin)::
 
-    docker compose exec business_app python scripts/seed_blog_milestone_2.py
+    $COMPOSE exec -T business_app rm -rf /tmp/scripts /tmp/blog_baseline
+    $COMPOSE cp scripts business_app:/tmp/scripts
+    $COMPOSE exec -T -e PYTHONPATH=/app -e BLOG_SEED_ONLY=<slugs> business_app python /tmp/scripts/seed_blog_milestone_2.py
 
-Idempotent — safe to re-run; any change in the article module overwrites
-the DB content (so editing a module + re-running is the publish workflow).
+``BLOG_SEED_ONLY`` is required: a comma-separated list of slugs, or ``all``
+for the whole ``ARTICLE_SLUGS`` list. Unset, empty or blank, the run is
+refused (usage, exit code 2) and nothing is written, so a misspelt or empty
+variable never reaches every article. ``BLOG_SEED_ALLOW_CREATE=1`` lets the
+run create or re-publish an article that is not live; without it such an
+article is left alone. The first seeding of an empty database needs
+``BLOG_SEED_ONLY=all BLOG_SEED_ALLOW_CREATE=1``.
+
+Idempotent — safe to re-run; a change in an article module's text
+overwrites the text of a LIVE article (so editing a module + re-running is
+the publish workflow). Compare first with ``scripts/compare_blog_live_vs_modules.py``.
 
 The script never touches Translation rows for fields that aren't in
 ``BlogPost._translatable_fields``; we only seed ``title``, ``excerpt``,
@@ -42,6 +58,7 @@ import re
 import sys
 from datetime import datetime, UTC
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 # Add project root to import path so ``business_app`` resolves when run
@@ -50,6 +67,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from business_app import create_app, db  # noqa: E402
 from business_app.models.blog import BlogPost, BlogCategory, BlogStatus  # noqa: E402
+from business_app.services.public_urls_service import public_blog_paths  # noqa: E402
 
 
 # Article module slugs in publish order. The list is the source of truth —
@@ -193,18 +211,13 @@ def _upsert_post(article: dict[str, Any]) -> tuple[BlogPost, bool]:
         db.session.flush()  # need post.id before set_translations
         created = True
     else:
-        # Update default-language column values (uz lives on the columns).
+        # Update default-language column values (uz lives on the columns). Only the text: category, tags,
+        # featured image, image alt text, featured flag and sort order are the admin editor's once the row exists.
         post.title = default_t["title"]
         post.excerpt = default_t["excerpt"]
         post.content = default_t["content"]
         post.meta_title = default_t["meta_title"]
         post.meta_description = default_t["meta_description"]
-        post.category = BlogCategory(article["category"])
-        post.tags = article.get("tags", "") or None
-        post.featured_image = article.get("featured_image")
-        post.image_alt_text = article.get("image_alt_text")
-        post.is_featured = bool(article.get("is_featured", False))
-        post.sort_order = int(article.get("sort_order", 0))
         # Promote to PUBLISHED if it was previously DRAFT/ARCHIVED. Preserve
         # the original published_at so listings keep their stable order.
         if post.status != BlogStatus.PUBLISHED:
@@ -212,28 +225,71 @@ def _upsert_post(article: dict[str, Any]) -> tuple[BlogPost, bool]:
         if post.published_at is None:
             post.published_at = datetime.now(UTC)
 
-    # Non-default languages go through set_translations (uz already on cols).
+    # All languages go through set_translations (uz is on the columns as well).
     # set_translations expects {field_name: {language: value}} — see
     # Translation.bulk_set_entity_translations — so we transpose the article's
     # natural {language: {field: value}} authoring shape here.
-    non_default_translations: dict[str, dict[str, str]] = {}
+    # The uz row is written too: the page reads a uz translation row before the
+    # column, and the admin editor writes that row on every save.
+    translations: dict[str, dict[str, str]] = {}
     for field in ("title", "excerpt", "content", "meta_title", "meta_description"):
-        non_default_translations[field] = {
-            lang: article["translations"][lang][field] for lang in NON_DEFAULT_LANGUAGES
-        }
-    post.set_translations(non_default_translations)
+        translations[field] = {lang: article["translations"][lang][field] for lang in ALL_LANGUAGES}
+    post.set_translations(translations)
 
     return post, created
 
 
-def seed_milestone_2_blog() -> dict[str, int]:
-    """Main entry. Returns counters for created/updated/skipped/warnings."""
+SEED_ALL = "all"
+USAGE = (
+    "usage: BLOG_SEED_ONLY=<slug>[,<slug>...] | BLOG_SEED_ONLY=all  [BLOG_SEED_ALLOW_CREATE=1]  "
+    "python seed_blog_milestone_2.py\n"
+    "BLOG_SEED_ONLY is required; the whole list is only ever BLOG_SEED_ONLY=all. Nothing was written."
+)
+
+
+def _run_options(environ: Mapping[str, str]) -> tuple[list[str] | None, bool] | None:
+    """(slugs to seed or None for the whole list, whether a missing/unpublished article may be created).
+
+    The whole list is only ``BLOG_SEED_ONLY=all``. None when ``BLOG_SEED_ONLY`` names nothing (unset, empty or
+    blank): the run is refused, so a misspelt or empty variable never seeds every article."""
+    raw = environ.get("BLOG_SEED_ONLY", "").strip()
+    allow_create = environ.get("BLOG_SEED_ALLOW_CREATE") == "1"
+    if raw == SEED_ALL:
+        return None, allow_create
+    only = [part.strip() for part in raw.split(",") if part.strip()]
+    return (only, allow_create) if only else None
+
+
+def seed_milestone_2_blog(only: Sequence[str] | None = None, allow_create: bool = False) -> dict[str, int]:
+    """Main entry. Returns counters for created/updated/skipped/warnings.
+
+    An article that is not live (no row, or not published) is written only with ``allow_create``.
+    """
     print("\n=== Milestone 2 — blog cluster seeding ===\n")
 
-    counters = {"created": 0, "updated": 0, "skipped_missing_module": 0, "warnings": 0}
+    counters = {
+        "created": 0,
+        "updated": 0,
+        "skipped_missing_module": 0,
+        "skipped_not_live": 0,
+        "warnings": 0,
+    }
     pending_warnings: list[str] = []
 
-    for slug in ARTICLE_SLUGS:
+    slugs = list(only) if only is not None else ARTICLE_SLUGS
+    if only is not None:
+        content_dir = Path(__file__).resolve().parent / "blog_content"
+        unknown = [slug for slug in slugs if not (content_dir / f"{slug.replace('-', '_')}.py").is_file()]
+        if unknown:
+            raise ValueError(f"no article module for: {', '.join(unknown)}")
+    live_slugs = {post.slug for _path, post in public_blog_paths()}
+
+    for slug in slugs:
+        if slug not in live_slugs and not allow_create:
+            state = "not published" if BlogPost.query.filter_by(slug=slug).first() else "absent"
+            print(f"  ⏭  {slug}: {state} — left alone (set BLOG_SEED_ALLOW_CREATE=1 to create it)")
+            counters["skipped_not_live"] += 1
+            continue
         module_path = _slug_to_module(slug)
         try:
             module = importlib.import_module(module_path)
@@ -280,16 +336,23 @@ def seed_milestone_2_blog() -> dict[str, int]:
         f"{counters['created']} created, "
         f"{counters['updated']} updated, "
         f"{counters['skipped_missing_module']} skipped (missing module), "
+        f"{counters['skipped_not_live']} skipped (not live), "
         f"{counters['warnings']} warnings"
     )
     return counters
 
 
 def main() -> int:
+    options = _run_options(os.environ)
+    if options is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+    only, allow_create = options
+    print(f"Seeding: {', '.join(only) if only is not None else 'the whole list'}; allow create: {allow_create}")
     app = create_app()
     with app.app_context():
         try:
-            seed_milestone_2_blog()
+            seed_milestone_2_blog(only=only, allow_create=allow_create)
         except Exception as exc:
             db.session.rollback()
             print(f"\nFATAL: {exc}")

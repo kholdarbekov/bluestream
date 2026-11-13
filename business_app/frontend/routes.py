@@ -22,6 +22,17 @@ from business_app.models.blog import BlogPost, BlogStatus
 from business_app.models.audit import AuditSeverity
 from business_app.services.email_template_service import get_email_template_service
 from business_app.services.loyalty_service import LoyaltyService
+from business_app.services.public_offer_service import (
+    _json_number,
+    build_offer_faq,
+    build_offer_jsonld,
+    get_public_offer_facts,
+    home_meta_description,
+    price_sentence,
+    public_price_range,
+    smallest_order_sentence,
+)
+from business_app.services.public_urls_service import STATIC_PUBLIC_PATHS, public_blog_paths, public_product_paths
 from business_app.services.token_service import TokenService
 from business_app.services.telegram_login_service import (
     REFUSED_BAD_HASH,
@@ -63,7 +74,7 @@ from business_app.utils import display_labels
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from business_app import limiter
-from shared.constants import get_delivery_coverage, get_geoshape_polygon
+from shared.constants import get_delivery_coverage, get_delivery_statement, get_geoshape_polygon
 from shared.safe_paths import safe_next_path
 from shared.telegram_login import TELEGRAM_LOGIN_PATH, is_allowed_login_target
 from datetime import datetime, UTC
@@ -239,6 +250,30 @@ def _render_sitemap_index(entries):
     return Response("\n".join(lines), mimetype="application/xml")
 
 
+def _offer_context(product=None):
+    """The offer facts a storefront page prints, for `render_template`: `offer_facts` (the facts), `offer_by_id`
+    (each listed product's facts by its id) and `offer_product` (the facts of `product`, the page's own `Product`
+    row, or None without one). Read once per page, never memoised."""
+    offer_facts = get_public_offer_facts()
+    offer_by_id = {product_facts["id"]: product_facts for product_facts in offer_facts["products"]}
+    offer_product = None
+    if product is not None:
+        offer_product = offer_by_id.get(product.id)
+    return {"offer_facts": offer_facts, "offer_product": offer_product, "offer_by_id": offer_by_id}
+
+
+def _offer_rows(offer_by_id):
+    """The `Product` rows of the listed offer facts, by id: the feeds read their text from these and their price from
+    the facts, so every row printed has its facts."""
+    return Product.query.filter(Product.id.in_(list(offer_by_id))).order_by(Product.id).all()
+
+
+def _order_channels(company_website):
+    """Where an order can be placed, for both public feeds: the website and the Telegram bot. The phone is contact
+    data, not an order channel (`llms.txt` names the same two)."""
+    return {"web": company_website, "telegramBot": current_app.config["COMPANY_TELEGRAM_BOT_URL"]}
+
+
 def _render_product_detail_page(product, language):
     """Render product detail template with consistent related products logic."""
     related_products = (
@@ -251,21 +286,25 @@ def _render_product_detail_page(product, language):
 
     canonical_endpoint = "frontend.product_detail_slug" if product.slug else "frontend.product_detail"
     canonical_params = {"slug": product.slug} if product.slug else {"product_id": product.id}
+    canonical_url = _build_external_url(canonical_endpoint, **canonical_params)
     product_payload = product.to_dict(language=language)
     product_images = product_payload.get("images") or []
     if isinstance(product_images, list):
         product_payload["images"] = [(_as_absolute_url(image) or image) for image in product_images]
+    offer = _offer_context(product)
 
     return render_template(
         "frontend/product_detail.html",
         product=product_payload,
         related_products=[rp.to_dict(language=language) for rp in related_products],
-        canonical_url=_build_external_url(canonical_endpoint, **canonical_params),
+        canonical_url=canonical_url,
+        offer_jsonld=build_offer_jsonld(offer["offer_product"], url=canonical_url),
+        **offer,
     )
 
 
-def _build_dual_sku_product_group(language="en"):
-    """schema.org ProductGroup linking the two bottle SKUs (18.9 L + 10 L).
+def _build_dual_sku_product_group(facts, language):
+    """schema.org ProductGroup linking the two bottle SKUs (18.9 L + 10 L), from the offer facts.
 
     LLMs treat standalone ``Product`` entries as unrelated items; a
     ``ProductGroup`` with ``hasVariant`` plus a plain-language decision rule lets
@@ -274,57 +313,38 @@ def _build_dual_sku_product_group(language="en"):
     active, so the rendering template omits the block (never publish an empty
     group to crawlers).
     """
-    products = Product.query.filter_by(is_active=True).order_by(Product.base_price.desc()).all()
+    # Only the two canonical bottle SKUs form the group.
+    bottles = [product_facts for product_facts in facts["products"] if product_facts["size_code"] in ("10L", "19L")]
+    if not bottles:
+        return None
 
     variants = []
-    prices = []
-    any_in_stock = False
-    for product in products:
-        size_value = product.size.value if product.size else None
-        if size_value not in ("10L", "19L"):
-            continue  # only the two canonical bottle SKUs form the group
-
+    for product_facts in bottles:
         # TWO independent facts, and they used to share one variable.
         #   `is_large_format` is physical: an 18.9 L bottle needs a cooler, a
         #   10 L one does not. That is what `size` records.
-        #   `is_returnable` is operational: is this SKU in the swap pool the
+        #   `returnable` is operational: is this SKU in the swap pool the
         #   bottle ledger tracks? That is `Product.is_returnable_bottle`.
         # Deriving the second from the first published "Returnable bottle" to
         # crawlers straight off the size, so the public claim silently
         # disagreed with what the ledger actually booked.
-        is_large_format = size_value == "19L"
-        is_returnable = product.is_returnable_bottle
-        size_label = "18.9 L" if is_large_format else "10 L"
-        effective_price = float(product.discount_price or product.base_price or 0)
-        if effective_price > 0:
-            prices.append(effective_price)
-        # A marking-code product's stock is its code pool, not stock_quantity, and
-        # the pool gates only code-consuming rails -- so it must not be advertised
-        # OutOfStock on / and /shop while the detail page sells it for cash. The
-        # size filter above is exactly the two bottle SKUs, one of which IS the
-        # marking-code product. Same SSOT as the product page and the JSON feed.
-        in_stock = not product.stock_caps_purchase() or (product.stock_quantity or 0) > 0
-        any_in_stock = any_in_stock or in_stock
-
-        product_url = (
-            _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
-            if product.slug
-            else _absolute_public_url(url_for("frontend.product_detail", product_id=product.id))
-        )
+        is_large_format = product_facts["size_code"] == "19L"
+        litres = product_facts["litres"]  # None when the row records no volume
+        product_url = _absolute_public_url(product_facts["path"])
         variants.append(
             {
                 "@type": "Product",
-                "name": product.get_translated("name", language),
-                "sku": product.sku,
+                "name": product_facts["name"][language],
+                "sku": product_facts["sku"],
                 "url": product_url,
-                "size": size_label,
+                "size": product_facts["size_text"]["en"],
                 "additionalProperty": [
                     {
                         "@type": "PropertyValue",
                         "name": "Bottle size (litres)",
-                        "value": 18.9 if is_large_format else 10,
+                        "value": _json_number(litres) if litres is not None else None,
                     },
-                    {"@type": "PropertyValue", "name": "Returnable bottle", "value": is_returnable},
+                    {"@type": "PropertyValue", "name": "Returnable bottle", "value": product_facts["returnable"]},
                     {
                         "@type": "PropertyValue",
                         "name": "Requires a cooler/dispenser",
@@ -341,32 +361,35 @@ def _build_dual_sku_product_group(language="en"):
                         ),
                     },
                 ],
-                "offers": {
-                    "@type": "Offer",
-                    "priceCurrency": "UZS",
-                    "price": effective_price,
-                    "availability": f"https://schema.org/{'InStock' if in_stock else 'OutOfStock'}",
-                    "url": product_url,
-                },
+                "offers": build_offer_jsonld(product_facts, url=product_url),
             }
         )
 
-    if not variants:
-        return None
-
+    prices = [variant["offers"]["price"] for variant in variants if variant["offers"]["price"] > 0]
+    in_stock = any(product_facts["available"] for product_facts in bottles)
+    # The decision rule names each bottle by its facts' size, one sentence per variant present: no typed size.
+    size_by_code = {}
+    for product_facts in bottles:
+        size_by_code.setdefault(product_facts["size_code"], product_facts["size_text"]["en"])
+    sentences = ["Aqua Element delivers artesian drinking water across Tashkent in two bottle sizes."]
+    if "19L" in size_by_code:
+        sentences.append(
+            f"If you have or want a water cooler/dispenser, choose the {size_by_code['19L']} returnable bottle — "
+            "for offices, classrooms, clinics, gyms, and homes with a cooler."
+        )
+    if "10L" in size_by_code:
+        sentences.append(
+            f"If you have no cooler, choose the {size_by_code['10L']} bottle — for kitchens, individuals, and "
+            "smaller households."
+        )
+    sentences += ["Both are the same 11-stage-filtered artesian water.", facts["delivery"]["line"]["en"]]
     company_website = current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz")
     schema = {
         "@context": "https://schema.org",
         "@type": "ProductGroup",
         "@id": f"{company_website}#water-bottles",
         "name": "Aqua Element artesian drinking water",
-        "description": (
-            "Aqua Element delivers artesian drinking water across Tashkent in two bottle sizes. If you have "
-            "or want a water cooler/dispenser, choose the 18.9 L (19 L) returnable bottle — for offices, "
-            "classrooms, clinics, gyms, and homes with a cooler. If you have no cooler, choose the 10 L "
-            "bottle — for kitchens, individuals, and smaller households. Both are the same 11-stage-filtered "
-            "artesian water; delivery is free across Tashkent."
-        ),
+        "description": " ".join(sentences),
         "brand": {"@type": "Brand", "name": current_app.config.get("COMPANY_NAME", "Aqua Element")},
         "productGroupID": "aqua-element-water",
         "variesBy": ["https://schema.org/size"],
@@ -376,11 +399,11 @@ def _build_dual_sku_product_group(language="en"):
     if prices:
         schema["offers"] = {
             "@type": "AggregateOffer",
-            "priceCurrency": "UZS",
+            "priceCurrency": facts["currency"],
             "lowPrice": min(prices),
             "highPrice": max(prices),
             "offerCount": len(variants),
-            "availability": f"https://schema.org/{'InStock' if any_in_stock else 'OutOfStock'}",
+            "availability": f"https://schema.org/{'InStock' if in_stock else 'OutOfStock'}",
         }
     return schema
 
@@ -475,6 +498,7 @@ def index():
 
     print(f"!!!! RENDER_TEMPLATE ABOUT TO BE CALLED for {request_id} with language: {language}")
 
+    offer = _offer_context()
     return render_template(
         "frontend/index.html",
         featured_products=featured_products,
@@ -485,7 +509,9 @@ def index():
         user_data=user_data,
         loyalty_data=loyalty_data,
         loyalty_handbook=get_loyalty_handbook_context(),
-        product_group_schema=_build_dual_sku_product_group(language),
+        product_group_schema=_build_dual_sku_product_group(offer["offer_facts"], language),
+        home_meta_description=home_meta_description(offer["offer_facts"], language),
+        **offer,
     )
 
 
@@ -540,6 +566,7 @@ def shop():
     if products_pagination.has_next:
         next_page_url = _build_external_url("frontend.shop", page=products_pagination.next_num, **base_listing_params)
 
+    offer = _offer_context()
     return render_template(
         "frontend/shop.html",
         products=products_pagination,
@@ -550,15 +577,18 @@ def shop():
         meta_robots=meta_robots,
         prev_page_url=prev_page_url,
         next_page_url=next_page_url,
-        product_group_schema=_build_dual_sku_product_group(language),
+        product_group_schema=_build_dual_sku_product_group(offer["offer_facts"], language),
+        offer_faq=build_offer_faq(offer["offer_facts"], language),
+        **offer,
     )
 
 
 @frontend_bp.route("/product/<int:product_id>")
 def product_detail(product_id):
-    """Legacy product detail route using ID, kept for backward compatibility."""
+    """Legacy product detail route using ID, kept for backward compatibility. A product that is not active answers
+    404 like any missing page (owner, 2026-11-13), before any redirect to its slug."""
     language = get_current_language()
-    product = Product.query.get_or_404(product_id)
+    product = Product.query.filter_by(id=product_id, is_active=True).first_or_404()
     if product.slug:
         return redirect(url_for("frontend.product_detail_slug", slug=product.slug), code=301)
     return _render_product_detail_page(product, language)
@@ -566,9 +596,9 @@ def product_detail(product_id):
 
 @frontend_bp.route("/product/<slug>")
 def product_detail_slug(slug):
-    """Primary SEO-friendly product detail route."""
+    """Primary SEO-friendly product detail route. A product that is not active answers 404 (owner, 2026-11-13)."""
     language = get_current_language()
-    product = Product.query.filter_by(slug=slug).first_or_404()
+    product = Product.query.filter_by(slug=slug, is_active=True).first_or_404()
     return _render_product_detail_page(product, language)
 
 
@@ -576,6 +606,25 @@ def product_detail_slug(slug):
 def cart():
     """Shopping cart page"""
     return render_template("frontend/cart.html")
+
+
+def _delivery_statement_text() -> str:
+    """The delivery statement as the website prints it: its whole sentences, in the page's language."""
+    return " ".join(get_delivery_statement(get_current_language()))
+
+
+def _order_when_context(order) -> dict:
+    """What an order page says about when: a "Scheduled for" date, or the statement, or neither.
+
+    The backend decides (`customer_delivery_expectation`); this only labels the answer."""
+    from business_app.services.order_schedule_service import OrderScheduleService
+
+    expectation = OrderScheduleService.customer_delivery_expectation(order)
+    day = expectation["scheduled_for"]
+    return {
+        "scheduled_for_label": display_labels.date_long(day, get_current_language()) if day is not None else None,
+        "delivery_statement": _delivery_statement_text() if expectation["show_statement"] else None,
+    }
 
 
 @frontend_bp.route("/checkout")
@@ -590,7 +639,13 @@ def checkout():
     # Get today's date for date picker
     today = datetime.now(UTC).strftime("%Y-%m-%d")
 
-    return render_template("frontend/checkout.html", user=user, addresses=addresses, today=today)
+    return render_template(
+        "frontend/checkout.html",
+        user=user,
+        addresses=addresses,
+        today=today,
+        delivery_statement=_delivery_statement_text(),
+    )
 
 
 @frontend_bp.route("/order-confirmation")
@@ -626,6 +681,7 @@ def order_confirmation():
         # F15: the wait for a new date, or the status itself. The page labels it and
         # never works the wait out from the order and its delivery.
         display_status=OrderScheduleService.customer_display_status(order),
+        **_order_when_context(order),
     )
 
 
@@ -732,6 +788,7 @@ def order_tracking():
         # labels the one and hands the other to order-actions.js through its island, and works out neither.
         display_status=OrderScheduleService.customer_display_status(order),
         customer_actions=customer_actions(order, language=get_current_language()),
+        **_order_when_context(order),
     )
 
 
@@ -1116,7 +1173,7 @@ def process_filtration():
     inside the template (per-language) and propagates to base.html via the
     shared meta-block convention.
     """
-    return render_template("frontend/process_filtration.html")
+    return render_template("frontend/process_filtration.html", **_offer_context())
 
 
 @frontend_bp.route("/about/sources")
@@ -1129,7 +1186,7 @@ def about_sources():
     JS) reads the full text. Localisation lives in the template via the
     same i18n-dict pattern used by process_filtration.html.
     """
-    return render_template("frontend/about_sources.html")
+    return render_template("frontend/about_sources.html", **_offer_context())
 
 
 @frontend_bp.route("/gallery")
@@ -1152,14 +1209,18 @@ def privacy():
 
 @frontend_bp.route("/delivery-policy")
 def delivery_policy():
-    """Delivery policy page."""
-    return render_template("frontend/delivery_policy.html")
+    """Delivery page: the shared offer block plus how ordering and delivery work."""
+    return render_template(
+        "frontend/delivery_policy.html",
+        **_offer_context(),
+        schedule_horizon_days=current_app.config["MAX_SCHEDULE_HORIZON_DAYS"],
+    )
 
 
 @frontend_bp.route("/pricing-policy")
 def pricing_policy():
     """Pricing policy page."""
-    return render_template("frontend/pricing_policy.html")
+    return render_template("frontend/pricing_policy.html", **_offer_context())
 
 
 @frontend_bp.route("/refund-policy")
@@ -1177,7 +1238,12 @@ def quality_standards():
 @frontend_bp.route("/water-delivery-faq")
 def water_delivery_faq():
     """Public FAQ page for delivery and product buying questions."""
-    return render_template("frontend/water_delivery_faq.html")
+    offer = _offer_context()
+    return render_template(
+        "frontend/water_delivery_faq.html",
+        **offer,
+        offer_faq=build_offer_faq(offer["offer_facts"], get_current_language()),
+    )
 
 
 @frontend_bp.route("/login")
@@ -1692,7 +1758,7 @@ def inject_global_vars():
         "geo_latitude": current_app.config.get("COMPANY_GEO_LATITUDE", ""),
         "geo_longitude": current_app.config.get("COMPANY_GEO_LONGITUDE", ""),
         "opening_hours_specs": opening_hours_specs,
-        "price_range": current_app.config.get("COMPANY_PRICE_RANGE", ""),
+        "price_range": public_price_range() or "",
         "wikidata_id": wikidata_id,
         "same_as_links": same_as_links,
     }
@@ -1749,15 +1815,11 @@ def llms_txt():
     """Serve /llms.txt at the site root.
 
     The llms.txt convention (https://llmstxt.org/) lets us hand AI assistants a
-    curated, markdown-formatted index of our most cite-worthy pages. Nginx in
-    production also has a `location = /llms.txt` alias for performance, but
-    this route guarantees the URL works in dev and as a fallback.
+    curated, markdown-formatted index of our most cite-worthy pages.
     """
-    from flask import send_from_directory
-
-    static_dir = Path(current_app.static_folder)
-    response = send_from_directory(str(static_dir), "llms.txt", mimetype="text/markdown; charset=utf-8")
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    body = render_template("frontend/llms.txt", offer_facts=get_public_offer_facts())
+    response = current_app.response_class(body.replace("\u00a0", " "), mimetype="text/markdown")
+    response.headers["Cache-Control"] = "public, no-cache"
     return response
 
 
@@ -1897,27 +1959,6 @@ def sitemap_index():
 def sitemap_static():
     """Sitemap for static/public marketing pages."""
     static_lastmod = _static_content_lastmod()
-    paths = [
-        "/",
-        "/shop",
-        "/subscriptions",
-        "/services",
-        "/coverage",
-        "/loyalty-guide",
-        "/about",
-        "/contact",
-        "/gallery",
-        "/blog",
-        "/terms",
-        "/privacy",
-        "/delivery-policy",
-        "/pricing-policy",
-        "/refund-policy",
-        "/quality-standards",
-        "/water-delivery-faq",
-        "/process/11-step-filtration",
-        "/about/sources",
-    ]
     entries = [
         {
             "loc": _absolute_public_url(path),
@@ -1925,7 +1966,7 @@ def sitemap_static():
             "changefreq": "weekly",
             "priority": "0.8" if path == "/" else "0.6",
         }
-        for path in paths
+        for path in STATIC_PUBLIC_PATHS
     ]
     return _render_sitemap_urlset(entries)
 
@@ -1933,44 +1974,29 @@ def sitemap_static():
 @frontend_bp.route("/sitemap-products.xml")
 def sitemap_products():
     """Sitemap for active product pages."""
-    products = Product.query.filter_by(is_active=True).all()
-    entries = []
-    for product in products:
-        if product.slug:
-            product_path = url_for("frontend.product_detail_slug", slug=product.slug)
-        else:
-            product_path = url_for("frontend.product_detail", product_id=product.id)
-
-        entries.append(
-            {
-                "loc": _absolute_public_url(product_path),
-                "lastmod": _format_lastmod(
-                    getattr(product, "updated_at", None) or getattr(product, "created_at", None)
-                ),
-                "changefreq": "weekly",
-                "priority": "0.7",
-            }
-        )
+    entries = [
+        {
+            "loc": _absolute_public_url(product_path),
+            "lastmod": _format_lastmod(getattr(product, "updated_at", None) or getattr(product, "created_at", None)),
+            "changefreq": "weekly",
+            "priority": "0.7",
+        }
+        for product_path, product in public_product_paths()
+    ]
     return _render_sitemap_urlset(entries)
 
 
 @frontend_bp.route("/sitemap-blog.xml")
 def sitemap_blog():
     """Sitemap for published blog pages."""
-    posts = (
-        BlogPost.query.filter(BlogPost.status == BlogStatus.PUBLISHED, BlogPost.published_at <= datetime.now(UTC))
-        .order_by(desc(BlogPost.published_at))
-        .all()
-    )
-
     entries = [
         {
-            "loc": _absolute_public_url(url_for("frontend.blog_detail", slug=post.slug)),
+            "loc": _absolute_public_url(post_path),
             "lastmod": _format_lastmod(post.published_at or getattr(post, "updated_at", None)),
             "changefreq": "monthly",
             "priority": "0.6",
         }
-        for post in posts
+        for post_path, post in public_blog_paths()
     ]
     return _render_sitemap_urlset(entries)
 
@@ -1979,7 +2005,10 @@ def sitemap_blog():
 def google_products_feed():
     """Google Merchant-compatible product feed (XML RSS)."""
     language = current_app.config.get("DEFAULT_LANGUAGE", "uz")
-    products = Product.query.filter_by(is_active=True).all()
+    offer = _offer_context()
+    offer_by_id = offer["offer_by_id"]
+    currency = offer["offer_facts"]["currency"]
+    products = _offer_rows(offer_by_id)
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -1999,29 +2028,13 @@ def google_products_feed():
             or product_data.get("description")
             or product_name
         )
-        base_price_raw = product_data.get("base_price") or 0
-        discount_price_raw = product_data.get("discount_price")
-        base_price_value = float(base_price_raw) if base_price_raw is not None else 0.0
-        discount_price_value = float(discount_price_raw) if discount_price_raw is not None else 0.0
-        if base_price_value <= 0 and discount_price_value > 0:
-            base_price_value = discount_price_value
-            discount_price_value = 0.0
-        use_sale_price = discount_price_value > 0 and discount_price_value < base_price_value
-        # Google Merchant suppresses an out-of-stock item, so a marking-code
-        # product -- whose stock is its code pool, not this column -- must not be
-        # advertised out of stock while we sell it for cash. `product_data` already
-        # carries the SSOT flag (Product.stock_caps_purchase), so this costs no
-        # extra query.
-        product_availability = (
-            "in stock"
-            if (not product_data.get("stock_caps_purchase", True) or (product.stock_quantity or 0) > 0)
-            else "out of stock"
-        )
-
-        if product.slug:
-            product_link = _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
-        else:
-            product_link = _absolute_public_url(url_for("frontend.product_detail", product_id=product.id))
+        facts = offer_by_id[product.id]
+        list_price = facts["list_price"]
+        # Googles pair: the list price and, when discounted, the price an order is charged.
+        feed_price = f"{_format_feed_price(list_price or facts['unit_price'])} {currency}"
+        feed_sale_price = f"{_format_feed_price(facts['unit_price'])} {currency}"
+        product_availability = "in stock" if facts["available"] else "out of stock"
+        product_link = _absolute_public_url(facts["path"])
 
         images = product_data.get("images") or []
         image_link = (
@@ -2043,7 +2056,7 @@ def google_products_feed():
                 f"<title>{escape(str(product_name))}</title>",
                 f"<description>{escape(str(product_description))}</description>",
                 f"<link>{escape(product_link)}</link>",
-                f"<g:price>{_format_feed_price(base_price_value)} UZS</g:price>",
+                f"<g:price>{feed_price}</g:price>",
                 f"<g:availability>{product_availability}</g:availability>",
                 "<g:condition>new</g:condition>",
                 f'<g:brand>{escape("Aqua Element")}</g:brand>',
@@ -2051,8 +2064,8 @@ def google_products_feed():
             ]
         )
 
-        if use_sale_price:
-            lines.append(f"<g:sale_price>{_format_feed_price(discount_price_value)} UZS</g:sale_price>")
+        if list_price:
+            lines.append(f"<g:sale_price>{feed_sale_price}</g:sale_price>")
 
         if image_link:
             lines.append(f"<g:image_link>{escape(image_link)}</g:image_link>")
@@ -2197,12 +2210,16 @@ def public_products_feed():
       - All translatable fields are emitted in all three languages
         (uz/ru/en) so an assistant can quote in the user's language.
 
-    Caching: short Cache-Control (15 min) — long enough to absorb burst
-    traffic from crawlers, short enough that price/availability changes
-    propagate quickly. Re-uses the active-product filter the rest of the
-    site uses (`is_active=True`) so deactivated SKUs are never exposed.
+    Caching: `public, no-cache` -- the feed is revalidated on every request
+    so a price change shows at once, and the word `public` keeps the
+    login-cookie refresh off it. Prices, sizes and availability come from
+    the public offer facts (`get_public_offer_facts`), which list only the
+    active products, so deactivated SKUs are never exposed.
     """
-    products = Product.query.filter_by(is_active=True).order_by(Product.id).all()
+    offer = _offer_context()
+    offer_facts = offer["offer_facts"]
+    offer_by_id = offer["offer_by_id"]
+    products = _offer_rows(offer_by_id)
 
     # Resolve site-wide identity from the same context the JSON-LD blocks
     # use, so the feed stays consistent with what's emitted on every page.
@@ -2249,7 +2266,6 @@ def public_products_feed():
     for product in products:
         # Fetch translations across all three languages so AI assistants can
         # quote whichever matches the user's locale.
-        i18n_name = {lang: product.get_translated("name", lang) for lang in ("uz", "ru", "en")}
         i18n_description = {lang: product.get_translated("description", lang) for lang in ("uz", "ru", "en")}
         i18n_short_description = {}
         # ``short_description`` is translatable on Product per current schema;
@@ -2260,69 +2276,43 @@ def public_products_feed():
             except Exception:
                 i18n_short_description[lang] = None
 
-        product_url = (
-            _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
-            if product.slug
-            else _absolute_public_url(url_for("frontend.product_detail", product_id=product.id))
-        )
+        facts = offer_by_id[product.id]
+        product_url = _absolute_public_url(facts["path"])
 
         product_dict = product.to_dict(language="uz")
         images = product_dict.get("images") or []
         absolute_images = [_as_absolute_url(img) for img in images if img]
         absolute_images = [img for img in absolute_images if img]
 
-        base_price = float(product_dict.get("base_price") or 0)
-        discount_price_raw = product_dict.get("discount_price")
-        discount_price = float(discount_price_raw) if discount_price_raw is not None else 0.0
-        sale_price = discount_price if (0 < discount_price < base_price) else None
-
-        # A marking-code product's stock is its code pool, not stock_quantity, so
-        # it must not be advertised as OutOfStock to crawlers/assistants while the
-        # product detail page still sells it for cash. `product_dict` already
-        # carries the SSOT flag (Product.stock_caps_purchase).
-        availability = (
-            "InStock"
-            if (not product_dict.get("stock_caps_purchase", True) or (product.stock_quantity or 0) > 0)
-            else "OutOfStock"
-        )
-
-        # Size-aware structured fields. The codebase's ProductSizeEnum carries
-        # values like "10L"/"19L"; we expose both the human label and a
-        # numeric litres value so partners don't have to parse strings.
-        size_label = getattr(product, "size", None)
-        size_litres = None
-        if size_label:
-            size_str = size_label.value if hasattr(size_label, "value") else str(size_label)
-            # Map known SKU sizes; unknown sizes pass through as the label only.
-            litres_map = {"10L": 10.0, "19L": 18.9}
-            size_litres = litres_map.get(size_str)
-        size_str = "18.9L" if size_str == "19L" else size_str  # Normalize "19L" to more standard "18.9L" for clarity
+        litres = facts["litres"]
+        offers = build_offer_jsonld(facts, url=product_url)
+        if facts["list_price"] is not None:
+            offers["listPrice"] = _json_number(facts["list_price"])
         products_payload.append(
             {
                 "@type": "Product",
                 "id": product.id,
                 "sku": getattr(product, "sku", None),
-                "name": i18n_name,
+                "name": facts["name"],
                 "description": i18n_description,
                 "shortDescription": i18n_short_description,
                 "size": {
-                    "label": size_str if size_label else None,
-                    "litres": size_litres,
+                    "label": f"{_json_number(litres)}L" if litres is not None else facts["size_code"],
+                    "litres": _json_number(litres) if litres is not None else None,
                 },
                 # From the ledger's own rule, not from the size string — see
                 # `_build_dual_sku_product_group` for why the two questions are
                 # kept apart.
-                "returnable": product.is_returnable_bottle,
+                "returnable": facts["returnable"],
                 "url": product_url,
                 "images": absolute_images,
-                "offers": {
-                    "@type": "Offer",
-                    "priceCurrency": "UZS",
-                    "price": base_price,
-                    "salePrice": sale_price,
-                    "availability": f"https://schema.org/{availability}",
-                    "url": product_url,
-                },
+                "offers": offers,
+                "priceText": facts["price_text"],
+                "minOrderQuantity": facts["smallest_order_quantity"],
+                "minOrderTotal": _json_number(facts["smallest_order_total"]),
+                "minOrderTotalText": facts["smallest_order_total_text"],
+                # Only when true: a `false` would read as "a deposit applies", and no bottle carries one.
+                **({"noDeposit": True} if facts["no_deposit"] else {}),
                 "brand": "Aqua Element",
                 "category": "Bottled artesian water",
             }
@@ -2369,12 +2359,18 @@ def public_products_feed():
             "districts": [d["name"] for d in coverage_en["districts"]],
             "coverageUrl": "/coverage",
         },
-        "orderChannels": {
-            "web": company_website,
-            "telegramBot": current_app.config["COMPANY_TELEGRAM_BOT_URL"],
-            "phone": current_app.config.get("COMPANY_PHONE", ""),
-        },
+        "orderChannels": _order_channels(company_website),
         "supportedLanguages": ["uz", "ru", "en"],
+        "pricesAsOf": offer_facts["as_of"],
+        "minOrderAmount": _json_number(offer_facts["min_order_amount"]),
+        "delivery": {
+            "fee": _json_number(offer_facts["delivery"]["fee"]),
+            "currency": offer_facts["currency"],
+            "free": offer_facts["delivery"]["free"],
+            "everyDay": offer_facts["delivery"]["every_day"],
+            "statement": {lang: list(sentences) for lang, sentences in offer_facts["delivery"]["statement"].items()},
+            "statementReviewedOn": offer_facts["delivery"]["statement_reviewed_on"],
+        },
         "totalProducts": len(products_payload),
         "products": products_payload,
     }
@@ -2384,7 +2380,7 @@ def public_products_feed():
         status=200,
         mimetype="application/json; charset=utf-8",
     )
-    response.headers["Cache-Control"] = "public, max-age=900"  # 15 min
+    response.headers["Cache-Control"] = "public, no-cache"
     response.headers["Access-Control-Allow-Origin"] = "*"  # AI bots fetch cross-origin
     return response
 
@@ -2461,11 +2457,7 @@ def public_loyalty_feed():
         "consecutiveStrikeBonuses": facts["consecutive_strike_rules"],
         "rewards": facts["rewards"],
         "supportedLanguages": ["uz", "ru", "en"],
-        "orderChannels": {
-            "web": company_website,
-            "telegramBot": current_app.config["COMPANY_TELEGRAM_BOT_URL"],
-            "phone": current_app.config.get("COMPANY_PHONE", ""),
-        },
+        "orderChannels": _order_channels(company_website),
     }
 
     response = current_app.response_class(
@@ -2481,10 +2473,19 @@ def public_loyalty_feed():
 # Custom template filters
 
 
+# One composer per fact sentence: templates call the service's functions, they never fill the keys themselves.
+frontend_bp.add_app_template_global(price_sentence, name="offer_price_sentence")
+frontend_bp.add_app_template_global(smallest_order_sentence, name="offer_smallest_order_sentence")
+
+
 @frontend_bp.app_template_filter("format_price")
 def format_price(amount):
     """Format price with proper formatting"""
-    return f"{amount:,.0f} UZS"
+    return display_labels.money(amount)
+
+
+# The number the Offer JSON-LD prints, for a template that states a price as a plain number (`llms.txt`).
+frontend_bp.add_app_template_filter(_json_number, "json_number")
 
 
 @frontend_bp.route("/docs/api")
@@ -2653,4 +2654,5 @@ def blog_detail(slug):
         recent_posts=recent_posts,
         recommended_products=[product.to_dict(language=language) for product in recommended_products],
         canonical_url=_build_external_url("frontend.blog_detail", slug=post.slug),
+        **_offer_context(),
     )

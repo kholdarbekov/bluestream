@@ -1,15 +1,16 @@
 """llms.txt must surface the Aqua Club loyalty programme to AI assistants."""
 
-from pathlib import Path
-
 import pytest
 
 
-@pytest.mark.unit
-def test_llms_txt_mentions_loyalty_surfaces():
-    import business_app
+def _llms_txt(app) -> str:
+    """The document as served: `/llms.txt` is rendered by Flask."""
+    return app.test_client().get("/llms.txt").get_data(as_text=True)
 
-    text = (Path(business_app.__file__).parent / "static" / "llms.txt").read_text(encoding="utf-8")
+
+@pytest.mark.unit
+def test_llms_txt_mentions_loyalty_surfaces(app, db):
+    text = _llms_txt(app)
     assert "/loyalty-guide" in text
     assert "/api/public/loyalty.json" in text
     assert "Aqua Club" in text
@@ -17,7 +18,7 @@ def test_llms_txt_mentions_loyalty_surfaces():
 
 
 @pytest.mark.unit
-def test_llms_txt_does_not_qualify_the_tier_discount_by_payment_rail():
+def test_llms_txt_does_not_qualify_the_tier_discount_by_payment_rail(app, db):
     """OWNER DECISION (2026-09-03), deliberate — do not "fix" this by adding the
     condition back.
 
@@ -35,9 +36,7 @@ def test_llms_txt_does_not_qualify_the_tier_discount_by_payment_rail():
     state the discount without the COD condition, and a customer who then picks
     Click sees no tier discount at checkout. That is accepted.
     """
-    import business_app
-
-    text = (Path(business_app.__file__).parent / "static" / "llms.txt").read_text(encoding="utf-8")
+    text = _llms_txt(app)
     section = text.split("## Aqua Club loyalty programme", 1)[1].split("\n## ", 1)[0]
 
     for rail_term in ("cash-on-delivery", "cash on delivery", "Click", "Payme"):
@@ -48,12 +47,10 @@ def test_llms_txt_does_not_qualify_the_tier_discount_by_payment_rail():
 
 
 @pytest.mark.unit
-def test_llms_txt_names_the_channel_the_tier_discount_is_a_perk_of():
+def test_llms_txt_names_the_channel_the_tier_discount_is_a_perk_of(app, db):
     """The tier discount is a perk of ordering in the bot / on the website.
     The channel is a plain benefit clause - not a payment-rail qualifier."""
-    import business_app
-
-    text = (Path(business_app.__file__).parent / "static" / "llms.txt").read_text(encoding="utf-8")
+    text = _llms_txt(app)
     section = text.split("## Aqua Club loyalty programme", 1)[1].split("\n## ", 1)[0]
     assert "Telegram bot" in section
     assert "website" in section

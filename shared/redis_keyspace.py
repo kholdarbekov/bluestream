@@ -273,6 +273,13 @@ class RedisKeyspace:
     def eta_recompute_lock() -> str:
         return "bs:eta_recompute:lock"
 
+    # Tier: CACHE. The IndexNow submission's "a submission is already queued" marker (`SET NX EX`
+    # INDEXNOW_SCHEDULED_TTL_SECONDS, deleted by the run as it starts, and by a request whose publish failed). It
+    # debounces a burst of saves into one submission; losing it costs one extra submission, never a missed one.
+    @staticmethod
+    def indexnow_submit_scheduled() -> str:
+        return "bs:indexnow:scheduled"
+
     # ---- Scan patterns ---------------------------------------------------
     # SCAN patterns use `*` wildcards. Callers should prefer these helpers
     # over inlining `f"{prefix}:*"` so the wildcard shape stays in sync
@@ -328,6 +335,7 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'google_routes_calls':               RedisUsageTier.TIER_CACHE,
     'eta_recompute_scheduled':           RedisUsageTier.TIER_CACHE,
     'eta_recompute_lock':                RedisUsageTier.TIER_RELIABILITY,
+    'indexnow_submit_scheduled':         RedisUsageTier.TIER_CACHE,
 }
 
 

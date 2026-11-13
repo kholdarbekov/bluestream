@@ -594,6 +594,7 @@
       },
       "payment_method": "click",
       "promo_code_used": null,
+      "show_delivery_statement": false,
       "special_instructions": null,
       "status": "pending",
       "subscription_id": 1,

@@ -169,6 +169,10 @@ def register_cli_commands(app):
 # opens in that language); this endpoint keeps its `?lang=` so the language rides on the link itself.
 FRONTEND_LINK_LANGUAGE_ENDPOINTS = frozenset({"frontend.reminders_unsubscribe"})
 
+# Documents that read the same in every language: never redirected to a language URL, and never store a language in
+# the session.
+FRONTEND_LANGUAGE_NEUTRAL_ENDPOINTS = frozenset({"frontend.llms_txt"})
+
 
 def _remember_frontend_language(lang: str) -> None:
     """Keep `lang` as the visitor's language for the session, so a reload or the next page stays in it.
@@ -213,6 +217,7 @@ def setup_request_handlers(app):
         # DEBUG: Log all available language sources
         url_lang = request.args.get("lang", None)
         session_lang = session.get("language")
+        language_neutral = request.endpoint in FRONTEND_LANGUAGE_NEUTRAL_ENDPOINTS
 
         # Keep default language URLs clean: /path (not /path?lang=<default>).
         # This reduces duplicate URL variants for crawlers and canonical signals.
@@ -224,6 +229,7 @@ def setup_request_handlers(app):
             and not request.path.startswith("/api/")
             and url_lang == default_language
             and request.endpoint not in FRONTEND_LINK_LANGUAGE_ENDPOINTS
+            and not language_neutral
         ):
             parsed_url = urlsplit(request.url)
             filtered_query = [
@@ -305,6 +311,7 @@ def setup_request_handlers(app):
             and not url_lang
             and lang != default_language
             and lang_source in {"Session", "User DB preference", "Accept-Language header"}
+            and not language_neutral
         ):
             parsed_url = urlsplit(request.url)
             existing_query = parse_qsl(parsed_url.query, keep_blank_values=True)
@@ -327,7 +334,7 @@ def setup_request_handlers(app):
         # Persist resolved language for frontend requests so reloads remain stable
         # even when JWT/session source availability changes between requests.
         endpoint = request.endpoint or ""
-        if endpoint.startswith("frontend."):
+        if endpoint.startswith("frontend.") and not language_neutral:
             _remember_frontend_language(lang)
 
     @app.after_request
@@ -645,6 +652,7 @@ def create_app(config_class=None):
     # Initialize extensions with app
     db.init_app(app)
     from business_app.utils.eta_recompute_dispatch import register_eta_recompute_dispatch
+    from business_app.utils.indexnow_dispatch import register_indexnow_dispatch
     from business_app.utils.loyalty_award_dispatch import register_loyalty_award_dispatch
     from business_app.utils.payment_confirmation_dispatch import (
         register_payment_confirmation_dispatch,
@@ -659,6 +667,7 @@ def create_app(config_class=None):
     register_route_card_refresh_dispatch(db)
     register_eta_recompute_dispatch(db)
     register_shared_place_case_dispatch(db)
+    register_indexnow_dispatch(db)
     migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
     cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)

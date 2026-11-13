@@ -1,23 +1,18 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Политика доставки Aqua Element: зона обслуживания, временные окна, повторная доставка и контакты поддержки." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Delivery policy for Aqua Element: service area, scheduling windows, failed delivery handling, and support contacts." %}
-{% else %}
-{% set meta_description = "Aqua Element yetkazib berish siyosati: xizmat hududi, vaqt oraligi, qayta yetkazish va yordam kontaktlari." %}
-{% endif %}
+{% set delivery_title = ('landing.delivery_page.title'|t) ~ (('landing.delivery_page.title_free_suffix'|t) if offer_facts.delivery.free else '') %}
+{% set meta_description = offer_facts.delivery.statement[current_language][0] %}
 
-{% block title %}Delivery Policy - {{ company_name }}{% endblock %}
+{% block title %}{{ delivery_title }} - {{ company_name }}{% endblock %}
 
 {% block content %}
 <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>Delivery Policy</h1>
+            <h1>{{ delivery_title }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>Delivery Policy</li>
+                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>{{ delivery_title }}</li>
             </ul>
         </div>
     </div>
@@ -26,18 +21,19 @@
 <section class="service-details">
     <div class="auto-container">
         <div class="content-box">
-            <h2>Service Coverage and Time Slots</h2>
-            <p>Aqua Element delivers orders within active service zones based on checkout address validation and available operational capacity.</p>
-            <p>Delivery windows are shown during checkout. Same-day delivery is available for many zones when slots remain open.</p>
+            {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+            {{ offer_facts_block(offer_facts, current_language) }}
 
-            <h2>Order Processing</h2>
-            <p>Orders are confirmed after successful placement and payment status verification. The delivery team receives assignment and routing details from the operations system.</p>
+            <h2>{{ 'landing.delivery_page.heading_how'|t }}</h2>
+            <ul>
+                <li>{{ 'landing.delivery_page.order_anytime'|t }}</li>
+                <li>{{ 'landing.delivery_page.live_arrival'|t }}</li>
+                <li>{{ 'landing.delivery_page.choose_date'|t(days=schedule_horizon_days) }}</li>
+                <li>{{ 'landing.offer.own_bottles'|t }} <a href="{{ external_url_for_lang('frontend.terms') }}#returnable-bottles">{{ 'landing.delivery_page.bottle_terms'|t }}</a></li>
+                <li>{{ 'landing.delivery_page.payment'|t }}</li>
+            </ul>
 
-            <h2>Failed Delivery and Reattempts</h2>
-            <p>If a recipient is unavailable at delivery time, our team may attempt contact using the provided phone number. Reattempt and rescheduling options depend on route capacity and product type.</p>
-
-            <h2>Contact for Delivery Support</h2>
-            <p>For delivery assistance, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or email <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+            <p><a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.delivery_page.support'|t }}</a></p>
         </div>
     </div>
 </section>

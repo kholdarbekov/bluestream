@@ -300,6 +300,9 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
         base_price = float(product.base_price)
         card_pricing = resolve_product_pricing(product, user, quantity)
         current_price = card_pricing["current_price"]
+        # Below the list price only: a discount price of 0 is not charged and one above the base is,
+        # so neither publishes a discount, and the amount is never negative (Review Focus 1).
+        saving = max(0.0, base_price - current_price)
 
         product_data = {
             "id": product.id,
@@ -312,10 +315,8 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
             "pricing": {
                 "base_price": base_price,
                 "current_price": current_price,
-                "discount_amount": base_price - current_price,
-                "discount_percentage": (
-                    round(((base_price - current_price) / base_price * 100), 2) if base_price > 0 else 0
-                ),
+                "discount_amount": saving,
+                "discount_percentage": round((saving / base_price * 100), 2) if base_price > 0 else 0,
                 "quantity": quantity,
                 "total_price": current_price * quantity,
                 "currency": "UZS",
@@ -489,9 +490,13 @@ def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
     ``current_price`` is the catalogue (bulk rules applied): a card is drawn before a payment
     method exists. ``contract_price_at_checkout`` says a contract price will apply at checkout.
     Both come from the contract resolver, called with no method, so the rule stays in one place.
+
+    The catalogue starts from ``Product.catalogue_unit_price``, what an order is charged for one
+    unit (the discount price when one is set), the same figure the server cart starts from
+    (``CartService._price_cart_line``); bulk rules apply to that figure, as there.
     """
-    base_price = float(product.base_price)
-    effective_price = base_price
+    unit_price = float(product.catalogue_unit_price)
+    effective_price = unit_price
 
     # Apply bulk discounts
     if hasattr(product, "price_rules") and product.price_rules:
@@ -499,10 +504,10 @@ def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
             if rule.is_active and quantity >= rule.min_quantity:
                 if rule.max_quantity is None or quantity <= rule.max_quantity:
                     if rule.discount_type == "percentage":
-                        discount = base_price * (float(rule.discount_value) / 100)
+                        discount = unit_price * (float(rule.discount_value) / 100)
                     else:
                         discount = float(rule.discount_value)
-                    effective_price = max(0, base_price - discount)
+                    effective_price = max(0, unit_price - discount)
                     break
 
     # NOTE: there is deliberately NO user-tier or VIP adjustment here. A

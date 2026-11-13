@@ -4,6 +4,7 @@
 Milestone 2, post 4/8. B2B-segment buyer guide.
 """
 
+# NATIVE-READ (2026-11-12): the uz and ru sentences changed for the price-and-delivery plan await a native read.
 ARTICLE = {
     "slug": "voda-dlya-ofisa-tashkent",
     "category": "lifestyle",
@@ -146,7 +147,7 @@ ARTICLE = {
   <li><strong>Подписка</strong> с фиксированным графиком на 19 л и 10 л — оформляется на странице <a href="/subscriptions">Подписки</a>.</li>
   <li><strong>Гибкость:</strong> приостановка на отпуск, перенос даты, усиление частоты на летние месяцы.</li>
   <li><strong>Документы:</strong> договор с юрлицом, счёт на оплату, счёт-фактура, акт.</li>
-  <li><strong>Telegram-бот</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> для офис-менеджера: посмотреть статус, заказать «срочно сегодня», добавить разовую партию для мероприятия.</li>
+  <li><strong>Telegram-бот</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> для офис-менеджера: посмотреть статус, оформить дополнительный заказ, добавить разовую партию для мероприятия.</li>
   <li><strong>Возвратная тара:</strong> бутыли 19 л — оборотные, забираем пустые при следующей доставке.</li>
   <li><strong>Зона обслуживания:</strong> Ташкент и Ташкентская область.</li>
 </ul>
@@ -156,7 +157,7 @@ ARTICLE = {
 <ol>
   <li>Заполните форму на странице <a href="/contact">Контакты</a> или напишите менеджеру: укажите количество сотрудников, адрес, желаемое количество бутылей в неделю.</li>
   <li>Мы согласуем график, тарифный план, реквизиты для договора и подпишем документы.</li>
-  <li>Первая доставка обычно в течение 1–2 рабочих дней. Дальше — по графику, без напоминаний.</li>
+  <li>После этого доставки идут по графику, без напоминаний.</li>
 </ol>
 <p>Если хотите оценить ассортимент и цены без оформления договора — посмотрите <a href="/shop">магазин</a> и оформите пробный заказ как физлицо.</p>
 
@@ -176,9 +177,9 @@ ARTICLE = {
 <h3>Какие преимущества у подписки для офисов?</h3>
 <p>Главное — автозаказ: подписка сама оформляет каждый заказ по графику, поэтому вода в кулере не заканчивается в самый неподходящий момент. Доставка всегда бесплатная, а за каждую доставку начисляются AquaCoins по ставке вашего уровня. Воду по подписке вы покупаете по обычной цене. Для крупных контрактов (от 50 бутылей в неделю) согласовываем индивидуальные условия — обратитесь через <a href="/contact">страницу контактов</a>.</p>
 <h3>Что делать, если вода в кулере закончилась внезапно?</h3>
-<p>Через Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> можно оформить срочную доставку на тот же день в пределах графика курьеров. Поэтому мы рекомендуем держать запас минимум на 1 день — обычно 1–2 полные бутыли.</p>
+<p>Оформите обычный заказ в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Чтобы не остаться без воды, держите запас минимум на день — обычно 1–2 полные бутыли.</p>
 <h3>Какой минимальный объём для корпоративного клиента?</h3>
-<p>Жёсткого минимума нет — мы обслуживаем и небольшие офисы на 5 человек. Однако автозаказ по подписке особенно удобен офисам от 8 бутылей 19 л в месяц: система сама оформляет заказы, чтобы кулер не остался пустым в самый нужный момент.</p>
+<p>Минимальный заказ указан в блоке «цена и доставка» под этой статьёй; мы обслуживаем и небольшие офисы на 5 человек. Однако автозаказ по подписке особенно удобен офисам от 8 бутылей 19 л в месяц: система сама оформляет заказы, чтобы кулер не остался пустым в самый нужный момент.</p>
 
 <h2>Сезонные пики и как к ним готовиться</h2>
 <p>В Ташкенте спрос на питьевую воду в офисах не равномерный по году. Мы видим три выраженных пика, к которым стоит готовиться заранее:</p>
@@ -194,7 +195,7 @@ ARTICLE = {
 <p>За годы работы с корпоративными клиентами мы видим повторяющиеся ошибки. Их легко избежать:</p>
 <ul>
   <li><strong>Один кулер на 30+ человек.</strong> К нему встаёт очередь, сотрудники начинают пить воду из-под крана или приносить свою. Решение — добавить второй диспенсер.</li>
-  <li><strong>Заказ «по факту окончания».</strong> Пятница, обед, бутыль кончилась, курьеры заняты — офис без воды до понедельника. Решение — подписка и буфер 1–2 бутыли.</li>
+  <li><strong>Заказ «по факту окончания».</strong> Пятница, обед, бутыль кончилась — и офис ждёт доставку без воды. Решение — подписка и буфер 1–2 бутыли.</li>
   <li><strong>Игнорирование гигиены поддона.</strong> В нём накапливается влага и пыль, появляется запах. Решение — внести еженедельную чистку в чек-лист клининга.</li>
   <li><strong>Хранение бутылей на солнце.</strong> Запас, поставленный у окна на южной стороне, перегревается. Решение — хранить запас в тени или подсобке при температуре 5–25 °C.</li>
   <li><strong>Отсутствие чёткого ответственного.</strong> Когда «вода — общее дело», ей никто не занимается. Решение — назначить офис-менеджера или АХО ответственным за подписку и чистоту кулера.</li>
@@ -215,8 +216,8 @@ ARTICLE = {
     {"@type": "Question", "name": "Есть ли стеклянная бутылка для переговорных?", "acceptedAnswer": {"@type": "Answer", "text": "Стандарт — 19 л и 10 л. Для переговорных подойдёт 10-литровая бутыль или графины."}},
     {"@type": "Question", "name": "Кто отвечает за гигиену кулера?", "acceptedAnswer": {"@type": "Answer", "text": "Чистота диспенсера — на стороне офиса. Aqua Element отвечает за воду в запечатанной бутыли."}},
     {"@type": "Question", "name": "Какие преимущества у подписки для офисов?", "acceptedAnswer": {"@type": "Answer", "text": "Главное — автозаказ: подписка сама оформляет каждый заказ по графику. Доставка всегда бесплатная, AquaCoins начисляются по ставке вашего уровня. Для крупных контрактов условия индивидуальные."}},
-    {"@type": "Question", "name": "Что делать, если вода закончилась внезапно?", "acceptedAnswer": {"@type": "Answer", "text": "Через Telegram-бот @aqua_element_bot можно оформить срочную доставку в пределах графика."}},
-    {"@type": "Question", "name": "Какой минимальный объём для корпоративного клиента?", "acceptedAnswer": {"@type": "Answer", "text": "Жёсткого минимума нет, автозаказ по подписке особенно удобен офисам от 8 бутылей 19 л в месяц."}}
+    {"@type": "Question", "name": "Что делать, если вода закончилась внезапно?", "acceptedAnswer": {"@type": "Answer", "text": "Оформите заказ в Telegram-боте @aqua_element_bot и держите в запасе 1–2 полные бутыли."}},
+    {"@type": "Question", "name": "Какой минимальный объём для корпоративного клиента?", "acceptedAnswer": {"@type": "Answer", "text": "Минимальный заказ указан в блоке «цена и доставка» под статьёй; автозаказ по подписке особенно удобен офисам от 8 бутылей 19 л в месяц."}}
   ]
 }
 </script>
@@ -312,7 +313,7 @@ ARTICLE = {
 <p>Biznes uchun idish narxi emas, balki litr narxi va yetkazib berishning bashoratliligi muhim. Takliflarni solishtirayotganda to'rtta parametrga e'tibor bering:</p>
 <ul>
   <li><strong>Obunada avtobuyurtma va yetkazib berish</strong>: tizim har bir buyurtmani jadval bo'yicha o'zi rasmiylashtiradi, yetkazib berish esa doim bepul. Obunadagi suv odatiy narxda hisoblanadi.</li>
-  <li><strong>Tara depoziti</strong>. Bozor standarti — keyingi yetkazib berishda qaytariladigan 19 l aylanma idish. Depozit va qaytarish shartlarini aniqlang.</li>
+  <li><strong>Idish uchun garov puli</strong>. Bozor standarti — keyingi yetkazib berishda qaytariladigan 19 l aylanma idish. Garov puli va qaytarish shartlarini aniqlang.</li>
   <li><strong>Moslashuvchanlik</strong>: haftani o'tkazib yuborish (ta'til, korporativ, ofis ko'chish), avgustda chastotani oshirish, tadbir oldidan bir martalik partiya qo'shish.</li>
   <li><strong>Buxgalteriya hujjatlari</strong>: schyot-faktura, yuridik shaxs bilan shartnoma, sverka dalolatnomasi. Ularsiz xarid kelishuvdan o'tmaydi.</li>
 </ul>
@@ -355,7 +356,7 @@ ARTICLE = {
   <li><strong>Obuna</strong> 19 l va 10 l uchun belgilangan jadval bilan — <a href="/subscriptions">Obunalar</a> sahifasida rasmiylashtiriladi.</li>
   <li><strong>Moslashuvchanlik:</strong> ta'tilga to'xtatish, sanani ko'chirish, yoz oylariga chastotani kuchaytirish.</li>
   <li><strong>Hujjatlar:</strong> yuridik shaxs bilan shartnoma, to'lov schyoti, schyot-faktura, dalolatnoma.</li>
-  <li><strong>Telegram-bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> ofis menejeri uchun: holatni ko'rish, "shoshilinch bugun" buyurtma berish, tadbir uchun bir martalik partiya qo'shish.</li>
+  <li><strong>Telegram-bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> ofis menejeri uchun: holatni ko'rish, qo'shimcha buyurtma berish, tadbir uchun bir martalik partiya qo'shish.</li>
   <li><strong>Qaytariladigan tara:</strong> 19 l idishlar aylanma, keyingi yetkazib berishda bo'shlarini olib ketamiz.</li>
   <li><strong>Xizmat hududi:</strong> Toshkent shahri va Toshkent viloyati.</li>
 </ul>
@@ -365,7 +366,7 @@ ARTICLE = {
 <ol>
   <li><a href="/contact">Kontaktlar</a> sahifasida shaklni to'ldiring yoki menejerga yozing: xodimlar soni, manzil, haftada qancha idish kerakligini ko'rsating.</li>
   <li>Biz jadval, tarif rejasi, shartnoma rekvizitlarini kelishib olamiz va hujjatlarni imzolaymiz.</li>
-  <li>Birinchi yetkazib berish odatda 1–2 ish kuni ichida. Keyin — eslatmasiz, jadval bo'yicha.</li>
+  <li>Shundan keyin yetkazib berish jadval bo'yicha, eslatmalarsiz davom etadi.</li>
 </ol>
 <p>Shartnoma rasmiylashtirmasdan assortiment va narxlarni baholash istasangiz — <a href="/shop">do'kon</a>ga qarang va jismoniy shaxs sifatida sinov buyurtma bering.</p>
 
@@ -385,9 +386,9 @@ ARTICLE = {
 <h3>Ofislar uchun obunaning qanday afzalliklari bor?</h3>
 <p>Asosiysi — avtobuyurtma: obuna har bir buyurtmani jadval bo'yicha o'zi rasmiylashtiradi, shuning uchun kulerdagi suv eng kerakli paytda tugab qolmaydi. Yetkazib berish doim bepul, har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi. Obunadagi suv odatiy narxda hisoblanadi. Yirik shartnomalar uchun (haftada 50+ idish) individual shartlarni kelishamiz — <a href="/contact">kontaktlar sahifasi</a> orqali murojaat qiling.</p>
 <h3>Kulerda suv kutilmaganda tugab qolsa nima qilish kerak?</h3>
-<p>Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali kuryerlar jadvali doirasida o'sha kun ichida shoshilinch yetkazib berishni rasmiylashtirish mumkin. Shu sababli kamida 1 kunlik zaxira — odatda 1–2 to'liq idishni saqlab qolishni tavsiya etamiz.</p>
+<p>Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali oddiy buyurtma bering. Suvsiz qolmaslik uchun kamida 1 kunlik zaxira — odatda 1–2 to'liq idish saqlang.</p>
 <h3>Korporativ mijoz uchun minimal hajm qancha?</h3>
-<p>Qattiq minimum yo'q — biz 5 kishilik kichik ofislarga ham xizmat ko'rsatamiz. Lekin avtobuyurtma oyiga 8 ta 19 l idishdan boshlab ofislar uchun ayniqsa qulay: tizim buyurtmalarni o'zi rasmiylashtiradi, shunda kuler eng kerakli paytda bo'sh qolmaydi.</p>
+<p>Eng kichik buyurtma shu maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; biz 5 kishilik kichik ofislarga ham xizmat ko'rsatamiz. Lekin avtobuyurtma oyiga 8 ta 19 l idishdan boshlab ofislar uchun ayniqsa qulay: tizim buyurtmalarni o'zi rasmiylashtiradi, shunda kuler eng kerakli paytda bo'sh qolmaydi.</p>
 
 <h2>Mavsumiy cho'qqilar va ularga tayyorgarlik</h2>
 <p>Toshkentda ofislardagi ichimlik suviga talab yil davomida bir tekis emas. Biz oldindan tayyorgarlik ko'rish kerak bo'lgan uchta aniq cho'qqini ko'ramiz:</p>
@@ -403,7 +404,7 @@ ARTICLE = {
 <p>Korporativ mijozlar bilan ishlash yillari davomida biz takrorlanadigan xatolarni ko'ramiz. Ulardan qochish oson:</p>
 <ul>
   <li><strong>30+ kishiga bitta kuler.</strong> Unga navbat turadi, xodimlar jo'mrak suvini ichishni yoki o'z suvini olib kelishni boshlaydi. Yechim — ikkinchi dispenser qo'shish.</li>
-  <li><strong>"Tugagandan keyin" buyurtma.</strong> Juma, tushlik, idish tugadi, kuryerlar band — ofis dushanbagacha suvsiz. Yechim — obuna va 1–2 idishlik bufer.</li>
+  <li><strong>"Tugagandan keyin" buyurtma.</strong> Juma, tushlik, idish tugadi — ofis yetkazib berishni suvsiz kutadi. Yechim — obuna va 1–2 idishlik bufer.</li>
   <li><strong>Poddon gigienasini e'tiborsiz qoldirish.</strong> Unda namlik va chang to'planadi, hid paydo bo'ladi. Yechim — klining ro'yxatiga haftalik tozalashni kiritish.</li>
   <li><strong>Idishlarni quyoshda saqlash.</strong> Janub tomondagi deraza yonida turgan zaxira qiziydi. Yechim — zaxirani soyada yoki yordamchi xonada 5–25 °C haroratda saqlash.</li>
   <li><strong>Aniq mas'ul shaxsning yo'qligi.</strong> "Suv — umumiy ish" bo'lganda, u bilan hech kim shug'ullanmaydi. Yechim — obuna va kuler tozaligi uchun ofis menejerini yoki AXOni mas'ul qilib tayinlash.</li>
@@ -424,8 +425,8 @@ ARTICLE = {
     {"@type": "Question", "name": "Muzokara xonalari uchun shisha bormi?", "acceptedAnswer": {"@type": "Answer", "text": "Standart format 19 l va 10 l. Muzokaralar uchun 10 litrlik idish yoki grafinlar mos."}},
     {"@type": "Question", "name": "Kuler gigienasi uchun kim javobgar?", "acceptedAnswer": {"@type": "Answer", "text": "Dispenserning tozaligi ofis tomonida. Aqua Element idishdagi suv sterilligi uchun javobgar."}},
     {"@type": "Question", "name": "Ofislar uchun obunaning qanday afzalliklari bor?", "acceptedAnswer": {"@type": "Answer", "text": "Asosiysi — avtobuyurtma: obuna buyurtmalarni jadval bo'yicha o'zi rasmiylashtiradi. Yetkazib berish doim bepul, AquaCoins darajangiz stavkasida hisoblanadi. Yirik shartnomalar uchun individual shartlar."}},
-    {"@type": "Question", "name": "Suv tugab qolsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-bot @aqua_element_bot orqali shoshilinch yetkazib berish."}},
-    {"@type": "Question", "name": "Minimal hajm qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Qattiq minimum yo'q, avtobuyurtma oyiga 8 ta idishdan boshlab ofislar uchun ayniqsa qulay."}}
+    {"@type": "Question", "name": "Suv tugab qolsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-bot @aqua_element_bot orqali buyurtma bering va zaxirada 1–2 to'liq idish saqlang."}},
+    {"@type": "Question", "name": "Minimal hajm qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Eng kichik buyurtma maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; avtobuyurtma oyiga 8 ta idishdan boshlab ofislar uchun ayniqsa qulay."}}
   ]
 }
 </script>
@@ -564,7 +565,7 @@ ARTICLE = {
   <li><strong>Subscription</strong> with a fixed schedule for 19 L and 10 L — set up via the <a href="/subscriptions">Subscriptions</a> page.</li>
   <li><strong>Flexibility:</strong> pause for holidays, shift dates, ramp up the cadence for summer.</li>
   <li><strong>Documents:</strong> contract with a legal entity, payment invoice, VAT invoice, reconciliation act.</li>
-  <li><strong>Telegram bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> for the office manager: check status, place a same-day rush order, add a one-off batch for an event.</li>
+  <li><strong>Telegram bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> for the office manager: check status, place an extra order, add a one-off batch for an event.</li>
   <li><strong>Returnable bottles:</strong> 19 L bottles are exchanged — we collect empties at the next delivery.</li>
   <li><strong>Service area:</strong> Tashkent and Tashkent Region.</li>
 </ul>
@@ -574,7 +575,7 @@ ARTICLE = {
 <ol>
   <li>Fill out the form on the <a href="/contact">Contact</a> page or message a manager: tell us headcount, address, and target weekly volume.</li>
   <li>We agree on the schedule, tariff, and contract details, and sign the paperwork.</li>
-  <li>The first delivery typically lands within 1–2 working days. After that, deliveries run on schedule, with no nudges from your side.</li>
+  <li>After that, deliveries run on schedule, with no nudges from your side.</li>
 </ol>
 <p>If you want to evaluate the range and prices without a contract first, browse the <a href="/shop">shop</a> and place a trial order as an individual.</p>
 
@@ -594,9 +595,9 @@ ARTICLE = {
 <h3>What does a subscription give an office?</h3>
 <p>The main benefit is auto-order: the subscription places each order for you on schedule, so the cooler never runs dry when you need it most. Delivery is always free, and every delivery earns AquaCoins at your tier's rate. Subscription deliveries are billed at the regular price. For larger contracts (50+ bottles per week) we agree custom terms — reach out via the <a href="/contact">contact page</a>.</p>
 <h3>What if a cooler runs out unexpectedly?</h3>
-<p>Through the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> you can place a same-day rush delivery within courier coverage. We recommend keeping at least one day of buffer — usually 1–2 full bottles in reserve.</p>
+<p>Place an ordinary order in the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. To avoid running dry, keep at least one day of buffer — usually 1–2 full bottles in reserve.</p>
 <h3>What is the minimum volume for a corporate client?</h3>
-<p>There is no hard minimum — we serve small offices of 5 people too. That said, auto-order on a subscription suits offices best from around 8 × 19 L bottles per month: the system places each order for you, so the cooler is not left empty when you need it most.</p>
+<p>The smallest order is shown in the price and delivery block under this article; we serve small offices of 5 people too. That said, auto-order on a subscription suits offices best from around 8 × 19 L bottles per month: the system places each order for you, so the cooler is not left empty when you need it most.</p>
 
 <h2>Bottom line</h2>
 <p>Office water is infrastructure, not a consumable. Calculate by formula, keep one dispenser per 12–15 people, and choose a subscription with pause and proper invoicing. Aqua Element handles the job end-to-end: <a href="/process/11-step-filtration">artesian water with 11 stages of filtration</a>, a flexible <a href="/subscriptions">corporate subscription</a>, returnable 19 L bottles, and a Telegram bot for your office manager. To launch deliveries, fill in the form on the <a href="/contact">Contact</a> page.</p>
@@ -613,8 +614,8 @@ ARTICLE = {
     {"@type": "Question", "name": "What about glass-bottle service for meeting rooms?", "acceptedAnswer": {"@type": "Answer", "text": "Standard formats are 19 L and 10 L. For meeting rooms use a 10 L bottle on the table or carafes."}},
     {"@type": "Question", "name": "How is cooler hygiene managed?", "acceptedAnswer": {"@type": "Answer", "text": "The dispenser is on the office side. Aqua Element ensures water sterility up to bottle installation."}},
     {"@type": "Question", "name": "What does a subscription give an office?", "acceptedAnswer": {"@type": "Answer", "text": "The main benefit is auto-order: each order is placed for you on schedule. Delivery is always free and AquaCoins are earned at your tier's rate. Custom terms for larger contracts."}},
-    {"@type": "Question", "name": "What if a cooler runs out unexpectedly?", "acceptedAnswer": {"@type": "Answer", "text": "Use the Telegram bot @aqua_element_bot for a same-day rush delivery."}},
-    {"@type": "Question", "name": "What is the minimum volume?", "acceptedAnswer": {"@type": "Answer", "text": "No hard minimum, but auto-order on a subscription suits offices of about 8 or more 19 L bottles per month."}}
+    {"@type": "Question", "name": "What if a cooler runs out unexpectedly?", "acceptedAnswer": {"@type": "Answer", "text": "Place an order in the Telegram bot @aqua_element_bot and keep 1–2 full bottles in reserve."}},
+    {"@type": "Question", "name": "What is the minimum volume?", "acceptedAnswer": {"@type": "Answer", "text": "The smallest order is shown in the price and delivery block under the article; auto-order on a subscription suits offices of about 8 or more 19 L bottles per month."}}
   ]
 }
 </script>

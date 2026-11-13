@@ -60,10 +60,17 @@ class TimezoneMiddleware:
         """Process response after handling"""
         try:
             # Convert UTC datetimes in response to user timezone
-            if response.is_json and response.get_json():
-                data = response.get_json()
-                converted_data = self._convert_response_datetimes(data)
-                response.set_data(json.dumps(converted_data))
+            if response.is_json:
+                body = response.get_data()
+                sent = json.loads(body)
+                if sent:
+                    # The converter gets its own parse of the body, so `sent` stays the body as the route wrote it
+                    # even if a converter ever changed its argument in place.
+                    converted_data = self._convert_response_datetimes(json.loads(body))
+                    # Re-dump only when a datetime was converted: an untouched body keeps the route's own bytes
+                    # (its UTF-8 text and layout, e.g. the public feeds). A converted one is dumped as before.
+                    if converted_data != sent:
+                        response.set_data(json.dumps(converted_data))
 
         except Exception as e:
             logger.warning(f"Error in timezone middleware after_request: {e}")

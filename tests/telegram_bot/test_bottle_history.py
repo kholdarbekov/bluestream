@@ -29,6 +29,7 @@ written inline here is invisible to that guard, which is precisely how this file
 stayed green while the live screen showed 0 for every customer.
 """
 
+import re
 from unittest.mock import AsyncMock
 
 import pytest
@@ -703,3 +704,31 @@ async def test_history_404_for_a_no_longer_visible_address_is_handled(monkeypatc
     # ...the user gets the localized load-error instead.
     answers = [c.args[0] for c in update.callback_query.answer.call_args_list if c.args]
     assert any("telegram.bottles.load_error" in a for a in answers)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("lang", ["en", "uz", "ru"])
+async def test_a_bottle_charge_row_never_reads_as_a_fine(monkeypatch, lang):
+    from scripts.seed_bottle_ledger_translations import KEYS
+
+    names = ("fine_issued", "fine_reversed", "fine_paid")
+    items = [
+        {
+            "id": n,
+            "event_type": name,
+            "quantity": 0,
+            "occurred_at": "2026-07-12T10:00:00+00:00",
+            "order_id": None,
+            "order_number": None,
+        }
+        for n, name in enumerate(names, start=1)
+    ]
+    query = await _run_history(
+        monkeypatch,
+        _ledger_response(items, total=3, page=1),
+        labels={key: value[lang] for key, value in KEYS.items()},
+    )
+    lines = _last_edit_kwargs(query)["text"].splitlines()
+    assert all(f"{KEYS[f'telegram.bottles.event.{name}'][lang]} (12.07.2026)" in lines for name in names)
+    assert not re.search(r"\bfine\b|jarima|штраф", "\n".join(lines), re.I)

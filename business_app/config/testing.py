@@ -113,6 +113,8 @@ class TestingConfig(BaseConfig):
     # wherever those exist. Tests never post to it (owner rule 2026-11-10); a test that drives the post sets its
     # own fake URL in app.config and mocks the HTTP call.
     SLACK_ALERTS_WEBHOOK_URL = None
+    # The test runner passes the dev .env; tests never reach IndexNow (a test switches it on with monkeypatch).
+    INDEXNOW_ENABLED = False
     METRICS_ENABLED = False
     HEALTH_CHECK_ENABLED = False
 

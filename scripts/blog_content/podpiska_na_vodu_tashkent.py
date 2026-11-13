@@ -5,6 +5,7 @@ Milestone 2, post 8/8. Conversion-oriented content for the subscription
 model; cadence-planning table; routes via the Telegram bot.
 """
 
+# NATIVE-READ (2026-11-12): the uz and ru sentences changed for the price-and-delivery plan await a native read.
 ARTICLE = {
     "slug": "podpiska-na-vodu-tashkent",
     "category": "company_news",
@@ -16,15 +17,15 @@ ARTICLE = {
     "translations": {
         "ru": {
             "title": "Подписка на воду в Ташкенте: автодоставка, возвратные бутыли, без перебоев",
-            "excerpt": "Подписка на воду в Ташкенте от Aqua Element — регулярная доставка 19 л и 10 л бутылей с удобной периодичностью. Пустая бутыль возвращается со следующей доставкой, расходы предсказуемы. Управляйте графиком на сайте, в Telegram-боте или по телефону.",
+            "excerpt": "Подписка на воду в Ташкенте от Aqua Element — регулярная доставка 19 л и 10 л бутылей с удобной периодичностью. Пустая бутыль 19 л возвращается со следующей доставкой, расходы предсказуемы. Управляйте графиком на сайте, в Telegram-боте или по телефону.",
             "meta_title": "Подписка на воду в Ташкенте — автодоставка 19 л и 10 л | Aqua Element",
-            "meta_description": "Подписка на воду в Ташкенте: автодоставка 19 л и 10 л, возврат бутылей, гибкий график, оформление в Telegram-боте и на сайте Aqua Element.",
+            "meta_description": "Подписка на воду в Ташкенте: автодоставка 19 л и 10 л, возврат бутылей 19 л, гибкий график, оформление в Telegram-боте и на сайте Aqua Element.",
             "content": """
-<p class="lead">«Закончилась вода в субботу вечером» — знакомая картина для многих ташкентских семей и офисов. В жарком климате расход питьевой воды растёт незаметно, а одноразовые заявки приходится оформлять «по факту». Подписка на воду в Ташкенте от Aqua Element снимает эту нагрузку: вы один раз согласуете график — и 19 л или 10 л бутыли приезжают регулярно, пустые забирают, бюджет на воду становится предсказуемым. В этой статье разберём, как устроена подписка, какую периодичность выбрать для разных профилей домохозяйства и офиса, и как оформить план на сайте или через Telegram-бот.</p>
+<p class="lead">«Закончилась вода в субботу вечером» — знакомая картина для многих ташкентских семей и офисов. В жарком климате расход питьевой воды растёт незаметно, а одноразовые заявки приходится оформлять «по факту». Подписка на воду в Ташкенте от Aqua Element снимает эту нагрузку: вы один раз согласуете график — и 19 л или 10 л бутыли приезжают регулярно, пустые бутыли 19 л забирают, бюджет на воду становится предсказуемым. В этой статье разберём, как устроена подписка, какую периодичность выбрать для разных профилей домохозяйства и офиса, и как оформить план на сайте или через Telegram-бот.</p>
 
 <h2>Почему именно подписка: «вода закончилась» как системная проблема</h2>
 <p>Питьевая вода — это базовое потребление, которое легко недооценить. Один человек выпивает в среднем 1,5–2,5 л воды в день, в жару — заметно больше. Прибавьте воду для приготовления пищи, чая, кофе и для гостей — и одна 19 л бутыль уходит у пары за 4–7 дней, у семьи из четырёх — за 3–5 дней. В офисе расход выше: 30 человек в жаркий месяц легко выпивают 8–12 бутылей в неделю.</p>
-<p>Проблема не в воде как таковой, а в когнитивной нагрузке: нужно помнить, проверять остаток в кулере, оформлять заявку, сверяться с графиком водителя. На фоне работы, семейных дел и поездок этот контур регулярно ломается — и заканчивается тем, что в субботу вечером вода кончилась, а доставка начнётся только в понедельник. Подписка на воду переводит эту задачу из «надо помнить» в «уже работает в фоне».</p>
+<p>Проблема не в воде как таковой, а в когнитивной нагрузке: нужно помнить, проверять остаток в кулере, оформлять заявку, сверяться с графиком водителя. На фоне работы, семейных дел и поездок этот контур регулярно ломается — и заканчивается тем, что в субботу вечером вода кончилась, а заказ ещё не оформлен. Подписка на воду переводит эту задачу из «надо помнить» в «уже работает в фоне».</p>
 
 <h2>Что такое подписка на воду от Aqua Element</h2>
 <p>Подписка — это запланированная регулярная доставка артезианской питьевой воды Aqua Element с выбранной вами периодичностью. Вы определяете три параметра:</p>
@@ -124,7 +125,7 @@ ARTICLE = {
 </ul>
 
 <h2>Логистика возвратной тары на подписке</h2>
-<p>19 л бутыли Aqua Element — возвратные. На каждой доставке курьер привозит полные бутыли и забирает пустые в обмен. Залоговая стоимость и условия возврата прозрачны и фиксируются при оформлении подписки. Если вы только начинаете и пустых бутылей у вас нет, при первой доставке тара выдаётся под залог; при отмене подписки залог возвращается при сдаче бутылей.</p>
+<p>19 л бутыли Aqua Element — возвратные. На каждой доставке курьер привозит полные бутыли и забирает пустые в обмен. Залог за бутыли не берём — ни при первой доставке, ни при оформлении подписки.</p>
 <p>Этот цикл — один из самых экологичных способов потреблять питьевую воду: одна бутыль обслуживает десятки циклов «розлив → доставка → потребление → возврат → мойка → розлив». Никаких сотен мелких пластиковых бутылок в мусоре.</p>
 
 <h2>Как Aqua Element обеспечивает качество воды на подписке</h2>
@@ -169,7 +170,7 @@ ARTICLE = {
 <p>Минимального обязательного срока нет. Вы можете начать подписку и отменить её в любой момент по стандартным условиям, описанным на <a href="/subscriptions">/subscriptions</a>.</p>
 
 <h3>Есть ли плата за подключение или активацию?</h3>
-<p>Нет, активация подписки бесплатна. Залог за возвратные 19 л бутыли начисляется при первой доставке (если у вас ещё нет бутылей) и возвращается при сдаче тары.</p>
+<p>Нет, активация подписки бесплатна. Залог за бутыли не берём — ни при первой доставке, ни при оформлении подписки.</p>
 
 <h3>Можно ли в одной подписке заказывать одновременно 19 л и 10 л?</h3>
 <p>Да. Подписка поддерживает смешанные позиции: например, 2 бутыли 19 л на кухню и 4 бутыли 10 л в детскую — в одной доставке.</p>
@@ -198,7 +199,7 @@ ARTICLE = {
     {"@type": "Question", "name": "Что делать, если я уезжаю на месяц?", "acceptedAnswer": {"@type": "Answer", "text": "Поставьте подписку на паузу на нужный период или пропустите ближайшие доставки. Никаких штрафов и пересчётов вручную не требуется."}},
     {"@type": "Question", "name": "Можно ли перейти с 10 л на 19 л в середине подписки?", "acceptedAnswer": {"@type": "Answer", "text": "Да. Формат бутылей меняется в настройках подписки, изменения вступают в силу со следующей доставки."}},
     {"@type": "Question", "name": "Какая минимальная продолжительность подписки?", "acceptedAnswer": {"@type": "Answer", "text": "Минимального обязательного срока нет. Вы можете начать и отменить подписку в любой момент по стандартным условиям."}},
-    {"@type": "Question", "name": "Есть ли плата за подключение?", "acceptedAnswer": {"@type": "Answer", "text": "Нет, активация подписки бесплатна. Залог за возвратные 19 л бутыли начисляется при первой доставке и возвращается при сдаче тары."}},
+    {"@type": "Question", "name": "Есть ли плата за подключение?", "acceptedAnswer": {"@type": "Answer", "text": "Нет, активация подписки бесплатна. Залог за бутыли не берём — ни при первой доставке, ни при оформлении подписки."}},
     {"@type": "Question", "name": "Можно ли в одной подписке заказывать 19 л и 10 л?", "acceptedAnswer": {"@type": "Answer", "text": "Да. Подписка поддерживает смешанные позиции в одной доставке."}},
     {"@type": "Question", "name": "Как идёт оплата — раз в месяц или за каждую доставку?", "acceptedAnswer": {"@type": "Answer", "text": "За каждую доставку: заказ на каждую плановую доставку оформляется отдельно и оплачивается выбранным способом (наличными, через Click или с корпоративного счёта). Ежемесячный счёт не выставляется."}},
     {"@type": "Question", "name": "Где увидеть ближайшие доставки?", "acceptedAnswer": {"@type": "Answer", "text": "В Telegram-боте команда Мои доставки, на сайте раздел Моя подписка в личном кабинете."}}
@@ -209,15 +210,15 @@ ARTICLE = {
         },
         "uz": {
             "title": "Toshkentda suv obunasi: avtoyetkazib berish, qaytariladigan idishlar, uzilishsiz",
-            "excerpt": "Aqua Element’dan Toshkentda suv obunasi: 19 l va 10 l idishlarning siz tanlagan davriylikda yetkazib berilishi. Bo‘sh idish keyingi yetkazib berishda olib ketiladi, byudjet bashoratli. Saytda, Telegram-botda yoki telefon orqali boshqaring.",
+            "excerpt": "Aqua Element’dan Toshkentda suv obunasi: 19 l va 10 l idishlarning siz tanlagan davriylikda yetkazib berilishi. Bo‘sh 19 l idish keyingi yetkazib berishda olib ketiladi, byudjet bashoratli. Saytda, Telegram-botda yoki telefon orqali boshqaring.",
             "meta_title": "Toshkentda suv obunasi — 19 l va 10 l avtoyetkazib berish | Aqua Element",
-            "meta_description": "Toshkentda suv obunasi: 19 l va 10 l avtoyetkazib berish, idish qaytarish, moslashuvchan jadval, Telegram-bot va saytda rasmiylashtirish.",
+            "meta_description": "Toshkentda suv obunasi: 19 l va 10 l avtoyetkazib berish, 19 l idishni qaytarish, moslashuvchan jadval, Telegram-bot va saytda rasmiylashtirish.",
             "content": """
-<p class="lead">«Shanba kuni kechqurun suv tugab qoldi» — ko‘pchilik toshkentlik oilalar va ofislar uchun tanish manzara. Issiq iqlimda ichimlik suv sarfi sezdirmay oshadi, bir martalik buyurtmalarni esa har safar qayta rasmiylashtirishga to‘g‘ri keladi. Aqua Element’dan Toshkentda suv obunasi bu yukni olib tashlaydi: bir marta jadvalni kelishasiz va 19 l yoki 10 l idishlar muntazam keladi, bo‘shlari olib ketiladi, suv uchun byudjet oldindan ma’lum bo‘ladi. Ushbu maqolada obuna qanday ishlashi, turli uy va ofis profillari uchun qaysi davriylikni tanlash, hamda saytda yoki Telegram-bot orqali rejani qanday rasmiylashtirishni ko‘rib chiqamiz.</p>
+<p class="lead">«Shanba kuni kechqurun suv tugab qoldi» — ko‘pchilik toshkentlik oilalar va ofislar uchun tanish manzara. Issiq iqlimda ichimlik suv sarfi sezdirmay oshadi, bir martalik buyurtmalarni esa har safar qayta rasmiylashtirishga to‘g‘ri keladi. Aqua Element’dan Toshkentda suv obunasi bu yukni olib tashlaydi: bir marta jadvalni kelishasiz va 19 l yoki 10 l idishlar muntazam keladi, bo‘sh 19 l idishlar olib ketiladi, suv uchun byudjet oldindan ma’lum bo‘ladi. Ushbu maqolada obuna qanday ishlashi, turli uy va ofis profillari uchun qaysi davriylikni tanlash, hamda saytda yoki Telegram-bot orqali rejani qanday rasmiylashtirishni ko‘rib chiqamiz.</p>
 
 <h2>Nima uchun aynan obuna: «suv tugadi» — tizimli muammo</h2>
 <p>Ichimlik suv — bu asosiy iste’mol bo‘lib, uni baholashda ko‘pincha xato qilamiz. Bir kishi kuniga o‘rtacha 1,5–2,5 l suv ichadi, jazirama kunlari esa sezilarli darajada ko‘proq. Bunga ovqat tayyorlash, choy, kofe va mehmonlar uchun suvni qo‘shing — va bitta 19 l idish juftlikda 4–7 kunda, to‘rt kishilik oilada 3–5 kunda tugaydi. Ofisda sarf yanada yuqori: 30 kishi issiq oyda haftasiga 8–12 idish ichib qo‘yadi.</p>
-<p>Muammo suvning o‘zida emas, balki kognitiv yukda: kulerdagi qoldiqni eslab turish, buyurtma berish, haydovchi jadvali bilan kelishish kerak. Ish, oilaviy ishlar va safarlar fonida bu zanjir muntazam buziladi va shanba oqshomi suv tugaydi, yetkazib berish esa faqat dushanbada boshlanadi. Suv obunasi bu vazifani «eslash kerak» darajasidan «fonda allaqachon ishlamoqda» darajasiga olib chiqadi.</p>
+<p>Muammo suvning o‘zida emas, balki kognitiv yukda: kulerdagi qoldiqni eslab turish, buyurtma berish, haydovchi jadvali bilan kelishish kerak. Ish, oilaviy ishlar va safarlar fonida bu zanjir muntazam buziladi va shanba oqshomi suv tugaydi, buyurtma esa hali berilmagan. Suv obunasi bu vazifani «eslash kerak» darajasidan «fonda allaqachon ishlamoqda» darajasiga olib chiqadi.</p>
 
 <h2>Aqua Element’dan suv obunasi nima</h2>
 <p>Obuna — bu Aqua Element artezian ichimlik suvini siz tanlagan davriylikda muntazam yetkazib berish. Siz uchta parametrni belgilaysiz:</p>
@@ -317,7 +318,7 @@ ARTICLE = {
 </ul>
 
 <h2>Obunada qaytariladigan idish logistikasi</h2>
-<p>Aqua Element 19 l idishlari qaytariladigan. Har yetkazib berishda kuryer to‘la idishlarni olib keladi va bo‘shlarini almashinuvga oladi. Garov qiymati va qaytarish shartlari shaffof, obunani rasmiylashtirishda qayd etiladi. Agar siz endi boshlayotgan bo‘lsangiz va bo‘sh idishlaringiz bo‘lmasa, birinchi yetkazib berishda idish garov asosida beriladi; obunani bekor qilganingizda idishlarni topshirish bilan garov qaytariladi.</p>
+<p>Aqua Element 19 l idishlari qaytariladigan. Har yetkazib berishda kuryer to‘la idishlarni olib keladi va bo‘shlarini almashinuvga oladi. Idishlar uchun garov puli olinmaydi — birinchi yetkazib berishda ham, obunani rasmiylashtirishda ham.</p>
 <p>Bu sikl ichimlik suvni iste’mol qilishning eng ekologik usullaridan biri: bitta idish «to‘ldirish → yetkazib berish → iste’mol → qaytarish → yuvish → to‘ldirish» tsikllarining o‘nlab sikllariga xizmat qiladi.</p>
 
 <h2>Aqua Element obunada suv sifatini qanday ta’minlaydi</h2>
@@ -362,7 +363,7 @@ ARTICLE = {
 <p>Majburiy minimal muddat yo‘q. Obunani istalgan paytda <a href="/subscriptions">/subscriptions</a> da ko‘rsatilgan standart shartlar bo‘yicha boshlash va bekor qilish mumkin.</p>
 
 <h3>Ulash yoki faollashtirish uchun to‘lov bormi?</h3>
-<p>Yo‘q, obunani faollashtirish bepul. Qaytariladigan 19 l idish uchun garov birinchi yetkazib berishda hisoblanadi (agar idishingiz bo‘lmasa) va idishni topshirishda qaytariladi.</p>
+<p>Yo‘q, obunani faollashtirish bepul. Idishlar uchun garov puli olinmaydi — birinchi yetkazib berishda ham, obunani rasmiylashtirishda ham.</p>
 
 <h3>Bitta obunada bir vaqtda 19 l va 10 l buyurtma qilish mumkinmi?</h3>
 <p>Ha. Obuna aralash pozitsiyalarni qo‘llab-quvvatlaydi: masalan, oshxona uchun 2 ta 19 l va bolalar xonasi uchun 4 ta 10 l — bitta yetkazib berishda.</p>
@@ -391,7 +392,7 @@ ARTICLE = {
     {"@type": "Question", "name": "Bir oyga safarga ketsam-chi?", "acceptedAnswer": {"@type": "Answer", "text": "Obunani kerakli muddatga pauzaga qo‘ying yoki yaqin yetkazib berishlarni o‘tkazib yuboring. Jarima yoki qo‘lda qayta hisoblash kerak emas."}},
     {"@type": "Question", "name": "Obuna o‘rtasida 10 l dan 19 l ga o‘tish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Format obuna sozlamalarida o‘zgartiriladi va keyingi yetkazib berishdan kuchga kiradi."}},
     {"@type": "Question", "name": "Obunaning minimal muddati qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Majburiy minimal muddat yo‘q. Standart shartlar bo‘yicha istalgan paytda boshlash va bekor qilish mumkin."}},
-    {"@type": "Question", "name": "Faollashtirish uchun to‘lov bormi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q, obunani faollashtirish bepul. 19 l idish uchun garov birinchi yetkazib berishda hisoblanadi va idishni topshirishda qaytariladi."}},
+    {"@type": "Question", "name": "Faollashtirish uchun to‘lov bormi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q, obunani faollashtirish bepul. Idishlar uchun garov puli olinmaydi — birinchi yetkazib berishda ham, obunani rasmiylashtirishda ham."}},
     {"@type": "Question", "name": "Bitta obunada 19 l va 10 l buyurtma qilish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Obuna bitta yetkazib berishda aralash pozitsiyalarni qo‘llab-quvvatlaydi."}},
     {"@type": "Question", "name": "To‘lov oyiga bir marta yoki har yetkazib berishga?", "acceptedAnswer": {"@type": "Answer", "text": "Har bir yetkazib berish uchun: har bir rejalashtirilgan yetkazib berishga buyurtma alohida rasmiylashtiriladi va tanlangan usulda to‘lanadi (naqd pul, Click yoki korporativ hisob). Oylik hisob-faktura chiqarilmaydi."}},
     {"@type": "Question", "name": "Yaqin yetkazib berishlarni qayerda ko‘rish mumkin?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-botda Mening yetkazib berishlarim buyrug‘i va saytdagi Mening obunam bo‘limi."}}
@@ -402,15 +403,15 @@ ARTICLE = {
         },
         "en": {
             "title": "Water subscription in Tashkent: automatic delivery, returnable bottles, no run-outs",
-            "excerpt": "An Aqua Element water subscription in Tashkent is a scheduled, recurring delivery of 19 L and 10 L bottles on the cadence you choose. Empties are collected on the next visit, your monthly water budget becomes predictable. Manage on web, Telegram bot, or phone.",
+            "excerpt": "An Aqua Element water subscription in Tashkent is a scheduled, recurring delivery of 19 L and 10 L bottles on the cadence you choose. Empty 19 L bottles are collected on the next visit, your monthly water budget becomes predictable. Manage on web, Telegram bot, or phone.",
             "meta_title": "Water subscription in Tashkent — 19 L and 10 L delivery plans | Aqua Element",
-            "meta_description": "Water subscription in Tashkent: scheduled 19 L and 10 L delivery, returnable cycle, flexible cadence. Sign up via Aqua Element Telegram bot or web.",
+            "meta_description": "Water subscription in Tashkent: scheduled 19 L and 10 L delivery, returnable 19 L bottles, flexible cadence. Sign up via Aqua Element Telegram bot or web.",
             "content": """
-<p class="lead">"We ran out of water on Saturday night" is a familiar scene for many Tashkent households and offices. The hot climate quietly pushes drinking-water consumption higher than people expect, and one-off orders have to be placed reactively. An Aqua Element water subscription in Tashkent removes that load: you agree on a schedule once, and 19 L or 10 L bottles arrive on cadence, empties go back automatically, and the monthly water budget becomes predictable. This article explains how the subscription works, what cadence to pick for different household and office profiles, and how to set up a plan on the website or via the Telegram bot.</p>
+<p class="lead">"We ran out of water on Saturday night" is a familiar scene for many Tashkent households and offices. The hot climate quietly pushes drinking-water consumption higher than people expect, and one-off orders have to be placed reactively. An Aqua Element water subscription in Tashkent removes that load: you agree on a schedule once, and 19 L or 10 L bottles arrive on cadence, empty 19 L bottles go back automatically, and the monthly water budget becomes predictable. This article explains how the subscription works, what cadence to pick for different household and office profiles, and how to set up a plan on the website or via the Telegram bot.</p>
 
 <h2>Why a subscription: "we ran out" is a systemic problem</h2>
 <p>Drinking water is basic consumption that is easy to underestimate. One person drinks 1.5–2.5 L per day on average, and noticeably more in heat. Add cooking, tea, coffee, and guests — and a single 19 L bottle lasts a couple 4–7 days, a family of four 3–5 days. In offices the rate is higher: 30 people in a hot month easily drink 8–12 bottles per week.</p>
-<p>The issue is not the water itself but the cognitive load: someone has to remember the cooler level, place the order, sync with the courier window. Layered on top of work, family, and travel, that loop fails on a regular basis — and you end up out of water on a Saturday with nothing arriving until Monday. A water subscription moves the task from "I need to remember" to "it's already running in the background".</p>
+<p>The issue is not the water itself but the cognitive load: someone has to remember the cooler level, place the order, sync with the courier window. Layered on top of work, family, and travel, that loop fails on a regular basis — and you end up out of water on a Saturday evening with no order placed. A water subscription moves the task from "I need to remember" to "it's already running in the background".</p>
 
 <h2>What an Aqua Element water subscription is</h2>
 <p>A subscription is a scheduled, recurring delivery of Aqua Element artesian drinking water on a cadence you choose. You set three parameters:</p>
@@ -510,7 +511,7 @@ ARTICLE = {
 </ul>
 
 <h2>Returnable-bottle logistics on a subscription</h2>
-<p>Aqua Element 19 L bottles are returnable. On every delivery the courier brings full bottles and picks up the empties in exchange. Deposit value and return rules are transparent and confirmed at sign-up. If you are starting fresh and have no empty bottles, the bottles are issued under deposit on the first delivery; on cancellation the deposit is refunded when the bottles are returned.</p>
+<p>Aqua Element 19 L bottles are returnable. On every delivery the courier brings full bottles and picks up the empties in exchange. We charge no deposit for the bottles, on the first delivery or at sign-up.</p>
 <p>This cycle is one of the most environmentally efficient ways to consume drinking water: a single bottle serves dozens of "fill → deliver → consume → return → wash → fill" cycles. No piles of small plastic bottles in the bin.</p>
 
 <h2>How Aqua Element keeps subscription quality consistent</h2>
@@ -548,7 +549,7 @@ ARTICLE = {
 <p>There is no mandatory minimum length. You can start and cancel at any time under the standard terms described on <a href="/subscriptions">/subscriptions</a>.</p>
 
 <h3>Is there a setup or activation fee?</h3>
-<p>No, subscription activation is free. A deposit on the returnable 19 L bottles is charged on the first delivery (if you have no bottles yet) and refunded when the bottles are returned.</p>
+<p>No, subscription activation is free. We charge no deposit for the bottles, on the first delivery or at sign-up.</p>
 
 <h3>Can I order both 19 L and 10 L on the same subscription?</h3>
 <p>Yes. The subscription supports mixed line items: for example, 2 bottles of 19 L for the kitchen and 4 bottles of 10 L for the kids' room — all in one delivery.</p>
@@ -577,7 +578,7 @@ ARTICLE = {
     {"@type": "Question", "name": "What if I am travelling for a month?", "acceptedAnswer": {"@type": "Answer", "text": "Pause the subscription for that period or skip the upcoming deliveries. There are no penalties and no manual re-billing."}},
     {"@type": "Question", "name": "Can I switch from 10 L to 19 L mid-subscription?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The bottle format is changed in subscription settings and applies from the next delivery."}},
     {"@type": "Question", "name": "What is the minimum subscription length?", "acceptedAnswer": {"@type": "Answer", "text": "There is no mandatory minimum length. You can start and cancel at any time under standard terms."}},
-    {"@type": "Question", "name": "Is there a setup fee?", "acceptedAnswer": {"@type": "Answer", "text": "No, activation is free. A deposit on the 19 L returnable bottles is charged on the first delivery and refunded when the bottles are returned."}},
+    {"@type": "Question", "name": "Is there a setup fee?", "acceptedAnswer": {"@type": "Answer", "text": "No, activation is free. We charge no deposit for the bottles, on the first delivery or at sign-up."}},
     {"@type": "Question", "name": "Can I order both 19 L and 10 L on the same subscription?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The subscription supports mixed line items in a single delivery."}},
     {"@type": "Question", "name": "Am I billed monthly or per delivery?", "acceptedAnswer": {"@type": "Answer", "text": "Per delivery: each scheduled delivery is placed as its own order and paid with the method on your subscription (cash on delivery, Click, or a company account). No monthly invoice is issued."}},
     {"@type": "Question", "name": "Where can I see my upcoming deliveries?", "acceptedAnswer": {"@type": "Answer", "text": "In the Telegram bot the My deliveries command and on the website the My subscription section in your account."}}

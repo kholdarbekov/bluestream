@@ -81,6 +81,9 @@
                                         </div>
                                     </div>
 
+                                    {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+                                    {{ offer_facts_block(offer_facts, current_language, heading_tag='h3') }}
+
                                     {% if post.tags %}
                                     <div class="post-tags">
                                         <h5>{{ 'Tags'|t }}:</h5>
@@ -169,7 +172,8 @@
                                                 {{ product.name }}
                                             </a>
                                         </h5>
-                                        <span class="post-date">{{ product.current_price|format_price }}</span>
+                                        {% set offer = offer_by_id.get(product.id) %}
+                                        <span class="post-date" data-sidebar-price="{{ product.id }}">{{ 'landing.offer.price_label'|t }} <span data-price>{% if offer %}{{ offer.price_text[current_language] }}{% endif %}</span></span>
                                     </div>
                                 </div>
                                 {% endfor %}

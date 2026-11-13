@@ -1019,16 +1019,17 @@ def test_the_product_picker_lists_every_active_product_at_its_subscription_price
         assert row["images"] == list(product.images or [])
 
 
-def test_the_picker_price_is_the_subscription_price_not_the_products_api_one(db, web, build, discounted):
-    """The products API prices a card for checkout (`base_price`, its bulk rules, a contract); a subscription
-    item is priced by `customer_unit_price` (the discount price here). The picker shows the price the
-    subscription will use, the one the Items save then prices the line at."""
+def test_the_picker_price_is_the_subscription_price_and_the_products_api_agrees(db, web, build, discounted):
+    """A subscription item is priced by `customer_unit_price` (the discount price here). The picker shows the price
+    the subscription will use, the one the Items save then prices the line at. The products API prices a card for
+    checkout from the same charged figure (`catalogue_unit_price`, then its bulk rules and a contract; final review
+    P4, owner 2026-11-13), so with no rule and no contract it states the same discount price, not `base_price`."""
     sub_id = build()
     checkout = web.get(f"/api/v1/products/{discounted.id}").get_json()["data"]["product"]["pricing"]["current_price"]
 
     [row] = [r for r in web.get(PICKER).get_json()["data"]["items"] if r["id"] == discounted.id]
 
-    assert checkout == 8000.0
+    assert checkout == float(discounted.catalogue_unit_price) == 6000.0
     assert row["unit_price_label"] == f"6{NBSP}000{NBSP}so'm"
     preview = web.post(f"{BASE}/{sub_id}/preview", {"items": [{"product_id": discounted.id, "quantity": 2}]})
     assert preview.get_json()["data"]["preview"]["items"][0]["unit_price_label"] == row["unit_price_label"]

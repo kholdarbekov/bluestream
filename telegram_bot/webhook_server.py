@@ -19,6 +19,7 @@ from config import config
 from database import db_manager
 from i18n import i18n
 from shared import reorder_reminder_copy
+from shared.constants import get_delivery_statement
 from shared.i18n_rendering import SUPPORTED_LANGUAGES
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import REORDER_REMINDER_CLAIM_TTL_SECONDS, RedisKeyspace
@@ -758,8 +759,12 @@ class WebhookServer:
             "user_id": 12345,
             "order_id": 67890,
             "amount": 15000,
-            "currency": "UZS"
+            "currency": "UZS",
+            "show_delivery_statement": true
         }
+
+        `show_delivery_statement` is the backend's decision: only `true` appends the delivery statement; a missing
+        key (an older backend) means no.
 
         The X-Request-ID (`payment-confirm:<payment_id>`, one per payment) is claimed before the send and kept only
         for a confirmation that was delivered. A send that fails releases it and answers 500; one Telegram refuses
@@ -849,6 +854,10 @@ class WebhookServer:
                     amount=f"{amount:,.0f}",
                     currency=currency
                 )
+                # The constant's whole sentences, plain text: `OrderHandlers._delivery_statement_block`'s expression,
+                # written inline because this server does not import the handlers.
+                if data.get('show_delivery_statement') is True:
+                    message_text += "\n\n" + " ".join(get_delivery_statement(language))
 
                 # Try to edit the existing payment message, fall back to sending new.
                 # RED-005: the Redis lookup is TIER_CACHE (speedup only — fresh

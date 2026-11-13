@@ -374,9 +374,10 @@
                            the steps it passed stay ticked. While it waits, the step it had reached
                            is ticked too: a delivery can fail while the order is still pending,
                            confirmed or preparing, and what failed was the delivery. Out for
-                           Delivery, where the attempt failed, is neither. Nothing is on its way and
-                           there is no new date yet, so "Delivery will start soon" and the failed
-                           attempt's "Estimated delivery" are hidden. #}
+                           Delivery, where the attempt failed, is neither. No date is printed while
+                           it waits. "Delivery will start soon" shows only beside the delivery
+                           statement (the backend's answer for an undated or today's live order),
+                           so a later-day, waiting, cancelled or returned order does not print it. #}
                         {% set waiting_for_date = display_status == 'awaiting_new_date' %}
                         <!-- Pending -->
                         <div class="timeline-item {% if display_status == 'pending' %}active{% elif order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'pending') %}completed{% endif %}">
@@ -432,7 +433,7 @@
                             </div>
                             {% elif order.status.value == 'delivered' %}
                             <div class="timeline-description">{{ 'Delivery completed'|t }}</div>
-                            {% elif not waiting_for_date %}
+                            {% elif delivery_statement %}
                             <div class="timeline-description">{{ 'Delivery will start soon'|t }}</div>
                             {% endif %}
                         </div>
@@ -448,11 +449,12 @@
                             <div class="timeline-time">{{ delivery.delivered_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
                             {% endif %}
                             <div class="timeline-description">{{ 'Your order has been delivered successfully'|t }}</div>
-                            {% elif not waiting_for_date %}
-                            <div class="timeline-description">{{ 'Estimated delivery'|t }}: {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</div>
+                            {% elif scheduled_for_label %}
+                            <div class="timeline-description">{{ 'landing.order.scheduled_for'|t }} {{ scheduled_for_label }}</div>
                             {% endif %}
                         </div>
                     </div>
+                    {% if delivery_statement %}<p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>{% endif %}
 
                     {% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
                     <div class="refresh-notice">

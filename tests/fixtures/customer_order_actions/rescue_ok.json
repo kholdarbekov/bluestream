@@ -109,6 +109,7 @@
      },
      "payment_method": "cash",
      "promo_code_used": null,
+     "show_delivery_statement": true,
      "special_instructions": null,
      "status": "pending",
      "subscription_id": null,

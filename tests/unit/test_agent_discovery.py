@@ -224,11 +224,11 @@ class TestAdvertisedLinksResolve:
 class TestPublicApiFeedHeaders:
     """The advertised /api/public/ feed is carved out of the private /api/ no-store+noindex defaults."""
 
-    def test_products_feed_is_cacheable_and_indexable(self, public_client, db):
+    def test_products_feed_is_revalidated_and_indexable(self, public_client, db):
         resp = public_client.get("/api/public/products.json")
         assert resp.status_code == 200
         cache_control = resp.headers.get("Cache-Control", "")
-        assert "public" in cache_control and "max-age=900" in cache_control
+        assert cache_control == "public, no-cache"
         assert "no-store" not in cache_control
         assert "noindex" not in resp.headers.get("X-Robots-Tag", "")
 
@@ -282,3 +282,14 @@ class TestCacheableResponseCookieGuard:
         assert resp.status_code == 200
         assert "public" in resp.headers.get("Cache-Control", "")
         assert not self._sets_access_cookie(resp)
+
+    def test_no_auth_cookie_on_the_public_product_feed(self, app, db, sample_user):
+        resp = self._client_with_near_expiry_token(app, db, sample_user).get("/api/public/products.json")
+        assert resp.status_code == 200
+        assert "public" in resp.headers.get("Cache-Control", "")
+        assert not self._sets_access_cookie(resp)
+
+    def test_no_cookie_of_any_kind_on_llms_txt(self, app, db, sample_user):
+        resp = self._client_with_near_expiry_token(app, db, sample_user).get("/llms.txt")
+        assert resp.status_code == 200 and "public" in resp.headers["Cache-Control"]
+        assert resp.headers.get_all("Set-Cookie") == []

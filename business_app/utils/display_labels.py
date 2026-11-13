@@ -1,6 +1,6 @@
 """Display labels for the website: the ONE helper per language (spec 2026-10-26 §5 B11).
 
-Dates, delivery windows, money, "today"/"tomorrow"/"in N days" and payment-method names, in the
+Dates, delivery windows, money, litres, "today"/"tomorrow"/"in N days" and payment-method names, in the
 request's language, from DB-backed copy (`web.display_labels.*`, seeded en/uz/ru). The website reads
 these as published labels and never formats a date or an amount itself (no `new Date('YYYY-MM-DD')`,
 no en-US `toLocaleString`). B11 is website-only (spec §12): the bot and the emails keep their formats.
@@ -24,10 +24,21 @@ from shared.i18n_rendering import plural_key
 KEY = "web.display_labels"
 NBSP = "\u00a0"
 EN_DASH = "\u2013"
+# The currency every amount is in (ISO 4217): the unit a money label falls back to when its copy is missing.
+CURRENCY = "UZS"
+# The languages that write a decimal comma: "18,9 l" / "18,9 л", against English "18.9 L".
+DECIMAL_COMMA_LANGUAGES = ("uz", "ru")
 
 
 def _t(key: str, language: Optional[str], **values) -> str:
     return get_translation(f"{KEY}.{key}", language, **values)
+
+
+def _t_or(key: str, language: Optional[str], fallback: str, **values) -> str:
+    """`_t`, or `fallback` when no row of the key exists (the lookup then returns the key itself): a label that
+    states a number prints the number with its unit, never the key's name."""
+    text = _t(key, language, **values)
+    return fallback if text == f"{KEY}.{key}" else text
 
 
 def weekday_name(weekday: int, language: Optional[str] = None) -> str:
@@ -94,10 +105,21 @@ def window(start: Optional[time], end: Optional[time]) -> Optional[str]:
 
 
 def money(amount, language: Optional[str] = None) -> str:
-    """An amount: "36 000 so'm" / "36 000 сум", whole so'm, thousands grouped by a no-break space."""
+    """An amount: "36 000 so'm" / "36 000 сум", whole so'm, thousands grouped by a no-break space;
+    "36 000 UZS" when the copy is missing."""
     whole = Decimal(str(amount or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     grouped = f"{int(whole):,}".replace(",", NBSP)
-    return _t("money", language, amount=grouped)
+    return _t_or("money", language, f"{grouped}{NBSP}{CURRENCY}", amount=grouped)
+
+
+def litres(amount, language: Optional[str] = None) -> str:
+    """A volume: "18,9 l" / "18,9 л" / "18.9 L", trailing zeros dropped ("10 L", not "10.0 L"); "18,9 L" when the
+    copy is missing."""
+    language = language or get_current_language()
+    text = f"{Decimal(str(amount)).normalize():f}"
+    if language in DECIMAL_COMMA_LANGUAGES:
+        text = text.replace(".", ",")
+    return _t_or("litres", language, f"{text}{NBSP}L", amount=text)
 
 
 def days_away(day: date, today: date, language: Optional[str] = None) -> Optional[str]:

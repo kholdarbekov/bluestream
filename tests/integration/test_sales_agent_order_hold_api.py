@@ -675,6 +675,7 @@ def test_t_hold_3_a_held_order_paid_by_click_is_confirmed_once(
                 "order_number": order.order_number,
                 "amount": float(order.total_amount),
                 "currency": "UZS",
+                "show_delivery_statement": True,  # a held order is live and has no later date
             },
         )
         assert (pushes, emails) == ([push], [])

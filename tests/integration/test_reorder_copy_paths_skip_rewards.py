@@ -74,6 +74,10 @@ def test_retry_with_cash_copies_the_paid_lines_only(app, client, db, sample_user
         (sample_product.id, 2, False)
     ]
     assert db.session.get(Order, rescued["id"]).subtotal == Decimal("30000.00")
+    # The bot's rescue screen prints the delivery statement only when this flag is True
+    # (telegram_bot/handlers/orders.py `_delivery_statement_block`); an undated cash order carries it.
+    assert db.session.get(Order, rescued["id"]).delivery_date is None
+    assert rescued["show_delivery_statement"] is True
 
 
 def test_retry_with_cash_refuses_an_order_whose_only_lines_were_free(

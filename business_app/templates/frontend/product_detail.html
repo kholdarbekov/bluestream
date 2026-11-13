@@ -1,7 +1,6 @@
 {% extends "frontend/base.html" %}
-{% set meta_description = product.meta_description or product.short_description or product.description %}
-{% set delivery_facts = "Delivery windows are shown at checkout and depend on service zone and available slots." %}
-{% set pricing_facts = "Final payable amount is shown in cart/checkout based on current listed product price and active discounts." %}
+{% set product_description = product.meta_description or product.short_description or product.description or offer_price_sentence(offer_product, current_language) %}
+{% set meta_description = [offer_price_sentence(offer_product, current_language), product.meta_description or product.short_description or product.description]|select|join(' ') %}
 {% set refund_facts = "Refund and replacement handling follows the published refund policy terms." %}
 
 {% block title %}{{ product.name }} - {{ company_name }}{% endblock %}
@@ -14,36 +13,19 @@
 {% set product_image = product.images[0] if product.images and product.images|length > 0 else url_for('static', filename='images/logo.png', _external=True) %}
 <meta property="og:url" content="{{ product_url }}">
 <meta property="og:image" content="{{ product_image }}">
-<meta property="product:price:amount" content="{{ product.discount_price if product.discount_price else product.base_price }}">
+<meta property="product:price:amount" content="{{ offer_jsonld.price }}">
 <meta property="product:price:currency" content="UZS">
-{% set availability = 'https://schema.org/OutOfStock' if (product.stock_caps_purchase and product.stock_quantity <= 0) else 'https://schema.org/InStock' %}
 {% set product_schema = {
   "@context": "https://schema.org",
   "@type": "Product",
   "name": product.name,
-  "description": meta_description,
+  "description": product_description,
   "sku": product.sku,
   "image": product.images if product.images else [product_image],
   "category": product.category.name if product.category else None,
   "url": product_url,
-  "offers": {
-    "@type": "Offer",
-    "priceCurrency": "UZS",
-    "price": product.discount_price if product.discount_price else product.base_price,
-    "availability": availability,
-    "url": product_url
-  },
+  "offers": offer_jsonld,
   "additionalProperty": [
-    {
-      "@type": "PropertyValue",
-      "name": "Delivery Information",
-      "value": delivery_facts
-    },
-    {
-      "@type": "PropertyValue",
-      "name": "Pricing Information",
-      "value": pricing_facts
-    },
     {
       "@type": "PropertyValue",
       "name": "Refund Information",
@@ -79,22 +61,6 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "How is delivery scheduled for this product?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": delivery_facts
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "How is product pricing determined?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": pricing_facts
-      }
-    },
     {
       "@type": "Question",
       "name": "What happens if there is a quality or fulfillment issue?",
@@ -233,17 +199,15 @@
                         <!-- Price Row -->
                         <div class="price-row">
                             <div class="price-box">
-                                {% if product.discount_price and product.discount_price > 0 %}
                                 <div class="price-group">
-                                    <span class="price-new">{{ product.discount_price|format_price }} <small>UZS</small></span>
-                                    <span class="price-old">{{ product.base_price|format_price }} UZS</span>
-                                    <span class="save-tag">-{{ ((product.base_price - product.discount_price) / product.base_price * 100)|int }}%</span>
+                                    <span class="price-new">{{ offer_product.price_text[current_language] }}</span>
+                                    {% if offer_product.list_price_text %}
+                                    <span class="price-old">{{ offer_product.list_price_text[current_language] }}</span>
+                                    {% if offer_product.discount_percent %}
+                                    <span class="save-tag">-{{ offer_product.discount_percent }}%</span>
+                                    {% endif %}
+                                    {% endif %}
                                 </div>
-                                {% else %}
-                                <div class="price-group">
-                                    <span class="price-new">{{ product.base_price|format_price }} <small>UZS</small></span>
-                                </div>
-                                {% endif %}
                             </div>
                             <div class="stock-box">
                                 {% if not product.stock_caps_purchase %}
@@ -269,12 +233,6 @@
                                     {{ 'Out of Stock'|t }}
                                 </span>
                                 {% endif %}
-                                {% if (product.min_order_quantity or 1) > 1 %}
-                                <span class="stock-label stock-min-qty">
-                                    <i class="fas fa-info-circle"></i>
-                                    {{ 'Minimum order'|t }}: {{ product.min_order_quantity }}
-                                </span>
-                                {% endif %}
                             </div>
                         </div>
 
@@ -287,13 +245,13 @@
 
                         <!-- Features Grid - 3 Columns -->
                         <div class="features-grid">
-                            {% if product.volume %}
+                            {% if offer_product %}
                             <div class="feature-card">
                                 <div class="icon-wrap">
                                     <i class="fas fa-tint"></i>
                                 </div>
                                 <div class="feature-info">
-                                    <strong>{{ product.volume }} {{ product.volume_unit or 'L' }}</strong>
+                                    <strong>{{ offer_product.size_text[current_language] }}</strong>
                                     <span>{{ 'Volume'|t }}</span>
                                 </div>
                             </div>
@@ -342,13 +300,6 @@
                         <div class="benefits-section">
                             <div class="benefit-row">
                                 <div class="benefit-item">
-                                    <i class="fas fa-truck"></i>
-                                    <div>
-                                        <strong>{{ 'Fast Delivery'|t }}</strong>
-                                        <p>{{ 'Same day delivery available'|t }}</p>
-                                    </div>
-                                </div>
-                                <div class="benefit-item">
                                     <i class="fas fa-undo-alt"></i>
                                     <div>
                                         <strong>{{ 'Refund Support'|t }}</strong>
@@ -365,19 +316,12 @@
                             </div>
                         </div>
 
+                        {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+                        {{ offer_facts_block(offer_facts, current_language, product_id=product.id, heading_tag='h3') }}
+
                         <div class="product-facts-section" style="margin-top: 24px;">
                             <h3 style="font-size: 22px; margin-bottom: 14px;">{{ 'Verified Buying Facts'|t }}</h3>
                             <ul style="margin: 0; padding-left: 18px;">
-                                <li style="margin-bottom: 10px;">
-                                    <strong>{{ 'Delivery:'|t }}</strong>
-                                    {{ delivery_facts }}
-                                    <a href="{{ external_url_for_lang('frontend.delivery_policy') }}">{{ 'Read delivery policy'|t }}</a>.
-                                </li>
-                                <li style="margin-bottom: 10px;">
-                                    <strong>{{ 'Pricing:'|t }}</strong>
-                                    {{ pricing_facts }}
-                                    <a href="{{ external_url_for_lang('frontend.pricing_policy') }}">{{ 'Read pricing policy'|t }}</a>.
-                                </li>
                                 <li>
                                     <strong>{{ 'Refunds:'|t }}</strong>
                                     {{ refund_facts }}
@@ -450,14 +394,15 @@
                                 </figure>
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                    <span>{{ rel_product.volume }}{{ rel_product.volume_unit or 'L' }} - {{ rel_product.category.name if rel_product.category else 'Water' }}</span>
+                                    {% set rel_offer = offer_by_id.get(rel_product.id) %}
+                                    <span>{% if rel_offer %}{{ rel_offer.size_text[current_language] }} - {% endif %}{{ rel_product.category.name if rel_product.category else 'Water' }}</span>
                                     <h4><a href="{% if rel_product.slug %}{{ external_url_for_lang('frontend.product_detail_slug', slug=rel_product.slug) }}{% else %}{{ external_url_for_lang('frontend.product_detail', product_id=rel_product.id) }}{% endif %}">{{ rel_product.name }}</a></h4>
                                     <div class="price">
-                                        {% if rel_product.discount_price and rel_product.discount_price > 0 %}
-                                        <span class="old-price">{{ rel_product.base_price|format_price }} UZS</span>
-                                        <span class="new-price">{{ rel_product.discount_price|format_price }} UZS</span>
-                                        {% else %}
-                                        <h6>{{ rel_product.base_price|format_price }} UZS</h6>
+                                        {% if rel_offer and rel_offer.list_price_text %}
+                                        <span class="old-price">{{ rel_offer.list_price_text[current_language] }}</span>
+                                        <span class="new-price">{{ rel_offer.price_text[current_language] }}</span>
+                                        {% elif rel_offer %}
+                                        <h6>{{ rel_offer.price_text[current_language] }}</h6>
                                         {% endif %}
                                     </div>
                                     <div class="btn-box">

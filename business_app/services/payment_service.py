@@ -1482,6 +1482,11 @@ class PaymentService:
         sweep re-fires unmarked COMPLETED payments on Click and card only (`FISCALIZED_RAILS`); a failed Payme or
         business-account publish is logged at ERROR instead. NEVER raises: it runs inside the payment-completion chain
         and must not abort it. A dispatch that raises parks nothing and leaves the payment unmarked.
+
+        The bot push carries `show_delivery_statement`, True only for an online rail on an order whose customer is
+        told the statement (`OrderScheduleService.bot_message_shows_delivery_statement`, the rule the order payload's
+        key for the order-placed screen reads too), and False when that cannot be decided, so a failure there drops
+        the sentence, never the confirmation.
         """
         order = payment.order
         marked_at = datetime.now(timezone.utc).isoformat()
@@ -1489,6 +1494,7 @@ class PaymentService:
             from business_app.utils.payment_confirmation_dispatch import queue_online_payment_confirmation
 
             from .notification_service import NotificationService
+            from .order_schedule_service import OrderScheduleService
 
             method = payment.payment_method
             rail = method.value if hasattr(method, "value") else str(method)
@@ -1497,6 +1503,18 @@ class PaymentService:
             user = payment.user
             channels = NotificationService._resolve_telegram_else_email(user) if user is not None else []
             if NotificationChannel.TELEGRAM in channels:
+                try:
+                    show_delivery_statement = bool(
+                        order is not None
+                        and OrderScheduleService.bot_message_shows_delivery_statement(
+                            order, rail=method, payment_confirmed=True
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    current_app.logger.exception(
+                        "Could not decide the delivery statement for payment %s; confirming without it", payment.id
+                    )
+                    show_delivery_statement = False
                 queue_online_payment_confirmation(
                     db.session,
                     payment.id,
@@ -1510,6 +1528,7 @@ class PaymentService:
                         "order_number": order.order_number if order else None,
                         "amount": float(order.total_amount) if order else float(payment.amount),
                         "currency": "UZS",
+                        "show_delivery_statement": show_delivery_statement,
                     },
                 )
             elif NotificationChannel.EMAIL in channels:

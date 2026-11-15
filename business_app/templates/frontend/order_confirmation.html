@@ -1,442 +1,89 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from "frontend/macros/order_status.html" import order_status_pill %}
+{% from "frontend/partials/order_parts.html" import order_address, order_lines, order_totals with context %}
 
-{% block title %}{{ 'Order Confirmed'|t }} - {{ company_name }}{% endblock %}
+{#-
+  Where checkout lands once an order is placed (/order-confirmation?order_id=N; routes.order_confirmation).
+  - The status is the backend's display_status (F15) as every order page names it: order_status_pill
+    (macros/order_status.html, the one place its words and tone are decided).
+  - "When": the scheduled day or the delivery statement, or neither (the backend's customer_delivery_expectation).
+  - Address, lines and money: partials/order_parts.html, from the published labels (the page formats nothing).
+  - Hooks tests read: .confirmation-content, .delivery-info-box [data-delivery-statement], .totals-section,
+    the links to the tracking page and My orders.
+  Styles: static/css/pages/checkout.css (.ae-order-page, .ae-done).
+-#}
+
+{% block title %}{{ 'web.checkout.order.done_title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-/* Order Confirmation Styles */
-.confirmation-section {
-    padding: 100px 0;
-}
-
-.confirmation-content {
-    max-width: 800px;
-    margin: 0 auto;
-    background: #fff;
-    border-radius: 10px;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
-    overflow: hidden;
-}
-
-.success-header {
-    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
-    color: #fff;
-    text-align: center;
-    padding: 50px 30px;
-}
-
-.success-icon {
-    width: 80px;
-    height: 80px;
-    background: #fff;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 20px;
-    animation: scaleIn 0.5s ease;
-}
-
-@keyframes scaleIn {
-    from {
-        transform: scale(0);
-    }
-    to {
-        transform: scale(1);
-    }
-}
-
-.success-icon i {
-    font-size: 40px;
-    color: #28a745;
-}
-
-.success-header h2 {
-    font-size: 32px;
-    font-weight: 700;
-    margin-bottom: 10px;
-}
-
-.success-header p {
-    font-size: 16px;
-    opacity: 0.9;
-}
-
-.order-number {
-    background: rgba(255, 255, 255, 0.2);
-    display: inline-block;
-    padding: 10px 20px;
-    border-radius: 5px;
-    margin-top: 15px;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.confirmation-body {
-    padding: 40px;
-}
-
-.info-section {
-    margin-bottom: 35px;
-}
-
-.info-section h4 {
-    font-size: 18px;
-    font-weight: 700;
-    margin-bottom: 15px;
-    color: #222;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #f0f0f0;
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid #f5f5f5;
-}
-
-.info-label {
-    font-weight: 600;
-    color: #666;
-}
-
-.info-value {
-    color: #222;
-    text-align: right;
-}
-
-.order-items {
-    margin-top: 20px;
-}
-
-.order-item {
-    display: flex;
-    align-items: center;
-    padding: 15px 0;
-    border-bottom: 1px solid #f5f5f5;
-}
-
-.item-image {
-    width: 60px;
-    height: 60px;
-    border-radius: 5px;
-    object-fit: cover;
-    margin-right: 15px;
-}
-
-.item-details {
-    flex: 1;
-}
-
-.item-name {
-    font-weight: 600;
-    margin-bottom: 5px;
-    color: #222;
-}
-
-.item-qty {
-    font-size: 14px;
-    color: #666;
-}
-
-.item-price {
-    font-weight: 600;
-    color: #00d1f9;
-}
-
-.totals-section {
-    background: #f8f9fa;
-    padding: 20px;
-    border-radius: 8px;
-    margin-top: 25px;
-}
-
-.total-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-    font-size: 15px;
-}
-
-.total-row.final {
-    border-top: 2px solid #e0e0e0;
-    margin-top: 10px;
-    padding-top: 15px;
-    font-size: 20px;
-    font-weight: 700;
-    color: #222;
-}
-
-.total-row.final .amount {
-    color: #00d1f9;
-}
-
-.action-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-    margin-top: 35px;
-}
-
-.action-buttons .theme-btn {
-    text-align: center;
-}
-
-.delivery-info-box {
-    background: #e8f5f9;
-    border: 2px solid #00d1f9;
-    border-radius: 8px;
-    padding: 20px;
-    margin-top: 30px;
-}
-
-.delivery-info-box h5 {
-    color: #00d1f9;
-    font-weight: 700;
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-}
-
-.delivery-info-box h5 i {
-    margin-right: 10px;
-    font-size: 24px;
-}
-
-.delivery-info-box p {
-    margin-bottom: 8px;
-    color: #555;
-}
-
-.payment-status {
-    display: inline-block;
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.payment-status.pending {
-    background: #fff3cd;
-    color: #856404;
-}
-
-.payment-status.paid {
-    background: #d4edda;
-    color: #155724;
-}
-
-.payment-status.failed {
-    background: #f8d7da;
-    color: #721c24;
-}
-
-@media (max-width: 767px) {
-    .confirmation-body {
-        padding: 25px;
-    }
-
-    .success-header {
-        padding: 40px 20px;
-    }
-
-    .success-header h2 {
-        font-size: 24px;
-    }
-
-    .action-buttons {
-        grid-template-columns: 1fr;
-    }
-
-    .info-row {
-        flex-direction: column;
-        gap: 5px;
-    }
-
-    .info-value {
-        text-align: left;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
 {% endblock %}
 
 {% block content %}
-{% from "frontend/macros/order_status.html" import order_status_label %}
-        <!-- confirmation-section -->
-        <section class="confirmation-section">
-            <div class="auto-container">
-                <div class="confirmation-content">
-                    <!-- Success Header -->
-                    <div class="success-header">
-                        <div class="success-icon">
-                            <i class="far fa-check"></i>
-                        </div>
-                        <h2>{{ 'Order Confirmed!'|t }}</h2>
-                        <p>{{ 'Thank you for your order'|t }}</p>
-                        {% if order %}
-                        <div class="order-number">
-                            {{ 'Order'|t }} #{{ order.order_number }}
-                        </div>
-                        {% endif %}
+{% set number_label = 'web.checkout.order.number'|t(number=order.order_number) %}
+{{ page_hero('web.checkout.order.done_title'|t, crumbs=[('landing.nav.my_account'|t, url_for('frontend.my_account')), ('web.checkout.pay.my_orders'|t, url_for('frontend.my_orders')), (number_label, None)], variant='soft') }}
+
+<div class="ae-flow ae-order-page ae-done">
+    <section class="ae-section confirmation-section">
+        <div class="ae-container">
+            <article class="ae-card ae-done__card confirmation-content" aria-labelledby="done-number">
+                <header class="ae-done__head">
+                    <span class="ae-done__icon" aria-hidden="true"><i class="far fa-check"></i></span>
+                    <div class="ae-done__id">
+                        <h2 class="ae-done__number" id="done-number">{{ number_label }}</h2>
+                        {{ order_status_pill(display_status) }}
                     </div>
+                    <p class="ae-done__thanks">{{ 'web.checkout.order.thanks'|t }}</p>
+                </header>
 
-                    <!-- Confirmation Body -->
-                    <div class="confirmation-body">
-                        {% if order %}
-                        <!-- Delivery Information -->
-                        <div class="delivery-info-box">
-                            <h5>
-                                <i class="far fa-truck"></i>
-                                {{ 'Delivery Information'|t }}
-                            </h5>
-                            {# The backend decides (customer_delivery_expectation): a later date, or the statement, or neither. #}
-                            {% if scheduled_for_label %}<p><strong>{{ 'landing.order.scheduled_for'|t }}</strong> {{ scheduled_for_label }}</p>{% endif %}
-                            <p><strong>{{ 'Status'|t }}:</strong> {{ order_status_label(display_status) }}</p>
-                            <p><strong>{{ 'Tracking'|t }}:</strong> {{ 'We will notify you when your order is on the way'|t }}</p>
-                            {% if delivery_statement %}<p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>{% endif %}
-                        </div>
-
-                        <!-- Order Details -->
-                        <div class="info-section">
-                            <h4>{{ 'Order Details'|t }}</h4>
-
-                            <div class="info-row">
-                                <span class="info-label">{{ 'Order Number'|t }}:</span>
-                                <span class="info-value">{{ order.order_number }}</span>
-                            </div>
-
-                            <div class="info-row">
-                                <span class="info-label">{{ 'Order Date'|t }}:</span>
-                                <span class="info-value">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
-                            </div>
-
-                            <div class="info-row">
-                                <span class="info-label">{{ 'Payment Method'|t }}:</span>
-                                <span class="info-value">
-                                    {{ payment_method_label }}
-                                </span>
-                            </div>
-
-                            <div class="info-row">
-                                <span class="info-label">{{ 'Payment Status'|t }}:</span>
-                                <span class="info-value">
-                                    <span class="payment-status {{ order.payment_status }}">
-                                        {{ order.payment_status|title }}
-                                    </span>
-                                </span>
-                            </div>
-                        </div>
-
-                        <!-- Delivery Address -->
-                        {% if delivery %}
-                        <div class="info-section">
-                            <h4>{{ 'Delivery Address'|t }}</h4>
-                            <p style="color: #666; line-height: 1.8;">
-                                {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
-                                {{ delivery.delivery_address_line1 }}<br>
-                                {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
-                                {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
-                                {% if delivery.recipient_phone %}<strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.recipient_phone }}{% endif %}
-                            </p>
-                        </div>
-                        {% endif %}
-
-                        <!-- Order Items -->
-                        <div class="info-section">
-                            <h4>{{ 'Order Items'|t }} ({{ order.order_items|length }})</h4>
-
-                            <div class="order-items">
-                                {% for item in order.order_items %}
-                                <div class="order-item">
-                                    <img src="{{ item.product.image_url if item.product.image_url else url_for('static', filename='images/resource/shop/shop-1.jpg') }}"
-                                         alt="{{ item.product.name }}"
-                                         class="item-image">
-                                    <div class="item-details">
-                                        <div class="item-name">{{ item.product.name }}</div>
-                                        <div class="item-qty">{{ 'Quantity'|t }}: {{ item.quantity }}</div>
-                                    </div>
-                                    <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
-                                </div>
-                                {% endfor %}
-                            </div>
-                        </div>
-
-                        <!-- Order Totals -->
-                        <div class="totals-section">
-                            <div class="total-row">
-                                <span>{{ 'Subtotal'|t }}:</span>
-                                <span class="amount">{{ "{:,.0f}".format(order.subtotal) }} UZS</span>
-                            </div>
-                            <div class="total-row">
-                                <span>{{ 'Delivery Fee'|t }}:</span>
-                                <span class="amount">
-                                    {% if order.delivery_fee == 0 %}
-                                        {{ 'Free'|t }}
-                                    {% else %}
-                                        {{ "{:,.0f}".format(order.delivery_fee) }} UZS
-                                    {% endif %}
-                                </span>
-                            </div>
-                            {% if order.tier_discount and order.tier_discount > 0 %}
-                            <div class="total-row">
-                                <span>{{ 'Tier discount (bot & website perk)'|t }}:</span>
-                                <span class="amount">−{{ "{:,.0f}".format(order.tier_discount) }} UZS</span>
-                            </div>
-                            {% endif %}
-                            {% if order.discount_amount and order.discount_amount > 0 %}
-                            <div class="total-row">
-                                <span>{{ 'Subscription discount'|t }}:</span>
-                                <span class="amount">−{{ "{:,.0f}".format(order.discount_amount) }} UZS</span>
-                            </div>
-                            {% endif %}
-                            {% if order.loyalty_discount and order.loyalty_discount > 0 %}
-                            <div class="total-row">
-                                <span>{{ 'Reward discount'|t }}:</span>
-                                <span class="amount">−{{ "{:,.0f}".format(order.loyalty_discount) }} UZS</span>
-                            </div>
-                            {% endif %}
-                            <div class="total-row final">
-                                <span>{{ 'Total'|t }}:</span>
-                                <span class="amount">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
-                            </div>
-                        </div>
-
-                        <!-- Action Buttons -->
-                        <div class="action-buttons">
-                            <a href="{{ url_for('frontend.order_tracking', order_id=order.id) }}" class="theme-btn btn-one">
-                                <i class="far fa-map-marker-alt"></i> {{ 'Track Order'|t }}
-                            </a>
-                            <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                                <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
-                            </a>
-                            <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                                <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
-                            </a>
-                        </div>
-                        {% else %}
-                        <!-- No Order Found -->
-                        <div style="text-align: center; padding: 40px 20px;">
-                            <i class="flaticon-box" style="font-size: 60px; color: #e0e0e0; margin-bottom: 20px;"></i>
-                            <h3 style="color: #666; margin-bottom: 15px;">{{ 'Order Not Found'|t }}</h3>
-                            <p style="color: #999; margin-bottom: 30px;">{{ 'We could not find your order. Please check your order number.'|t }}</p>
-                            <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
-                                {{ 'landing.button.continue_shopping'|t }}
-                            </a>
-                        </div>
-                        {% endif %}
+                {# The backend decides (customer_delivery_expectation): a later date, or the statement, or neither. #}
+                {% if scheduled_for_label or delivery_statement %}
+                <div class="ae-alert ae-order-when delivery-info-box">
+                    <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-clock"></i></span>
+                    <div class="ae-order-when__body">
+                        {% if scheduled_for_label %}<p class="ae-order-when__date"><strong>{{ 'landing.order.scheduled_for'|t }}</strong> {{ scheduled_for_label }}</p>{% endif %}
+                        {% if delivery_statement %}<p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>{% endif %}
                     </div>
                 </div>
-            </div>
-        </section>
-        <!-- confirmation-section end -->
+                {% endif %}
+
+                <dl class="ae-dl ae-done__facts">
+                    {% if placed_label %}
+                    <div class="ae-dl__row">
+                        <dt>{{ 'web.checkout.order.placed'|t }}</dt>
+                        <dd class="ae-num">{{ placed_label }}</dd>
+                    </div>
+                    {% endif %}
+                    <div class="ae-dl__row">
+                        <dt>{{ 'web.checkout.pay.method'|t }}</dt>
+                        <dd>{{ payment_method_label }}</dd>
+                    </div>
+                    <div class="ae-dl__row">
+                        <dt>{{ 'web.checkout.order.address_title'|t }}</dt>
+                        <dd>{{ order_address(order.delivery_address) }}</dd>
+                    </div>
+                </dl>
+
+                <section class="ae-done__items" aria-labelledby="done-items">
+                    <h3 class="ae-order-title" id="done-items">{{ 'web.checkout.order.items_title'|t }}</h3>
+                    {{ order_lines(items, labels, placeholder) }}
+                    {{ order_totals(order, labels) }}
+                </section>
+
+                <div class="ae-done__actions action-buttons">
+                    <a href="{{ url_for('frontend.order_tracking', order_id=order.id) }}" class="ae-btn ae-btn--primary">
+                        <i class="far fa-route" aria-hidden="true"></i>{{ 'web.checkout.order.track'|t }}
+                    </a>
+                    <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary">{{ 'web.checkout.pay.my_orders'|t }}</a>
+                    <a href="{{ url_for('frontend.shop') }}" class="ae-link ae-done__link">{{ 'web.checkout.pay.continue'|t }}</a>
+                </div>
+            </article>
+        </div>
+    </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-{% from "frontend/macros/page_data.html" import render_page_data %}
-{{ render_page_data({
-    'order_success': true if (order is defined and order) else false,
-    'i18n': {'order_success': 'Order placed successfully!' | t},
-}) }}
-<script src="{{ url_for('static', filename='js/pages/order-confirmation.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-confirmation.js') }}"></script>
 {% endblock %}

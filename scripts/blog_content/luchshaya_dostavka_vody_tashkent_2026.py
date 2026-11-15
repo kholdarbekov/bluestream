@@ -10,7 +10,7 @@ ARTICLE = {
     "slug": "luchshaya-dostavka-vody-tashkent-2026",
     "category": "lifestyle",
     "tags": "tashkent,delivery,water,2026,best-water-delivery,artesian-water",
-    "featured_image": "/static/images/news/news-1.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "Курьер передаёт 19-литровую бутыль питьевой воды клиенту в Ташкенте",
     "is_featured": True,
     "sort_order": 100,
@@ -64,7 +64,7 @@ ARTICLE = {
 
 <h3>Каналы заказа и оплаты</h3>
 
-<p>В 2026 году серьёзный игрок предлагает минимум три канала: сайт с корзиной, Telegram-бот, телефон. Оплата — наличные курьеру, карта, и обязательно местные платёжные системы (Payme, Click). Подписка должна позволять менять день, ставить на паузу и отказываться без штрафных условий.</p>
+<p>В 2026 году серьёзный игрок предлагает минимум два канала: сайт с корзиной и Telegram-бот. Оплата — наличные курьеру, карта, и обязательно местные платёжные системы (Payme, Click). Подписка должна позволять менять день, ставить на паузу и отказываться без штрафных условий.</p>
 
 <h2>Сколько это должно стоить: рамка «цена–качество»</h2>
 
@@ -175,7 +175,7 @@ ARTICLE = {
 
 <p>Линейка SKU простая и сознательно ограничена: 18,9 л (стандарт «19 литров», возвратная тара) и 10 л. Других объёмов мы не продаём — потому что фокусируемся на качестве этих двух форматов и на их логистике.</p>
 
-<p>Заказ — три канала: сайт <a href="/shop">/shop</a>, Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, телефон. Оплата — наличные курьеру, Payme, Click, банковская карта. Подписка <a href="/subscriptions">/subscriptions</a> позволяет фиксировать дни доставки, ставить заказы на паузу на время отъезда и менять количество бутылей.</p>
+<p>Заказ — два канала: <a href="/shop">сайт</a> и Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Оплата — наличные курьеру, Payme, Click, банковская карта. <a href="/subscriptions">Подписка</a> позволяет фиксировать дни доставки, ставить заказы на паузу на время отъезда и менять количество бутылей.</p>
 
 <h2>Часто задаваемые вопросы</h2>
 
@@ -186,7 +186,7 @@ ARTICLE = {
 <p>Да. 18,9-литровая поликарбонатная бутыль — возвратная тара. Курьер забирает пустую бутыль при следующем заказе, она проходит инспекцию, мойку и дезинфекцию перед повторным розливом.</p>
 
 <h3>Какие способы оплаты вы принимаете?</h3>
-<p>Наличные курьеру, оплата картой, Payme и Click. Способ выбирается при оформлении заказа на сайте, в Telegram-боте или по телефону.</p>
+<p>Наличные курьеру, оплата картой, Payme и Click. Способ выбирается при оформлении заказа на сайте или в Telegram-боте.</p>
 
 <h3>Чем артезианская вода отличается от водопроводной?</h3>
 <p>Артезианская вода добывается из глубокого защищённого водоносного горизонта, изолированного от поверхностных загрязнений. Водопроводная вода — это обработанная поверхностная или подземная вода, проходящая по городской и внутридомовой сети. Источники, технология подготовки и контроль качества различаются.</p>
@@ -198,82 +198,82 @@ ARTICLE = {
 <p>Нет. Зона обслуживания Aqua Element — только Ташкент и Ташкентская область.</p>
 
 <h3>Можно ли подписаться и в любой момент поставить на паузу?</h3>
-<p>Да. Подписка <a href="/subscriptions">/subscriptions</a> позволяет ставить доставку на паузу, переносить дату и менять количество бутылей в личном кабинете или через Telegram-бот.</p>
+<p>Да. <a href="/subscriptions">Подписка</a> позволяет ставить доставку на паузу, переносить дату и менять количество бутылей в личном кабинете или через Telegram-бот.</p>
 
 <h3>Какие размеры бутылей у вас есть?</h3>
 <p>Мы продаём только два формата: 18,9 л (стандарт «19 литров», возвратная тара) и 10 л. Других объёмов в линейке нет.</p>
 
 <h3>Что входит в 11 ступеней фильтрации?</h3>
-<p>Кварцевый фильтр, активированный уголь, ионообменник/умягчитель, блок регенерации, механическая фильтрация 5 мкм, механическая фильтрация 1 мкм, обратный осмос, мембранная CIP-санитизация, УФ-обеззараживание, минерализация, обработка озоном. Подробное описание — на странице <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p>Кварцевый фильтр, активированный уголь, ионообменник/умягчитель, блок регенерации, механическая фильтрация 5 мкм, механическая фильтрация 1 мкм, обратный осмос, мембранная CIP-санитизация, УФ-обеззараживание, минерализация, обработка озоном. Подробное описание — на <a href="/process/11-step-filtration">странице об 11 этапах фильтрации</a>.</p>
 
-<p>Готовы попробовать? Оформите заказ на <a href="/shop">/shop</a>, настройте регулярную доставку через <a href="/subscriptions">/subscriptions</a> или закажите в нашем Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> — там же можно следить за доставкой.</p>
+<p>Готовы попробовать? Оформите заказ в <a href="/shop">магазине на сайте</a>, настройте регулярную доставку через <a href="/subscriptions">страницу подписки</a> или закажите в нашем Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> — там же можно следить за доставкой.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужен ли кулер для 18,9-литровой бутыли?","acceptedAnswer":{"@type":"Answer","text":"Нет, кулер не обязателен. Бутыль можно использовать с обычной механической помпой (ручной или электрической) или установить на диспенсер."}},{"@type":"Question","name":"Возвратная ли бутыль?","acceptedAnswer":{"@type":"Answer","text":"Да. 18,9-литровая поликарбонатная бутыль возвратная. Курьер забирает пустую бутыль при следующем заказе, она проходит инспекцию, мойку и дезинфекцию перед повторным розливом."}},{"@type":"Question","name":"Какие способы оплаты вы принимаете?","acceptedAnswer":{"@type":"Answer","text":"Наличные курьеру, оплата картой, Payme и Click. Способ выбирается при оформлении заказа на сайте, в Telegram-боте или по телефону."}},{"@type":"Question","name":"Чем артезианская вода отличается от водопроводной?","acceptedAnswer":{"@type":"Answer","text":"Артезианская вода добывается из глубокого защищённого водоносного горизонта. Водопроводная вода проходит по городской и внутридомовой сети. Источники, технология подготовки и контроль качества различаются."}},{"@type":"Question","name":"Как тестируется ваша вода?","acceptedAnswer":{"@type":"Answer","text":"Контроль ведётся в рамках надзора Комитета санитарно-эпидемиологического благополучия и общественного здоровья Республики Узбекистан, с регулярными лабораторными анализами по микробиологическим, химическим и физико-химическим показателям."}},{"@type":"Question","name":"Доставляете ли вы за пределы Ташкентской области?","acceptedAnswer":{"@type":"Answer","text":"Нет. Зона обслуживания Aqua Element — только Ташкент и Ташкентская область."}},{"@type":"Question","name":"Можно ли подписаться и в любой момент поставить на паузу?","acceptedAnswer":{"@type":"Answer","text":"Да. Подписка позволяет ставить доставку на паузу, переносить дату и менять количество бутылей в личном кабинете или через Telegram-бот."}},{"@type":"Question","name":"Какие размеры бутылей у вас есть?","acceptedAnswer":{"@type":"Answer","text":"Мы продаём только два формата: 18,9 л (стандарт 19 литров, возвратная тара) и 10 л."}},{"@type":"Question","name":"Что входит в 11 ступеней фильтрации?","acceptedAnswer":{"@type":"Answer","text":"Кварцевый фильтр, активированный уголь, ионообменник, блок регенерации, механическая фильтрация 5 мкм, механическая фильтрация 1 мкм, обратный осмос, мембранная CIP-санитизация, УФ-обеззараживание, минерализация, обработка озоном."}}]}</script>"""
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужен ли кулер для 18,9-литровой бутыли?","acceptedAnswer":{"@type":"Answer","text":"Нет, кулер не обязателен. Бутыль можно использовать с обычной механической помпой (ручной или электрической) или установить на диспенсер."}},{"@type":"Question","name":"Возвратная ли бутыль?","acceptedAnswer":{"@type":"Answer","text":"Да. 18,9-литровая поликарбонатная бутыль возвратная. Курьер забирает пустую бутыль при следующем заказе, она проходит инспекцию, мойку и дезинфекцию перед повторным розливом."}},{"@type":"Question","name":"Какие способы оплаты вы принимаете?","acceptedAnswer":{"@type":"Answer","text":"Наличные курьеру, оплата картой, Payme и Click. Способ выбирается при оформлении заказа на сайте или в Telegram-боте."}},{"@type":"Question","name":"Чем артезианская вода отличается от водопроводной?","acceptedAnswer":{"@type":"Answer","text":"Артезианская вода добывается из глубокого защищённого водоносного горизонта. Водопроводная вода проходит по городской и внутридомовой сети. Источники, технология подготовки и контроль качества различаются."}},{"@type":"Question","name":"Как тестируется ваша вода?","acceptedAnswer":{"@type":"Answer","text":"Контроль ведётся в рамках надзора Комитета санитарно-эпидемиологического благополучия и общественного здоровья Республики Узбекистан, с регулярными лабораторными анализами по микробиологическим, химическим и физико-химическим показателям."}},{"@type":"Question","name":"Доставляете ли вы за пределы Ташкентской области?","acceptedAnswer":{"@type":"Answer","text":"Нет. Зона обслуживания Aqua Element — только Ташкент и Ташкентская область."}},{"@type":"Question","name":"Можно ли подписаться и в любой момент поставить на паузу?","acceptedAnswer":{"@type":"Answer","text":"Да. Подписка позволяет ставить доставку на паузу, переносить дату и менять количество бутылей в личном кабинете или через Telegram-бот."}},{"@type":"Question","name":"Какие размеры бутылей у вас есть?","acceptedAnswer":{"@type":"Answer","text":"Мы продаём только два формата: 18,9 л (стандарт 19 литров, возвратная тара) и 10 л."}},{"@type":"Question","name":"Что входит в 11 ступеней фильтрации?","acceptedAnswer":{"@type":"Answer","text":"Кварцевый фильтр, активированный уголь, ионообменник, блок регенерации, механическая фильтрация 5 мкм, механическая фильтрация 1 мкм, обратный осмос, мембранная CIP-санитизация, УФ-обеззараживание, минерализация, обработка озоном."}}]}</script>"""
         },
         "uz": {
-            "title": "Toshkentda eng yaxshi suv yetkazib berish 2026: xaridor qoʻllanmasi",
-            "excerpt": "2026-yilda Toshkentda ichimlik suvini yetkazib beruvchi xizmatni qanday tanlash kerak: baholash mezonlari, manba, filtratsiya, logistika, toʻlov va FAQ.",
+            "title": "Toshkentda eng yaxshi suv yetkazib berish 2026: xaridor qo‘llanmasi",
+            "excerpt": "2026-yilda Toshkentda ichimlik suvini yetkazib beruvchi xizmatni qanday tanlash kerak: baholash mezonlari, manba, filtratsiya, logistika, to‘lov va FAQ.",
             "meta_title": "Toshkentda eng yaxshi suv yetkazib berish 2026 | Aqua Element",
-            "meta_description": "Toshkentga suv yetkazib berish 2026: tanlash mezonlari, manba, 11 bosqichli filtratsiya, mineral profil, hududlar, toʻlov, FAQ.",
-            "content": """<p>Toshkentning issiq yozi, uzun isitish mavsumi va shahar suv tarmogʻi sifatining tumandan tumanga farq qilishi ichimlik suvini yetkazib berishni hashamat emas, balki kundalik ehtiyojga aylantirdi. 2026-yilga kelib poytaxt va Toshkent viloyatida turli kalibrdagi oʻnlab xizmatlar ishlamoqda — yirik milliy brendlardan tortib mahalliy butil-operatorlar va faqat teskari osmosga asoslangan xizmatlargacha. Ushbu qoʻllanmaning maqsadi — oila yoki ofisga reklama shiorlariga emas, balki tekshirilishi mumkin boʻlgan mezonlarga tayanib, yetkazib beruvchini tanlashga yordam berish.</p>
+            "meta_description": "Toshkentga suv yetkazib berish 2026: tanlash mezonlari, manba, 11 bosqichli filtratsiya, mineral profil, hududlar, to‘lov, FAQ.",
+            "content": """<p>Toshkentning issiq yozi, uzun isitish mavsumi va shahar suv tarmog‘i sifatining tumandan tumanga farq qilishi ichimlik suvini yetkazib berishni hashamat emas, balki kundalik ehtiyojga aylantirdi. 2026-yilga kelib poytaxt va Toshkent viloyatida turli kalibrdagi o‘nlab xizmatlar ishlamoqda — yirik milliy brendlardan tortib mahalliy butil-operatorlar va faqat teskari osmosga asoslangan xizmatlargacha. Ushbu qo‘llanmaning maqsadi — oila yoki ofisga reklama shiorlariga emas, balki tekshirilishi mumkin bo‘lgan mezonlarga tayanib, yetkazib beruvchini tanlashga yordam berish.</p>
 
-<p>Biz ataylab raqobatchi brendlarning nomini keltirmaymiz: vazifa — sizga oʻz tekshiruv roʻyxatingizni tuzishga va uni shahardagi har qanday yetkazib beruvchiga qoʻllashga yordam berish. Aniq raqobatchilar bilan solishtirish — alohida maqolaning mavzusi. Bu yerda esa umumlashgan arxetiplar ishlatiladi.</p>
+<p>Biz ataylab raqobatchi brendlarning nomini keltirmaymiz: vazifa — sizga o‘z tekshiruv ro‘yxatingizni tuzishga va uni shahardagi har qanday yetkazib beruvchiga qo‘llashga yordam berish. Aniq raqobatchilar bilan solishtirish — alohida maqolaning mavzusi. Bu yerda esa umumlashgan arxetiplar ishlatiladi.</p>
 
-<p>Shu bilan birga, ushbu mezonlarda <strong>Aqua Element</strong> qaysi oʻrinda ekanini ham koʻrsatamiz. Aqua Element — Blue Stream Group artezian brendi, Toshkent va Toshkent viloyatida ishlaydi, manba sifatida Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi quduqdan foydalanadi va suvni 11 bosqichli qayta ishlashdan oʻtkazadi.</p>
+<p>Shu bilan birga, ushbu mezonlarda <strong>Aqua Element</strong> qaysi o‘rinda ekanini ham ko‘rsatamiz. Aqua Element — Blue Stream Group artezian brendi, Toshkent va Toshkent viloyatida ishlaydi, manba sifatida Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi quduqdan foydalanadi va suvni 11 bosqichli qayta ishlashdan o‘tkazadi.</p>
 
-<h2>Nega Toshkentda suv yetkazib berish odat boʻlib qoldi</h2>
+<h2>Nega Toshkentda suv yetkazib berish odat bo‘lib qoldi</h2>
 
-<p>Toshkentning iqlimi keskin kontinental: iyul-avgust kunduzgi haroratlari koʻpincha 38–40 °C dan oshadi. Bunday rejimda kattalarning kunlik suv ehtiyoji 2,5–3 litrgacha, faol ofisning haftalik ehtiyoji esa 10 xodimga 60–80 litrgacha yetadi. Bunday hajmlarni doʻkondan tashish ham, har safar kichik PET-shishalarni sotib olish ham na narx, na plastik nuqtai nazaridan oqlanmaydi.</p>
+<p>Toshkentning iqlimi keskin kontinental: iyul-avgust kunduzgi haroratlari ko‘pincha 38–40 °C dan oshadi. Bunday rejimda kattalarning kunlik suv ehtiyoji 2,5–3 litrgacha, faol ofisning haftalik ehtiyoji esa 10 xodimga 60–80 litrgacha yetadi. Bunday hajmlarni do‘kondan tashish ham, har safar kichik PET-shishalarni sotib olish ham na narx, na plastik nuqtai nazaridan oqlanmaydi.</p>
 
-<p>Shu bilan birga, fuqarolarda shahar suv tarmogʻining sifatiga oid asosli savollar saqlanib qoladi. Shahar suvi odatda suv olish nuqtasida sanitariya talablariga javob beradi, lekin uy ichidagi quvurlar holati turli yillarda qurilgan binolarda juda farq qiladi. Rangi, xlor hidi, qaynatilgandan keyingi choʻkma, choynakdagi quyqa — eski uy-joy fondida tipik shikoyatlar. Bu vodoprovod xavfli degani emas, lekin koʻp oilalar ichish va ovqat tayyorlash uchun uy ichidagi infratuzilmadan mustaqil manbani afzal koʻrishini koʻrsatadi.</p>
+<p>Shu bilan birga, fuqarolarda shahar suv tarmog‘ining sifatiga oid asosli savollar saqlanib qoladi. Shahar suvi odatda suv olish nuqtasida sanitariya talablariga javob beradi, lekin uy ichidagi quvurlar holati turli yillarda qurilgan binolarda juda farq qiladi. Rangi, xlor hidi, qaynatilgandan keyingi cho‘kma, choynakdagi quyqa — eski uy-joy fondida tipik shikoyatlar. Bu vodoprovod xavfli degani emas, lekin ko‘p oilalar ichish va ovqat tayyorlash uchun uy ichidagi infratuzilmadan mustaqil manbani afzal ko‘rishini ko‘rsatadi.</p>
 
-<p>Uchinchi omil — turmush tarzi. Yetkazib berish oiladan kundalik yumushni olib tashlaydi: 18,9 litrli butil pomp yoki kulerga oʻrnatiladi, boʻsh idish kuryer tomonidan olib ketiladi, buyurtma esa obuna boʻyicha takrorlanadi. Ofislar uchun bu HR-standartining bir qismi, bolali oilalar uchun esa alohida xotirjamlik turi.</p>
+<p>Uchinchi omil — turmush tarzi. Yetkazib berish oiladan kundalik yumushni olib tashlaydi: 18,9 litrli butil pomp yoki kulerga o‘rnatiladi, bo‘sh idish kuryer tomonidan olib ketiladi, buyurtma esa obuna bo‘yicha takrorlanadi. Ofislar uchun bu HR-standartining bir qismi, bolali oilalar uchun esa alohida xotirjamlik turi.</p>
 
-<h2>Yetkazib beruvchidan aslida nimani soʻrash kerak</h2>
+<h2>Yetkazib beruvchidan aslida nimani so‘rash kerak</h2>
 
-<p>Deyarli barcha xizmatlarning marketingi bir xil yangraydi: «toza», «foydali», «tabiiy». Farq aniq savollar berganingizda paydo boʻladi. Quyida ishchi tekshiruv roʻyxati keltirilgan.</p>
+<p>Deyarli barcha xizmatlarning marketingi bir xil yangraydi: «toza», «foydali», «tabiiy». Farq aniq savollar berganingizda paydo bo‘ladi. Quyida ishchi tekshiruv ro‘yxati keltirilgan.</p>
 
 <h3>Suv manbasi</h3>
 
-<p>Birinchi va eng muhim savol: suv qayerdan? Mumkin boʻlgan variantlar — artezian quduq (chuqur himoyalangan suv qatlamidan), yer usti suvi (daryo, suv ombori), tozalangan shahar suvi yoki import qilingan mahsulot. Jiddiy yetkazib beruvchi quduq tumanini, chuqurligini va turini aytadi va quduq pasportini koʻrsatishga tayyor. «Tabiiy suv» kabi noaniq javoblar — ehtiyot boʻlish uchun signal.</p>
+<p>Birinchi va eng muhim savol: suv qayerdan? Mumkin bo‘lgan variantlar — artezian quduq (chuqur himoyalangan suv qatlamidan), yer usti suvi (daryo, suv ombori), tozalangan shahar suvi yoki import qilingan mahsulot. Jiddiy yetkazib beruvchi quduq tumanini, chuqurligini va turini aytadi va quduq pasportini ko‘rsatishga tayyor. «Tabiiy suv» kabi noaniq javoblar — ehtiyot bo‘lish uchun signal.</p>
 
-<h3>Filtratsiyaning chuqurligi va mantigʻi</h3>
+<h3>Filtratsiyaning chuqurligi va mantig‘i</h3>
 
-<p>«Koʻp bosqichli filtratsiya» — noaniq ibora. Bosqichlar tarkibi muhim. Sanoat darajasidagi shisha ichimlik suv uchun minimum: mexanik old filtratsiya, koʻmirli tozalash, yumshatish/ion almashinuvi, membranali bosqich (teskari osmos yoki ultrafiltratsiya), UV-zararsizlantirish va yakuniy stabilizatsiya. Agar suv teskari osmosdan oʻtgan boʻlsa, mineralizatsiya bosqichi muhim — keyinchalik mineral profili tiklanmagan demineralizatsiyalangan suv toʻliq qiymatli ichimlik suv hisoblanmaydi.</p>
+<p>«Ko‘p bosqichli filtratsiya» — noaniq ibora. Bosqichlar tarkibi muhim. Sanoat darajasidagi shisha ichimlik suv uchun minimum: mexanik old filtratsiya, ko‘mirli tozalash, yumshatish/ion almashinuvi, membranali bosqich (teskari osmos yoki ultrafiltratsiya), UV-zararsizlantirish va yakuniy stabilizatsiya. Agar suv teskari osmosdan o‘tgan bo‘lsa, mineralizatsiya bosqichi muhim — keyinchalik mineral profili tiklanmagan demineralizatsiyalangan suv to‘liq qiymatli ichimlik suv hisoblanmaydi.</p>
 
 <h3>Mineral profili</h3>
 
-<p>Yaxshi amaliyot — TDS (umumiy mineralizatsiya), pH va asosiy ionlarning taxminiy qiymatlarini eʼlon qilish: kaltsiy, magniy, natriy, kaliy, gidrokarbonat, sulfat, xlorid. Bu xaridorga suvni oʻz didi bilan solishtirishga imkon beradi: kimdir kundalik ichish va choy uchun past mineralizatsiyali suvni, kimdir koʻproq mineralizatsiyalangan variantni afzal koʻradi.</p>
+<p>Yaxshi amaliyot — TDS (umumiy mineralizatsiya), pH va asosiy ionlarning taxminiy qiymatlarini e’lon qilish: kaltsiy, magniy, natriy, kaliy, gidrokarbonat, sulfat, xlorid. Bu xaridorga suvni o‘z didi bilan solishtirishga imkon beradi: kimdir kundalik ichish va choy uchun past mineralizatsiyali suvni, kimdir ko‘proq mineralizatsiyalangan variantni afzal ko‘radi.</p>
 
 <h3>Tartibga soluvchi nazorat</h3>
 
-<p>Oʻzbekistonda ichimlik suvi xavfsizligini Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qoʻmitasi (Sanepid) nazorat qiladi. Shisha mahsulot uchun muvofiqlik hujjatlari va davriy laboratoriya tekshiruvlari mavjud. Yetkazib beruvchidan amaldagi xulosalarning va oziq-ovqat bilan ishlash huquqining mavjudligini soʻrang.</p>
+<p>O‘zbekistonda ichimlik suvi xavfsizligini Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo‘mitasi (Sanepid) nazorat qiladi. Shisha mahsulot uchun muvofiqlik hujjatlari va davriy laboratoriya tekshiruvlari mavjud. Yetkazib beruvchidan amaldagi xulosalarning va oziq-ovqat bilan ishlash huquqining mavjudligini so‘rang.</p>
 
 <h3>Idishlar logistikasi</h3>
 
-<p>Qaytariladigan 18,9 litrli polikarbonat butil — soha standarti. Uchta narsa muhim: (1) qaytarish dasturi umuman bormi, (2) qaytarilgan butillarni qayta toʻldirishdan oldin sanitariyalash qanday tashkil etilgan, (3) idish uchun garov puli qanchalik shaffof. Yaxshi operator har bir butilni yuvadi, dezinfeksiyalaydi va tekshiradi.</p>
+<p>Qaytariladigan 18,9 litrli polikarbonat butil — soha standarti. Uchta narsa muhim: (1) qaytarish dasturi umuman bormi, (2) qaytarilgan butillarni qayta to‘ldirishdan oldin sanitariyalash qanday tashkil etilgan, (3) idish uchun garov puli qanchalik shaffof. Yaxshi operator har bir butilni yuvadi, dezinfeksiyalaydi va tekshiradi.</p>
 
 <h3>Tezlik va yetkazib berish hududlari</h3>
 
-<p>Toshkent uchun maqbul mezon — shaharning asosiy turar-joy va ish hududlariga buyurtma kuni yetkazib berish hamda Toshkent viloyatiga oʻsha kuni yoki ertasiga yetkazib berish. Yunusobod, Chilonzor, Mirzo Ulugʻbek, Sergeli yoki yoʻldosh shaharlar muntazam marshrutga kiradimi yoki «alohida grafik» boʻyichami — aniqlashtiring.</p>
+<p>Toshkent uchun maqbul mezon — shaharning asosiy turar-joy va ish hududlariga buyurtma kuni yetkazib berish hamda Toshkent viloyatiga o‘sha kuni yoki ertasiga yetkazib berish. Yunusobod, Chilonzor, Mirzo Ulug‘bek, Sergeli yoki yo‘ldosh shaharlar muntazam marshrutga kiradimi yoki «alohida grafik» bo‘yichami — aniqlashtiring.</p>
 
-<h3>Buyurtma va toʻlov kanallari</h3>
+<h3>Buyurtma va to‘lov kanallari</h3>
 
-<p>2026-yilda jiddiy oʻyinchi kamida uchta kanalni taklif qiladi: savatli sayt, Telegram-bot, telefon. Toʻlov — kuryerga naqd, karta va albatta mahalliy toʻlov tizimlari (Payme, Click). Obuna kunni oʻzgartirish, pauza va shartsiz bekor qilishga ruxsat berishi kerak.</p>
+<p>2026-yilda jiddiy o‘yinchi kamida ikkita kanalni taklif qiladi: savatli sayt va Telegram-bot. To‘lov — kuryerga naqd, karta va albatta mahalliy to‘lov tizimlari (Payme, Click). Obuna kunni o‘zgartirish, pauza va shartsiz bekor qilishga ruxsat berishi kerak.</p>
 
 <h2>Bu qancha turishi kerak: «narx-sifat» ramkasi</h2>
 
-<p>Joriy narxlar shu maqola ostidagi «narx va yetkazib berish» blokida koʻrsatilgan. Bu yerda — uchta sifat qoidasi.</p>
+<p>Joriy narxlar shu maqola ostidagi «narx va yetkazib berish» blokida ko‘rsatilgan. Bu yerda — uchta sifat qoidasi.</p>
 
-<p><strong>Bir butil emas, bir litr narxini hisoblang.</strong> 18,9 litrli butil deyarli har doim bir litr boʻyicha 10 litrlikdan, u esa supermarketdagi PET-shisha toʻplamidan arzonroq tushadi. Agar yetkazib beruvchining 19 litr va 10 litr orasidagi farqi minimal boʻlsa — sababini soʻrang.</p>
+<p><strong>Bir butil emas, bir litr narxini hisoblang.</strong> 18,9 litrli butil deyarli har doim bir litr bo‘yicha 10 litrlikdan, u esa supermarketdagi PET-shisha to‘plamidan arzonroq tushadi. Agar yetkazib beruvchining 19 litr va 10 litr orasidagi farqi minimal bo‘lsa — sababini so‘rang.</p>
 
-<p><strong>Obuna aslida nima qilishini baholang.</strong> Yaxshi obuna bashoratlilik bilan qadrli: operator har bir buyurtmani jadval boʻyicha oʻzi rasmiylashtiradi (avtobuyurtma), yetkazib berish bepul qoladi, sodiqlik bonuslari esa toʻplanaveradi. Agar «obuna» faqat eslatma boʻlib, buyurtmani baribir qoʻlda rasmiylashtirishga toʻgʻri kelsa, bu obuna emas.</p>
+<p><strong>Obuna aslida nima qilishini baholang.</strong> Yaxshi obuna bashoratlilik bilan qadrli: operator har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi (avtobuyurtma), yetkazib berish bepul qoladi, sodiqlik bonuslari esa to‘planaveradi. Agar «obuna» faqat eslatma bo‘lib, buyurtmani baribir qo‘lda rasmiylashtirishga to‘g‘ri kelsa, bu obuna emas.</p>
 
-<p><strong>Idish uchun garov puli — suv narxi emas.</strong> Agar chekda polikarbonat butil uchun qaytariladigan garov puli boʻlsa, u idishni qaytarganda qaytariladi. Buni mahsulot narxi bilan adashtirmang. Baʼzi operatorlarda garov puli umuman yoʻq.</p>
+<p><strong>Idish uchun garov puli — suv narxi emas.</strong> Agar chekda polikarbonat butil uchun qaytariladigan garov puli bo‘lsa, u idishni qaytarganda qaytariladi. Buni mahsulot narxi bilan adashtirmang. Ba’zi operatorlarda garov puli umuman yo‘q.</p>
 
 <h2>Yetkazib beruvchi arxetiplari taqqoslovi</h2>
 
-<p>Quyida Aqua Element va toʻrtta umumlashtirilgan yetkazib beruvchi arxetipi taqqoslangan. Jadvalni shablon sifatida ishlating: oʻng ustunlarga oʻz nomzodlaringizni kiriting va har birini bir xil mezonlar boʻyicha baholang.</p>
+<p>Quyida Aqua Element va to‘rtta umumlashtirilgan yetkazib beruvchi arxetipi taqqoslangan. Jadvalni shablon sifatida ishlating: o‘ng ustunlarga o‘z nomzodlaringizni kiriting va har birini bir xil mezonlar bo‘yicha baholang.</p>
 
 <table>
 <thead>
@@ -288,9 +288,9 @@ ARTICLE = {
 </thead>
 <tbody>
 <tr>
-<td>Suv manbasi ochiq eʼlon qilingan</td>
+<td>Suv manbasi ochiq e’lon qilingan</td>
 <td>Ha: ~120 m artezian quduq, Quyi Chirchiq</td>
-<td>Koʻpincha umumiy ifoda</td>
+<td>Ko‘pincha umumiy ifoda</td>
 <td>Tozalangan shahar suvi</td>
 <td>Har xil</td>
 <td>Xorijdagi manba, importchi orqali</td>
@@ -301,13 +301,13 @@ ARTICLE = {
 <td>Kamdan kam</td>
 <td>Faqat RO + asosiy old filtratsiya</td>
 <td>Har xil</td>
-<td>Texnologik pasportga bogʻliq</td>
+<td>Texnologik pasportga bog‘liq</td>
 </tr>
 <tr>
-<td>Mineral profil eʼlon qilingan</td>
+<td>Mineral profil e’lon qilingan</td>
 <td>Ha: TDS 30–50 mg/l, pH 7,5</td>
-<td>Baʼzan</td>
-<td>Koʻpincha faqat «mineralizatsiyadan keyin»</td>
+<td>Ba’zan</td>
+<td>Ko‘pincha faqat «mineralizatsiyadan keyin»</td>
 <td>Kam</td>
 <td>Asosan etiketkada</td>
 </tr>
@@ -322,8 +322,8 @@ ARTICLE = {
 <tr>
 <td>Sayt orqali buyurtma</td>
 <td>Ha: aqua-element.uz</td>
-<td>Riteyl orqali, toʻgʻridan-toʻgʻri emas</td>
-<td>Koʻpincha ha</td>
+<td>Riteyl orqali, to‘g‘ridan-to‘g‘ri emas</td>
+<td>Ko‘pincha ha</td>
 <td>Har xil</td>
 <td>Distribyutor orqali</td>
 </tr>
@@ -331,14 +331,14 @@ ARTICLE = {
 <td>Telegram-bot orqali buyurtma</td>
 <td>Ha: t.me/aqua_element_bot</td>
 <td>Kamdan kam</td>
-<td>Baʼzan</td>
-<td>Baʼzan</td>
+<td>Ba’zan</td>
+<td>Ba’zan</td>
 <td>Kamdan kam</td>
 </tr>
 <tr>
-<td>Pauza va kunni oʻzgartirish bilan obuna</td>
+<td>Pauza va kunni o‘zgartirish bilan obuna</td>
 <td>Ha</td>
-<td>Yoʻq (riteyl)</td>
+<td>Yo‘q (riteyl)</td>
 <td>Har xil</td>
 <td>Har xil</td>
 <td>Har xil</td>
@@ -348,62 +348,62 @@ ARTICLE = {
 
 <h2>«Yangi suv» nimani anglatadi va qanday baholash mumkin</h2>
 
-<p>Suvning yangiligi — bu marketing emas, balki uch parametrning yigʻindisi: shisha sanasi, saqlash sharoiti va qaytariladigan idishning sanitariya tsikli.</p>
+<p>Suvning yangiligi — bu marketing emas, balki uch parametrning yig‘indisi: shisha sanasi, saqlash sharoiti va qaytariladigan idishning sanitariya tsikli.</p>
 
-<p><strong>Shisha sanasi.</strong> U butilda yoki uning plombasida koʻrinishi shart. Standart idishdagi artezian suvning yaroqlilik muddati odatda bir necha oy, lekin amalda suv mijozga kunlar ichida yetib boradi. Agar butilda oʻqib boʻlmaydigan sana boʻlsa — bu kulrang zona emas, qonun buzilishi.</p>
+<p><strong>Shisha sanasi.</strong> U butilda yoki uning plombasida ko‘rinishi shart. Standart idishdagi artezian suvning yaroqlilik muddati odatda bir necha oy, lekin amalda suv mijozga kunlar ichida yetib boradi. Agar butilda o‘qib bo‘lmaydigan sana bo‘lsa — bu kulrang zona emas, qonun buzilishi.</p>
 
-<p><strong>Saqlash.</strong> Polikarbonat butil toʻgʻridan-toʻgʻri quyoshni va yuqori haroratni yoqtirmaydi. Jiddiy operator tayyor mahsulotni iqlim nazorati ostidagi yopiq xonada saqlaydi.</p>
+<p><strong>Saqlash.</strong> Polikarbonat butil to‘g‘ridan-to‘g‘ri quyoshni va yuqori haroratni yoqtirmaydi. Jiddiy operator tayyor mahsulotni iqlim nazorati ostidagi yopiq xonada saqlaydi.</p>
 
-<p><strong>Idish sanitariya tsikli.</strong> Qaytarilgan butil qayta toʻldirishdan oldin tekshiruv, yuvish, dezinfeksiya va tayyor suv bilan chayishdan oʻtadi. Bu jarayonning kritik qismi; agar yetkazib beruvchi idishni qanday yuvishini tushuntira olmasa — oʻylab koʻring.</p>
+<p><strong>Idish sanitariya tsikli.</strong> Qaytarilgan butil qayta to‘ldirishdan oldin tekshiruv, yuvish, dezinfeksiya va tayyor suv bilan chayishdan o‘tadi. Bu jarayonning kritik qismi; agar yetkazib beruvchi idishni qanday yuvishini tushuntira olmasa — o‘ylab ko‘ring.</p>
 
 <h2>Toshkent va viloyatdagi yetkazib berish hududlari</h2>
 
-<p>Toshkentda operator barcha 12 tumanni qoplashi kerak: Olmazor, Bektemir, Mirobod, Mirzo Ulugʻbek, Sergeli, Uchtepa, Chilonzor, Shayxontohur, Yunusobod, Yakkasaroy, Yashnobod, hamda tegishli boʻlsa Yuqori Chirchiq. Toshkent viloyati boʻyicha — Chirchiq, Yangiyoʻl, Ohangaron, Olmaliq, Bekobod, Quyi Chirchiq, Zangiota va boshqalar.</p>
+<p>Toshkentda operator barcha 12 tumanni qoplashi kerak: Olmazor, Bektemir, Mirobod, Mirzo Ulug‘bek, Sergeli, Uchtepa, Chilonzor, Shayxontohur, Yunusobod, Yakkasaroy, Yashnobod, hamda tegishli bo‘lsa Yuqori Chirchiq. Toshkent viloyati bo‘yicha — Chirchiq, Yangiyo‘l, Ohangaron, Olmaliq, Bekobod, Quyi Chirchiq, Zangiota va boshqalar.</p>
 
-<p>Shaffof yetkazib beruvchi butun shahar boʻylab «soatma-soat» vaʼda qilmaydi — qaysi buyurtma shu kuni, qaysi biri ertasi kuni yetib borishini ochiq aytadi.</p>
+<p>Shaffof yetkazib beruvchi butun shahar bo‘ylab «soatma-soat» va’da qilmaydi — qaysi buyurtma shu kuni, qaysi biri ertasi kuni yetib borishini ochiq aytadi.</p>
 
 <h2>Aqua Element ushbu tizimda qayerda turadi</h2>
 
-<p>Aqua Element — Blue Stream Group artezian brendi, faqat Toshkent va Toshkent viloyatiga xizmat koʻrsatadi. Manba — Toshkent viloyati Quyi Chirchiq tumanida joylashgan taxminan 120 metr chuqurlikdagi artezian quduq. Biz 11 bosqichli ishlov berishni ochiq tavsiflaymiz: kvars filtri, faollashtirilgan koʻmir, ion almashtirgich/yumshatgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya va yakuniy ozon ishlovi. Batafsil — <a href="/process/11-step-filtration">11 bosqichli filtratsiya</a> sahifasida.</p>
+<p>Aqua Element — Blue Stream Group artezian brendi, faqat Toshkent va Toshkent viloyatiga xizmat ko‘rsatadi. Manba — Toshkent viloyati Quyi Chirchiq tumanida joylashgan taxminan 120 metr chuqurlikdagi artezian quduq. Biz 11 bosqichli ishlov berishni ochiq tavsiflaymiz: kvars filtri, faollashtirilgan ko‘mir, ion almashtirgich/yumshatgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya va yakuniy ozon ishlovi. Batafsil — <a href="/process/11-step-filtration">11 bosqichli filtratsiya</a> sahifasida.</p>
 
-<p>Shisha mahsulotning taxminiy profili: TDS 30–50 mg/l, pH ≈ 7,5, kaltsiy 10–60 mg/l, magniy 7–20 mg/l, natriy 5–15 mg/l, kaliy 1–4 mg/l, gidrokarbonat 50–120 mg/l, sulfat 10–30 mg/l, xlorid 5–10 mg/l. Bu past mineralizatsiyali, yumshoq taʼmli suv — kundalik ichish, choy va qahva uchun mos. Xavfsizlik Oʻzbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qoʻmitasi tomonidan nazorat qilinadi.</p>
+<p>Shisha mahsulotning taxminiy profili: TDS 30–50 mg/l, pH ≈ 7,5, kaltsiy 10–60 mg/l, magniy 7–20 mg/l, natriy 5–15 mg/l, kaliy 1–4 mg/l, gidrokarbonat 50–120 mg/l, sulfat 10–30 mg/l, xlorid 5–10 mg/l. Bu past mineralizatsiyali, yumshoq ta’mli suv — kundalik ichish, choy va qahva uchun mos. Xavfsizlik O‘zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo‘mitasi tomonidan nazorat qilinadi.</p>
 
-<p>SKU chizigʻi sodda va ataylab cheklangan: 18,9 l («19 litr» standarti, qaytariladigan idish) va 10 l. Boshqa hajmlar yoʻq — chunki biz aynan shu ikki format sifati va logistikasiga eʼtibor qaratamiz.</p>
+<p>SKU chizig‘i sodda va ataylab cheklangan: 18,9 l («19 litr» standarti, qaytariladigan idish) va 10 l. Boshqa hajmlar yo‘q — chunki biz aynan shu ikki format sifati va logistikasiga e’tibor qaratamiz.</p>
 
-<p>Buyurtma — uch kanal: sayt <a href="/shop">/shop</a>, Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, telefon. Toʻlov — kuryerga naqd, Payme, Click, bank kartasi. Obuna <a href="/subscriptions">/subscriptions</a> yetkazib berish kunlarini belgilash, safar paytida pauza qilish va butillar sonini oʻzgartirish imkonini beradi.</p>
+<p>Buyurtma — ikki kanal: <a href="/shop">sayt</a> va Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. To‘lov — kuryerga naqd, Payme, Click, bank kartasi. <a href="/subscriptions">Obuna</a> yetkazib berish kunlarini belgilash, safar paytida pauza qilish va butillar sonini o‘zgartirish imkonini beradi.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 
 <h3>18,9 litrli butil uchun kuler kerakmi?</h3>
-<p>Yoʻq, kuler shart emas. Butilni oddiy mexanik pomp (qoʻl yoki elektr) bilan ishlatish yoki dispenserga oʻrnatish mumkin. Pomp va kulerlar doʻkonda alohida sotiladi.</p>
+<p>Yo‘q, kuler shart emas. Butilni oddiy mexanik pomp (qo‘l yoki elektr) bilan ishlatish yoki dispenserga o‘rnatish mumkin. Pomp va kulerlar do‘konda alohida sotiladi.</p>
 
 <h3>Idish qaytariladimi?</h3>
-<p>Ha. 18,9 litrli polikarbonat butil — qaytariladigan idish. Kuryer keyingi buyurtmada boʻsh butilni olib ketadi, u qayta toʻldirishdan oldin tekshiruv, yuvish va dezinfeksiyadan oʻtadi.</p>
+<p>Ha. 18,9 litrli polikarbonat butil — qaytariladigan idish. Kuryer keyingi buyurtmada bo‘sh butilni olib ketadi, u qayta to‘ldirishdan oldin tekshiruv, yuvish va dezinfeksiyadan o‘tadi.</p>
 
-<h3>Qanday toʻlov usullarini qabul qilasiz?</h3>
-<p>Kuryerga naqd, karta orqali toʻlov, Payme va Click. Usul saytda, Telegram-botda yoki telefon orqali buyurtma berilganda tanlanadi.</p>
+<h3>Qanday to‘lov usullarini qabul qilasiz?</h3>
+<p>Kuryerga naqd, karta orqali to‘lov, Payme va Click. Usul saytda yoki Telegram-botda buyurtma berilganda tanlanadi.</p>
 
 <h3>Artezian suv vodoprovod suvidan nimasi bilan farq qiladi?</h3>
-<p>Artezian suv chuqur himoyalangan yer osti suv qatlamidan olinadi. Vodoprovod suvi shahar va uy ichidagi tarmoq orqali oʻtadi. Manbalar, tayyorlash texnologiyasi va sifat nazorati farqlanadi.</p>
+<p>Artezian suv chuqur himoyalangan yer osti suv qatlamidan olinadi. Vodoprovod suvi shahar va uy ichidagi tarmoq orqali o‘tadi. Manbalar, tayyorlash texnologiyasi va sifat nazorati farqlanadi.</p>
 
 <h3>Suvingiz qanday tekshiriladi?</h3>
-<p>Nazorat Oʻzbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qoʻmitasi nazorati doirasida olib boriladi, mikrobiologik, kimyoviy va fizik-kimyoviy koʻrsatkichlar boʻyicha muntazam laboratoriya tahlillari oʻtkaziladi. Batafsil — <a href="/quality-standards">sifat standartlari</a> sahifasida.</p>
+<p>Nazorat O‘zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo‘mitasi nazorati doirasida olib boriladi, mikrobiologik, kimyoviy va fizik-kimyoviy ko‘rsatkichlar bo‘yicha muntazam laboratoriya tahlillari o‘tkaziladi. Batafsil — <a href="/quality-standards">sifat standartlari</a> sahifasida.</p>
 
 <h3>Toshkent viloyatidan tashqariga yetkazib berasizmi?</h3>
-<p>Yoʻq. Aqua Element xizmat koʻrsatish hududi — faqat Toshkent va Toshkent viloyati.</p>
+<p>Yo‘q. Aqua Element xizmat ko‘rsatish hududi — faqat Toshkent va Toshkent viloyati.</p>
 
 <h3>Obunaga ulanib istalgan vaqtda pauza qilish mumkinmi?</h3>
-<p>Ha. Obuna <a href="/subscriptions">/subscriptions</a> yetkazib berishni pauza qilish, sanani siljitish va shaxsiy kabinet yoki Telegram-bot orqali butillar sonini oʻzgartirish imkonini beradi.</p>
+<p>Ha. <a href="/subscriptions">Obuna</a> yetkazib berishni pauza qilish, sanani siljitish va shaxsiy kabinet yoki Telegram-bot orqali butillar sonini o‘zgartirish imkonini beradi.</p>
 
 <h3>Sizda qanday hajmdagi butillar bor?</h3>
-<p>Biz faqat ikki formatni sotamiz: 18,9 l («19 litr» standarti, qaytariladigan idish) va 10 l. Boshqa hajmlar yoʻq.</p>
+<p>Biz faqat ikki formatni sotamiz: 18,9 l («19 litr» standarti, qaytariladigan idish) va 10 l. Boshqa hajmlar yo‘q.</p>
 
 <h3>11 bosqichli filtratsiyaga nimalar kiradi?</h3>
-<p>Kvars filtri, faollashtirilgan koʻmir, ion almashtirgich/yumshatgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya, ozon ishlovi. Batafsil tavsif — <a href="/process/11-step-filtration">/process/11-step-filtration</a> sahifasida.</p>
+<p>Kvars filtri, faollashtirilgan ko‘mir, ion almashtirgich/yumshatgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya, ozon ishlovi. Batafsil tavsif — <a href="/process/11-step-filtration">11 bosqichli filtrlash</a> sahifasida.</p>
 
-<p>Sinab koʻrishga tayyormisiz? <a href="/shop">/shop</a> sahifasida buyurtma bering, <a href="/subscriptions">/subscriptions</a> orqali muntazam yetkazib berishni sozlang yoki Telegram-botimiz <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali buyurtma bering — yetkazib berishni ham shu yerda kuzatasiz.</p>
+<p>Sinab ko‘rishga tayyormisiz? <a href="/shop">do‘kon</a> sahifasida buyurtma bering, <a href="/subscriptions">obuna sahifasi</a> orqali muntazam yetkazib berishni sozlang yoki Telegram-botimiz <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali buyurtma bering — yetkazib berishni ham shu yerda kuzatasiz.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"18,9 litrli butil uchun kuler kerakmi?","acceptedAnswer":{"@type":"Answer","text":"Yoʻq, kuler shart emas. Butilni oddiy mexanik pomp (qoʻl yoki elektr) bilan ishlatish yoki dispenserga oʻrnatish mumkin."}},{"@type":"Question","name":"Idish qaytariladimi?","acceptedAnswer":{"@type":"Answer","text":"Ha. 18,9 litrli polikarbonat butil qaytariladigan idish. Kuryer keyingi buyurtmada boʻsh butilni olib ketadi, u qayta toʻldirishdan oldin tekshiruv, yuvish va dezinfeksiyadan oʻtadi."}},{"@type":"Question","name":"Qanday toʻlov usullarini qabul qilasiz?","acceptedAnswer":{"@type":"Answer","text":"Kuryerga naqd, karta orqali toʻlov, Payme va Click. Usul saytda, Telegram-botda yoki telefon orqali buyurtma berilganda tanlanadi."}},{"@type":"Question","name":"Artezian suv vodoprovod suvidan nimasi bilan farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"Artezian suv chuqur himoyalangan yer osti suv qatlamidan olinadi. Vodoprovod suvi shahar va uy ichidagi tarmoq orqali oʻtadi. Manbalar, tayyorlash texnologiyasi va sifat nazorati farqlanadi."}},{"@type":"Question","name":"Suvingiz qanday tekshiriladi?","acceptedAnswer":{"@type":"Answer","text":"Nazorat Oʻzbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qoʻmitasi nazorati doirasida olib boriladi, muntazam laboratoriya tahlillari oʻtkaziladi."}},{"@type":"Question","name":"Toshkent viloyatidan tashqariga yetkazib berasizmi?","acceptedAnswer":{"@type":"Answer","text":"Yoʻq. Aqua Element xizmat koʻrsatish hududi faqat Toshkent va Toshkent viloyati."}},{"@type":"Question","name":"Obunaga ulanib istalgan vaqtda pauza qilish mumkinmi?","acceptedAnswer":{"@type":"Answer","text":"Ha. Obuna yetkazib berishni pauza qilish, sanani siljitish va shaxsiy kabinet yoki Telegram-bot orqali butillar sonini oʻzgartirish imkonini beradi."}},{"@type":"Question","name":"Sizda qanday hajmdagi butillar bor?","acceptedAnswer":{"@type":"Answer","text":"Biz faqat ikki formatni sotamiz: 18,9 l (19 litr standarti, qaytariladigan idish) va 10 l."}},{"@type":"Question","name":"11 bosqichli filtratsiyaga nimalar kiradi?","acceptedAnswer":{"@type":"Answer","text":"Kvars filtri, faollashtirilgan koʻmir, ion almashtirgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya, ozon ishlovi."}}]}</script>"""
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"18,9 litrli butil uchun kuler kerakmi?","acceptedAnswer":{"@type":"Answer","text":"Yo‘q, kuler shart emas. Butilni oddiy mexanik pomp (qo‘l yoki elektr) bilan ishlatish yoki dispenserga o‘rnatish mumkin."}},{"@type":"Question","name":"Idish qaytariladimi?","acceptedAnswer":{"@type":"Answer","text":"Ha. 18,9 litrli polikarbonat butil qaytariladigan idish. Kuryer keyingi buyurtmada bo‘sh butilni olib ketadi, u qayta to‘ldirishdan oldin tekshiruv, yuvish va dezinfeksiyadan o‘tadi."}},{"@type":"Question","name":"Qanday to‘lov usullarini qabul qilasiz?","acceptedAnswer":{"@type":"Answer","text":"Kuryerga naqd, karta orqali to‘lov, Payme va Click. Usul saytda yoki Telegram-botda buyurtma berilganda tanlanadi."}},{"@type":"Question","name":"Artezian suv vodoprovod suvidan nimasi bilan farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"Artezian suv chuqur himoyalangan yer osti suv qatlamidan olinadi. Vodoprovod suvi shahar va uy ichidagi tarmoq orqali o‘tadi. Manbalar, tayyorlash texnologiyasi va sifat nazorati farqlanadi."}},{"@type":"Question","name":"Suvingiz qanday tekshiriladi?","acceptedAnswer":{"@type":"Answer","text":"Nazorat O‘zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo‘mitasi nazorati doirasida olib boriladi, muntazam laboratoriya tahlillari o‘tkaziladi."}},{"@type":"Question","name":"Toshkent viloyatidan tashqariga yetkazib berasizmi?","acceptedAnswer":{"@type":"Answer","text":"Yo‘q. Aqua Element xizmat ko‘rsatish hududi faqat Toshkent va Toshkent viloyati."}},{"@type":"Question","name":"Obunaga ulanib istalgan vaqtda pauza qilish mumkinmi?","acceptedAnswer":{"@type":"Answer","text":"Ha. Obuna yetkazib berishni pauza qilish, sanani siljitish va shaxsiy kabinet yoki Telegram-bot orqali butillar sonini o‘zgartirish imkonini beradi."}},{"@type":"Question","name":"Sizda qanday hajmdagi butillar bor?","acceptedAnswer":{"@type":"Answer","text":"Biz faqat ikki formatni sotamiz: 18,9 l (19 litr standarti, qaytariladigan idish) va 10 l."}},{"@type":"Question","name":"11 bosqichli filtratsiyaga nimalar kiradi?","acceptedAnswer":{"@type":"Answer","text":"Kvars filtri, faollashtirilgan ko‘mir, ion almashtirgich, regeneratsiya bloki, 5 mkm mexanik filtratsiya, 1 mkm mexanik filtratsiya, teskari osmos, membrana CIP-sanitariya, UV-zararsizlantirish, mineralizatsiya, ozon ishlovi."}}]}</script>"""
         },
         "en": {
             "title": "Best Water Delivery in Tashkent 2026: Buyer's Guide",
@@ -454,7 +454,7 @@ ARTICLE = {
 
 <h3>Order and payment channels</h3>
 
-<p>In 2026, a serious operator offers at least three channels: a website with a real cart, a Telegram bot, and a phone line. Payment options should include cash on delivery, card, and the local payment systems Payme and Click. Subscriptions should let you change the delivery day, pause during travel, and cancel without penalty clauses.</p>
+<p>In 2026, a serious operator offers at least two channels: a website with a real cart and a Telegram bot. Payment options should include cash on delivery, card, and the local payment systems Payme and Click. Subscriptions should let you change the delivery day, pause during travel, and cancel without penalty clauses.</p>
 
 <h2>What it should cost: a price–quality framework</h2>
 
@@ -565,7 +565,7 @@ ARTICLE = {
 
 <p>The SKU range is intentionally narrow: 18.9 L (the "19-litre" standard, returnable bottle) and 10 L. We do not sell other sizes — the focus is on the quality and logistics of those two formats.</p>
 
-<p>Ordering uses three channels: the website at <a href="/shop">/shop</a>, the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, and phone. Payment options are cash on delivery, Payme, Click, and bank card. The <a href="/subscriptions">/subscriptions</a> programme lets you fix delivery days, pause during travel, and adjust the number of bottles.</p>
+<p>Ordering uses two channels: <a href="/shop">the website</a> and the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Payment options are cash on delivery, Payme, Click, and bank card. The <a href="/subscriptions">subscription</a> programme lets you fix delivery days, pause during travel, and adjust the number of bottles.</p>
 
 <h2>Frequently asked questions</h2>
 
@@ -576,7 +576,7 @@ ARTICLE = {
 <p>Yes. The 18.9-litre polycarbonate bottle is a returnable container. The driver collects the empty on the next delivery, and it goes through inspection, washing, and sanitisation before being refilled.</p>
 
 <h3>Which payment methods are accepted?</h3>
-<p>Cash on delivery, card payment, Payme, and Click. The method is selected at checkout on the website, in the Telegram bot, or by phone.</p>
+<p>Cash on delivery, card payment, Payme, and Click. The method is selected at checkout on the website or in the Telegram bot.</p>
 
 <h3>What is the difference between artesian and tap water?</h3>
 <p>Artesian water is drawn from a deep, protected aquifer isolated from surface contamination. Tap water is treated surface or ground water that travels through municipal and in-building piping. Source, treatment, and quality control are all different.</p>
@@ -588,17 +588,17 @@ ARTICLE = {
 <p>No. Aqua Element's service area is Tashkent and the Tashkent Region only.</p>
 
 <h3>Can I subscribe and pause anytime?</h3>
-<p>Yes. The <a href="/subscriptions">/subscriptions</a> programme lets you pause delivery, shift the date, and adjust the number of bottles in your account or via the Telegram bot.</p>
+<p>Yes. The <a href="/subscriptions">subscription</a> programme lets you pause delivery, shift the date, and adjust the number of bottles in your account or via the Telegram bot.</p>
 
 <h3>What bottle sizes are available?</h3>
 <p>We sell only two formats: 18.9 L (the "19-litre" returnable standard) and 10 L. No other sizes are part of the range.</p>
 
 <h3>What does the 11-step filtration include?</h3>
-<p>Quartz filter, activated carbon, ion exchanger / softener, regeneration block, 5-micron PP sediment filter, 1-micron PP sediment filter, reverse osmosis, membrane CIP, UV disinfection, mineralisation, and ozone treatment. Full description on the <a href="/process/11-step-filtration">/process/11-step-filtration</a> page.</p>
+<p>Quartz filter, activated carbon, ion exchanger / softener, regeneration block, 5-micron PP sediment filter, 1-micron PP sediment filter, reverse osmosis, membrane CIP, UV disinfection, mineralisation, and ozone treatment. Full description on the <a href="/process/11-step-filtration">11-step filtration</a> page.</p>
 
-<p>Ready to try? Place your order on <a href="/shop">/shop</a>, set up recurring delivery via <a href="/subscriptions">/subscriptions</a>, or order in our Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, where you can also follow your delivery.</p>
+<p>Ready to try? Place your order in <a href="/shop">our online shop</a>, set up recurring delivery via <a href="/subscriptions">the subscription page</a>, or order in our Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, where you can also follow your delivery.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Do I need a cooler for the 18.9-litre bottle?","acceptedAnswer":{"@type":"Answer","text":"No. The bottle works with a simple manual or electric pump as well as on a dispenser. Pumps and coolers are sold separately."}},{"@type":"Question","name":"Is the bottle returnable?","acceptedAnswer":{"@type":"Answer","text":"Yes. The 18.9-litre polycarbonate bottle is a returnable container. The driver collects the empty on the next delivery, and it goes through inspection, washing, and sanitisation before being refilled."}},{"@type":"Question","name":"Which payment methods are accepted?","acceptedAnswer":{"@type":"Answer","text":"Cash on delivery, card payment, Payme, and Click. The method is selected at checkout on the website, in the Telegram bot, or by phone."}},{"@type":"Question","name":"What is the difference between artesian and tap water?","acceptedAnswer":{"@type":"Answer","text":"Artesian water is drawn from a deep, protected aquifer. Tap water is treated water that travels through municipal and in-building piping. Source, treatment, and quality control are all different."}},{"@type":"Question","name":"How is the water tested?","acceptedAnswer":{"@type":"Answer","text":"Quality control is performed under the supervision of the Committee of the Republic of Uzbekistan for Sanitary and Epidemiological Wellbeing and Public Health, with regular laboratory analysis of microbiological, chemical, and physical-chemical parameters."}},{"@type":"Question","name":"Do you deliver outside the Tashkent Region?","acceptedAnswer":{"@type":"Answer","text":"No. Aqua Element's service area is Tashkent and the Tashkent Region only."}},{"@type":"Question","name":"Can I subscribe and pause anytime?","acceptedAnswer":{"@type":"Answer","text":"Yes. The subscription programme lets you pause delivery, shift the date, and adjust the number of bottles in your account or via the Telegram bot."}},{"@type":"Question","name":"What bottle sizes are available?","acceptedAnswer":{"@type":"Answer","text":"We sell only two formats: 18.9 L (the 19-litre returnable standard) and 10 L. No other sizes are part of the range."}},{"@type":"Question","name":"What does the 11-step filtration include?","acceptedAnswer":{"@type":"Answer","text":"Quartz filter, activated carbon, ion exchanger, regeneration block, 5-micron PP sediment filter, 1-micron PP sediment filter, reverse osmosis, membrane CIP, UV disinfection, mineralisation, and ozone treatment."}}]}</script>"""
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Do I need a cooler for the 18.9-litre bottle?","acceptedAnswer":{"@type":"Answer","text":"No. The bottle works with a simple manual or electric pump as well as on a dispenser. Pumps and coolers are sold separately."}},{"@type":"Question","name":"Is the bottle returnable?","acceptedAnswer":{"@type":"Answer","text":"Yes. The 18.9-litre polycarbonate bottle is a returnable container. The driver collects the empty on the next delivery, and it goes through inspection, washing, and sanitisation before being refilled."}},{"@type":"Question","name":"Which payment methods are accepted?","acceptedAnswer":{"@type":"Answer","text":"Cash on delivery, card payment, Payme, and Click. The method is selected at checkout on the website or in the Telegram bot."}},{"@type":"Question","name":"What is the difference between artesian and tap water?","acceptedAnswer":{"@type":"Answer","text":"Artesian water is drawn from a deep, protected aquifer. Tap water is treated water that travels through municipal and in-building piping. Source, treatment, and quality control are all different."}},{"@type":"Question","name":"How is the water tested?","acceptedAnswer":{"@type":"Answer","text":"Quality control is performed under the supervision of the Committee of the Republic of Uzbekistan for Sanitary and Epidemiological Wellbeing and Public Health, with regular laboratory analysis of microbiological, chemical, and physical-chemical parameters."}},{"@type":"Question","name":"Do you deliver outside the Tashkent Region?","acceptedAnswer":{"@type":"Answer","text":"No. Aqua Element's service area is Tashkent and the Tashkent Region only."}},{"@type":"Question","name":"Can I subscribe and pause anytime?","acceptedAnswer":{"@type":"Answer","text":"Yes. The subscription programme lets you pause delivery, shift the date, and adjust the number of bottles in your account or via the Telegram bot."}},{"@type":"Question","name":"What bottle sizes are available?","acceptedAnswer":{"@type":"Answer","text":"We sell only two formats: 18.9 L (the 19-litre returnable standard) and 10 L. No other sizes are part of the range."}},{"@type":"Question","name":"What does the 11-step filtration include?","acceptedAnswer":{"@type":"Answer","text":"Quartz filter, activated carbon, ion exchanger, regeneration block, 5-micron PP sediment filter, 1-micron PP sediment filter, reverse osmosis, membrane CIP, UV disinfection, mineralisation, and ozone treatment."}}]}</script>"""
         },
     },
 }

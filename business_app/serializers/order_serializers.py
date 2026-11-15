@@ -250,6 +250,10 @@ class CartEstimateRequest(BaseModel):
     delivery_address_id: Optional[int] = None
     delivery_date: Optional[date] = None
     delivery_window: Optional[Dict[str, Any]] = None
+    # The window the web checkout will order with, raw "HH:MM" as CreateOrderRequest takes it: the quote judges the
+    # day and window by the rule the order applies (api/orders.py `_judge_checkout_schedule`).
+    delivery_window_start: Optional[str] = None
+    delivery_window_end: Optional[str] = None
     loyalty_points_used: int = Field(default=0, ge=0)
     # promo_code deliberately NOT accepted here (F3, 2026-08-27): this route is
     # @jwt_required only, so any authenticated customer could set it, and
@@ -432,6 +436,18 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         if hasattr(order, "delivery_address") and order.delivery_address:
             addr = order.delivery_address
             order_data["delivery_address"] = addr.to_dict()
+            # The address as the customer names it (its title, else its street line): the one rule the subscription
+            # page uses too, so the website's order cards print it instead of picking fields themselves.
+            from business_app.services.subscription_display import address_label  # local: services import this module
+
+            order_data["delivery_address_label"] = address_label(addr)
+            # The district by its name in the request's language (shared.constants, as /addresses names it); a
+            # free-text district from an older row stays as it was typed. The website never prints the stored key.
+            from shared.constants import get_district_name
+
+            order_data["delivery_address_district_label"] = (
+                get_district_name(addr.district, get_current_language()) if addr.district else None
+            )
 
         return order_data
 
@@ -526,16 +542,22 @@ def format_order_items_summary(order: Optional[Order], limit: int = ORDER_ITEMS_
 def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
     """Serialize order item object"""
     try:
+        product = order_item.product
+        images = product.images or []
         return {
             "id": order_item.id,
             "product_id": order_item.product_id,
-            "product_name": order_item.product.name,
-            "product_sku": order_item.product.sku,
+            "product_name": product.name,
+            # The name the customer reads, in the request's language (the product's own translation, as the
+            # subscription page and the product card name it); `product_name` stays the stored name for the bots.
+            "product_display_name": product.get_translated("name", get_current_language()) or product.name,
+            # The product's first image (the one the shop shows), or None: the website's order lines draw it.
+            "product_image": images[0] if images else None,
+            "product_sku": product.sku,
             "quantity": order_item.quantity,
             "unit_price": float(order_item.unit_price),
             "total_price": float(order_item.total_price),
             "is_reward": is_free_reward_item(order_item),
-            # 'product_image_url': getattr(order_item, 'product_image_url', None)
         }
     except Exception:
         return {

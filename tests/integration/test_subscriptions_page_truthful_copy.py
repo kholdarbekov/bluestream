@@ -6,7 +6,9 @@ The /subscriptions page, the /services blurb, the shop FAQ and the "my subscript
 promise "up to 20%", "2x AquaCoins", a savings readout and an always-zero "Monthly Savings" tile.
 
 The render tests load the SHIPPED seed rows (not a local copy of the copy) for every key the page asks
-for, so a key that is renamed in the template but not in the seed fails here.
+for, so a key that is renamed in the template but not in the seed fails here. Since the 2026-11-14 redesign the
+/subscriptions copy ships in scripts/seed_web_ui_subs_translations.py (`web.subs.*`, Uzbek written with ‘ and ’);
+the /services blurb and the shared rows still ship in scripts/seed_backend_translations.py.
 """
 
 import json
@@ -20,6 +22,7 @@ from tests.integration.contract_pricing_factory import customer_headers
 
 from business_app.models.translation import Translation
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from scripts.seed_web_ui_subs_translations import CATEGORY as SUBS_CATEGORY, TRANSLATIONS as SUBS_TRANSLATIONS
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = REPO / "business_app" / "templates" / "frontend"
@@ -31,17 +34,18 @@ LANGS = ("en", "uz", "ru")
 AUTO_ORDER = {
     "en": "Your subscription places each order for you on schedule, so you never forget to order water "
     "and never run out when you need it most.",
-    "uz": "Obunangiz har bir buyurtmani jadval bo'yicha o'zi beradi",
+    "uz": "Obunangiz har bir buyurtmani jadval bo‘yicha o‘zi beradi",
     "ru": "Подписка сама оформляет каждый заказ по расписанию",
 }
+# Printed only while the public offer says delivery is free (review SITE-02: never "always").
 FREE_DELIVERY = {
-    "en": "Delivery is always free, on subscription deliveries as on every order.",
-    "uz": "Yetkazib berish doim bepul",
-    "ru": "Доставка всегда бесплатная",
+    "en": "Delivery is free, on subscription deliveries as on every order.",
+    "uz": "Yetkazib berish bepul",
+    "ru": "Доставка бесплатная",
 }
 COINS = {
     "en": "Earn AquaCoins on every subscription delivery at your tier's rate, and redeem them for rewards.",
-    "uz": "darajangiz stavkasi bo'yicha AquaCoins",
+    "uz": "darajangiz stavkasi bo‘yicha AquaCoins",
     "ru": "AquaCoins по ставке вашего уровня",
 }
 REGULAR_PRICE_EN = "Subscription deliveries are billed at the regular price."
@@ -54,19 +58,29 @@ FORBIDDEN = {
 }
 
 
+# Every row a seed ships, as {key: {lang: value}}: the backend seed's, then the /subscriptions page's own.
+SHIPPED = {key: dict(row) for key, row in BACKEND_TRANSLATIONS.items()}
+for _lang, _rows in SUBS_TRANSLATIONS.items():
+    for _key, _value in _rows.items():
+        SHIPPED.setdefault(_key, {})[_lang] = _value
+
+
+def _category(key: str) -> str:
+    return SUBS_CATEGORY if key.startswith("web.subs.") else _category_for(key)
+
+
 def _page_keys() -> set[str]:
+    """Every literal key the page translates, wherever it sits: `{{ 'k'|t }}`, a macro argument or a `{% set %}`."""
     source = PAGE.read_text(encoding="utf-8")
-    raw = re.findall(r"\{\{\s*'((?:[^'\\]|\\.)*)'\s*\|\s*(?:t|translate)\b", source)
+    raw = re.findall(r"'((?:[^'\\\n]|\\.)*)'\s*\|\s*(?:t|translate)\b", source)
     return {k.replace("\\'", "'") for k in raw}
 
 
 def _seed_shipped_rows(db, keys: set[str]) -> None:
-    for key in keys & set(BACKEND_TRANSLATIONS):
+    for key in keys & set(SHIPPED):
         for lang in LANGS:
-            value = BACKEND_TRANSLATIONS[key].get(lang) or BACKEND_TRANSLATIONS[key]["en"]
-            db.session.add(
-                Translation(key=key, language=lang, value=value, category=_category_for(key), is_active=True)
-            )
+            value = SHIPPED[key].get(lang) or SHIPPED[key]["en"]
+            db.session.add(Translation(key=key, language=lang, value=value, category=_category(key), is_active=True))
     db.session.commit()
 
 
@@ -123,8 +137,8 @@ def test_subscriptions_page_says_once_that_deliveries_are_billed_at_the_regular_
 PAID_ORDER_STAYS = {
     "en": "An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: "
     "it stays and is delivered, and the change applies from the following delivery.",
-    "uz": "Siz allaqachon to'lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o'tkazib yuborib ham, "
-    "to'xtatib ham bo'lmaydi: u qoladi va yetkaziladi",
+    "uz": "Siz allaqachon to‘lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o‘tkazib yuborib ham, "
+    "to‘xtatib ham bo‘lmaydi: u qoladi va yetkaziladi",
     "ru": "Уже оплаченный заказ или заказ, который курьер уже забрал для доставки, нельзя пропустить или "
     "приостановить: он остаётся и будет доставлен",
 }
@@ -179,18 +193,18 @@ def test_services_page_subscription_blurb_is_the_auto_order_message(client, db, 
 
 @pytest.mark.unit
 def test_new_subscription_copy_is_trilingual_and_free_of_discount_words():
-    keys = _page_keys() & set(BACKEND_TRANSLATIONS)
-    # The seed must cover the new strings; the unseeded remainder is pre-existing.
-    for must in (
-        AUTO_ORDER["en"],
-        FREE_DELIVERY["en"],
-        COINS["en"],
-        "What do I get with a subscription?",
-        "landing.services.subscription_plans.description",
-    ):
-        assert must in BACKEND_TRANSLATIONS, f"{must[:50]!r} is not seeded"
+    keys = _page_keys()
+    # Every key the page asks for ships in a seed, in all three languages: none is DB-only.
+    assert keys, "the page asks for no translation key: the key reader is broken"
+    unseeded = sorted(keys - set(SHIPPED))
+    assert unseeded == [], f"/subscriptions asks for keys no seed ships: {unseeded}"
+    # The seed carries the real benefits, in the page's own namespace.
+    english = set(SUBS_TRANSLATIONS["en"].values())
+    for must in (AUTO_ORDER["en"], FREE_DELIVERY["en"], COINS["en"], "What do I get with a subscription?"):
+        assert must in english, f"{must[:50]!r} is not seeded"
+    assert "landing.services.subscription_plans.description" in BACKEND_TRANSLATIONS
     for key in keys | {"landing.services.subscription_plans.description"}:
-        row = BACKEND_TRANSLATIONS[key]
+        row = SHIPPED[key]
         for lang in LANGS:
             assert row.get(lang), f"{key[:50]!r} has no {lang}"
         text = " ".join(row[lang] for lang in LANGS).lower()
@@ -203,7 +217,12 @@ def test_new_subscription_copy_is_trilingual_and_free_of_discount_words():
 
 @pytest.mark.unit
 def test_page_script_has_no_discount_table_or_savings_readout():
-    source = (STATIC_JS / "subscriptions.js").read_text(encoding="utf-8")
+    """The fake frequency preview, the last home of a per-frequency discount table, is gone with its script
+    (redesign 2026-11-14): the page loads no script of its own, and none may come back with such a table."""
+    template = PAGE.read_text(encoding="utf-8")
+    assert "<script" not in template and "render_page_data" not in template
+    script = STATIC_JS / "subscriptions.js"
+    source = script.read_text(encoding="utf-8") if script.exists() else ""
     assert not re.search(r"\b(daily|weekly|biweekly|monthly)\s*:\s*\d+", source), "a per-frequency percentage table is back"
     for word in ("discount", "savings", "preview-savings"):
         assert word not in source.lower()
@@ -263,15 +282,15 @@ BOTH_SURFACES = {
         "Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.",
     ],
     "uz": [
-        "Mahsulotlar, miqdor yoki jadvalni istalgan vaqtda shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",
-        "Istalgan navbatdagi yetkazishni ham shaxsiy kabinetda yoki Telegram botimizda o'tkazib yuborishingiz mumkin.",
-        "uni shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",
+        "Mahsulotlar, miqdor yoki jadvalni istalgan vaqtda shaxsiy kabinetda yoki Telegram botimizda o‘zgartirishingiz mumkin.",
+        "Istalgan navbatdagi yetkazishni ham shaxsiy kabinetda yoki Telegram botimizda o‘tkazib yuborishingiz mumkin.",
+        "uni shaxsiy kabinetda yoki Telegram botimizda o‘zgartirishingiz mumkin.",
         "Obunangiz siz tanlagan manzilga yetkaziladi. Uni shaxsiy kabinetda yoki Telegram botimizda saqlangan manzillaringizdan "
-        "birini tanlab o'zgartirishingiz mumkin. Agar kuryer navbatdagi buyurtmalarni hali olmagan bo'lsa, ular ham yangi "
-        "manzilga o'tadi.",
-        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi "
-        "kabi amalga oshiriladi. Click orqali to'lov o'tmasa, buyurtmani to'lov muddati tugaguncha shaxsiy kabinetda yoki "
-        "Telegram botimizda qayta to'lashingiz mumkin. Yordam kerak bo'lsa, Telegram botimizga yozing.",
+        "birini tanlab o‘zgartirishingiz mumkin. Agar kuryer navbatdagi buyurtmalarni hali olmagan bo‘lsa, ular ham yangi "
+        "manzilga o‘tadi.",
+        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to‘lov har qanday buyurtmadagi "
+        "kabi amalga oshiriladi. Click orqali to‘lov o‘tmasa, buyurtmani to‘lov muddati tugaguncha shaxsiy kabinetda yoki "
+        "Telegram botimizda qayta to‘lashingiz mumkin. Yordam kerak bo‘lsa, Telegram botimizga yozing.",
     ],
     "ru": [
         "Менять товары, количество или расписание можно в любое время в личном кабинете или в нашем Telegram-боте.",
@@ -288,8 +307,8 @@ BOTH_SURFACES = {
 NO_BOT_ONLY = {
     "en": ["skip your next delivery in the Telegram bot", "message us in our Telegram bot and we will update",
            "which you can change in our Telegram bot", "anytime in our Telegram bot"],
-    "uz": ["Keyingi yetkazishni o'tkazib yuborish Telegram botimizda mavjud", "biz uni siz uchun yangilaymiz",
-           "chastotani istalgan vaqtda Telegram botimizda", "uni Telegram botimizda o'zgartirish mumkin"],
+    "uz": ["Keyingi yetkazishni o‘tkazib yuborish Telegram botimizda mavjud", "biz uni siz uchun yangilaymiz",
+           "chastotani istalgan vaqtda Telegram botimizda", "uni Telegram botimizda o‘zgartirish mumkin"],
     "ru": ["и мы обновим его", "Пропустить ближайшую доставку можно в Telegram-боте",
            "частоту можно в любое время в нашем Telegram-боте", "его можно изменить в нашем Telegram-боте"],
 }

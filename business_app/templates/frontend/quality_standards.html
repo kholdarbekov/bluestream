@@ -1,21 +1,25 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Стандарты качества Aqua Element: источники, обработка и подход к контролю качества доставляемой воды." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Quality standards at Aqua Element: sourcing, handling practices, and quality control approach for delivered water products." %}
-{% else %}
-{% set meta_description = "Aqua Element sifat standartlari: manbalar, saqlash-amaliyotlari va yetkaziladigan suv mahsulotlari sifat nazorati." %}
-{% endif %}
+{#- /quality-standards (redesign step 3, group "info"). Every line was hard-coded English; now each one is a key
+    (`web.info.quality.*`) and states only what the site documents elsewhere: the water facts of /about/sources and the
+    filtration page (the TDS and pH figures are the mineral table's own keys), the records kept for every order, and
+    the policies. The filtration link is the SEO pillar link; the policy links keep the visitor's language. -#}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/info_ui.html' import mail_text, link_card with context %}
+{% from 'frontend/macros/ui.html' import telegram_panel %}
 
-{% block title %}Quality Standards - {{ company_name }}{% endblock %}
+{% set doc_title = 'web.shell.footer.quality'|t %}
+{% set meta_description = 'web.info.quality.meta'|t %}
+
+{% block title %}{{ doc_title }} — {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
 {% set quality_page_schema = {
     "@context": "https://schema.org",
     "@type": "WebPage",
-    "name": "Quality Standards",
-    "url": canonical_url if canonical_url is defined else request.url,
+    "name": doc_title,
+    "url": canonical_href,
     "description": meta_description,
+    "inLanguage": current_language,
     "publisher": {
         "@type": "Organization",
         "name": company_name
@@ -24,63 +28,71 @@
 <script type="application/ld+json">{{ quality_page_schema | tojson }}</script>
 {% endblock %}
 
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/info.css') }}" rel="stylesheet">
+{% endblock %}
+
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>Quality Standards</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>Quality Standards</li>
-            </ul>
+{%- set Q = 'web.info.quality.' -%}
+<div class="info info--quality">
+    {{ page_hero(doc_title, [(doc_title, None)], lead=(Q ~ 'lead')|t) }}
+
+    <section class="ae-section" aria-labelledby="water-h">
+        <div class="ae-container info-split info-split--wide">
+            <div class="info-split__main">
+                <h2 class="info-h2" id="water-h">{{ (Q ~ 'water_h')|t }}</h2>
+                <p class="info-intro__lead">{{ (Q ~ 'water_p')|t }}</p>
+                <ul class="info-checks">
+                    <li>{{ (Q ~ 'fact_source')|t }}</li>
+                    <li>{{ (Q ~ 'fact_stages')|t }}</li>
+                    <li>{{ (Q ~ 'fact_disinfection')|t }}</li>
+                    <li>{{ (Q ~ 'fact_minerals')|t(tds='web.info.mineral.row_1.value'|t, ph='web.info.mineral.row_2.value'|t) }}</li>
+                    <li>{{ (Q ~ 'fact_oversight')|t }}</li>
+                    <li>{{ mail_text(Q ~ 'fact_lab', lab_email) }}</li>
+                </ul>
+            </div>
+            <div class="info-split__aside ae-stack">
+                {{ link_card(external_url_for_lang('frontend.process_filtration'), 'far fa-filter', 'web.shell.footer.filtration'|t, 'web.info.link.process_text'|t) }}
+                {{ link_card(external_url_for_lang('frontend.about_sources'), 'far fa-book-open', 'web.info.sources.title'|t, 'web.info.link.sources_text'|t) }}
+            </div>
         </div>
-    </div>
-</section>
+    </section>
 
-<section class="service-details">
-    <div class="auto-container">
-        <div class="content-box">
-            <h2>Quality Focus</h2>
-            <p>Aqua Element prioritizes safe handling, consistent product quality, and transparent customer communication across all delivery workflows.</p>
-
-            <p>For a full technical breakdown of how Aqua Element water is treated &mdash; the artesian source, every one of the eleven filtration and mineralisation stages, the resulting mineral profile, and the regulatory oversight under which we operate &mdash; see our dedicated process page:
-                <strong><a href="{{ url_for('frontend.process_filtration') }}">11-stage filtration &amp; mineralisation process &rarr;</a></strong>
-            </p>
-
-            <h2>Storage and Handling</h2>
-            <p>Products are stored and transported according to operational standards designed to maintain product integrity and delivery reliability.</p>
-
-            <h2>Operational Quality Control</h2>
-            <p>Order processing, dispatch, and delivery events are monitored through platform workflows to reduce delivery errors and improve consistency.</p>
-
-            <h2>Verifiable Quality Evidence</h2>
-            <p>Aqua Element maintains records that can be reviewed by support and operations teams for quality-related requests:</p>
-            <ul>
-                <li>Order-level timestamps for checkout, dispatch, and delivery completion</li>
-                <li>Product-level pricing and availability data shown on each product page</li>
-                <li>Policy documents that define delivery, pricing, and refund terms</li>
-                <li>Customer support communication history for issue investigation and resolution</li>
-            </ul>
-
-            <h2>Policy and Standards References</h2>
-            <p>The following pages define customer-facing standards and are used as source references for operational decisions:</p>
-            <ul>
-                <li><a href="{{ url_for('frontend.delivery_policy') }}">Delivery Policy</a></li>
-                <li><a href="{{ url_for('frontend.pricing_policy') }}">Pricing Policy</a></li>
-                <li><a href="{{ url_for('frontend.refund_policy') }}">Refund Policy</a></li>
-                <li><a href="{{ url_for('frontend.water_delivery_faq') }}">Water Delivery FAQ</a></li>
-            </ul>
-
-            <h2>Expert Review Workflow</h2>
-            <p>Operational procedures are reviewed periodically by responsible teams. Feedback from delivery incidents, customer reports, and process audits is incorporated into updated workflows.</p>
-
-            <h2>Continuous Improvement</h2>
-            <p>Customer feedback, service data, and incident reviews are used to improve fulfillment quality and customer outcomes over time.</p>
-
-            <h2>Contact</h2>
-            <p>Questions about quality standards can be directed to <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+    <section class="ae-section ae-section--tint" aria-labelledby="records-h">
+        <div class="ae-container">
+            <div class="ae-grid ae-grid--2 info-pair">
+                <div>
+                    <h2 class="info-h2" id="records-h">{{ (Q ~ 'records_h')|t }}</h2>
+                    <p>{{ (Q ~ 'records_p')|t }}</p>
+                    <ul class="info-checks">
+                        {%- for n in range(1, 5) %}
+                        <li>{{ (Q ~ 'record_%d' % n)|t }}</li>
+                        {%- endfor %}
+                    </ul>
+                </div>
+                <div>
+                    <h2 class="info-h2" id="policies-h">{{ (Q ~ 'policies_h')|t }}</h2>
+                    <p>{{ (Q ~ 'policies_p')|t }}</p>
+                    <ul class="info-doclinks" aria-labelledby="policies-h">
+                        {%- for endpoint, label_key, icon in [
+                            ('frontend.delivery_policy', 'web.shell.footer.delivery_policy', 'far fa-truck'),
+                            ('frontend.pricing_policy', 'landing.pricing_policy.title', 'far fa-tags'),
+                            ('frontend.refund_policy', 'web.shell.footer.refund_policy', 'far fa-undo'),
+                            ('frontend.water_delivery_faq', 'web.shell.footer.faq', 'far fa-question-circle'),
+                        ] %}
+                        <li><a href="{{ external_url_for_lang(endpoint) }}"><i class="{{ icon }}" aria-hidden="true"></i><span>{{ label_key|t }}</span><i class="far fa-arrow-right info-doclinks__arrow" aria-hidden="true"></i></a></li>
+                        {%- endfor %}
+                    </ul>
+                </div>
+            </div>
         </div>
-    </div>
-</section>
+    </section>
+
+    <section class="ae-section ae-section--tight" aria-label="{{ (Q ~ 'help_text')|t }}">
+        <div class="ae-container info-help">
+            {{ telegram_panel((Q ~ 'help_text')|t, company_telegram_bot_url) }}
+            <p class="info-note">{{ mail_text(Q ~ 'help_email', company_email) }}</p>
+        </div>
+    </section>
+</div>
 {% endblock %}

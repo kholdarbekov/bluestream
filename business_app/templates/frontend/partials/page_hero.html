@@ -1,0 +1,34 @@
+{#- The page-title banner every inner page opens with (design-system v1, "one bold moment per page").
+
+    page_hero(title, crumbs=[(label, url)], lead=None, variant='splash')
+    - title: the page's H1, printed as given.
+    - crumbs: the trail AFTER Home (the macro prints Home first). The last crumb is the current page and is never a
+      link; earlier crumbs link when they have a url. Give the last crumb a short label when the H1 is long.
+    - lead: one optional sentence under the H1.
+    - variant: 'splash' (the water-splash image with its wave; marketing and info pages) or 'soft' (a light tint;
+      cabinet, auth, checkout, error pages).
+    A title over 48 characters gets ae-hero--long (one type step smaller, so it keeps to two lines on desktop); a
+    shorter H1 is still the better fix.
+    Import it `with context`: the Home crumb keeps the visitor's language through external_url_for_lang (the
+    storefront context processor), as the nav and footer do.
+    Keeps the classes tests and older CSS read: section.page-title, its h1 and ul.bread-crumb li. No <header> or <nav>
+    wrapper: the Markdown served to agents drops those, and the H1 must stay in it. -#}
+{% macro page_hero(title, crumbs=[], lead=None, variant='splash') -%}
+{%- set home_url = external_url_for_lang('frontend.index') if external_url_for_lang is defined else url_for('frontend.index') -%}
+<section class="page-title centred ae-hero ae-hero--{{ variant }}{% if title|string|length > 48 %} ae-hero--long{% endif %}">
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>{{ title }}</h1>
+            {%- if lead %}
+            <p class="ae-hero__lead">{{ lead }}</p>
+            {%- endif %}
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ home_url }}">{{ 'landing.nav.home'|t }}</a></li>
+                {%- for label, url in crumbs %}
+                <li>{% if url and not loop.last %}<a href="{{ url }}">{{ label }}</a>{% else %}<span aria-current="page">{{ label }}</span>{% endif %}</li>
+                {%- endfor %}
+            </ul>
+        </div>
+    </div>
+</section>
+{%- endmacro %}

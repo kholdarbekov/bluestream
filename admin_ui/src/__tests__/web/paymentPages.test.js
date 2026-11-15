@@ -143,7 +143,8 @@ describe('the payment-cancelled page', () => {
     expect(fixture.page.island.order.customer_actions.cancel.allowed).toBe(true);
     expect(page.$1('[data-order-action="cancel"]')).toBeNull();
     expect(page.$1('[data-order-action="confirm"]')).toBeNull();
-    expect(squash(page.$1('.order-info').textContent)).toContain('Pending');
+    // The status in the words macros/order_status.html gives it (web.cabinet.status.pending), as on every order surface.
+    expect(squash(page.$1('.order-info .ae-status').textContent)).toBe('Awaiting confirmation');
   });
 
   it('a dead order draws no Pay and sends nothing', async () => {
@@ -233,6 +234,27 @@ describe('the payment-pending page', () => {
     for (let i = 0; i < 25; i += 1) await page.advance(6000);
     expect(page.requests).toHaveLength(20);
     expect(page.navigate).not.toHaveBeenCalled();
+  });
+
+  it('“Check now” that is still pending says so in the caption, and starts no second loop', async () => {
+    const fixture = loadCase('payment_pending');
+    const page = await boot({
+      html: fixture.page.html,
+      island: fixture.page.island,
+      answers: { [statusKey(fixture)]: fixture.polls.pending },
+      script: PENDING_SCRIPT,
+    });
+    const caption = page.$1('#pending-live [data-pending-caption]');
+    expect(page.$1('#pending-live').getAttribute('role')).toBe('status');
+    expect(caption.textContent).not.toBe(fixture.page.island.i18n.still_pending);
+
+    page.$1('[data-action="check-payment-status"]').click();
+    await settle(page.window);
+
+    expect(page.requests.map((r) => r.key)).toEqual([statusKey(fixture)]);
+    expect(caption.textContent).toBe(fixture.page.island.i18n.still_pending);
+    expect(page.navigate).not.toHaveBeenCalled();
+    expect(page.pending()).toEqual([3000]);
   });
 
   it('a signed-out pending page polls nothing', async () => {
@@ -357,7 +379,8 @@ describe('checkout.js places a Click order and reads the answer', () => {
   const CART = [{ product_id: 1, quantity: 2 }];
   const SHELL = `
     <div id="loading-overlay" style="display:none"></div>
-    <input id="delivery-date" type="date"><div id="time-slots-container"></div>
+    <input id="delivery-date" type="date" min="2026-01-01" max="2026-01-16" value="2026-01-01">
+    <p id="delivery-date-error"></p><div id="time-slots-container"></div><p id="delivery-window-error"></p>
     <div id="payment-methods-container"></div><input id="selected-payment-method">
     <div class="address-card selected" data-address-id="1"><input type="radio"></div>
     <textarea id="order-notes"></textarea><input type="checkbox" id="agree-terms" checked>
@@ -377,6 +400,11 @@ describe('checkout.js places a Click order and reads the answer', () => {
     login_url: '/login',
     checkout_url: '/checkout',
     default_image: '/x.png',
+    // The day and windows the server draws (routes.checkout `schedule`).
+    schedule: {
+      today: '2026-01-01', max_date: '2026-01-16', max_label: '16 January',
+      windows: [{ key: 'anytime', start: null, end: null, open_today: true }],
+    },
     i18n: { tier_discount_line: '{tier} {percent}', window_anytime: 'Any time', place_order_failed: 'failed' },
     order_actions: WORDS,
   };

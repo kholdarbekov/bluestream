@@ -15,17 +15,22 @@ from tests.integration.reorder_reminder_builders import customer_headers
 
 pytestmark = pytest.mark.integration
 
+# Each item is named as its page's own title, so the dashboard reads "My account" (its H1) and the subscriptions item
+# "My subscriptions" (cabinet.subs.title) -- never the header's bare "Subscriptions", which opens the public page.
 SIDEBAR = {
-    "uz": ["Boshqaruv paneli", "Profil sozlamalari", "Buyurtmalarim", "Manzillarim", "Obunalar", "Aqua Club", "Xavfsizlik", "Chiqish"],
-    "ru": ["Панель управления", "Настройки профиля", "Мои заказы", "Мои адреса", "Подписки", "Aqua Club", "Безопасность", "Выйти"],
+    "uz": ["Mening hisobim", "Profil sozlamalari", "Buyurtmalarim", "Manzillarim", "Obunalarim", "Aqua Club", "Xavfsizlik", "Chiqish"],
+    "ru": ["Мой аккаунт", "Настройки профиля", "Мои заказы", "Мои адреса", "Мои подписки", "Aqua Club", "Безопасность", "Выйти"],
 }
+
+# The sidebar's keys outside `landing.*`.
+SIDEBAR_KEYS = {"cabinet.subs.title"}
 
 
 @pytest.fixture(autouse=True)
 def seeded(db):
-    """Every `landing.*` row exactly as the seeder ships it."""
+    """Every `landing.*` row, and the sidebar's other keys, exactly as the seeder ships them."""
     for key, values in BACKEND_TRANSLATIONS.items():
-        if key.startswith("landing."):
+        if key.startswith("landing.") or key in SIDEBAR_KEYS:
             for language, value in values.items():
                 db.session.add(Translation(key=key, language=language, value=value, category=_category_for(key)))
     db.session.commit()
@@ -42,4 +47,5 @@ def test_the_sidebar_is_in_the_customers_language(app, db, sample_user, language
     soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
     labels = [li.get_text(" ", strip=True) for li in soup.select(".account-menu li")]
     assert labels == SIDEBAR[language]
-    assert "landing." not in soup.select_one(".account-menu").get_text()
+    menu_text = soup.select_one(".account-menu").get_text()
+    assert "landing." not in menu_text and "cabinet." not in menu_text

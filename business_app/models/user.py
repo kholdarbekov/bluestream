@@ -35,6 +35,11 @@ class User(db.Model, TimestampMixin):
         String(20), unique=True, nullable=True, index=True
     )  # Nullable for telegram registration, required before ordering
     password_hash = Column(String(255), nullable=False)
+    # When the person last chose their website password (register, reset, change); NULL while the stored password is
+    # one we made up (a bot signup's placeholder, the random secret of an admin-, agent- or staff-created account).
+    # auth_service.has_website_password reads it. AuthService._set_chosen_password stamps it, and only it; the
+    # cross_platform_sync_service merges copy it along with the password it dates (the migration backfilled it once).
+    password_set_at = Column(DateTime(timezone=True), nullable=True)
     date_of_birth = Column(DateTime(timezone=True), nullable=True)
     gender = Column(
         Enum(UserGender, name="user_gender", values_callable=lambda x: [e.value for e in x]),

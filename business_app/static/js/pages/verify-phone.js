@@ -1,193 +1,186 @@
+/* Phone confirmation, a cabinet page (templates/frontend/verify_phone.html). The login cookies are the identity:
+   apiRequest sends them, and a lapsed login is its job (sign in, then back here).
+   Step 1 posts {phone} to /auth/send-otp. The server is the one judge of the number (400), refuses a number another
+   account holds (409) and answers the code's life in `expires_in` and when "send a new code" may show in
+   `resend_available_in` (at expiry). A number whose code is still valid gets no new one: a 429 RESEND_COOLDOWN with
+   that code's time left in the same two fields; the page then shows the code step with its own note, as the code
+   already sent is the one to enter. Step 2 posts {otp} to /auth/verify-phone, which
+   saves the number to the account only when the code sent to it matches; 404 means the request lapsed. The page words
+   its own errors (a number another account holds is `taken`, whichever step finds it). */
 (function () {
     var PAGE_DATA = getPageData();
-    var currentUserId = null;
-    var currentPhone = null;
-    var timerInterval = null;
+    var I18N = PAGE_DATA.i18n || {};
 
-    function startTimer(seconds) {
-        clearInterval(timerInterval);
-
-        var timerElement = document.getElementById('timer');
-        var timeLeft = seconds;
-
-        timerInterval = setInterval(function () {
-            var minutes = Math.floor(timeLeft / 60);
-            var secs = timeLeft % 60;
-
-            timerElement.textContent =
-                String(minutes).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
-
-            if (timeLeft <= 0) {
-                clearInterval(timerInterval);
-                timerElement.textContent = '00:00';
-                showNotification(PAGE_DATA.i18n.code_expired, 'warning');
-            }
-
-            timeLeft--;
-        }, 1000);
-    }
-
+    var phoneStep = document.getElementById('phoneStep');
+    var otpStep = document.getElementById('otpStep');
     var phoneForm = document.getElementById('phoneForm');
-    if (phoneForm) {
-        phoneForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            var formData = new FormData(this);
-            var phone = formData.get('phone');
-
-            if (!phone) {
-                showNotification(PAGE_DATA.i18n.invalid_phone, 'error');
-                return;
-            }
-
-            try {
-                var token = getAuthToken();
-                if (!token) {
-                    showNotification(PAGE_DATA.i18n.please_login, 'error');
-                    window.location.href = PAGE_DATA.login_url;
-                    return;
-                }
-
-                var response = await apiRequest('/auth/send-otp', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        phone: phone,
-                        user_id: CURRENT_USER ? CURRENT_USER.id : null
-                    })
-                });
-
-                var result = await response.json();
-
-                if (response.ok) {
-                    currentUserId = result.user_id;
-                    currentPhone = phone;
-
-                    document.getElementById('phoneForm').style.display = 'none';
-                    document.getElementById('otpForm').style.display = 'block';
-                    document.getElementById('sentToPhone').textContent = phone;
-
-                    startTimer(300);
-
-                    showNotification(PAGE_DATA.i18n.code_sent, 'success');
-                } else {
-                    showNotification(result.message || PAGE_DATA.i18n.send_failed, 'error');
-                }
-            } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
-            }
-        });
-    }
-
     var otpForm = document.getElementById('otpForm');
-    if (otpForm) {
-        otpForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            var formData = new FormData(this);
-            var otp = formData.get('otp');
-
-            if (!otp || otp.length !== 6) {
-                showNotification(PAGE_DATA.i18n.invalid_otp, 'error');
-                return;
-            }
-
-            try {
-                var response = await apiRequest('/auth/verify-otp', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        user_id: currentUserId,
-                        otp: otp
-                    })
-                });
-
-                var result = await response.json();
-
-                if (response.ok) {
-                    document.getElementById('otpForm').style.display = 'none';
-                    document.getElementById('successMessage').style.display = 'block';
-
-                    clearInterval(timerInterval);
-
-                    showNotification(PAGE_DATA.i18n.verified, 'success');
-                } else {
-                    showNotification(result.message || PAGE_DATA.i18n.invalid_code, 'error');
-                }
-            } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
-            }
-        });
-    }
-
+    var phoneInput = document.getElementById('phone');
+    var otpInput = document.getElementById('otpCode');
     var resendBtn = document.getElementById('resendCode');
-    if (resendBtn) {
-        resendBtn.addEventListener('click', async function (e) {
-            e.preventDefault();
+    var stillValidNote = document.getElementById('codeStillValid');
+    var otp = AEAuth.wireOtp(otpInput);
+    var stopTimer = null;
+    var currentPhone = null;
 
-            if (!currentPhone) {
-                showNotification(PAGE_DATA.i18n.no_phone, 'error');
+    function fail(alertId, message) {
+        AEAuth.showAlert(alertId, message);
+        var alert = document.getElementById(alertId);
+        if (alert) alert.focus();
+    }
+
+    function startTimer(expiresIn, resendAvailableIn) {
+        if (stopTimer) stopTimer();
+        stopTimer = AEAuth.countdown(document.getElementById('timer'), resendBtn, expiresIn, resendAvailableIn,
+            I18N.code_expired);
+    }
+
+    function resetCode() {
+        otp.reset();
+        AEAuth.clearErrors(otpForm);
+        AEAuth.hideAlert('otpAlert');
+    }
+
+    function showOtpStep(phone) {
+        phoneStep.hidden = true;
+        otpStep.hidden = false;
+        document.getElementById('sentToPhone').textContent = phone;
+        resetCode();
+        otpInput.focus();
+    }
+
+    function showPhoneStep() {
+        if (stopTimer) stopTimer();
+        stillValidNote.hidden = true;
+        otpStep.hidden = true;
+        phoneStep.hidden = false;
+        resetCode();
+        phoneInput.focus();
+    }
+
+    // The refusal of a number, under the phone field (step 1) or above the code (a resend).
+    function refuseNumber(message) {
+        if (phoneStep.hidden) {
+            fail('otpAlert', message);
+        } else {
+            AEAuth.setFieldError(phoneForm, 'phone', message);
+            phoneInput.focus();
+        }
+    }
+
+    // Asks the server for a code: 'sent', 'still_valid' (the code this number holds is still the one to enter), or
+    // null when there is no code to enter (the reason is shown).
+    async function sendCode(phone, button) {
+        AEAuth.setBusy(button, true);
+        try {
+            var response = await apiRequest('/auth/send-otp', {
+                method: 'POST',
+                body: JSON.stringify({ phone: phone })
+            });
+            var result = await AEAuth.readJson(response);
+            var data = result.data || {};
+            var stillValid = response.status === 429 && data.error_code === 'RESEND_COOLDOWN';
+            if (response.ok || stillValid) {
+                currentPhone = phone;
+                stillValidNote.hidden = !stillValid;
+                startTimer(data.expires_in, data.resend_available_in);
+                return stillValid ? 'still_valid' : 'sent';
+            }
+            if (response.status === 400) refuseNumber(I18N.invalid_phone);
+            else if (response.status === 409) refuseNumber(I18N.taken);
+            else if (response.status === 429) fail(phoneStep.hidden ? 'otpAlert' : 'phoneAlert', I18N.rate_limited);
+            else fail(phoneStep.hidden ? 'otpAlert' : 'phoneAlert', phoneStep.hidden ? I18N.resend_failed : I18N.send_failed);
+        } catch (error) {
+            fail(phoneStep.hidden ? 'otpAlert' : 'phoneAlert', I18N.network_error);
+        } finally {
+            AEAuth.setBusy(button, false);
+        }
+        return null;
+    }
+
+    phoneForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var button = document.getElementById('sendCodeBtn');
+        if (AEAuth.isBusy(button)) return;
+        AEAuth.clearErrors(phoneForm);
+        AEAuth.hideAlert('phoneAlert');
+
+        var phone = phoneInput.value.trim();
+        if (!phone) {
+            AEAuth.setFieldError(phoneForm, 'phone', I18N.need_phone);
+            phoneInput.focus();
+            return;
+        }
+        if (await sendCode(phone, button)) showOtpStep(phone);
+    });
+
+    otpForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var button = document.getElementById('verifyCodeBtn');
+        if (AEAuth.isBusy(button)) return;
+        AEAuth.clearErrors(otpForm);
+        AEAuth.hideAlert('otpAlert');
+
+        var code = otpInput.value;
+        if (!/^[0-9]{6}$/.test(code)) {
+            AEAuth.setFieldError(otpForm, 'otp', I18N.incomplete_otp);
+            otpInput.focus();
+            return;
+        }
+
+        AEAuth.setBusy(button, true);
+        try {
+            var response = await apiRequest('/auth/verify-phone', {
+                method: 'POST',
+                body: JSON.stringify({ otp: code })
+            });
+            var result = await AEAuth.readJson(response);
+
+            if (response.ok) {
+                if (stopTimer) stopTimer();
+                var saved = (result.data && result.data.phone) || currentPhone;
+                var text = document.getElementById('phoneDoneText');
+                text.textContent = (text.getAttribute('data-template') || '{phone}').replace('{phone}', saved);
+                otpStep.hidden = true;
+                document.getElementById('successMessage').hidden = false;
+                document.getElementById('phoneDoneTitle').focus();
                 return;
             }
-
-            try {
-                var response = await apiRequest('/auth/send-otp', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        phone: currentPhone,
-                        user_id: currentUserId
-                    })
-                });
-
-                var result = await response.json();
-
-                if (response.ok) {
-                    startTimer(300);
-                    showNotification(PAGE_DATA.i18n.code_resent, 'success');
-                } else {
-                    showNotification(result.message || PAGE_DATA.i18n.resend_failed, 'error');
-                }
-            } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
+            if (response.status === 400) {
+                otp.reset();
+                AEAuth.setFieldError(otpForm, 'otp', I18N.wrong_code);
+                otpInput.focus();
+            } else if (response.status === 404) {
+                showPhoneStep();
+                fail('phoneAlert', I18N.request_expired);
+            } else if (response.status === 409) {
+                showPhoneStep();
+                AEAuth.setFieldError(phoneForm, 'phone', I18N.taken);
+            } else if (response.status === 429) {
+                fail('otpAlert', I18N.too_many_codes);
+            } else {
+                fail('otpAlert', I18N.verification_failed);
             }
-        });
-    }
+        } catch (error) {
+            fail('otpAlert', I18N.network_error);
+        } finally {
+            AEAuth.setBusy(button, false);
+        }
+    });
 
-    var changePhoneBtn = document.getElementById('changePhone');
-    if (changePhoneBtn) {
-        changePhoneBtn.addEventListener('click', function (e) {
-            e.preventDefault();
+    resendBtn.addEventListener('click', async function () {
+        if (AEAuth.isBusy(resendBtn) || !currentPhone) return;
+        AEAuth.hideAlert('otpAlert');
+        var sent = await sendCode(currentPhone, resendBtn);
+        if (sent === 'sent') {
+            resetCode();
+            showNotification(I18N.new_code_sent, 'success');
+        }
+        if (sent) otpInput.focus();
+    });
 
-            document.getElementById('phoneForm').style.display = 'block';
-            document.getElementById('otpForm').style.display = 'none';
+    document.getElementById('changePhone').addEventListener('click', showPhoneStep);
 
-            clearInterval(timerInterval);
-
-            document.getElementById('phoneForm').reset();
-        });
-    }
-
-    var phoneInput = document.querySelector('input[name="phone"]');
-    if (phoneInput) {
-        phoneInput.addEventListener('input', function () {
-            var value = this.value.replace(/\D/g, '');
-
-            if (value.length > 0 && !value.startsWith('998')) {
-                if (value.startsWith('0')) {
-                    value = '998' + value.substring(1);
-                } else {
-                    value = '998' + value;
-                }
-            }
-
-            if (value.length > 0) {
-                this.value = '+' + value;
-            }
-        });
-    }
-
-    var otpInput = document.querySelector('input[name="otp"]');
-    if (otpInput) {
-        otpInput.addEventListener('input', function () {
-            this.value = this.value.replace(/\D/g, '');
-        });
-    }
+    AEAuth.clearOnInput(phoneForm);
+    AEAuth.clearOnInput(otpForm);
 })();

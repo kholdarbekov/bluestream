@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from business_app.models.translation import Translation
 from business_app.services.public_urls_service import STATIC_PUBLIC_PATHS, public_product_paths
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
+from scripts.seed_web_ui_content_translations import CATEGORY as CONTENT_CATEGORY, TRANSLATIONS as CONTENT
 from shared.constants import get_delivery_statement
 from tests.integration.public_page_builders import flat, get_page, offer_skus, page, seed_copy, shipped  # noqa: F401
 from tests.integration.retired_phrases import _page_texts, _string_leaves, find_retired
@@ -58,7 +60,7 @@ CAUGHT = {   # the sentences this plan retires, by the entry that must catch the
     "flat_claim": ("via subscription, with same-day delivery across Tashkent.",),
 }
 IGNORED = (   # true sentences that sit next to the retired ones
-    "Select a time slot", "Vaqt oralig'ini tanlang", "Выберите временной интервал", "Yetkazib berish kuni",
+    "Select a time slot", "Vaqt oralig‘ini tanlang", "Выберите время", "Yetkazib berish kuni",
     "22 рабочих дня", "22 ish kuni", "К концу рабочего дня", "Mon - Sat: 9AM - 6PM.", "Dush - Shan: 9:00 - 18:00.",
     "eng tez-tez uchraydigan", "Qanchalik tez-tez yetkazib beraylik?", "кислотности", "краткосрочную память",
     "the faster every future AquaCoin adds up", "Delivery: every day",
@@ -133,6 +135,11 @@ def test_the_services_card_makes_no_speed_claim(app, db, lang):
 
 
 def test_the_terms_page_names_the_coverage_area_not_service_zones(app, db):
+    # The terms are keys of the content group's seed since the redesign (2026-11-14), in the published English wording.
+    for key, value in CONTENT["en"].items():
+        if key.startswith("web.content.terms."):
+            db.session.add(Translation(key=key, language="en", value=value, category=CONTENT_CATEGORY, is_active=True))
+    db.session.commit()
     text = flat(page(app, db, "/terms", "en").select_one("main").get_text(" "))
     assert "Delivery terms follow the current delivery policy and our delivery coverage area." in text
 

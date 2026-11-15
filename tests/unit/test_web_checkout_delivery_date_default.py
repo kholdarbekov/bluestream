@@ -1,4 +1,4 @@
-"""The web checkout must default the delivery date to TODAY, in local time.
+"""The web checkout must default the delivery date to TODAY, in Tashkent time (the server's, since review checkout-r02).
 
 Source-level, because there is no JS runtime in the backend test environment
 (`business_app/static/js/` is served as-is; only `admin_ui/` has a JS test
@@ -56,10 +56,15 @@ def test_delivery_date_default_is_not_tomorrow():
     )
 
 
-def test_delivery_date_min_and_value_are_both_todays_local_date():
+def test_delivery_date_min_max_and_value_are_the_servers_and_the_page_never_overwrites_them():
+    """Since review checkout-r02 the SERVER draws the field: `min` and the default `value` are Tashkent's today and
+    `max` the horizon's last day (routes.checkout `schedule`, `delivery_window.schedule_date_bounds`; the rendered
+    values are asserted end to end in tests/integration/test_web_checkout_flow.py). checkout.js used to write the
+    browser's own day over them, a second "today" that disagreed with the rule in any other time zone."""
     code = _code_lines(_source())
-    assert re.search(r"localDateString\(new Date\(\)\)", code), "the local-today helper call is gone"
-    # Same variable feeds the picker's floor and its preselected value: today
-    # is both the earliest allowed day and the default one.
-    assert re.search(r"\.min\s*=\s*today\b", code)
-    assert re.search(r"\.value\s*=\s*today\b", code)
+    assert "new Date(" not in code, "checkout.js derives a calendar day from the browser's clock again"
+    assert not re.search(r"\.(min|max)\s*=", code), "checkout.js overwrites the date field's server bounds"
+    template = (CHECKOUT_JS.parents[3] / "templates" / "frontend" / "checkout.html").read_text(encoding="utf-8")
+    field = re.search(r'<input type="date" id="delivery-date"[^>]*>', template).group(0)
+    assert 'min="{{ schedule.today }}"' in field and 'value="{{ schedule.today }}"' in field
+    assert 'max="{{ schedule.max_date }}"' in field

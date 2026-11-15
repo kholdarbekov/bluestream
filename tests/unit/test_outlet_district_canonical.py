@@ -1,4 +1,4 @@
-"""`_canonical_district`: the one place free-text district names become canonical keys.
+"""`canonical_district`: the one place free-text district names become canonical keys.
 
 Why this file exists: the staff bot's "New outlet" pin step forwards whatever
 `POST /api/v1/addresses/reverse-geocode` said, VERBATIM. A geocoder does not
@@ -16,15 +16,15 @@ its apostrophe (U+2018, not the U+0027 our own constants use) and its spelling
 of Shaykhontohur.
 
 This is the outlet WRITE PATH's canonicaliser. It is not the only name→key
-matcher in the tree — `admin_ui/src/pages/Users.js`, `Tryouts.js` and
-`business_app/static/js/address-wizard.js` each carry their own — but the bot
-deliberately has none: it posts the raw string
+matcher in the tree — `admin_ui/src/pages/Users.js` and `Tryouts.js` each carry
+their own (the website's address wizard uses the `district_key` reverse-geocode
+publishes) — but the bot deliberately has none: it posts the raw string
 (tests/staff_bot/test_sales_new_outlet_journey.py asserts exactly that) and this
 is what maps it.
 """
 import pytest
 
-from business_app.services.sales.outlet_service import _canonical_district, _district_display_names
+from business_app.utils.district_text import canonical_district, district_display_names
 from shared.constants import TASHKENT_DISTRICTS
 
 pytestmark = pytest.mark.unit
@@ -65,7 +65,7 @@ pytestmark = pytest.mark.unit
     ],
 )
 def test_decorated_district_names_resolve_to_their_key(raw, expected):
-    assert _canonical_district(raw) == expected
+    assert canonical_district(raw) == expected
 
 
 @pytest.mark.parametrize(
@@ -88,7 +88,7 @@ def test_decorated_district_names_resolve_to_their_key(raw, expected):
     ],
 )
 def test_text_that_names_no_district_resolves_to_none(raw):
-    assert _canonical_district(raw) is None
+    assert canonical_district(raw) is None
 
 
 # The ru adjectival forms split cleanly, and the boundary is worth stating
@@ -98,7 +98,7 @@ def test_text_that_names_no_district_resolves_to_none(raw):
 # "Хамзинский"), so it does not.
 @pytest.mark.parametrize("raw", ["Чиланзарский район", "Юнусабадский район", "Яшнабадский район"])
 def test_russian_adjectival_forms_of_consonant_names_still_resolve(raw):
-    assert _canonical_district(raw) is not None
+    assert canonical_district(raw) is not None
 
 
 @pytest.mark.parametrize("raw", ["Учтепинский район", "Хамзинский район"])
@@ -115,19 +115,19 @@ def test_russian_adjectival_stems_that_are_not_prefixes_are_a_KNOWN_GAP(raw):
     Reachable only for a ru-locale geocode: the configured provider answers
     Tashkent districts in Latin ("Yashnobod Tumani").
     """
-    assert _canonical_district(raw) is None
+    assert canonical_district(raw) is None
 
 
 def test_no_district_name_is_a_prefix_of_another():
     """The invariant the prefix rule rests on, asserted rather than assumed.
 
-    `_canonical_district` falls back to `remainder.startswith(name)` after
+    `canonical_district` falls back to `remainder.startswith(name)` after
     stripping a locale suffix, which is what lets the Russian adjectival form
     ("чиланзарский") reach "чиланзар". That is only safe while no district's
     display name is a prefix of another's — the day one is, this fails here
     instead of quietly filing outlets under the wrong district.
     """
-    names = sorted(set(_district_display_names()) | set(TASHKENT_DISTRICTS))
+    names = sorted(set(district_display_names()) | set(TASHKENT_DISTRICTS))
     collisions = [
         (short, long) for short in names for long in names if short != long and long.startswith(short)
     ]
@@ -137,30 +137,30 @@ def test_no_district_name_is_a_prefix_of_another():
 def test_every_canonical_key_round_trips_through_every_language():
     """Each district, in each language, decorated and bare, lands on its own key."""
     for key, names in TASHKENT_DISTRICTS.items():
-        assert _canonical_district(key) == key
+        assert canonical_district(key) == key
         for language, suffix in (("en", "District"), ("uz", "Tumani"), ("ru", "район")):
             display = names.get(language)
             if not display:
                 continue
-            assert _canonical_district(display) == key, (language, display)
-            assert _canonical_district(f"{display} {suffix}") == key, (language, display)
+            assert canonical_district(display) == key, (language, display)
+            assert canonical_district(f"{display} {suffix}") == key, (language, display)
 
 
 @pytest.mark.parametrize("apostrophe", ["'", "\u2019", "\u2018", "\u02bb", "\u02bc", "`"])
 def test_every_apostrophe_variant_folds_to_the_same_key(apostrophe):
     """Nobody agrees which codepoint an Uzbek apostrophe is.
 
-    `shared/constants.py` writes "Mirzo Ulug'bek" with U+0027, live Nominatim
+    `shared/constants.py` writes "Mirzo Ulug‘bek" with U+2018, live Nominatim
     answers U+2018, and the orthographically correct character is U+02BB. The
     match is about the letters, so all of them fold away — on both sides, which
     is why the uz display name itself still resolves.
     """
-    assert _canonical_district(f"Mirzo Ulug{apostrophe}bek Tumani") == "mirzo_ulugbek"
+    assert canonical_district(f"Mirzo Ulug{apostrophe}bek Tumani") == "mirzo_ulugbek"
 
 
 def test_the_alias_table_points_at_real_district_keys():
     """An alias whose target is not a district key is a silent write of garbage."""
-    from business_app.services.sales.outlet_service import _DISTRICT_ALIASES
+    from business_app.utils.district_text import _DISTRICT_ALIASES
 
     unknown = {alias: key for alias, key in _DISTRICT_ALIASES.items() if key not in TASHKENT_DISTRICTS}
     assert unknown == {}

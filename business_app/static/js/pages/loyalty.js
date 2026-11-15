@@ -1,404 +1,306 @@
+// /my-loyalty (templates/frontend/loyalty.html). The server renders the summary, the streak rules, the ways to earn
+// and the levels; this script reads only what is per request: the rewards (GET /loyalty/rewards), the AquaCoins history
+// (GET /loyalty/points/history, filtered by the chip's `group`, paged with "Show more") and, when asked, the referral code
+// (GET /loyalty/referral). An account the loyalty program does not cover gets no page data and no script.
 (function () {
     var PAGE_DATA = getPageData();
-    var currentUserReferralCode = '';
-    var currentUserTier = 'Bronze';
+    var LOYALTY = PAGE_DATA.loyalty;
+    if (!LOYALTY) return;
+    var I18N = LOYALTY.i18n || {};
+    var TXN = LOYALTY.txn || {};
+    var NBSP = ' ';
+    var PER_PAGE = 20;
 
-    function escapeHtml(str) {
-        if (str === null || str === undefined) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    var history = { group: '', page: 0, pages: 0, total: 0, shown: 0, loading: false };
+    var referral = { code: '', link: '' };
+
+    // base.js (loaded on every page before this script) owns escaping; there is no unescaped fallback.
+    function escapeHtml(value) {
+        return window.AE.escapeHtml(value);
     }
 
-    function formatDate(dateString) {
-        var date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
+    // `{name}` placeholders, filled by base.js (AE.fill, the one fill every page script shares).
+    var fill = window.AE.fill;
+
+    // A whole number grouped by a no-break space, as the server prints it (12 000).
+    function formatPoints(value) {
+        var number = Math.round(Math.abs(Number(value) || 0));
+        return String(number).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
     }
 
-    function attachImageErrorHandlers(container) {
-        container.querySelectorAll('img[data-hide-on-error]').forEach(function (img) {
+    function formatDate(iso) {
+        return window.AE && typeof window.AE.formatDate === 'function' ? window.AE.formatDate(iso) : String(iso || '').slice(0, 10);
+    }
+
+    // The 403 every loyalty read answers when the account is not (or no longer) covered: the server draws that state.
+    function isNotAvailable(response, result) {
+        return response.status === 403 && result && result.data && result.data.code === 'loyalty_not_available';
+    }
+
+    // `request` is the pending apiRequest call; each caller names its route literally.
+    async function readJson(request) {
+        var response = await request;
+        var result = null;
+        try { result = await response.json(); } catch (error) { result = null; }
+        if (isNotAvailable(response, result)) {
+            window.location.reload();
+            return null;
+        }
+        if (!response.ok || !result || !result.success) throw new Error('loyalty request failed: ' + response.status);
+        return result;
+    }
+
+    // ---------------------------------------------------------------- rewards
+
+    function rewardMedia(reward) {
+        var icon = reward.reward_type === 'free_product' ? 'fa-tint' : 'fa-tag';
+        var tile = '<span class="ae-icon-tile ae-acl__reward-icon" aria-hidden="true"><i class="far ' + icon + '"></i></span>';
+        if (!reward.image_url) return tile;
+        // A picture that fails to load gives way to the type's icon (no empty block).
+        return '<img class="ae-acl__reward-img" src="' + escapeHtml(reward.image_url) + '" alt="" loading="lazy" data-reward-img>' + tile;
+    }
+
+    function rewardState(reward) {
+        if (reward.is_system_reward) {
+            return '<span class="ae-acl__reward-state is-ready"><i class="far fa-check-circle" aria-hidden="true"></i>' + escapeHtml(I18N.reward_auto) + '</span>';
+        }
+        if (reward.can_redeem) {
+            return '<span class="ae-acl__reward-state is-ready"><i class="far fa-check-circle" aria-hidden="true"></i>' + escapeHtml(I18N.reward_ready) + '</span>';
+        }
+        return '<span class="ae-acl__reward-state">' +
+            escapeHtml(fill(I18N.reward_missing, { pts: formatPoints(reward.points_needed) })) + '</span>';
+    }
+
+    function renderRewards(rewards) {
+        var grid = document.getElementById('rewardsGrid');
+        if (!grid) return;
+        grid.removeAttribute('aria-busy');
+        if (!rewards || !rewards.length) {
+            grid.innerHTML = '<p class="ae-acl__note">' + escapeHtml(I18N.rewards_empty) + '</p>';
+            return;
+        }
+        var typeLabels = { discount: I18N.type_discount, free_product: I18N.type_free_product };
+        grid.innerHTML = rewards.map(function (reward) {
+            var cost = reward.points_cost || reward.points_required || 0;
+            var type = typeLabels[reward.reward_type];
+            return '<article class="ae-acl__reward' + (reward.can_redeem || reward.is_system_reward ? ' is-ready' : '') + '">' +
+                '<div class="ae-acl__reward-media">' + rewardMedia(reward) + '</div>' +
+                '<div class="ae-acl__reward-body">' +
+                (type ? '<span class="ae-acl__reward-type">' + escapeHtml(type) + '</span>' : '') +
+                '<h3 class="ae-acl__reward-name">' + escapeHtml(reward.name) + '</h3>' +
+                (reward.description ? '<p class="ae-acl__reward-text">' + escapeHtml(reward.description) + '</p>' : '') +
+                '<div class="ae-acl__reward-foot">' +
+                '<span class="ae-badge ae-badge--gold ae-acl__reward-cost">' + formatPoints(cost) + NBSP + escapeHtml(LOYALTY.unit) + '</span>' +
+                rewardState(reward) +
+                '</div></div></article>';
+        }).join('');
+        grid.querySelectorAll('img[data-reward-img]').forEach(function (img) {
             img.addEventListener('error', function () {
-                this.style.display = 'none';
-            });
+                img.remove();
+            }, { once: true });
         });
     }
 
-    async function loadMembershipTiers() {
-        var container = document.getElementById('membershipTiersContainer');
+    async function loadRewards() {
+        var grid = document.getElementById('rewardsGrid');
         try {
-            var response = await apiRequest('/loyalty/tiers');
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                renderMembershipTiers(result.data.tiers, result.data.tier_discount_condition);
-            } else {
-                container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.tiers_failed) + '</p></div>';
-            }
+            var result = await readJson(apiRequest('/loyalty/rewards'));
+            if (result) renderRewards(result.data.rewards);
         } catch (error) {
-            console.error('Failed to load membership tiers:', error);
-            container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.tiers_failed) + '</p></div>';
+            if (!grid) return;
+            grid.removeAttribute('aria-busy');
+            grid.innerHTML = '<p class="ae-acl__note">' + escapeHtml(I18N.rewards_failed) + '</p>';
         }
     }
 
-    // `discountCondition` is a preformatted, already-translated sentence from
-    // GET /loyalty/tiers. The rate is a perk of orders placed in the bot or on
-    // the website; the browser never holds its own copy of that rule.
-    function renderMembershipTiers(tiers, discountCondition) {
-        var container = document.getElementById('membershipTiersContainer');
+    // ---------------------------------------------------------------- history
 
-        if (!tiers || tiers.length === 0) {
-            container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.no_tiers) + '</p></div>';
-            return;
-        }
+    var TXN_ICONS = {
+        order_earn: 'fa-shopping-bag', referral: 'fa-user-friends', welcome: 'fa-hand-sparkles',
+        birthday: 'fa-birthday-cake', streak: 'fa-fire', surprise: 'fa-gift', bonus: 'fa-gift',
+        redeem: 'fa-exchange-alt', refund: 'fa-undo', expired: 'fa-hourglass-end', adjustment: 'fa-sliders-h'
+    };
 
-        var html = tiers.map(function (tier) {
-            var tierClass = tier.name.toLowerCase();
-            var icon = tier.icon || 'fa-medal';
-            var color = tier.color || '#CD7F32';
-            var isCurrentTier = tier.name === currentUserTier;
-
-            var benefitsHtml = (tier.benefits || []).map(function (benefit) {
-                return '<li>' + escapeHtml(benefit) + '</li>';
-            }).join('');
-
-            var multiplierBadge = tier.points_multiplier >= 1
-                ? '<span class="badge" style="background: ' + escapeHtml(color) + '; color: white;">' +
-                  escapeHtml(String(tier.points_multiplier)) + 'x ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</span>'
-                : '';
-
-            var discountBlock = tier.discount_percentage > 0
-                ? '<div class="tier-discount" style="color: ' + escapeHtml(color) + ';">' +
-                  '<i class="far fa-tag"></i> ' + escapeHtml(String(tier.discount_percentage)) + '% ' + escapeHtml(PAGE_DATA.i18n.discount) +
-                  (discountCondition
-                      ? '<small class="d-block text-muted">' + escapeHtml(discountCondition) + '</small>'
-                      : '') +
-                  '</div>'
-                : '';
-
-            return '<div class="col-md-3">' +
-                '<div class="tier-card ' + escapeHtml(tierClass) + ' ' + (isCurrentTier ? 'current-tier' : '') + '" ' +
-                'style="border-left-color: ' + escapeHtml(color) + ';">' +
-                '<div class="tier-header">' +
-                '<i class="far ' + escapeHtml(icon) + '" style="color: ' + escapeHtml(color) + ';"></i>' +
-                '<h6>' + escapeHtml(tier.name) + '</h6>' +
-                '<p>' + escapeHtml(tier.points_range) + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</p>' +
-                multiplierBadge +
-                '</div>' +
-                '<div class="tier-benefits"><ul>' + benefitsHtml + '</ul></div>' +
-                discountBlock +
-                '</div></div>';
-        }).join('');
-
-        container.innerHTML = html;
+    function historyRow(txn) {
+        var category = txn.display_category || 'other';
+        var points = Number(txn.points) || 0;
+        var sign = points > 0 ? '+' : (points < 0 ? '−' : '');
+        var tone = points > 0 ? 'is-plus' : (points < 0 ? 'is-minus' : '');
+        return '<li class="ae-acl__txn">' +
+            '<span class="ae-icon-tile ae-icon-tile--sm ae-acl__txn-icon ' + tone + '" aria-hidden="true"><i class="far ' + (TXN_ICONS[category] || 'fa-circle') + '"></i></span>' +
+            '<div class="ae-acl__txn-body">' +
+            '<p class="ae-acl__txn-title">' + escapeHtml(TXN[category] || TXN.other || '') + '</p>' +
+            '<p class="ae-acl__txn-meta"><time datetime="' + escapeHtml(txn.created_at || '') + '">' + escapeHtml(formatDate(txn.created_at)) + '</time>' +
+            (txn.order_number ? '<span class="ae-acl__txn-order">' + escapeHtml(fill(I18N.txn_order, { number: txn.order_number })) + '</span>' : '') +
+            '</p>' +
+            '</div>' +
+            '<span class="ae-acl__txn-amount ' + tone + '">' + sign + formatPoints(points) +
+            '<span class="visually-hidden"> ' + escapeHtml(LOYALTY.unit) + '</span></span>' +
+            '</li>';
     }
 
-    function updateLoyaltyOverview(loyalty) {
-        currentUserTier = loyalty.current_tier || 'Bronze';
+    function setHistoryState(html) {
+        var state = document.getElementById('historyState');
+        if (!state) return;
+        state.innerHTML = html || '';
+        state.hidden = !html;
+    }
 
-        document.getElementById('currentPoints').textContent = loyalty.current_balance || 0;
-        document.getElementById('pointsThisMonth').textContent = '+' + (loyalty.points_this_month || 0) + ' ' + PAGE_DATA.i18n.this_month;
-        document.getElementById('currentTier').textContent = currentUserTier;
+    function updateMore() {
+        var more = document.getElementById('historyMore');
+        var info = document.getElementById('historyInfo');
+        if (!more) return;
+        more.hidden = !(history.page < history.pages);
+        if (info) info.textContent = more.hidden ? '' : fill(I18N.history_shown, { shown: history.shown, total: history.total });
+    }
 
-        if (loyalty.tier_valid_until) {
-            var date = new Date(loyalty.tier_valid_until);
-            var dateStr = date.toLocaleDateString();
-            document.getElementById('tierGuaranteeText').textContent = PAGE_DATA.i18n.guaranteed_until + ' ' + dateStr;
-        } else {
-            document.getElementById('tierGuaranteeText').textContent = '';
-        }
-
-        if (loyalty.requalification) {
-            var needed = loyalty.requalification.points_needed_to_keep || 0;
-            var reqText = document.getElementById('tierRequalificationText');
-            if (needed > 0) {
-                reqText.textContent = PAGE_DATA.i18n.earn_more_to_keep.replace('{count}', needed);
+    async function loadHistory(append) {
+        if (history.loading) return;
+        var list = document.getElementById('pointsHistoryList');
+        if (!list) return;
+        var page = append ? history.page + 1 : 1;
+        var group = history.group;
+        history.loading = true;
+        var moreButton = document.querySelector('[data-action="history-more"]');
+        if (moreButton && append) moreButton.setAttribute('aria-busy', 'true');
+        try {
+            var query = '?page=' + page + '&per_page=' + PER_PAGE + (group ? '&group=' + encodeURIComponent(group) : '');
+            var result = await readJson(apiRequest('/loyalty/points/history' + query));
+            if (!result || group !== history.group) return;
+            var items = (result.data && result.data.items) || [];
+            var meta = result.meta || {};
+            history.page = Number(meta.page) || page;
+            history.pages = Number(meta.pages) || 0;
+            history.total = Number(meta.total) || 0;
+            history.shown = (append ? history.shown : 0) + items.length;
+            list.removeAttribute('aria-busy');
+            var html = items.map(historyRow).join('');
+            if (append) {
+                list.insertAdjacentHTML('beforeend', html);
             } else {
-                reqText.textContent = PAGE_DATA.i18n.status_secured;
-                reqText.className = 'text-success mt-1';
+                list.innerHTML = html;
             }
+            setHistoryState(history.total ? '' : '<p class="ae-acl__note">' + escapeHtml(group ? I18N.history_empty_filtered : I18N.history_empty) + '</p>');
+            updateMore();
+        } catch (error) {
+            list.removeAttribute('aria-busy');
+            if (!append) list.innerHTML = '';
+            setHistoryState('<p class="ae-acl__note">' + escapeHtml(I18N.history_failed) + '</p>' +
+                '<button type="button" class="ae-btn ae-btn--secondary ae-btn--sm" data-action="history-retry" data-append="' + (append ? '1' : '') + '">' + escapeHtml(I18N.retry) + '</button>');
+        } finally {
+            history.loading = false;
+            if (moreButton) moreButton.removeAttribute('aria-busy');
         }
+    }
 
-        if (loyalty.tier_progress) {
-            var tierProgressPercent = (loyalty.tier_progress.current / loyalty.tier_progress.next_tier_points) * 100;
-            document.getElementById('tierProgress').style.width = Math.min(tierProgressPercent, 100) + '%';
-            document.getElementById('tierProgressText').textContent =
-                (loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points) + ' ' + PAGE_DATA.i18n.coins_to_next_tier;
-        }
-
-        var currentTierLower = (loyalty.current_tier || 'Bronze').toLowerCase();
-        document.querySelectorAll('.tier-card').forEach(function (card) {
-            card.classList.remove('current-tier');
-            if (card.classList.contains(currentTierLower)) {
-                card.classList.add('current-tier');
-            }
+    // A chip names a group of the backend's display categories (loyalty_serializers.HISTORY_GROUPS), so a row is
+    // listed under the chip its label belongs to; the page never classifies a row itself.
+    function selectHistoryGroup(button) {
+        var group = button.getAttribute('data-group') || '';
+        document.querySelectorAll('#historyFilter [data-group]').forEach(function (chip) {
+            chip.setAttribute('aria-pressed', chip === button ? 'true' : 'false');
         });
-
-        var streakWidget = document.getElementById('currentStreak') &&
-            document.getElementById('currentStreak').closest('.loyalty-card');
-        if (Array.isArray(loyalty.streak_progress) && loyalty.streak_progress.length) {
-            if (streakWidget) streakWidget.style.display = '';
-            // Show count of active rules in the header number slot
-            document.getElementById('currentStreak').textContent = loyalty.streak_progress.length;
-            // Render per-rule rows into the streakNextText element
-            var rulesHtml = '<ul class="streak-rules-list list-unstyled text-left mb-0 mt-1">' +
-                loyalty.streak_progress.map(function (r) {
-                    var pct = Math.min((r.current_orders / r.required_orders) * 100, 100);
-                    return '<li class="streak-rule mb-2">' +
-                        '<div class="d-flex justify-content-between align-items-baseline">' +
-                        '<span class="streak-rule__name font-weight-bold small">' + escapeHtml(r.name) + '</span>' +
-                        '<span class="streak-rule__meta text-muted small">' +
-                            escapeHtml(String(r.current_orders)) + '/' + escapeHtml(String(r.required_orders)) +
-                            ' · ' + escapeHtml(String(r.window_days)) + 'd → +' + escapeHtml(String(r.bonus_points)) +
-                        '</span>' +
-                        '</div>' +
-                        '<div class="progress mt-1" style="height:4px;">' +
-                        '<div class="progress-bar bg-danger" role="progressbar" style="width:' + pct + '%"></div>' +
-                        '</div></li>';
-                }).join('') +
-                '</ul>';
-            var streakProgressBar = document.getElementById('streakProgress');
-            if (streakProgressBar) streakProgressBar.closest('.mt-2').style.display = 'none';
-            var streakNextText = document.getElementById('streakNextText');
-            if (streakNextText) {
-                streakNextText.innerHTML = rulesHtml;
-                streakNextText.className = '';
-            }
-        } else {
-            if (streakWidget) streakWidget.style.display = 'none';
-        }
+        if (group === history.group && history.page) return;
+        history.group = group;
+        history.page = 0;
+        history.pages = 0;
+        history.loading = false;
+        loadHistory(false);
     }
 
-    async function loadLoyaltyData() {
+    // --------------------------------------------------------------- referral
+
+    async function showReferralCode(button) {
+        button.setAttribute('aria-busy', 'true');
         try {
-            var response = await apiRequest('/loyalty/account');
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                updateLoyaltyOverview(result.data);
-            } else {
-                console.error('Failed to load loyalty data:', result.message);
-                updateLoyaltyOverview({
-                    current_balance: 0,
-                    current_tier: 'Bronze',
-                    points_this_month: 0,
-                    tier_progress: { current: 0, next_tier_points: 1000 },
-                    available_rewards_count: 0
-                });
-            }
+            var result = await readJson(apiRequest('/loyalty/referral'));
+            if (!result) return;
+            var data = result.data || {};
+            var stats = data.statistics || {};
+            referral.code = data.referral_code || '';
+            referral.link = data.referral_link || '';
+            document.getElementById('referralCodeText').textContent = referral.code;
+            document.getElementById('referralCount').textContent = formatPoints(stats.total_referrals);
+            document.getElementById('referralPoints').textContent = formatPoints(stats.points_earned_from_referrals);
+            document.getElementById('referralCard').hidden = false;
+            button.hidden = true;
+            document.getElementById('referralCodeText').focus();
         } catch (error) {
-            console.error('Failed to load loyalty data:', error);
-        }
-    }
-
-    function getTransactionIcon(type) {
-        switch (type) {
-            case 'earned': return 'plus';
-            case 'bonus': return 'gift';
-            case 'redeemed': return 'minus';
-            case 'expired': return 'clock';
-            default: return 'circle';
-        }
-    }
-
-    function displayPointsHistory(transactions) {
-        var historyList = document.getElementById('pointsHistoryList');
-
-        if (!transactions || transactions.length === 0) {
-            historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.no_history) + '</p></div>';
-            return;
-        }
-
-        var html = transactions.map(function (transaction) {
-            return '<div class="points-history-item">' +
-                '<div class="points-icon ' + escapeHtml(transaction.transaction_type || 'earned') + '">' +
-                '<i class="far fa-' + getTransactionIcon(transaction.transaction_type) + '"></i></div>' +
-                '<div class="points-details">' +
-                '<h6>' + escapeHtml(transaction.description) + '</h6>' +
-                '<small class="text-muted">' + escapeHtml(formatDate(transaction.created_at)) + '</small>' +
-                (transaction.order_number ? '<br><small class="text-primary">' + escapeHtml(PAGE_DATA.i18n.order) + ' #' + escapeHtml(transaction.order_number) + '</small>' : '') +
-                '</div>' +
-                '<div class="points-amount ' + (transaction.points > 0 ? 'positive' : 'negative') + '">' +
-                (transaction.points > 0 ? '+' : '') + transaction.points + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) +
-                '</div></div>';
-        }).join('');
-
-        historyList.innerHTML = html;
-    }
-
-    async function loadPointsHistory() {
-        var filter = (document.getElementById('historyFilter') || {}).value || '';
-        var historyList = document.getElementById('pointsHistoryList');
-
-        try {
-            var response = await apiRequest('/loyalty/history' + (filter ? '?type=' + filter : ''));
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                displayPointsHistory(result.data.items);
-            } else {
-                historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.no_history) + '</p></div>';
-            }
-        } catch (error) {
-            console.error('Failed to load points history:', error);
-            historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.history_failed) + '</p></div>';
-        }
-    }
-
-    function displayRewards(rewards) {
-        var rewardsGrid = document.getElementById('rewardsGrid');
-
-        if (!rewards || rewards.length === 0) {
-            rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.no_rewards) + '</p></div>';
-            return;
-        }
-
-        // Reward-type vocabulary matches the backend whitelist (discount, free_product).
-        // free_delivery and voucher were removed (never applied/redeemable).
-        var typeLabelMap = {
-            'discount': PAGE_DATA.i18n.type_discount,
-            'free_product': PAGE_DATA.i18n.type_free_product
-        };
-
-        var html = rewards.map(function (reward) {
-            var pointsCost = reward.points_cost || reward.points_required || 0;
-            var rewardType = reward.reward_type || 'discount';
-            var isSystemReward = reward.is_system_reward || false;
-            var typeLabel = typeLabelMap[rewardType] || rewardType;
-
-            var imageBlock = reward.image_url
-                ? '<img src="' + escapeHtml(reward.image_url) + '" alt="' + escapeHtml(reward.name) + '" style="width:100%; height:100%; object-fit:cover;" data-hide-on-error="1">'
-                : (isSystemReward
-                    ? '<i class="fas fa-truck" style="font-size: 3rem; color: #52c41a;"></i>'
-                    : '<i class="far fa-gift" style="font-size: 3rem; color: #1890ff;"></i>');
-            var imageStyle = reward.image_url ? '' : 'display: flex; align-items: center; justify-content: center;';
-
-            if (isSystemReward) {
-                return '<div class="reward-card system-reward">' +
-                    '<span class="reward-type-badge ' + escapeHtml(rewardType) + '">' + escapeHtml(typeLabel) + '</span>' +
-                    '<span class="system-reward-badge"><i class="fas fa-check-circle"></i> ' + escapeHtml(PAGE_DATA.i18n.auto_applied) + '</span>' +
-                    '<div class="reward-image" style="' + imageStyle + '">' + imageBlock + '</div>' +
-                    '<div class="reward-content">' +
-                    '<h5>' + escapeHtml(reward.name) + '</h5>' +
-                    '<p>' + escapeHtml(reward.description || '') + '</p>' +
-                    '<div class="system-reward-info">' +
-                    '<i class="fas fa-magic"></i>' +
-                    '<span>' + escapeHtml(PAGE_DATA.i18n.applied_auto_order) + '</span>' +
-                    '</div>' +
-                    '<div class="reward-points-cost" style="border-top: none; padding-top: 0.75rem;">' +
-                    '<span class="points-badge" style="background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);">' +
-                    '<i class="far fa-star"></i> ' + pointsCost.toLocaleString() + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) +
-                    '</span></div></div></div>';
-            }
-
-            return '<div class="reward-card">' +
-                '<span class="reward-type-badge ' + escapeHtml(rewardType) + '">' + escapeHtml(typeLabel) + '</span>' +
-                '<div class="reward-image" style="' + imageStyle + '">' + imageBlock + '</div>' +
-                '<div class="reward-content">' +
-                '<h5>' + escapeHtml(reward.name) + '</h5>' +
-                '<p>' + escapeHtml(reward.description || '') + '</p>' +
-                '<div class="reward-points-cost">' +
-                '<span class="points-badge"><i class="far fa-star"></i> ' +
-                pointsCost.toLocaleString() + ' ' + escapeHtml(PAGE_DATA.i18n.aquacoins) + '</span>' +
-                '</div></div></div>';
-        }).join('');
-
-        rewardsGrid.innerHTML = html;
-        attachImageErrorHandlers(rewardsGrid);
-    }
-
-    async function loadAvailableRewards() {
-        var rewardsGrid = document.getElementById('rewardsGrid');
-
-        try {
-            var response = await apiRequest('/loyalty/rewards');
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                displayRewards(result.data.rewards);
-            } else {
-                rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.no_rewards) + '</p></div>';
-            }
-        } catch (error) {
-            console.error('Failed to load rewards:', error);
-            rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.rewards_failed) + '</p></div>';
-        }
-    }
-
-    async function generateReferralCode() {
-        try {
-            var response = await apiRequest('/loyalty/referral');
-            var result = await response.json();
-
-            if (response.ok && result.success) {
-                currentUserReferralCode = result.data.referral_code;
-                document.getElementById('referralCodeText').textContent = result.data.referral_code;
-                document.getElementById('referralCount').textContent =
-                    (result.data.statistics && result.data.statistics.total_referrals) || 0;
-                document.getElementById('referralPoints').textContent =
-                    (result.data.statistics && result.data.statistics.points_earned_from_referrals) || 0;
-                $('#referralModal').modal('show');
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.referral_failed, 'error');
-            }
-        } catch (error) {
-            console.error('Failed to generate referral code:', error);
-            showNotification(PAGE_DATA.i18n.referral_failed, 'error');
+            showNotification(I18N.referral_failed, 'error');
+        } finally {
+            button.removeAttribute('aria-busy');
         }
     }
 
     function copyReferralCode() {
-        navigator.clipboard.writeText(currentUserReferralCode).then(function () {
-            showNotification(PAGE_DATA.i18n.referral_copied, 'success');
+        if (referral.code) copyText(referral.code);
+    }
+
+    function copyText(text) {
+        if (!navigator.clipboard) {
+            showNotification(I18N.referral_copy_failed, 'error');
+            return;
+        }
+        navigator.clipboard.writeText(text).then(function () {
+            showNotification(I18N.referral_copied, 'success');
         }).catch(function () {
-            showNotification(PAGE_DATA.i18n.referral_copy_failed, 'error');
+            showNotification(I18N.referral_copy_failed, 'error');
         });
     }
 
+    // The link is the backend's (`referral_link`, built from the site's address), never one the page puts together.
+    // Without a share sheet, Share copies the same message with the link, so a friend gets what Share would send.
     function shareReferralCode() {
+        if (!referral.code) return;
+        var text = fill(I18N.share_text, { code: referral.code });
         if (navigator.share) {
             navigator.share({
-                title: PAGE_DATA.i18n.share_title,
-                text: PAGE_DATA.i18n.share_text_prefix + ': ' + currentUserReferralCode,
-                url: window.location.origin + '?ref=' + currentUserReferralCode
-            });
+                title: I18N.share_title,
+                text: text,
+                url: referral.link || undefined
+            }).catch(function () { /* the visitor closed the share sheet */ });
         } else {
-            copyReferralCode();
+            copyText(referral.link ? text + ' ' + referral.link : text);
         }
     }
 
-    document.addEventListener('DOMContentLoaded', async function () {
-        loadMembershipTiers();
-        await loadLoyaltyData();
-        loadAvailableRewards();
-        loadPointsHistory();
+    // ------------------------------------------------------------------ start
 
-        var historyFilter = document.getElementById('historyFilter');
-        if (historyFilter) {
-            historyFilter.addEventListener('change', loadPointsHistory);
+    document.addEventListener('click', function (event) {
+        var chip = event.target.closest('#historyFilter [data-group]');
+        if (chip) {
+            selectHistoryGroup(chip);
+            return;
         }
-
-        document.body.addEventListener('click', function (e) {
-            var target = e.target.closest('[data-action]');
-            if (!target) return;
-
-            switch (target.dataset.action) {
-                case 'generate-referral':
-                    generateReferralCode();
-                    break;
-                case 'copy-referral':
-                    copyReferralCode();
-                    break;
-                case 'share-referral':
-                    shareReferralCode();
-                    break;
-            }
-        });
+        var target = event.target.closest('[data-action]');
+        if (!target) return;
+        switch (target.getAttribute('data-action')) {
+            case 'generate-referral':
+                showReferralCode(target);
+                break;
+            case 'copy-referral':
+                copyReferralCode();
+                break;
+            case 'share-referral':
+                shareReferralCode();
+                break;
+            case 'history-more':
+                loadHistory(true);
+                break;
+            case 'history-retry':
+                loadHistory(target.getAttribute('data-append') === '1');
+                break;
+        }
     });
+
+    function start() {
+        loadRewards();
+        loadHistory(false);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
 })();

@@ -13,6 +13,7 @@ owner of that number would read.
 """
 
 import pytest
+import redis
 from flask_jwt_extended import create_access_token
 
 from business_app.models.user import User
@@ -356,11 +357,15 @@ def test_code_sent_to_the_callers_own_number_cannot_link_another_account(
 
 
 @pytest.mark.integration
-def test_resend_during_a_pending_change_goes_to_the_new_number(client, db, sample_user, bearer, sms_inbox):
+def test_resend_during_a_pending_change_goes_to_the_new_number(app, client, db, sample_user, bearer, sms_inbox):
     original_phone = sample_user.phone
 
     resp = client.post("/api/v1/auth/send-otp", json={"phone": NEW_PHONE}, headers=bearer(sample_user))
     assert resp.status_code == 200, resp.get_json()
+    # A number gets a new code only once the one it holds expires (tests/integration/test_web_auth_verify_resend.py)
+    redis.from_url(app.config["REDIS_URL"]).delete(
+        f"sms_verification:{sample_user.id}", f"sms_verification_phone:{sample_user.id}"
+    )
 
     resp = client.post("/api/v1/auth/resend-sms-verification", headers=bearer(sample_user))
     assert resp.status_code == 200, resp.get_json()

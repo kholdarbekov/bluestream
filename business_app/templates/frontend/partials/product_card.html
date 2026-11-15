@@ -1,0 +1,53 @@
+{#- One product card for the shop grid, the home shop section and related products (design-system v1).
+
+    product_card(product, offer, language, url, image=None, action='add-to-cart-shop', heading_tag='h3')
+    - product: the product (a model or the shop's dict); its id and translated name are read.
+    - offer: the product's public offer facts (offer_by_id[product.id]); every price and size comes from it, live
+      from the Product row. Without an offer the card prints no price.
+    - url: the product page (the slug route when there is a slug).
+    - image: the first product image URL, or None for the placeholder. A broken image falls back to it too.
+    - action: the cart button's data-action (base.js handles add-to-cart-shop; cart.js handles the cart page's own).
+    The size is a chip of its own (.ae-product__size); no category line: every product shares one category, and a
+    typed " - " joined them (site review SITE-29).
+    Keeps the hooks pages and tests read: .shop-block, .lower-content > span (the size), .price with
+    .old-price/.new-price or h6, .sale-tag, data-action + data-product-id. Words: landing.button.add_to_cart,
+    landing.offer.* via offer_smallest_order_sentence (the SSOT sentence). -#}
+{% macro product_card(product, offer, language, url, image=None, action='add-to-cart-shop', heading_tag='h3') -%}
+{#- The name in the page's language: the offer publishes it per language; without an offer, the model's own
+    translation (a plain dict has only its name). -#}
+{%- if offer and offer.name -%}{%- set name = offer.name[language] -%}
+{%- elif product.get_translated is defined -%}{%- set name = product.get_translated('name', language) -%}
+{%- else -%}{%- set name = product.name -%}{%- endif -%}
+{%- set placeholder = url_for('static', filename='images/product-placeholder.svg') -%}
+<article class="ae-product shop-block">
+    <a class="ae-product__media" href="{{ url }}" tabindex="-1" aria-hidden="true">
+        <img src="{{ image or placeholder }}" alt="" width="400" height="300" loading="lazy" decoding="async"
+             data-fallback="{{ placeholder }}">
+        {%- if offer and offer.discount_percent %}
+        <span class="ae-product__tag sale-tag">-{{ offer.discount_percent }}%</span>
+        {%- endif %}
+    </a>
+    <div class="ae-product__body lower-content">
+        {%- if offer %}
+        <span class="ae-product__size">{{ offer.size_text[language] }}</span>
+        {%- endif %}
+        <{{ heading_tag }} class="ae-product__name"><a href="{{ url }}">{{ name }}</a></{{ heading_tag }}>
+        {%- if offer %}
+        <div class="ae-product__price price">
+            {%- if offer.list_price_text %}
+            <span class="new-price">{{ offer.price_text[language] }}</span>
+            <span class="old-price">{{ offer.list_price_text[language] }}</span>
+            {%- else %}
+            <h6 class="new-price">{{ offer.price_text[language] }}</h6>
+            {%- endif %}
+        </div>
+        <p class="ae-product__note">{{ offer_smallest_order_sentence(offer, language) }}</p>
+        {%- endif %}
+        <div class="ae-product__actions">
+            <button type="button" class="ae-btn ae-btn--primary ae-btn--block" data-action="{{ action }}" data-product-id="{{ product.id }}"{% if offer %} data-qty="{{ offer.smallest_order_quantity }}"{% endif %}>
+                <i class="far fa-shopping-cart" aria-hidden="true"></i>{{ 'landing.button.add_to_cart'|t }}
+            </button>
+        </div>
+    </div>
+</article>
+{%- endmacro %}

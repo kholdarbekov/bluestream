@@ -843,7 +843,8 @@ def _shell(w: _World) -> dict:
             "orders": {
                 "html": "".join(
                     str(orders.select_one(f"#{el}"))
-                    for el in ("loadingOrders", "ordersList", "emptyState", "paginationSection")
+                    # The two filter selects first (the jsdom test picks a status and a period), then the list.
+                    for el in ("statusFilter", "dateFilter", "loadingOrders", "ordersList", "emptyState", "paginationSection")
                 ),
                 "island": _island(orders),
             },

@@ -8,13 +8,16 @@ delivery and no express lane.
 What is true for every customer: they can follow their delivery in the Telegram bot (Track) or on the website
 (/my-orders, the order tracking page). The call to action promises no message, because a phone-only website
 customer has no linked bot and no real email, so nothing can be sent to them (SMS is OTP-only). It promises no
-timing either: prod's own second sentence ("designed to fit your schedule" and its uz and ru twins) is gone. Its first
-sentence, the owner's own wording about Tashkent and the region, stays.
+timing either: prod's own second sentence ("designed to fit your schedule" and its uz and ru twins) is gone.
+Since the redesign (owner decision 2, 2026-11-13: no fleet or coverage beyond the delivery-zone SSOT) the home page's
+"How to order" lead is that true sentence alone, from the home seed (`web.home.how.lead`): prod's first sentence
+("Tashkent and the region", "our own fleet") is no longer printed. Where the water goes is the SSOT coverage, printed
+one section lower.
 
-Each test GETs the real page in every site language with the rows the seed ships. The two landing keys were
-DB-only until now, so no deploy could ever replace the live promise; they ship from the seed from here on.
-Rows come from `BACKEND_TRANSLATIONS`, never from a copy kept in this file. The expected sentences below pin the
-approved wording, so an edit to the seed has to be an edit here too.
+Each test GETs the real page in every site language with the rows the seeds ship. The footer key was DB-only until
+then, so no deploy could ever replace the live promise; it ships from the seed from here on. Rows come from
+`BACKEND_TRANSLATIONS` and the home seed's `TRANSLATIONS`, never from a copy kept in this file. The expected sentences
+below pin the approved wording, so an edit to a seed has to be an edit here too.
 """
 
 import re
@@ -22,11 +25,18 @@ import re
 import pytest
 
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig
-from tests.integration.public_page_builders import flat as _flat, page as _page, shipped as _shipped
+from business_app.models.translation import Translation
+from scripts.seed_web_ui_home_translations import CATEGORY as HOME_CATEGORY, TRANSLATIONS as HOME
+from tests.integration.public_page_builders import (  # noqa: F401 -- offer_skus is a fixture
+    flat as _flat,
+    offer_skus,
+    page as _page,
+    shipped as _shipped,
+)
 
 LANGS = ("en", "uz", "ru")
 
-CTA_KEY = "landing.cta.description"
+HOW_LEAD_KEY = "web.home.how.lead"
 FOOTER_KEY = "landing.footer.delivery_hours"
 
 # Any way of promising two hours, in the three site languages: "2 hours", "2-hour", "2 hrs", "two hours", "2 soat",
@@ -43,16 +53,14 @@ MESSAGE_PROMISES = ("message you", "xabar beramiz", "мы напишем вам"
 # ru "в удобное для вас время, без лишних ожиданий". The honest sentence below replaced them on purpose, and these
 # phrases keep them from coming back.
 TIMING_PROMISES = ("fit your schedule", "kafolatlaymiz", "без лишних ожиданий")
-# The call to action's first sentence is prod's live wording, the owner's own: Tashkent and the region, their own
-# fleet. The dev sentence about "delivery partners across Uzbekistan" was less true, so the seed carries prod's.
-CTA_FIRST_SENTENCE = {
-    "en": "We proudly serve Tashkent and the surrounding region with our own dedicated delivery fleet.",
-    "uz": "Biz Toshkent shahri va viloyati bo‘ylab o‘zimizning maxsus transport xizmatimizni taklif etamiz.",
-    "ru": "Мы обслуживаем Ташкент и область, используя собственный профессиональный автопарк.",
-}
-# What the call to action says after it, instead of the promises: every customer can follow the delivery in the bot
-# or on the website.
-CTA_NEW_SENTENCE = {
+# Prod's first sentence claimed an own fleet and the whole region ("Tashkent and the surrounding region with our own
+# dedicated delivery fleet", "Ташкент и область ... собственный ... автопарк", "Toshkent shahri va viloyati bo‘ylab
+# o‘zimizning maxsus transport xizmatimiz"). The delivery-zone SSOT says the city and the neighbouring districts of
+# the region, and owner decision 2 removed fleet and coverage claims beyond it: none of these words may come back.
+FLEET_OR_REGION_CLAIMS = ("автопарк", "fleet", "transport xizmat", "и область", "surrounding region", "viloyati bo‘ylab")
+# What the "How to order" lead says, instead of the promises: every customer can follow the delivery in the bot or
+# on the website.
+HOW_LEAD = {
     "en": "Order in a few taps and follow your delivery in our Telegram bot or on the website.",
     "uz": "Bir necha bosishda buyurtma bering va yetkazib berishni Telegram botimizda yoki saytda kuzatib boring.",
     "ru": "Закажите в несколько касаний и следите за доставкой в нашем Telegram-боте или на сайте.",
@@ -66,17 +74,13 @@ FOOTER_DELIVERY_LINE = {
 # The delivery promises the tier perks used to carry. They are checked on the perk bullets only: the same page says
 # AquaCoins add up "faster" (points, not delivery), which is true and stays.
 DELIVERY_UPSELL_WORDS = ("faster", "express", "tezroq", "ekspress", "tezkor", "быстр", "экспресс", "срочн")
-# The uz perk keeps the seed's typographic apostrophe (U+2018) in "qo‘llab".
-SILVER_PERK = {
-    "en": "Priority support",
-    "uz": "Ustuvor qo‘llab-quvvatlash",
-    "ru": "Приоритетная поддержка",
-}
-PLATINUM_PERK = {
-    "en": "Dedicated manager",
-    "uz": "Shaxsiy menejer",
-    "ru": "Персональный менеджер",
-}
+# Service promises the business does not make (owner, 2026-11-13): priority / VIP support, a dedicated manager, early
+# access. The tier cards used to carry them; no perk bullet may say any of them, in any language.
+SERVICE_PROMISE_WORDS = (
+    "support", "manager", "early access",
+    "qo‘llab", "qo'llab", "menejer", "erta kirish",
+    "поддержк", "менеджер", "ранний доступ",
+)
 
 
 @pytest.fixture
@@ -117,28 +121,41 @@ def loyalty_tiers(db):
     db.session.commit()
 
 
+def _seed_home_copy(db):
+    """The home seed's web.home.* rows, as `scripts/seed_web_ui_home_translations.py` writes them."""
+    for language, rows in HOME.items():
+        for key, value in rows.items():
+            db.session.add(Translation(key=key, language=language, value=value, category=HOME_CATEGORY, is_active=True))
+    db.session.commit()
+
+
 @pytest.mark.integration
 @pytest.mark.api
 @pytest.mark.parametrize("lang", LANGS)
-def test_the_landing_call_to_action_makes_no_time_promise(app, db, lang):
-    shipped = _shipped(CTA_KEY, lang)
-    soup = _page(app, db, "/", lang, ("landing.",))
+def test_the_how_to_order_lead_makes_no_time_fleet_or_region_promise(app, offer_skus, db, lang):
+    _seed_home_copy(db)
+    soup = _page(app, db, "/", lang, ("landing.", "web.display_labels"))
 
     paragraph = soup.select_one("section.cta-section .text p")
     assert paragraph is not None, "the call to action lost its paragraph"
     text = paragraph.get_text(" ", strip=True)
-    assert text == shipped
+    assert text == HOME[lang][HOW_LEAD_KEY] == HOW_LEAD[lang]
     for promise in MESSAGE_PROMISES:
         assert promise not in _flat(text).lower(), f"/?lang={lang} call to action still promises a message: {promise!r}"
     for promise in TIMING_PROMISES:
         assert promise not in _flat(text).lower(), f"/?lang={lang} call to action still promises timing: {promise!r}"
-    assert text == f"{CTA_FIRST_SENTENCE[lang]} {CTA_NEW_SENTENCE[lang]}"
 
-    # The scan covers the whole section but sees only what the seed owns. The section's title and feature rows are
-    # DB-only, so in this test they render as key names and their live text is not checked here.
+    # The whole section (its lead and the three steps, every word from the seeds) promises no two hours.
     section = _flat(soup.select_one("section.cta-section").get_text(" "))
     found = TWO_HOUR_PROMISE.search(section)
     assert found is None, f"/?lang={lang} call to action still promises {found.group(0)!r}"
+
+    # Nowhere on the page's own content (hero to guides; the footer is the shell's) is an own fleet or the whole
+    # region claimed. The coverage the page does print is the SSOT's, in the delivery section.
+    content = _flat(soup.select_one(".ae-home").get_text(" ")).lower()
+    for claim in FLEET_OR_REGION_CLAIMS:
+        assert claim not in content, f"/?lang={lang} still claims {claim!r}"
+    assert "web.home." not in content
 
 
 @pytest.mark.integration
@@ -173,9 +190,11 @@ def test_the_loyalty_guide_promises_no_faster_or_express_delivery(app, db, loyal
             for word in DELIVERY_UPSELL_WORDS:
                 assert word not in bullet.lower(), f"/loyalty-guide?lang={lang} {tier} still sells {word!r}: {bullet!r}"
 
-    # Tier 1 and tier 3 keep the support and the manager, as bullets of their own.
-    assert SILVER_PERK[lang] in perks["Silver"]
-    assert PLATINUM_PERK[lang] in perks["Platinum"]
+    # No tier promises a support level, a manager or early access (the perks the cards used to invent).
+    for tier, bullets in perks.items():
+        for bullet in bullets:
+            for word in SERVICE_PROMISE_WORDS:
+                assert word not in bullet.lower(), f"/loyalty-guide?lang={lang} {tier} still promises {word!r}: {bullet!r}"
 
 
 @pytest.mark.unit
@@ -211,8 +230,7 @@ def test_the_two_hour_detector_catches_every_spelling_and_ignores_other_numbers(
         "2 части",
         "2 частных клиента",
         "Mon - Sat: 9AM - 6PM.",
-        *CTA_FIRST_SENTENCE.values(),
-        *CTA_NEW_SENTENCE.values(),
+        *HOW_LEAD.values(),
     )
     for text in caught:
         assert TWO_HOUR_PROMISE.search(_flat(text)), f"the detector missed {text!r}"

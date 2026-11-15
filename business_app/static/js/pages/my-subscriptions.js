@@ -61,7 +61,7 @@
         orders: 'section.orders'
     };
     // After a card action focus stays in the card: its first action, else the subscription's name.
-    var HERO_FOCUS = ['#subscription .subs-hero__actions .subs-btn', '#sub-h'];
+    var HERO_FOCUS = ['#subscription .subs-hero__actions .ae-btn', '#sub-h'];
 
     var state = {
         subs: [],
@@ -85,21 +85,11 @@
 
     // ------------------------------------------------------------------ words and markup
 
-    function esc(value) {
-        if (value === null || value === undefined) return '';
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
+    // base.js's one copy (window.AE, loaded before every page script).
+    var esc = window.AE.escapeHtml;
 
-    function fill(template, values) {
-        return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
-            return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : whole;
-        });
-    }
+    // `{name}` placeholders, filled by base.js (AE.fill, the one fill every page script shares).
+    var fill = window.AE.fill;
 
     // Plain text of an island string, its {placeholders} filled with plain text.
     function text(key, values) {
@@ -119,11 +109,12 @@
         return '<i class="far ' + name + '" aria-hidden="true"></i>';
     }
 
-    // A published `{code, label, tone}` chip (or an island chip), never coloured without its icon and text.
+    // A published `{code, label, tone}` chip (or an island chip), never coloured without its icon and text: the
+    // site's status pill (ae-ui.css .ae-status, whose tones take the backend's names), its dot replaced by the icon.
     function chip(published) {
         if (!published || !published.label) return '';
         var glyph = CHIP_ICONS[published.code] || TONE_ICONS[published.tone] || TONE_ICONS.neutral;
-        return '<span class="subs-chip subs-chip--' + esc(published.tone || 'neutral') + '">' +
+        return '<span class="ae-status ae-status--icon ae-status--' + esc(published.tone || 'neutral') + '">' +
             icon(glyph) + esc(published.label) + '</span>';
     }
 
@@ -150,9 +141,10 @@
         return '';
     }
 
+    // The site's buttons (ae-ui.css .ae-btn): primary, secondary, and the solid danger one for a final step.
     function actionButton(variant, action, label, extra) {
-        return '<button type="button" class="subs-btn subs-btn--' + variant + '" data-action="' + action + '"' +
-            (extra || '') + '>' + esc(label) + '</button>';
+        return '<button type="button" class="ae-btn ae-btn--' + (variant === 'danger' ? 'danger-solid' : variant) +
+            '" data-action="' + action + '"' + (extra || '') + '>' + esc(label) + '</button>';
     }
 
     // "Thursday, 29 October, 10:00–12:00" from a published delivery or order reference.
@@ -492,7 +484,7 @@
             parts.push(reasonChips(reasons, open.reason));
             if (open.reason === 'other') {
                 parts.push('<label class="subs-label" for="subs-skip-other">' + esc(text('skip.reason_text')) + '</label>' +
-                    '<input type="text" class="form-control subs-input" id="subs-skip-other" data-focus="skip-other" maxlength="500" ' +
+                    '<input type="text" class="ae-input subs-input" id="subs-skip-other" data-focus="skip-other" maxlength="500" ' +
                     'value="' + esc(open.other) + '">');
             }
         }
@@ -633,11 +625,23 @@
             '</dl>';
     }
 
+    // Free delivery is named only while the public offer says it is free (the island's `delivery_free`, the offer
+    // facts every public page reads); AquaCoins only for a customer the loyalty program serves (`loyalty_eligible`:
+    // LoyaltyService.is_user_loyalty_eligible, the rule the dashboard's AquaCoins tile and /my-loyalty follow).
+    // Neither: no line.
+    function benefit() {
+        if (!PAGE.delivery_free) return PAGE.loyalty_eligible ? esc(PAGE.benefit_coins || '') : '';
+        var free = '<b>' + esc(text('items.benefit_free')) + '</b>';
+        if (PAGE.loyalty_eligible) return html('items.benefit', { free: free });
+        return fill(esc(PAGE.benefit_delivery || '{free}'), { free: free });
+    }
+
     function itemsValue(sub) {
         var rows = (sub.subscription_items || []).map(function (item) { return itemRow(sub, item); }).join('');
+        var line = benefit();
         return '<ul class="subs-items">' + rows + '</ul>' +
             totals(sub.estimated_per_delivery_label, sub.estimated_per_month_label) +
-            '<p class="subs-benefit">' + html('items.benefit', { free: '<b>' + esc(text('items.benefit_free')) + '</b>' }) + '</p>';
+            (line ? '<p class="subs-benefit">' + line + '</p>' : '');
     }
 
     function paymentValue(sub) {
@@ -653,7 +657,7 @@
     function ordersValue() {
         return '<ul class="subs-orders" id="subs-orders" tabindex="-1" aria-busy="true"></ul>' +
             '<p class="subs-orders__empty" id="subs-orders-empty" hidden></p>' +
-            '<button type="button" class="subs-btn subs-btn--secondary subs-orders__more" id="subs-orders-more" data-action="more-orders" hidden>' +
+            '<button type="button" class="ae-btn ae-btn--secondary subs-orders__more" id="subs-orders-more" data-action="more-orders" hidden>' +
             esc(text('orders.more')) + '</button>';
     }
 
@@ -686,11 +690,21 @@
             footer(sub);
     }
 
+    // The page's three perks (island `empty_perks`), each with its glyph: placed for you, skip or pause, change.
+    var EMPTY_PERK_ICONS = ['fa-calendar-check', 'fa-pause', 'fa-edit'];
+
     function emptyState() {
-        return '<div class="subs-empty">' + bottle('planned') +
-            '<h2 id="sub-h" tabindex="-1">' + esc(text('empty.title')) + '</h2>' +
-            '<p>' + esc(text('empty.body')) + '</p>' +
-            '<a class="subs-btn subs-btn--primary" href="' + esc(PAGE.builder_url) + '">' + esc(text('empty.cta')) + '</a></div>';
+        var perks = (PAGE.empty_perks || []).filter(Boolean).map(function (perk, index) {
+            return '<li>' + icon(EMPTY_PERK_ICONS[index] || 'fa-check') + '<span>' + esc(perk) + '</span></li>';
+        }).join('');
+        // The site's empty state (ae-ui.css .ae-empty): icon tile, title, one line, the perks, one action.
+        return '<div class="ae-empty subs-empty">' +
+            '<span class="ae-empty__icon subs-empty__art" aria-hidden="true">' + bottle('placed') + '</span>' +
+            '<h2 class="ae-empty__title" id="sub-h" tabindex="-1">' + esc(text('empty.title')) + '</h2>' +
+            '<p class="ae-empty__text">' + esc(text('empty.body')) + '</p>' +
+            (perks ? '<ul class="subs-empty__perks">' + perks + '</ul>' : '') +
+            '<div class="ae-empty__actions"><a class="ae-btn ae-btn--primary" href="' + esc(PAGE.builder_url) + '">' +
+            esc(text('empty.cta')) + '</a></div></div>';
     }
 
     // ------------------------------------------------------------------ the sections (edit mode)
@@ -702,7 +716,7 @@
             '<div class="subs-savebar-slot" id="subs-savebar-slot">' + savebar() + '</div></div>';
     }
 
-    // The segmented stepper (product-detail.css idiom): 44px buttons, a text box with a numeric keypad.
+    // The segmented stepper (the ae-qty stepper idiom): 44px buttons, a text box with a numeric keypad.
     function stepper(row, minimum, prefix, name) {
         var atMinimum = row.quantity <= minimum;
         return '<div class="subs-stepper">' +
@@ -813,7 +827,7 @@
             }
             return '<fieldset class="subs-fieldset"><legend>' + esc(text('schedule.which_day')) + '</legend>' +
                 '<label class="subs-label" for="subs-dom">' + esc(text('schedule.day_of_month')) + '</label>' +
-                '<select class="form-control ignore subs-select" id="subs-dom" data-focus="dom" aria-describedby="subs-dom-note">' +
+                '<select class="ae-input subs-select" id="subs-dom" data-focus="dom" aria-describedby="subs-dom-note">' +
                 options.join('') + '</select>' +
                 '<p class="subs-hint" id="subs-dom-note">' + esc(text('schedule.short_months')) + '</p></fieldset>';
         }
@@ -932,8 +946,8 @@
             (edit.guard ? '<p class="subs-savebar__guard" role="alert">' + esc(text('edit.dirty_guard')) + '</p>' : '') +
             (message ? '<p class="subs-error-line" role="alert">' + esc(message) + '</p>' : '') + '</div>' +
             '<div class="subs-savebar__buttons">' +
-            '<button type="button" class="subs-btn subs-btn--secondary" data-action="discard" data-focus="discard">' + esc(text('edit.discard')) + '</button>' +
-            '<button type="button" class="subs-btn subs-btn--primary" data-action="save" data-focus="save"' +
+            '<button type="button" class="ae-btn ae-btn--secondary" data-action="discard" data-focus="discard">' + esc(text('edit.discard')) + '</button>' +
+            '<button type="button" class="ae-btn ae-btn--primary" data-action="save" data-focus="save"' +
             (canSave() ? '' : ' aria-disabled="true"') + '>' +
             (edit.saving ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>' + esc(text('busy.saving')) : esc(text('edit.save'))) +
             '</button></div></div>';
@@ -1377,7 +1391,7 @@
             (product.unit_price_label ? '<small class="subs-pick__price">' + esc(product.unit_price_label) + '</small>' : '') +
             '</div>' +
             '<div class="subs-item__controls">' + stepper({ product_id: product.id, quantity: quantity }, minimumOf(product), 'pick-', product.product_name) +
-            '<button type="button" class="subs-btn subs-btn--secondary subs-pick__add" data-action="picker-add" ' +
+            '<button type="button" class="ae-btn ae-btn--secondary subs-pick__add" data-action="picker-add" ' +
             'data-product-id="' + product.id + '" data-focus="pick-add-' + product.id + '">' +
             esc(text('picker.add', { quantity: String(quantity), name: product.product_name })) + '</button></div></li>';
     }
@@ -1472,12 +1486,12 @@
                     '<div class="subs-confirm__row">' + alternatives.join('') + '</div></div>'
                 : '') +
             '<label class="subs-label" for="subs-cancel-reason">' + esc(text('cancel.reason')) + '</label>' +
-            '<textarea class="form-control subs-input" id="subs-cancel-reason" rows="2" maxlength="500"></textarea>' +
+            '<textarea class="ae-input subs-input" id="subs-cancel-reason" rows="2" maxlength="500"></textarea>' +
             '<p class="subs-error-line" id="subs-cancel-error" role="alert" hidden></p>' +
             '</div>' +
             '<div class="modal-footer subs-modal__footer">' +
-            '<button type="button" class="subs-btn subs-btn--secondary" data-action="cancel-keep" data-dismiss="modal">' + esc(plan.keep_label) + '</button>' +
-            '<button type="button" class="subs-btn subs-btn--danger" data-action="cancel-confirm">' + esc(plan.confirm_label) + '</button>' +
+            '<button type="button" class="ae-btn ae-btn--secondary" data-action="cancel-keep" data-dismiss="modal">' + esc(plan.keep_label) + '</button>' +
+            '<button type="button" class="ae-btn ae-btn--danger-solid" data-action="cancel-confirm">' + esc(plan.confirm_label) + '</button>' +
             '</div>';
     }
 
@@ -1729,7 +1743,7 @@
             ? '<button type="button" class="subs-orow__open" data-action="open-order" data-order-id="' + id + '">' + content + '</button>'
             : '<div class="subs-orow__open">' + content + '</div>';
         var payButton = actions && actions.pay.allowed
-            ? '<button type="button" class="subs-btn subs-btn--secondary subs-orow__pay" data-action="pay" data-order-id="' + id + '"' +
+            ? '<button type="button" class="ae-btn ae-btn--secondary subs-orow__pay" data-action="pay" data-order-id="' + id + '"' +
                 ' data-amount="' + esc(actions.pay.expected_amount) + '">' +
                 '<span aria-hidden="true">' + esc(text('orders.pay')) + '</span>' +
                 '<span class="sr-only">' + esc(text('orders.pay_label', { number: row.order_number || '' })) + '</span></button>'
@@ -1737,7 +1751,7 @@
         var remove = '';
         if (actions && actions.cancel.allowed) {
             var open = rowConfirmOpen(row.order_id);
-            remove = '<button type="button" class="subs-btn subs-btn--secondary subs-orow__act" data-action="order-remove" ' +
+            remove = '<button type="button" class="ae-btn ae-btn--secondary subs-orow__act" data-action="order-remove" ' +
                 'data-order-id="' + id + '" aria-controls="subs-orow-confirm-' + id + '" aria-expanded="' + (open ? 'true' : 'false') + '" ' +
                 'aria-describedby="subs-orow-' + id + '-when">' + esc(actions.cancel.label) + '</button>' +
                 '<div class="subs-orow__confirm" id="subs-orow-confirm-' + id + '" data-order-id="' + id + '" tabindex="-1"' +
@@ -1962,7 +1976,7 @@
     function showLoadError() {
         var $body = $('#subscription');
         $body.attr('aria-busy', 'false').html('<div class="subs-error" role="alert"><p>' + esc(text('load_failed')) + '</p>' +
-            '<button type="button" class="subs-btn subs-btn--secondary" data-action="retry-load">' + esc(text('retry')) + '</button></div>');
+            '<button type="button" class="ae-btn ae-btn--secondary" data-action="retry-load">' + esc(text('retry')) + '</button></div>');
     }
 
     async function load() {

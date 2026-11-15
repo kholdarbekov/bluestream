@@ -1,30 +1,25 @@
 {% extends "frontend/base.html" %}
-{% if current_category %}
-    {% if current_language == 'ru' %}
-        {% set meta_description = "Последние статьи по теме " ~ current_category|replace('_', ' ') ~ " и полезные материалы о воде от " ~ company_name ~ "." %}
-    {% elif current_language == 'en' %}
-        {% set meta_description = "Latest " ~ current_category|replace('_', ' ') ~ " articles and water insights from " ~ company_name ~ "." %}
-    {% else %}
-        {% set meta_description = company_name ~ " blogida " ~ current_category|replace('_', ' ') ~ " mavzusi boyicha songgi maqolalar va foydali suv maslahatlari." %}
-    {% endif %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import post_card, centre_current_chip with context %}
+{% from 'frontend/macros/ui.html' import empty_state %}
+
+{% set blog_title = 'web.content.blog.title'|t %}
+{% if current_category_label %}
+    {% set meta_description = 'web.content.blog.meta_category'|t(category=current_category_label, company=company_name) %}
 {% else %}
-    {% if current_language == 'ru' %}
-        {% set meta_description = "Польза воды, советы по здоровью и обновления компании от " ~ company_name ~ "." %}
-    {% elif current_language == 'en' %}
-        {% set meta_description = "Water benefits, health tips, and company updates from " ~ company_name ~ "." %}
-    {% else %}
-        {% set meta_description = "Suv foydasi, sogliq boyicha maslahatlar va " ~ company_name ~ " yangiliklari." %}
-    {% endif %}
+    {% set meta_description = 'web.content.blog.meta'|t(company=company_name) %}
 {% endif %}
+{#- An empty listing (a category with no published post yet) and a tag listing (old tag links; tags are English slugs
+    with no translation, so the page shows no tag name) stay out of the index. -#}
+{% if not posts or current_tag %}{% set meta_robots = 'noindex,follow' %}{% endif %}
+{% set page_suffix = (' — ' ~ ('web.content.blog.page_n'|t(n=pagination.page))) if pagination.page > 1 else '' %}
 
 {% block title %}
-{% if current_category %}
-{{ current_category|replace('_', ' ')|title }} - {{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
-{% elif current_tag %}
-{{ current_tag }} - {{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
-{% else %}
-{{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
-{% endif %}
+{%- if current_category_label -%}
+{{ current_category_label }} — {{ 'web.shell.nav.blog'|t }}{{ page_suffix }} — {{ company_name }}
+{%- else -%}
+{{ blog_title }}{{ page_suffix }} — {{ company_name }}
+{%- endif -%}
 {% endblock %}
 
 {% block extra_meta %}
@@ -46,7 +41,7 @@
 {% set blog_item_list_schema = {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    "name": "Blog Posts",
+    "name": blog_title,
     "url": canonical_url if canonical_url is defined else request.url,
     "numberOfItems": posts|length,
     "itemListOrder": "https://schema.org/ItemListOrderDescending",
@@ -55,174 +50,72 @@
 <script type="application/ld+json">{{ blog_item_list_schema | tojson }}</script>
 {% endblock %}
 
-{% block content %}
-    <!-- page-title -->
-    <section class="page-title">
-        <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-        <div class="auto-container">
-            <div class="content-box">
-                <h1>{{ 'Water Benefits & Health Tips'|t }}</h1>
-                <ul class="bread-crumb clearfix">
-                    <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                    <li>{{ 'Blog'|t }}</li>
-                </ul>
-            </div>
-        </div>
-    </section>
-    <!-- page-title end -->
-
-    <!-- blog-list-section -->
-    <section class="blog-list-section">
-        <div class="auto-container">
-            <div class="row clearfix">
-                <div class="col-lg-8 col-md-12 col-sm-12 content-side">
-                    <div class="blog-content">
-                        {% if posts and posts|length > 0 %}
-                            <div class="row clearfix">
-                                {% for post in posts %}
-                                <div class="col-lg-6 col-md-6 col-sm-12 news-block">
-                                    <div class="news-block-one">
-                                        <div class="inner-box">
-                                            <figure class="image-box">
-                                                <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
-                                                    {% if post.featured_image %}
-                                                        <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
-                                                    {% else %}
-                                                        <img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
-                                                    {% endif %}
-                                                </a>
-                                            </figure>
-                                            <div class="lower-content">
-                                                <div class="category">
-                                                    <a href="{{ url_for('frontend.blog_list', category=post.category.value) }}">
-                                                        {{ post.get_category_display(current_language) }}
-                                                    </a>
-                                                </div>
-                                                <h4>
-                                                    <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
-                                                        {{ post.get_translated('title', current_language) }}
-                                                    </a>
-                                                </h4>
-                                                <ul class="post-info clearfix">
-                                                    <li><a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">{{ post.author_name or 'Admin' }}</a></li>
-                                                    <li>{{ post.published_at.strftime('%B %d, %Y') if post.published_at else '' }}</li>
-                                                </ul>
-                                                <div class="text">
-                                                    <p>{{ (post.get_translated('excerpt', current_language)[:120] + '...') if post.get_translated('excerpt', current_language)|length > 120 else post.get_translated('excerpt', current_language) }}</p>
-                                                </div>
-                                                <div class="btn-box">
-                                                    <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}" class="theme-btn btn-two">
-                                                        {{ 'landing.button.read_more'|t }}
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </div>
-
-                            <!-- Pagination -->
-                            {% if pagination.pages > 1 %}
-                            <div class="pagination-wrapper centred">
-                                <ul class="pagination clearfix">
-                                    {% if pagination.has_prev %}
-                                    <li><a href="{{ url_for('frontend.blog_list', page=pagination.prev_num, category=current_category, tag=current_tag) }}"><i class="far fa-angle-left"></i></a></li>
-                                    {% endif %}
-
-                                    {% for page_num in pagination.iter_pages() %}
-                                        {% if page_num %}
-                                            {% if page_num != pagination.page %}
-                                            <li><a href="{{ url_for('frontend.blog_list', page=page_num, category=current_category, tag=current_tag) }}">{{ page_num }}</a></li>
-                                            {% else %}
-                                            <li><a href="#" class="current">{{ page_num }}</a></li>
-                                            {% endif %}
-                                        {% else %}
-                                        <li><span>...</span></li>
-                                        {% endif %}
-                                    {% endfor %}
-
-                                    {% if pagination.has_next %}
-                                    <li><a href="{{ url_for('frontend.blog_list', page=pagination.next_num, category=current_category, tag=current_tag) }}"><i class="far fa-angle-right"></i></a></li>
-                                    {% endif %}
-                                </ul>
-                            </div>
-                            {% endif %}
-                        {% else %}
-                            <div class="empty-state" style="text-align: center; padding: 80px 20px;">
-                                <i class="far fa-newspaper" style="font-size: 80px; color: #ddd; margin-bottom: 20px;"></i>
-                                <h3>{{ 'No posts found'|t }}</h3>
-                                <p>{{ 'Check back soon for new content'|t }}</p>
-                                <a href="{{ url_for('frontend.index') }}" class="theme-btn btn-one" style="margin-top: 20px;">{{ 'Back to Home'|t }}</a>
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <div class="col-lg-4 col-md-12 col-sm-12 sidebar-side">
-                    <div class="blog-sidebar">
-                        <!-- Categories Widget -->
-                        <div class="sidebar-widget category-widget">
-                            <div class="widget-title">
-                                <h4>{{ 'Categories'|t }}</h4>
-                            </div>
-                            <div class="widget-content">
-                                <ul class="category-list clearfix">
-                                    <li class="{% if not current_category %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'health_tips' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'water_benefits' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'company_news' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'quality_assurance' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'lifestyle' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='lifestyle') }}">{{ 'Lifestyle'|t }}</a>
-                                    </li>
-                                    <li class="{% if current_category == 'environment' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='environment') }}">{{ 'Environment'|t }}</a>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-    <!-- blog-list-section end -->
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
 {% endblock %}
 
-{% block extra_css %}
-<style>
-.blog-sidebar .sidebar-widget {
-    background: #fff;
-    padding: 25px;
-    margin-bottom: 30px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-    border: 1px solid #f0f0f0;
-}
+{% block content %}
+{{ page_hero(blog_title, [('web.shell.nav.blog'|t, None)], 'web.content.blog.lead'|t) }}
 
-.blog-sidebar .widget-title h4 {
-    font-size: 18px;
-    font-weight: 700;
-    color: #222;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #00d1f9;
-}
+<section class="ae-section ct ct--blog">
+    <div class="ae-container">
+        {#- Filter: every category that has a published post, with its count; a tag filter (old tag links) shows as one
+            removable chip. Links keep the visitor's language. -#}
+        {%- if blog_categories|length > 1 or current_tag %}
+        <nav class="ct-filter" aria-label="{{ 'web.content.blog.filter_label'|t }}">
+            <ul class="ae-chips ae-chips--scroll">
+                <li><a class="ae-chip" href="{{ external_url_for_lang('frontend.blog_list') }}"{% if not current_category and not current_tag %} aria-current="page"{% endif %}>{{ 'web.content.blog.all'|t }}</a></li>
+                {%- for cat in blog_categories %}
+                <li><a class="ae-chip" href="{{ external_url_for_lang('frontend.blog_list', category=cat.value) }}"{% if cat.value == current_category %} aria-current="page"{% endif %}>{{ cat.label }} <span class="ae-chip__count">{{ cat.count }}</span></a></li>
+                {%- endfor %}
+                {%- if current_tag %}
+                <li><a class="ae-chip ct-filter__tag" href="{{ external_url_for_lang('frontend.blog_list', category=current_category) }}" aria-current="page" aria-label="{{ 'web.content.blog.tag_filter'|t }}. {{ 'web.content.blog.clear_tag'|t }}">{{ 'web.content.blog.tag_filter'|t }} <i class="fas fa-times" aria-hidden="true"></i></a></li>
+                {%- endif %}
+            </ul>
+        </nav>
+        {{ centre_current_chip() }}
+        {%- endif %}
 
-.blog-sidebar .category-list li.active a {
-    color: #00d1f9;
-    font-weight: 600;
-}
-</style>
+        {%- if posts %}
+        {#- The newest post leads the first unfiltered page. -#}
+        {%- set lead_post = posts[0] if (pagination.page == 1 and not current_category and not current_tag and posts|length > 2) else None %}
+        {%- if lead_post %}
+        <div class="ct-lead">{{ post_card(lead_post, featured=True) }}</div>
+        {%- endif %}
+        <div class="ct-posts">
+            {%- for post in posts if post is not sameas lead_post %}
+            {{ post_card(post) }}
+            {%- endfor %}
+        </div>
+
+        {%- if pagination.pages > 1 %}
+        <nav aria-label="{{ 'web.content.blog.pagination'|t }}">
+            <ul class="ae-pagination">
+                {%- if pagination.has_prev %}
+                <li><a href="{{ external_url_for_lang('frontend.blog_list', page=pagination.prev_num, category=current_category, tag=current_tag) }}" rel="prev" aria-label="{{ 'web.content.blog.prev'|t }}"><i class="fas fa-chevron-left" aria-hidden="true"></i></a></li>
+                {%- endif %}
+                {%- for page_num in pagination.iter_pages() %}
+                {%- if page_num %}
+                {%- if page_num != pagination.page %}
+                <li><a href="{{ external_url_for_lang('frontend.blog_list', page=page_num, category=current_category, tag=current_tag) }}">{{ page_num }}</a></li>
+                {%- else %}
+                <li><span aria-current="page">{{ page_num }}</span></li>
+                {%- endif %}
+                {%- else %}
+                <li><span aria-hidden="true">…</span></li>
+                {%- endif %}
+                {%- endfor %}
+                {%- if pagination.has_next %}
+                <li><a href="{{ external_url_for_lang('frontend.blog_list', page=pagination.next_num, category=current_category, tag=current_tag) }}" rel="next" aria-label="{{ 'web.content.blog.next'|t }}"><i class="fas fa-chevron-right" aria-hidden="true"></i></a></li>
+                {%- endif %}
+            </ul>
+        </nav>
+        {%- endif %}
+        {%- else %}
+        {{ empty_state('far fa-newspaper', 'web.content.blog.empty_title'|t, 'web.content.blog.empty_text'|t,
+                       action={'label': 'web.content.blog.all'|t, 'url': external_url_for_lang('frontend.blog_list')},
+                       heading_tag='h2') }}
+        {%- endif %}
+    </div>
+</section>
 {% endblock %}

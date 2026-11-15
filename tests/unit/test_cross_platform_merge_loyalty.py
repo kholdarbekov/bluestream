@@ -319,7 +319,7 @@ def test_auto_link_accounts_does_not_duplicate_welcome_bonus(db, program, web_us
 
 
 def test_merge_keeps_gift_tagged_with_welcome_action_type(db, program, web_user, telegram_user):
-    """gift_points and /earn-points reuse the WELCOME_BONUS action_type; those
+    """gift_points reuses the WELCOME_BONUS action_type; those
     credits are not a welcome bonus and must survive the merge."""
     _account(db, web_user, program, total_earned=300, cached_balance=300)
     _welcome_lot(db, web_user.id)

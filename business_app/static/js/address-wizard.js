@@ -1,1064 +1,624 @@
 /**
- * Address Wizard - Enhanced address creation with map-based location selection
- * Uses Leaflet + OpenStreetMap for free map functionality
- * Loads geographic configuration from backend API (single source of truth)
+ * Address wizard (markup: templates/frontend/partials/address_wizard.html, which documents the host contract).
+ *
+ *   AddressWizard.open({address, onSaved, makeDefault})
+ *       Without `address`: a new address. With `address` (a row of GET /auth/addresses): edit it.
+ *       onSaved(address, {created}) runs after a successful save with the row the API returned.
+ *       makeDefault pre-ticks "Make this my main address" for a new address (e.g. the customer has none yet).
+ *   document 'ae:address-saved'   CustomEvent, detail {address, created}, fired after every save.
+ *   AddressWizard.ready           Promise of the geo config {center, polygon, districts} (GET /addresses/geo-config).
+ *   AddressWizard.districtName(k) the localized name of a district key, '' when unknown.
+ *
+ * Rules kept here:
+ * - The delivery zone is the backend's polygon (geo-config); a point outside it is refused on the map, and the
+ *   backend re-checks on save (ensure_within_delivery_zone).
+ * - Restoring a saved pin never geocodes: only a point the customer moves (map tap, drag, search, my location)
+ *   asks the geocoder, and its text replaces the address field only while the field is empty or still holds the
+ *   geocoder's previous text. Otherwise the wizard offers it as a suggestion.
+ * - The district comes from the reverse-geocode answer's canonical `district_key`, never from matching names here.
  */
+(function (window, document, $) {
+    'use strict';
 
-// Wizard state
-const AddressWizard = {
-    map: null,
-    marker: null,
-    boundaryLayer: null,
-    currentStep: 1,
-    totalSteps: 3,
-    editingAddressId: null,
-    selectedLocation: null,
+    var DATA = (typeof window.getPageData === 'function' ? window.getPageData('address-wizard-data') : {}) || {};
+    var T = DATA.i18n || {};
+    var FALLBACK_GEO = { center: { latitude: 41.2995, longitude: 69.2401 }, polygon: [], districts: [] };
+    var TOTAL_STEPS = 3;
 
-    // Geographic config (loaded from API — single source of truth)
-    geoConfig: {
-        center: { latitude: 41.2995, longitude: 69.2401 },  // Default fallback center (map hint only)
-        polygon: [],  // Delivery coverage polygon, [lat, lng] pairs (SSOT, loaded from /addresses/geo-config)
-        districts: []
-    },
-    configLoaded: false,
+    var state = {
+        step: 1,
+        map: null,
+        marker: null,
+        location: null,         // {lat, lng} of the pin
+        editingId: null,
+        wasDefault: false,
+        autoAddress: '',        // the geocoder text the wizard last put into #fullAddress
+        autoDistrict: '',       // the district key the wizard last selected on its own
+        suggestion: '',
+        onSaved: null,
+        geocodeSeq: 0,
+        geo: FALLBACK_GEO
+    };
 
-    // Initialize the wizard
-    init: function () {
-        this.bindEvents();
-        this.loadGeoConfig();
-    },
+    function el(id) { return document.getElementById(id); }
+    function val(id) { var node = el(id); return node && node.value ? node.value.trim() : ''; }
+    function setVal(id, value) { var node = el(id); if (node) node.value = value === null || value === undefined ? '' : value; }
 
-    // Bind event handlers
-    bindEvents: function () {
-        // Step navigation
-        document.getElementById('wizardNextBtn')?.addEventListener('click', () => this.nextStep());
-        document.getElementById('wizardPrevBtn')?.addEventListener('click', () => this.prevStep());
-        document.getElementById('wizardSaveBtn')?.addEventListener('click', () => this.saveAddress());
+    function notify(message, type) {
+        if (typeof window.showNotification === 'function') window.showNotification(message, type || 'error');
+    }
 
-        // Map controls
-        document.getElementById('useMyLocationBtn')?.addEventListener('click', () => this.useMyLocation());
-        document.getElementById('searchAddressBtn')?.addEventListener('click', () => this.searchAddress());
-
-        // Address search on enter
-        document.getElementById('addressSearchInput')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.searchAddress();
-            }
+    function format(template, params) {
+        return String(template || '').replace(/\{(\w+)\}/g, function (match, name) {
+            return Object.prototype.hasOwnProperty.call(params, name) ? params[name] : match;
         });
+    }
 
-        // Quick title buttons
-        document.querySelectorAll('.quick-title-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const title = e.target.dataset.title || e.currentTarget.dataset.title;
-                document.getElementById('addressTitle').value = title;
-                document.querySelectorAll('.quick-title-btn').forEach(b => b.classList.remove('active'));
-                e.currentTarget.classList.add('active');
-            });
-        });
+    async function readJson(response) {
+        try { return await response.json(); } catch (error) { return {}; }
+    }
 
-        // Modal events - critical for proper Leaflet map rendering
-        const modal = document.getElementById('addressWizardModal');
-        if (modal) {
-            $(modal).on('shown.bs.modal', () => {
-                // Initialize map ONLY after modal is fully visible
-                // This ensures container has proper dimensions (Leaflet needs non-zero dimensions)
-                if (!this.map) {
-                    this.initMap();
-                }
+    // ---- geo config (zone polygon + districts) -------------------------------------------------------------
+    function districtName(key) {
+        if (!key) return '';
+        var found = (state.geo.districts || []).find(function (d) { return d.key === key; });
+        return found ? found.name : '';
+    }
 
-                // Set marker if we have a pending location (from edit mode)
-                if (this.pendingMarkerLocation && this.map) {
-                    this.setMarkerPosition(this.pendingMarkerLocation.lat, this.pendingMarkerLocation.lng);
-                    this.pendingMarkerLocation = null;
-                }
-
-                // Force invalidateSize after a small delay to ensure proper tile rendering
-                setTimeout(() => {
-                    if (this.map) {
-                        this.map.invalidateSize();
-                    }
-                }, 100);
-            });
-
-            $(modal).on('hidden.bs.modal', () => {
-                // Clean up MutationObserver
-                if (this.tileObserver) {
-                    this.tileObserver.disconnect();
-                    this.tileObserver = null;
-                }
-                // Clean up map when modal closes
-                if (this.map) {
-                    this.map.remove();
-                    this.map = null;
-                    this.marker = null;
-                    this.boundaryLayer = null;
-                }
-                this.pendingMarkerLocation = null;
-            });
+    function setDistrict(key) {
+        var select = el('districtSelect');
+        if (!select) return;
+        key = key || '';
+        // A district saved as free text (older rows) is not one of the keys: keep it as its own option so a save
+        // without touching the field does not wipe it.
+        if (key && !Array.prototype.some.call(select.options, function (o) { return o.value === key; })) {
+            var legacy = document.createElement('option');
+            legacy.value = key;
+            legacy.textContent = key;
+            legacy.setAttribute('data-legacy', '1');
+            select.appendChild(legacy);
         }
-    },
+        select.value = key;
+    }
 
-    // Load geographic configuration from API
-    loadGeoConfig: async function () {
-        try {
-            const lang = document.documentElement.lang || 'en';
-            const response = await apiRequest(`/addresses/geo-config?lang=${lang}`);
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                this.geoConfig = result.data;
-                this.configLoaded = true;
-                this.populateDistrictDropdown();
-            }
-        } catch (error) {
-            console.error('Failed to load geo config:', error);
-            // Use fallback values
-        }
-    },
-
-    // Populate district dropdown
-    populateDistrictDropdown: function () {
-        const select = document.getElementById('districtSelect');
-        if (!select || !this.geoConfig.districts) return;
-
-        select.innerHTML = '<option value="">-- ' + this.getTranslation('select_district') + ' --</option>';
-        this.geoConfig.districts.forEach(district => {
-            const option = document.createElement('option');
+    function populateDistricts() {
+        var select = el('districtSelect');
+        if (!select) return;
+        var current = select.value;
+        select.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = T.f_district_ph || '';
+        select.appendChild(placeholder);
+        (state.geo.districts || []).forEach(function (district) {
+            var option = document.createElement('option');
             option.value = district.key;
             option.textContent = district.name;
             select.appendChild(option);
         });
-    },
+        setDistrict(current);
+    }
 
-    // Open wizard for new address
-    openForNew: function () {
-        this.editingAddressId = null;
-        this.selectedLocation = null;
-        this.pendingMarkerLocation = null;
-        this.resetForm();
-        this.goToStep(1);
-        this.updateModalTitle(false);
-        this.showModal();
-        // Map will be initialized by the shown.bs.modal event handler
-    },
-
-    // Open wizard for editing existing address
-    openForEdit: function (address) {
-        this.editingAddressId = address.id;
-        this.selectedLocation = (address.latitude && address.longitude) ? {
-            lat: address.latitude,
-            lng: address.longitude
-        } : null;
-
-        // Store location to set marker after map init
-        this.pendingMarkerLocation = this.selectedLocation;
-
-        // Pre-fill form fields
-        this.fillForm(address);
-
-        // Start at step 2 if we have coordinates, otherwise step 1
-        if (this.selectedLocation) {
-            this.goToStep(2);
-        } else {
-            this.goToStep(1);
+    async function loadGeo() {
+        try {
+            var lang = document.documentElement.lang || 'ru';
+            var response = await window.apiRequest('/addresses/geo-config?lang=' + encodeURIComponent(lang));
+            var result = await readJson(response);
+            if (response.ok && result.success && result.data) {
+                state.geo = {
+                    center: result.data.center || FALLBACK_GEO.center,
+                    polygon: result.data.polygon || [],
+                    districts: result.data.districts || []
+                };
+            }
+        } catch (error) {
+            // The wizard still works without it: no outline, no district names, the backend still checks the zone.
         }
+        populateDistricts();
+        return state.geo;
+    }
 
-        this.updateModalTitle(true);
-        this.showModal();
-        // Map will be initialized by the shown.bs.modal event handler
-    },
-
-    // Update modal title based on mode (new/edit)
-    updateModalTitle: function (isEditing) {
-        const titleEl = document.getElementById('addressWizardModalTitle');
-        if (titleEl) {
-            titleEl.textContent = isEditing
-                ? this.getTranslation('edit_address')
-                : this.getTranslation('add_new_address');
-        }
-    },
-
-    // Initialize Leaflet map
-    initMap: function () {
-        const mapContainer = document.getElementById('addressWizardMap');
-        if (!mapContainer) {
-            console.error('AddressWizard: Map container not found');
-            return;
-        }
-
-        // Debug: Log container dimensions
-        const rect = mapContainer.getBoundingClientRect();
-        console.log('AddressWizard: Map container dimensions:', {
-            width: rect.width,
-            height: rect.height,
-            offsetWidth: mapContainer.offsetWidth,
-            offsetHeight: mapContainer.offsetHeight
-        });
-
-        // Ensure container has dimensions before initializing map
-        if (rect.width === 0 || rect.height === 0) {
-            console.warn('AddressWizard: Map container has zero dimensions, retrying...');
-            setTimeout(() => this.initMap(), 100);
-            return;
-        }
-
-        // Destroy existing map if any
-        if (this.map) {
-            this.map.remove();
-            this.map = null;
-            this.marker = null;
-            this.boundaryLayer = null;
-        }
-
-        // Fix Leaflet default icon path issue
-        // This fixes the missing marker icon 404 errors
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-            iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-            iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-            shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-        });
-
-        const center = this.geoConfig.center;
-
-        // Create map centered on Tashkent
-        // Disable fadeAnimation to prevent conflicts with global CSS transitions
-        this.map = L.map('addressWizardMap', {
-            fadeAnimation: false,
-            zoomAnimation: true
-        }).setView(
-            [center.latitude, center.longitude],
-            12
-        );
-
-        // Add OpenStreetMap tiles
-        // Use crossOrigin to ensure tiles load properly
-        const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-            maxZoom: 19,
-            crossOrigin: true
-        }).addTo(this.map);
-
-        // Debug: Listen for tile events
-        tileLayer.on('tileload', (e) => {
-            console.log('AddressWizard: Tile loaded', e.coords);
-            // Force visibility on the loaded tile with inline styles
-            if (e.tile) {
-                // Log tile's current computed styles for debugging
-                const computed = window.getComputedStyle(e.tile);
-                console.log('AddressWizard: Tile computed styles:', {
-                    visibility: computed.visibility,
-                    opacity: computed.opacity,
-                    display: computed.display,
-                    transform: computed.transform,
-                    width: computed.width,
-                    height: computed.height,
-                    position: computed.position,
-                    left: computed.left,
-                    top: computed.top
-                });
-
-                // Apply all styles to override CSS transitions
-                e.tile.style.setProperty('visibility', 'visible', 'important');
-                e.tile.style.setProperty('opacity', '1', 'important');
-                e.tile.style.setProperty('transition', 'none', 'important');
-                e.tile.style.setProperty('transition-property', 'none', 'important');
-                e.tile.style.setProperty('transition-duration', '0s', 'important');
-                e.tile.style.setProperty('transition-delay', '0s', 'important');
-                e.tile.style.setProperty('max-width', 'none', 'important');
-                e.tile.style.setProperty('max-height', 'none', 'important');
-            }
-        });
-
-        tileLayer.on('tileerror', (e) => {
-            console.error('AddressWizard: Tile error', e);
-        });
-
-        tileLayer.on('load', () => {
-            console.log('AddressWizard: All tiles loaded');
-            // Force refresh styles on all tiles after load
-            this.forceRefreshTileStyles();
-
-            // Debug: Check parent elements
-            const tilePane = mapContainer.querySelector('.leaflet-tile-pane');
-            const mapPane = mapContainer.querySelector('.leaflet-map-pane');
-            const tileContainer = mapContainer.querySelector('.leaflet-tile-container');
-            const leafletContainer = mapContainer;
-
-            if (leafletContainer) {
-                const lcComputed = window.getComputedStyle(leafletContainer);
-                console.log('AddressWizard: Leaflet container styles:', {
-                    visibility: lcComputed.visibility,
-                    opacity: lcComputed.opacity,
-                    background: lcComputed.background,
-                    backgroundColor: lcComputed.backgroundColor,
-                    overflow: lcComputed.overflow,
-                    position: lcComputed.position
-                });
-            }
-
-            if (tilePane) {
-                const tpComputed = window.getComputedStyle(tilePane);
-                console.log('AddressWizard: Tile pane styles:', {
-                    visibility: tpComputed.visibility,
-                    opacity: tpComputed.opacity,
-                    display: tpComputed.display,
-                    transform: tpComputed.transform,
-                    zIndex: tpComputed.zIndex,
-                    background: tpComputed.background
-                });
-                // Check tile pane's bounding rect
-                const tpRect = tilePane.getBoundingClientRect();
-                console.log('AddressWizard: Tile pane rect:', tpRect);
-            }
-
-            if (tileContainer) {
-                const tcComputed = window.getComputedStyle(tileContainer);
-                console.log('AddressWizard: Tile container styles:', {
-                    visibility: tcComputed.visibility,
-                    opacity: tcComputed.opacity,
-                    transform: tcComputed.transform,
-                    position: tcComputed.position
-                });
-                // Check bounding rect
-                const tcRect = tileContainer.getBoundingClientRect();
-                console.log('AddressWizard: Tile container rect:', tcRect);
-            }
-
-            if (mapPane) {
-                const mpComputed = window.getComputedStyle(mapPane);
-                console.log('AddressWizard: Map pane styles:', {
-                    visibility: mpComputed.visibility,
-                    opacity: mpComputed.opacity,
-                    display: mpComputed.display,
-                    transform: mpComputed.transform
-                });
-            }
-
-            // Check first tile's actual position
-            const firstTile = mapContainer.querySelector('.leaflet-tile');
-            if (firstTile) {
-                const ftRect = firstTile.getBoundingClientRect();
-                console.log('AddressWizard: First tile bounding rect:', ftRect);
-            }
-
-            // Check if there's anything covering tiles
-            const overlayPane = mapContainer.querySelector('.leaflet-overlay-pane');
-            if (overlayPane) {
-                const opComputed = window.getComputedStyle(overlayPane);
-                console.log('AddressWizard: Overlay pane styles:', {
-                    visibility: opComputed.visibility,
-                    background: opComputed.background,
-                    zIndex: opComputed.zIndex
-                });
-            }
-        });
-
-        // Force invalidateSize after creation to ensure proper rendering
-        setTimeout(() => {
-            if (this.map) {
-                this.map.invalidateSize();
-                // Also force refresh tile styles
-                this.forceRefreshTileStyles();
-            }
-        }, 100);
-
-        // Additional delayed refresh for modal animation completion
-        setTimeout(() => {
-            if (this.map) {
-                this.map.invalidateSize();
-                this.forceRefreshTileStyles();
-            }
-        }, 500);
-
-        // Use MutationObserver to catch dynamically added tiles
-        this.setupTileObserver(mapContainer);
-
-        // Draw the delivery coverage polygon (visual indicator, SSOT)
-        const polygon = this.geoConfig.polygon;
-        if (polygon && polygon.length > 0) {
-            this.boundaryLayer = L.polygon(polygon, {
-                color: '#1890ff',
-                weight: 2,
-                opacity: 0.5,
-                fillOpacity: 0.05,
-                dashArray: '5, 10'
-            }).addTo(this.map);
-        }
-
-        // Map click handler - place marker
-        this.map.on('click', (e) => this.onMapClick(e));
-
-        // If editing and has location, show marker
-        if (this.selectedLocation) {
-            this.setMarkerPosition(this.selectedLocation.lat, this.selectedLocation.lng);
-        }
-    },
-
-    // Handle map click
-    onMapClick: function (e) {
-        const { lat, lng } = e.latlng;
-
-        // Validate within Tashkent bounds
-        if (!this.isWithinServiceArea(lat, lng)) {
-            this.showError(this.getTranslation('location_outside_tashkent'));
-            return;
-        }
-
-        this.setMarkerPosition(lat, lng);
-    },
-
-    // Check if coordinates are within the delivery coverage polygon (SSOT).
-    // Ray-casting point-in-polygon; mirrors shared.constants.point_in_polygon.
-    isWithinServiceArea: function (lat, lng) {
-        const polygon = this.geoConfig.polygon;
-        // If the polygon hasn't loaded yet, don't block the user — the backend
-        // re-validates authoritatively against TASHKENT_POLYGON on save.
-        if (!polygon || polygon.length === 0) return true;
-
-        let inside = false;
-        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-            const xi = polygon[i][0], yi = polygon[i][1];
-            const xj = polygon[j][0], yj = polygon[j][1];
-            const intersect = ((yi > lng) !== (yj > lng)) &&
-                (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
-            if (intersect) inside = !inside;
+    function insideZone(lat, lng) {
+        var polygon = state.geo.polygon;
+        if (!polygon || !polygon.length) return true;
+        var inside = false;
+        for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            var xi = polygon[i][0], yi = polygon[i][1];
+            var xj = polygon[j][0], yj = polygon[j][1];
+            if (((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)) inside = !inside;
         }
         return inside;
-    },
+    }
 
-    // Set marker position and reverse geocode
-    setMarkerPosition: function (lat, lng) {
-        if (this.marker) {
-            this.marker.setLatLng([lat, lng]);
-        } else {
-            // Create draggable marker with default Leaflet icon
-            this.marker = L.marker([lat, lng], {
-                draggable: true
-            }).addTo(this.map);
+    // ---- status line and messages ----------------------------------------------------------------------------
+    function setStatus(text, tone) {
+        var box = el('locationStatus');
+        var label = el('locationStatusText');
+        if (!box || !label) return;
+        box.classList.toggle('d-none', !text);
+        box.classList.remove('is-ok', 'is-busy', 'is-warn');
+        if (tone) box.classList.add('is-' + tone);
+        label.textContent = text || '';
+    }
 
-            // Handle marker drag
-            this.marker.on('dragend', (e) => {
-                const pos = e.target.getLatLng();
+    function showZoneAlert(show) {
+        var alert = el('wizardZoneAlert');
+        if (alert) alert.hidden = !show;
+    }
 
-                // Validate new position
-                if (!this.isWithinServiceArea(pos.lat, pos.lng)) {
-                    // Reset to previous valid position
-                    if (this.selectedLocation) {
-                        this.marker.setLatLng([this.selectedLocation.lat, this.selectedLocation.lng]);
-                    } else {
-                        const center = this.geoConfig.center;
-                        this.marker.setLatLng([center.latitude, center.longitude]);
-                    }
-                    this.showError(this.getTranslation('location_outside_tashkent'));
-                    return;
-                }
+    function showSuggestion(text) {
+        state.suggestion = text || '';
+        var box = el('wizardAddressSuggest');
+        if (!box) return;
+        el('wizardAddressSuggestText').textContent = state.suggestion;
+        box.hidden = !state.suggestion;
+    }
 
-                this.updateSelectedLocation(pos.lat, pos.lng);
-            });
+    // ---- map ---------------------------------------------------------------------------------------------------
+    function ensureMap() {
+        if (!window.AEMap || !DATA.leaflet) return Promise.reject(new Error('map helper missing'));
+        return window.AEMap.load(DATA.leaflet).then(function (L) {
+            var container = el('addressWizardMap');
+            if (!state.map) {
+                var center = state.geo.center || FALLBACK_GEO.center;
+                state.map = L.map(container, { fadeAnimation: false, zoomSnap: 0.25 }).setView([center.latitude, center.longitude], 12);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 19
+                }).addTo(state.map);
+                // A tap on the whole-city view is rough: zoom in on it so the pin can be put on the right door.
+                state.map.on('click', function (event) {
+                    pickPoint(event.latlng.lat, event.latlng.lng, state.map.getZoom() < 15);
+                });
+            }
+            drawZone(L);
+            state.map.invalidateSize();
+            if (state.location) {
+                placeMarker(state.location.lat, state.location.lng);
+                state.map.setView([state.location.lat, state.location.lng], 16);
+            }
+            return state.map;
+        });
+    }
+
+    function drawZone(L) {
+        if (state.zoneLayer || !state.geo.polygon || !state.geo.polygon.length) return;
+        state.zoneLayer = L.polygon(state.geo.polygon, {
+            color: '#0077B6', weight: 2, fillColor: '#00D1F9', fillOpacity: 0.08, interactive: false
+        }).addTo(state.map);
+        if (!state.location) state.map.fitBounds(state.zoneLayer.getBounds(), { padding: [8, 8] });
+    }
+
+    function placeMarker(lat, lng) {
+        if (!state.map || !window.L) return;
+        if (state.marker) {
+            state.marker.setLatLng([lat, lng]);
+            return;
         }
+        state.marker = window.L.marker([lat, lng], { draggable: true, keyboard: true }).addTo(state.map);
+        state.marker.on('dragend', function (event) {
+            var pos = event.target.getLatLng();
+            if (!insideZone(pos.lat, pos.lng)) {
+                if (state.location) state.marker.setLatLng([state.location.lat, state.location.lng]);
+                showZoneAlert(true);
+                return;
+            }
+            setPoint(pos.lat, pos.lng, true);
+        });
+    }
 
-        // Center map on marker
-        this.map.setView([lat, lng], 16);
+    function setPoint(lat, lng, geocode) {
+        state.location = { lat: lat, lng: lng };
+        setVal('selectedLatitude', lat);
+        setVal('selectedLongitude', lng);
+        showZoneAlert(false);
+        placeMarker(lat, lng);
+        if (geocode) reverseGeocode(lat, lng);
+        else setStatus(T.point_selected, 'ok');
+    }
 
-        // Update selected location
-        this.updateSelectedLocation(lat, lng);
-    },
-
-    // Update selected location and reverse geocode
-    updateSelectedLocation: async function (lat, lng) {
-        this.selectedLocation = { lat, lng };
-
-        // Show loading indicator
-        const statusEl = document.getElementById('locationStatus');
-        const statusTextEl = document.getElementById('locationStatusText');
-
-        if (statusEl) statusEl.classList.remove('d-none');
-        if (statusTextEl) {
-            statusTextEl.textContent = this.getTranslation('getting_address');
-            statusTextEl.classList.remove('text-success');
+    /** A point the customer chose (tap, drag, search, my location): check the zone, pin it, ask the geocoder. */
+    function pickPoint(lat, lng, zoom) {
+        if (!insideZone(lat, lng)) {
+            showZoneAlert(true);
+            return false;
         }
+        setPoint(lat, lng, true);
+        if (state.map && zoom) state.map.setView([lat, lng], 16);
+        return true;
+    }
 
-        // Update hidden fields
-        document.getElementById('selectedLatitude').value = lat;
-        document.getElementById('selectedLongitude').value = lng;
-
-        // Reverse geocode to get address
+    async function reverseGeocode(lat, lng) {
+        var seq = ++state.geocodeSeq;
+        setStatus(T.getting_address, 'busy');
         try {
-            const response = await apiRequest('/addresses/reverse-geocode', {
+            var response = await window.apiRequest('/addresses/reverse-geocode', {
                 method: 'POST',
                 body: JSON.stringify({ latitude: lat, longitude: lng })
             });
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                const data = result.data;
-
-                // Update form fields with geocoded address
-                document.getElementById('fullAddress').value = data.formatted_address || '';
-
-                if (data.district) {
-                    const districtKey = this.findDistrictKey(data.district);
-                    if (districtKey) {
-                        document.getElementById('districtSelect').value = districtKey;
-                    }
-                }
-
-                // Update status
-                if (statusTextEl) {
-                    statusTextEl.textContent = this.getTranslation('location_selected');
-                    statusTextEl.classList.add('text-success');
-                }
-
-                // Enable next button
-                this.updateNavigationButtons();
+            var result = await readJson(response);
+            if (seq !== state.geocodeSeq) return;
+            if (response.ok && result.success && result.data) {
+                applyGeocoded(result.data.formatted_address || '', result.data.district_key || '');
+                setStatus(T.point_selected, 'ok');
             } else {
-                if (statusTextEl) {
-                    statusTextEl.textContent = this.getTranslation('address_lookup_failed');
-                }
+                setStatus(T.point_no_address, 'warn');
             }
         } catch (error) {
-            console.error('Reverse geocoding failed:', error);
-            if (statusTextEl) {
-                statusTextEl.textContent = this.getTranslation('location_selected_no_address');
-            }
+            if (seq === state.geocodeSeq) setStatus(T.point_no_address, 'warn');
         }
-    },
+    }
 
-    // Find district key from name
-    findDistrictKey: function (districtName) {
-        if (!districtName || !this.geoConfig.districts) return null;
+    /** The "filled in from the map" help shows only while the field holds the geocoder's text. */
+    function syncAddressHelp() {
+        var help = el('fullAddressHelp');
+        if (help) help.hidden = !(state.autoAddress && val('fullAddress') === state.autoAddress);
+    }
 
-        const normalized = districtName.toLowerCase();
-        for (const district of this.geoConfig.districts) {
-            if (district.name.toLowerCase().includes(normalized) ||
-                normalized.includes(district.name.toLowerCase())) {
-                return district.key;
+    function applyGeocoded(text, districtKey) {
+        var current = val('fullAddress');
+        if (text) {
+            if (!current || current === state.autoAddress) {
+                setVal('fullAddress', text);
+                state.autoAddress = text;
+                showSuggestion('');
+            } else if (text !== current) {
+                showSuggestion(text);
             }
+            syncAddressHelp();
         }
-        return null;
-    },
+        var select = el('districtSelect');
+        if (districtKey && select && (!select.value || select.value === state.autoDistrict)) {
+            setDistrict(districtKey);
+            state.autoDistrict = districtKey;
+        }
+    }
 
-    // Use browser geolocation
-    useMyLocation: function () {
-        if (!navigator.geolocation) {
-            this.showError(this.getTranslation('geolocation_not_supported'));
+    async function searchAddress() {
+        var query = val('addressSearchInput');
+        if (!query) {
+            setStatus(T.search_empty, 'warn');
+            el('addressSearchInput').focus();
             return;
         }
-
-        const btn = document.getElementById('useMyLocationBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + this.getTranslation('getting_location');
-
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const { latitude, longitude } = position.coords;
-
-                // Validate within bounds
-                if (!this.isWithinServiceArea(latitude, longitude)) {
-                    this.showError(this.getTranslation('location_outside_tashkent'));
-                    this.resetLocationButton();
-                    return;
-                }
-
-                this.setMarkerPosition(latitude, longitude);
-                this.resetLocationButton();
-            },
-            (error) => {
-                console.error('Geolocation error:', error);
-                let errorMsg = this.getTranslation('geolocation_error');
-                if (error.code === error.PERMISSION_DENIED) {
-                    errorMsg = this.getTranslation('geolocation_denied');
-                }
-                this.showError(errorMsg);
-                this.resetLocationButton();
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
-        );
-    },
-
-    // Reset location button state
-    resetLocationButton: function () {
-        const btn = document.getElementById('useMyLocationBtn');
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-location-arrow"></i> ' + this.getTranslation('use_my_location');
-        }
-    },
-
-    // Search address and place marker
-    searchAddress: async function () {
-        const input = document.getElementById('addressSearchInput');
-        const address = input?.value?.trim();
-
-        if (!address) {
-            this.showError(this.getTranslation('enter_address_to_search'));
-            return;
-        }
-
-        const btn = document.getElementById('searchAddressBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
+        var button = el('searchAddressBtn');
+        setBusy(button, true);
         try {
-            const response = await apiRequest('/addresses/geocode', {
+            var response = await window.apiRequest('/addresses/geocode', {
                 method: 'POST',
-                body: JSON.stringify({ address: address + ', Tashkent' })
+                body: JSON.stringify({ address: query + ', Tashkent' })
             });
-            const result = await response.json();
-
-            if (response.ok && result.success) {
-                const { latitude, longitude, formatted_address } = result.data;
-
-                // Validate within bounds
-                if (!this.isWithinServiceArea(latitude, longitude)) {
-                    this.showError(this.getTranslation('location_outside_tashkent'));
-                    return;
-                }
-
-                this.setMarkerPosition(latitude, longitude);
-
-                // Update full address field
-                if (formatted_address) {
-                    document.getElementById('fullAddress').value = formatted_address;
-                }
+            var result = await readJson(response);
+            if (response.ok && result.success && result.data) {
+                pickPoint(result.data.latitude, result.data.longitude, true);
             } else {
-                this.showError(result.message || this.getTranslation('address_not_found'));
+                setStatus(response.status === 404 ? T.not_found : (result.message || T.not_found), 'warn');
             }
         } catch (error) {
-            console.error('Address search failed:', error);
-            this.showError(this.getTranslation('search_failed'));
+            setStatus(T.search_failed, 'warn');
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i>';
+            setBusy(button, false);
         }
-    },
+    }
 
-    // Navigation methods
-    goToStep: function (step) {
-        if (step < 1 || step > this.totalSteps) return;
-
-        // Hide all steps
-        document.querySelectorAll('.wizard-step').forEach(el => {
-            el.classList.remove('active');
-        });
-
-        // Show current step
-        document.getElementById(`wizardStep${step}`)?.classList.add('active');
-
-        // Update step indicators
-        document.querySelectorAll('.step-indicator').forEach((el, index) => {
-            el.classList.remove('active', 'completed');
-            if (index + 1 < step) {
-                el.classList.add('completed');
-            } else if (index + 1 === step) {
-                el.classList.add('active');
-            }
-        });
-
-        this.currentStep = step;
-        this.updateNavigationButtons();
-
-        // If going back to step 1 and map exists, invalidate size
-        // (Map initialization is handled by shown.bs.modal event)
-        if (step === 1 && this.map) {
-            setTimeout(() => {
-                this.map.invalidateSize();
-            }, 50);
-        }
-    },
-
-    nextStep: function () {
-        // Validate current step before proceeding
-        if (!this.validateStep(this.currentStep)) {
+    function useMyLocation() {
+        var button = el('useMyLocationBtn');
+        if (!navigator.geolocation) {
+            setStatus(T.geo_unsupported, 'warn');
             return;
         }
+        setBusy(button, true, T.locating);
+        navigator.geolocation.getCurrentPosition(function (position) {
+            setBusy(button, false, T.my_location);
+            pickPoint(position.coords.latitude, position.coords.longitude, true);
+        }, function (error) {
+            setBusy(button, false, T.my_location);
+            setStatus(error && error.code === 1 ? T.geo_denied : T.geo_failed, 'warn');
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+    }
 
-        if (this.currentStep < this.totalSteps) {
-            this.goToStep(this.currentStep + 1);
+    function setBusy(button, busy, label) {
+        if (!button) return;
+        button.disabled = busy;
+        button.classList.toggle('is-loading', busy);
+        button.setAttribute('aria-busy', busy ? 'true' : 'false');
+        if (label) {
+            var span = button.querySelector('span');
+            if (span) span.textContent = label;
+            else button.textContent = label;
         }
-    },
+    }
 
-    prevStep: function () {
-        if (this.currentStep > 1) {
-            this.goToStep(this.currentStep - 1);
+    // ---- steps -------------------------------------------------------------------------------------------------
+    function goToStep(step) {
+        if (step < 1 || step > TOTAL_STEPS) return;
+        state.step = step;
+        document.querySelectorAll('#addressWizardModal .ae-wizard__step').forEach(function (section) {
+            section.classList.toggle('is-active', Number(section.dataset.step) === step);
+        });
+        document.querySelectorAll('#addressWizardModal [data-step-indicator]').forEach(function (item) {
+            var index = Number(item.dataset.stepIndicator);
+            item.classList.toggle('is-done', index < step);
+            item.classList.toggle('is-current', index === step);
+            if (index === step) item.setAttribute('aria-current', 'step');
+            else item.removeAttribute('aria-current');
+        });
+        var labels = T.step_labels || [];
+        if (el('wizardStepLabel')) el('wizardStepLabel').textContent = labels[step - 1] || '';
+        if (el('wizardStepCount')) el('wizardStepCount').textContent = format(T.step_count, { n: step, total: TOTAL_STEPS });
+        if (el('wizardProgressBar')) el('wizardProgressBar').style.width = (step / TOTAL_STEPS * 100).toFixed(1) + '%';
+
+        el('wizardPrevBtn').hidden = step === 1;
+        el('wizardNextBtn').hidden = step === TOTAL_STEPS;
+        el('wizardSaveBtn').hidden = step !== TOTAL_STEPS;
+
+        if (step === 1 && isOpen()) {
+            ensureMap().catch(function () { setStatus(T.map_failed, 'warn'); });
         }
-    },
+        if (step === 3) renderSummary();
+        var body = document.querySelector('#addressWizardModal .modal-body');
+        if (body) body.scrollTop = 0;
+    }
 
-    // Validate step data
-    validateStep: function (step) {
-        switch (step) {
-            case 1:
-                // Must have selected location
-                if (!this.selectedLocation || !this.selectedLocation.lat || !this.selectedLocation.lng) {
-                    this.showError(this.getTranslation('select_location_on_map'));
-                    return false;
-                }
-                return true;
-
-            case 2:
-                // Title is required
-                const title = document.getElementById('addressTitle')?.value?.trim();
-                if (!title) {
-                    this.showError(this.getTranslation('title_required'));
-                    return false;
-                }
-                return true;
-
-            case 3:
-                return true;
-
-            default:
-                return true;
+    function validateStep(step) {
+        if (step === 1 && !state.location) {
+            setStatus(T.pick_point, 'warn');
+            return false;
         }
-    },
-
-    // Update navigation buttons state
-    updateNavigationButtons: function () {
-        const prevBtn = document.getElementById('wizardPrevBtn');
-        const nextBtn = document.getElementById('wizardNextBtn');
-        const saveBtn = document.getElementById('wizardSaveBtn');
-
-        // Previous button
-        if (prevBtn) {
-            prevBtn.style.display = this.currentStep > 1 ? 'inline-block' : 'none';
+        if (step === 2) {
+            var ok = !!val('addressTitle');
+            el('addressTitleError').hidden = ok;
+            el('addressTitleField').classList.toggle('ae-field--invalid', !ok);
+            el('addressTitle').setAttribute('aria-invalid', ok ? 'false' : 'true');
+            if (!ok) el('addressTitle').focus();
+            return ok;
         }
+        return true;
+    }
 
-        // Next button
-        if (nextBtn) {
-            nextBtn.style.display = this.currentStep < this.totalSteps ? 'inline-block' : 'none';
-            // Disable if no location selected on step 1
-            if (this.currentStep === 1) {
-                nextBtn.disabled = !this.selectedLocation || !this.selectedLocation.lat;
-            } else {
-                nextBtn.disabled = false;
-            }
+    function renderSummary() {
+        var labels = T.summary || {};
+        var select = el('districtSelect');
+        var district = select && select.value ? (districtName(select.value) || select.value) : '';
+        var rows = [
+            ['title', val('addressTitle'), true],
+            ['address', val('fullAddress'), true],
+            ['district', district],
+            ['street', val('streetAddress')],
+            ['floor', val('floorNumber')],
+            ['apartment', val('apartmentNumber')],
+            ['landmark', val('landmark')]
+        ];
+        var list = el('wizardSummary');
+        list.innerHTML = '';
+        rows.forEach(function (row) {
+            if (!row[1] && !row[2]) return;
+            var wrap = document.createElement('div');
+            wrap.className = 'ae-dl__row';
+            var dt = document.createElement('dt');
+            dt.textContent = labels[row[0]] || '';
+            var dd = document.createElement('dd');
+            dd.textContent = row[1] || T.not_set || '';
+            if (!row[1]) dd.className = 'is-empty';
+            wrap.appendChild(dt);
+            wrap.appendChild(dd);
+            list.appendChild(wrap);
+        });
+    }
+
+    // ---- open / fill / save ------------------------------------------------------------------------------------
+    function isOpen() {
+        var modal = el('addressWizardModal');
+        return !!modal && modal.classList.contains('show');
+    }
+
+    function resetForm() {
+        var form = el('addressWizardForm');
+        if (form) form.reset();
+        setVal('selectedLatitude', '');
+        setVal('selectedLongitude', '');
+        setDistrict('');
+        Array.prototype.slice.call(el('districtSelect').querySelectorAll('option[data-legacy]')).forEach(function (o) { o.remove(); });
+        document.querySelectorAll('#addressWizardModal .quick-title-btn').forEach(function (chip) {
+            chip.setAttribute('aria-pressed', 'false');
+        });
+        el('addressTitleError').hidden = true;
+        el('addressTitleField').classList.remove('ae-field--invalid');
+        el('addressTitle').removeAttribute('aria-invalid');
+        el('isDefault').disabled = false;
+        setStatus('');
+        showZoneAlert(false);
+        showSuggestion('');
+        state.location = null;
+        state.autoAddress = '';
+        state.autoDistrict = '';
+        state.geocodeSeq++;
+        syncAddressHelp();
+        if (state.marker && state.map) {
+            state.map.removeLayer(state.marker);
         }
+        state.marker = null;
+    }
 
-        // Save button (only on last step)
-        if (saveBtn) {
-            saveBtn.style.display = this.currentStep === this.totalSteps ? 'inline-block' : 'none';
-        }
-    },
-
-    // Fill form with address data (for editing)
-    fillForm: function (address) {
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.value = val || '';
-        };
-        const setChecked = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.checked = val || false;
-        };
-
+    function fillForm(address) {
         setVal('addressTitle', address.title);
         setVal('fullAddress', address.full_address);
         setVal('streetAddress', address.street_address);
-        setVal('districtSelect', address.district);
-        setVal('buildingNumber', address.building_number);
-        setVal('apartmentNumber', address.apartment_number);
+        setDistrict(address.district || '');
         setVal('floorNumber', address.floor_number);
-        setVal('entranceNumber', address.entrance_number);
-        setVal('deliveryInstructions', address.delivery_instructions);
+        setVal('apartmentNumber', address.apartment_number);
         setVal('landmark', address.landmark);
-        setVal('selectedLatitude', address.latitude);
-        setVal('selectedLongitude', address.longitude);
-        setChecked('isDefault', address.is_default);
-        setChecked('isBusiness', address.is_business);
-    },
-
-    // Reset form
-    resetForm: function () {
-        document.getElementById('addressWizardForm')?.reset();
-
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.value = val || '';
-        };
-
-        setVal('selectedLatitude', '');
-        setVal('selectedLongitude', '');
-
-        const statusEl = document.getElementById('locationStatus');
-        if (statusEl) statusEl.classList.add('d-none');
-
-        // Reset quick title buttons
-        document.querySelectorAll('.quick-title-btn').forEach(btn => btn.classList.remove('active'));
-
-        // Reset marker
-        if (this.marker && this.map) {
-            this.map.removeLayer(this.marker);
-            this.marker = null;
+        setVal('deliveryInstructions', address.delivery_instructions);
+        el('isDefault').checked = !!address.is_default;
+        // There is always one main address: the current one stays main until another one takes over.
+        el('isDefault').disabled = !!address.is_default;
+        el('isBusiness').checked = !!address.is_business;
+        syncChips();
+        if (address.latitude && address.longitude) {
+            state.location = { lat: Number(address.latitude), lng: Number(address.longitude) };
+            setVal('selectedLatitude', address.latitude);
+            setVal('selectedLongitude', address.longitude);
         }
-    },
+    }
 
-    // Save address to API
-    saveAddress: async function () {
-        // Final validation
-        if (!this.selectedLocation || !this.selectedLocation.lat || !this.selectedLocation.lng) {
-            this.showError(this.getTranslation('location_required'));
-            return;
-        }
-
-        const title = document.getElementById('addressTitle')?.value?.trim();
-        if (!title) {
-            this.showError(this.getTranslation('title_required'));
-            this.goToStep(2);
-            return;
-        }
-
-        const saveBtn = document.getElementById('wizardSaveBtn');
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + this.getTranslation('saving');
-
-        const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
-        const getChecked = (id) => document.getElementById(id)?.checked || false;
-
-        const data = {
-            title: title,
-            full_address: getVal('fullAddress'),
-            street_address: getVal('streetAddress'),
-            district: getVal('districtSelect'),
-            city: 'Tashkent',
-            country: 'Uzbekistan',
-            building_number: getVal('buildingNumber'),
-            apartment_number: getVal('apartmentNumber'),
-            floor_number: getVal('floorNumber'),
-            entrance_number: getVal('entranceNumber'),
-            delivery_instructions: getVal('deliveryInstructions'),
-            landmark: getVal('landmark'),
-            latitude: this.selectedLocation.lat,
-            longitude: this.selectedLocation.lng,
-            is_default: getChecked('isDefault'),
-            is_business: getChecked('isBusiness')
-        };
-
-        try {
-            let response;
-            if (this.editingAddressId) {
-                response = await apiRequest(`/auth/addresses/${this.editingAddressId}`, {
-                    method: 'PUT',
-                    body: JSON.stringify(data)
-                });
-            } else {
-                response = await apiRequest('/auth/addresses', {
-                    method: 'POST',
-                    body: JSON.stringify(data)
-                });
-            }
-
-            const result = await response.json();
-
-            if (response.ok) {
-                this.hideModal();
-                showNotification(this.getTranslation('address_saved'), 'success');
-
-                // Reload addresses list
-                if (typeof loadAddresses === 'function') {
-                    loadAddresses();
-                }
-            } else {
-                this.showError(result.message || this.getTranslation('save_failed'));
-            }
-        } catch (error) {
-            console.error('Failed to save address:', error);
-            this.showError(this.getTranslation('network_error'));
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + this.getTranslation('save_address');
-        }
-    },
-
-    // Modal methods
-    showModal: function () {
-        $('#addressWizardModal').modal('show');
-    },
-
-    hideModal: function () {
-        $('#addressWizardModal').modal('hide');
-    },
-
-    // Show error message
-    showError: function (message) {
-        if (typeof showNotification === 'function') {
-            showNotification(message, 'error');
-        } else {
-            alert(message);
-        }
-    },
-
-    // Get translation (with fallback)
-    getTranslation: function (key) {
-        const translations = {
-            'en': {
-                'select_district': 'Select District',
-                'location_outside_tashkent': 'Selected location is outside Tashkent. Please select a location within the city.',
-                'getting_address': 'Getting address...',
-                'location_selected': 'Location selected!',
-                'address_lookup_failed': 'Could not get address details',
-                'location_selected_no_address': 'Location selected (address lookup unavailable)',
-                'geolocation_not_supported': 'Geolocation is not supported by your browser',
-                'getting_location': 'Getting location...',
-                'geolocation_error': 'Could not get your location',
-                'geolocation_denied': 'Location access was denied. Please enable location or select on map.',
-                'use_my_location': 'Use My Location',
-                'enter_address_to_search': 'Please enter an address to search',
-                'address_not_found': 'Address not found. Try a different search.',
-                'search_failed': 'Search failed. Please try again.',
-                'select_location_on_map': 'Please select a location on the map',
-                'title_required': 'Please enter a title for this address',
-                'location_required': 'Location is required. Please go back and select on map.',
-                'saving': 'Saving...',
-                'address_saved': 'Address saved successfully!',
-                'save_failed': 'Failed to save address',
-                'network_error': 'Network error. Please try again.',
-                'save_address': 'Save Address',
-                'add_new_address': 'Add New Address',
-                'edit_address': 'Edit Address'
-            },
-            'ru': {
-                'select_district': 'Выберите район',
-                'location_outside_tashkent': 'Выбранное местоположение находится за пределами Ташкента. Пожалуйста, выберите местоположение в пределах города.',
-                'getting_address': 'Получение адреса...',
-                'location_selected': 'Местоположение выбрано!',
-                'address_lookup_failed': 'Не удалось получить данные адреса',
-                'location_selected_no_address': 'Местоположение выбрано (адрес недоступен)',
-                'geolocation_not_supported': 'Геолокация не поддерживается вашим браузером',
-                'getting_location': 'Определение местоположения...',
-                'geolocation_error': 'Не удалось определить местоположение',
-                'geolocation_denied': 'Доступ к местоположению был запрещен. Включите геолокацию или выберите на карте.',
-                'use_my_location': 'Мое местоположение',
-                'enter_address_to_search': 'Введите адрес для поиска',
-                'address_not_found': 'Адрес не найден. Попробуйте другой запрос.',
-                'search_failed': 'Ошибка поиска. Попробуйте снова.',
-                'select_location_on_map': 'Пожалуйста, выберите местоположение на карте',
-                'title_required': 'Введите название для этого адреса',
-                'location_required': 'Местоположение обязательно. Вернитесь и выберите на карте.',
-                'saving': 'Сохранение...',
-                'address_saved': 'Адрес успешно сохранен!',
-                'save_failed': 'Не удалось сохранить адрес',
-                'network_error': 'Ошибка сети. Попробуйте снова.',
-                'save_address': 'Сохранить адрес',
-                'add_new_address': 'Добавить адрес',
-                'edit_address': 'Редактировать адрес'
-            },
-            'uz': {
-                'select_district': 'Tumanni tanlang',
-                'location_outside_tashkent': 'Tanlangan joy Toshkent tashqarisida. Iltimos, shahar ichidagi joyni tanlang.',
-                'getting_address': 'Manzil olinmoqda...',
-                'location_selected': 'Joy tanlandi!',
-                'address_lookup_failed': 'Manzil maʼlumotlarini olishda xatolik',
-                'location_selected_no_address': 'Joy tanlandi (manzil mavjud emas)',
-                'geolocation_not_supported': 'Brauzeringiz joylashuvni aniqlashtni qoʻllab-quvvatlamaydi',
-                'getting_location': 'Joylashuv aniqlanmoqda...',
-                'geolocation_error': 'Joylashuvni aniqlab boʻlmadi',
-                'geolocation_denied': 'Joylashuvga ruxsat berilmadi. Geolokatsiyani yoqing yoki xaritadan tanlang.',
-                'use_my_location': 'Joylashuvimni aniqlash',
-                'enter_address_to_search': 'Qidirish uchun manzilni kiriting',
-                'address_not_found': 'Manzil topilmadi. Boshqa soʻrov bilan urinib koʻring.',
-                'search_failed': 'Qidiruv xatosi. Qaytadan urinib koʻring.',
-                'select_location_on_map': 'Iltimos, xaritadan joyni tanlang',
-                'title_required': 'Iltimos, manzil uchun nom kiriting',
-                'location_required': 'Joy talab qilinadi. Orqaga qaytib, xaritadan tanlang.',
-                'saving': 'Saqlanmoqda...',
-                'address_saved': 'Manzil muvaffaqiyatli saqlandi!',
-                'save_failed': 'Manzilni saqlashda xatolik',
-                'network_error': 'Tarmoq xatosi. Qaytadan urinib koʻring.',
-                'save_address': 'Manzilni saqlash',
-                'add_new_address': 'Yangi manzil qo\'shish',
-                'edit_address': 'Manzilni tahrirlash'
-            }
-        };
-
-        const lang = document.documentElement.lang || 'en';
-        const langTranslations = translations[lang] || translations['en'];
-        return langTranslations[key] || translations['en'][key] || key;
-    },
-
-    // Setup MutationObserver to fix styles on dynamically added tiles
-    setupTileObserver: function (mapContainer) {
-        if (this.tileObserver) {
-            this.tileObserver.disconnect();
-        }
-
-        this.tileObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        // Check if it's a tile image
-                        if (node.tagName === 'IMG' && (node.classList.contains('leaflet-tile') || node.closest('.leaflet-tile-pane'))) {
-                            this.fixTileStyle(node);
-                        }
-                        // Also check children
-                        const tiles = node.querySelectorAll ? node.querySelectorAll('img.leaflet-tile, .leaflet-tile-pane img') : [];
-                        tiles.forEach((tile) => this.fixTileStyle(tile));
-                    }
-                });
-            });
-        });
-
-        this.tileObserver.observe(mapContainer, {
-            childList: true,
-            subtree: true
-        });
-    },
-
-    // Fix styles on a single tile
-    fixTileStyle: function (tile) {
-        tile.style.setProperty('visibility', 'visible', 'important');
-        tile.style.setProperty('opacity', '1', 'important');
-        tile.style.setProperty('transition', 'none', 'important');
-        tile.style.setProperty('transition-property', 'none', 'important');
-        tile.style.setProperty('transition-duration', '0s', 'important');
-        tile.style.setProperty('transition-delay', '0s', 'important');
-        tile.style.setProperty('max-width', 'none', 'important');
-        tile.style.setProperty('max-height', 'none', 'important');
-    },
-
-    // Force refresh tile styles to override any CSS transition issues
-    forceRefreshTileStyles: function () {
-        if (!this.map) return;
-
-        const mapContainer = document.getElementById('addressWizardMap');
-        if (!mapContainer) return;
-
-        // Get all tile images and force their styles
-        const tiles = mapContainer.querySelectorAll('.leaflet-tile, .leaflet-tile-container img, img.leaflet-tile');
-        console.log('AddressWizard: Forcing styles on', tiles.length, 'tiles');
-
-        tiles.forEach((tile) => {
-            // IMPORTANT: Use setProperty to ADD styles without overwriting Leaflet's transform positioning
-            // DO NOT use style.cssText as it replaces ALL inline styles including position transforms
-            this.fixTileStyle(tile);
-        });
-
-        // Also check for any images that might have been missed
-        const allImages = mapContainer.querySelectorAll('img');
-        allImages.forEach((img) => {
-            if (img.classList.contains('leaflet-tile') || img.closest('.leaflet-tile-pane')) {
-                this.fixTileStyle(img);
-            }
+    function syncChips() {
+        var title = val('addressTitle');
+        document.querySelectorAll('#addressWizardModal .quick-title-btn').forEach(function (chip) {
+            chip.setAttribute('aria-pressed', chip.dataset.title === title ? 'true' : 'false');
         });
     }
-};
 
-// Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', function () {
-    AddressWizard.init();
-});
+    function open(options) {
+        options = options || {};
+        var address = options.address || null;
+        resetForm();
+        state.editingId = address ? address.id : null;
+        state.wasDefault = !!(address && address.is_default);
+        state.onSaved = typeof options.onSaved === 'function' ? options.onSaved : null;
+        // Where the keyboard was (the button that opened the form): it goes back there when the form closes.
+        state.returnFocus = document.activeElement;
+        if (address) {
+            fillForm(address);
+        } else if (options.makeDefault) {
+            el('isDefault').checked = true;
+        }
+        el('addressWizardModalTitle').textContent = address ? T.title_edit : T.title_new;
+        goToStep(address && state.location ? 2 : 1);
+        $('#addressWizardModal').modal('show');
+    }
 
-// Global function to open wizard (called from addresses.html)
-function showAddAddressModal() {
-    AddressWizard.openForNew();
-}
+    function payload() {
+        // Optional fields left empty are sent as null, so an edit clears them instead of storing ''.
+        function opt(id) { return val(id) || null; }
+        return {
+            title: val('addressTitle'),
+            full_address: val('fullAddress'),
+            street_address: opt('streetAddress'),
+            district: el('districtSelect').value || null,
+            city: 'Tashkent',
+            country: 'Uzbekistan',
+            floor_number: opt('floorNumber'),
+            apartment_number: opt('apartmentNumber'),
+            delivery_instructions: opt('deliveryInstructions'),
+            landmark: opt('landmark'),
+            latitude: state.location.lat,
+            longitude: state.location.lng,
+            is_default: el('isDefault').checked,
+            is_business: el('isBusiness').checked
+        };
+    }
 
-// Global function to edit address with wizard
-function editAddressWizard(address) {
-    AddressWizard.openForEdit(address);
-}
+    async function save() {
+        if (!state.location) { goToStep(1); validateStep(1); return; }
+        if (!validateStep(2)) { goToStep(2); validateStep(2); return; }
+        var button = el('wizardSaveBtn');
+        var label = button.textContent;
+        setBusy(button, true, T.saving);
+        var created = !state.editingId;
+        try {
+            var body = JSON.stringify(payload());
+            var response = created
+                ? await window.apiRequest('/auth/addresses', { method: 'POST', body: body })
+                : await window.apiRequest('/auth/addresses/' + state.editingId, { method: 'PUT', body: body });
+            var result = await readJson(response);
+            if (!response.ok || result.success === false) {
+                notify(result.message || T.save_failed, 'error');
+                return;
+            }
+            var saved = (result.data && result.data.address) || null;
+            var onSaved = state.onSaved;
+            $('#addressWizardModal').modal('hide');
+            notify(T.saved, 'success');
+            document.dispatchEvent(new CustomEvent('ae:address-saved', { detail: { address: saved, created: created } }));
+            if (onSaved) onSaved(saved, { created: created });
+        } catch (error) {
+            notify(T.network_error, 'error');
+        } finally {
+            setBusy(button, false, label);
+        }
+    }
+
+    function bind() {
+        el('wizardNextBtn').addEventListener('click', function () {
+            if (validateStep(state.step)) goToStep(state.step + 1);
+        });
+        el('wizardPrevBtn').addEventListener('click', function () { goToStep(state.step - 1); });
+        el('wizardSaveBtn').addEventListener('click', save);
+        el('searchAddressBtn').addEventListener('click', searchAddress);
+        el('useMyLocationBtn').addEventListener('click', useMyLocation);
+        el('addressSearchInput').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') { event.preventDefault(); searchAddress(); }
+        });
+        el('addressTitle').addEventListener('input', function () {
+            syncChips();
+            if (val('addressTitle')) {
+                el('addressTitleError').hidden = true;
+                el('addressTitleField').classList.remove('ae-field--invalid');
+                el('addressTitle').removeAttribute('aria-invalid');
+            }
+        });
+        document.querySelectorAll('#addressWizardModal .quick-title-btn').forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                setVal('addressTitle', chip.dataset.title);
+                el('addressTitle').dispatchEvent(new Event('input'));
+            });
+        });
+        el('wizardAddressSuggestBtn').addEventListener('click', function () {
+            setVal('fullAddress', state.suggestion);
+            state.autoAddress = state.suggestion;
+            showSuggestion('');
+            syncAddressHelp();
+        });
+        el('fullAddress').addEventListener('input', syncAddressHelp);
+        el('addressWizardForm').addEventListener('submit', function (event) { event.preventDefault(); });
+
+        var $modal = $('#addressWizardModal');
+        $modal.on('shown.bs.modal', function () {
+            if (state.step === 1) ensureMap().catch(function () { setStatus(T.map_failed, 'warn'); });
+        });
+        $modal.on('hidden.bs.modal', function () {
+            state.onSaved = null;
+            state.geocodeSeq++;
+            var back = state.returnFocus;
+            state.returnFocus = null;
+            if (back && back !== document.body && document.body.contains(back) && back.focus) back.focus();
+        });
+        // The static backdrop keeps a stray click outside from closing the form, but Escape closes it, as on every
+        // dialog: Bootstrap 4.4 turns Escape on a static modal into the same "shake" (hidePrevented), so the key
+        // that caused it is remembered here (this handler runs before Bootstrap's own) and the shake becomes a hide.
+        var escapeKey = false;
+        $modal.on('keydown', function (event) { escapeKey = event.key === 'Escape' || event.which === 27; });
+        $modal.on('hidePrevented.bs.modal', function (event) {
+            if (!escapeKey) return;
+            escapeKey = false;
+            event.preventDefault();
+            $modal.modal('hide');
+        });
+    }
+
+    var AddressWizard = {
+        ready: null,
+        open: open,
+        districtName: districtName,
+        // Kept for older callers.
+        openForNew: function (options) { open(options); },
+        openForEdit: function (address, options) { open(Object.assign({}, options || {}, { address: address })); }
+    };
+
+    function init() {
+        var modal = el('addressWizardModal');
+        if (!modal) return;
+        // Bootstrap modals must sit directly in <body>, outside the host page's layout boxes.
+        if (modal.parentNode !== document.body) document.body.appendChild(modal);
+        bind();
+        AddressWizard.ready = loadGeo();
+    }
+
+    window.AddressWizard = AddressWizard;
+    window.showAddAddressModal = function (options) { open(options); };
+    window.editAddressWizard = function (address, options) { AddressWizard.openForEdit(address, options); };
+
+    AddressWizard.ready = Promise.resolve(FALLBACK_GEO);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})(window, document, window.jQuery);

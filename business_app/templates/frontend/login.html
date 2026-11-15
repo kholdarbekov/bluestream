@@ -1,84 +1,49 @@
+{#- Sign in with a phone or email and a password (login.js posts to /api/v1/auth/login). Most customers signed up in the
+    Telegram bot and have no password: the Telegram option under the form tells them how the bot signs them in. -#}
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/macros/ui.html' import telegram_panel with context %}
+{% from 'frontend/macros/auth.html' import auth_head, field, password_field, or_divider, form_alert with context %}
 
-{% block title %}{{ 'landing.nav.login'|t }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'web.auth.login.page_title'|t }} — {{ company_name }}{% endblock %}
+{% set meta_description = 'web.auth.login.meta'|t %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.nav.login'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.nav.login'|t }}</li>
-                    </ul>
+{%- set next_query = ('?next=' ~ (request.args.get('next')|urlencode)) if request.args.get('next') else '' %}
+{{ page_hero('web.auth.login.hero'|t, [('web.auth.login.hero'|t, None)], variant='soft') }}
+
+<section class="ae-section ae-auth">
+    <div class="ae-container">
+        <div class="ae-auth__card">
+            {{ auth_head('web.auth.login.title'|t, 'web.auth.login.lead'|t) }}
+
+            {{ form_alert('loginAlert') }}
+
+            <form id="loginForm" class="ae-auth__form" novalidate>
+                {{ field('identifier', 'web.auth.login.identifier'|t, autocomplete='username', help='web.auth.login.identifier_help'|t) }}
+                {{ password_field('password', 'web.auth.common.password'|t, 'current-password') }}
+
+                {#- No "Remember me": /auth/login ignores it, every sign-in gets the same cookies (owner decision 3, dead UI). -#}
+                <div class="ae-auth__options">
+                    <a class="ae-auth__link" href="{{ url_for('frontend.forgot_password') }}">{{ 'web.auth.login.forgot'|t }}</a>
                 </div>
+
+                <button type="submit" class="ae-btn ae-btn--primary ae-btn--block ae-btn--lg btn-auth"><span>{{ 'web.auth.login.submit'|t }}</span></button>
+            </form>
+
+            {{ or_divider() }}
+            <div class="ae-auth__telegram">
+                {{ telegram_panel('web.forgot_password.telegram_hint'|t, company_telegram_bot_url) }}
             </div>
-        </section>
-        <!-- page-title end -->
 
-        <!-- login-section -->
-        <section class="auth-section">
-            <div class="auto-container">
-                <div class="auth-card">
-                    <!-- Card Header -->
-                    <div class="auth-card-header">
-                        <div class="logo-icon">
-                            <i class="fas fa-user"></i>
-                        </div>
-                        <h2>{{ 'Welcome Back'|t }}</h2>
-                        <p>{{ 'Please login to your account to continue'|t }}</p>
-                    </div>
-
-                    <!-- Login Form -->
-                    <form id="loginForm" class="auth-form">
-                        <!-- Email/Phone Input -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="text" name="identifier" class="form-control" placeholder="{{ 'Email or Phone Number'|t }}" required>
-                                <i class="fas fa-envelope input-icon"></i>
-                            </div>
-                        </div>
-
-                        <!-- Password Input -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
-                                <i class="fas fa-lock input-icon"></i>
-                                <button type="button" class="password-toggle" data-target="password" tabindex="-1">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Remember Me & Forgot Password -->
-                        <div class="form-options">
-                            <label class="auth-checkbox">
-                                <input type="checkbox" name="remember_me">
-                                <span class="checkbox-label">{{ 'Remember Me'|t }}</span>
-                            </label>
-                            <a href="{{ url_for('frontend.forgot_password') }}" class="forgot-link">{{ 'Forgot Password?'|t }}</a>
-                        </div>
-
-                        <!-- Submit Button -->
-                        <div class="form-group">
-                            <button type="submit" class="btn-auth">{{ 'landing.nav.login'|t }}</button>
-                        </div>
-                    </form>
-
-                    <!-- Footer -->
-                    <div class="auth-footer">
-                        <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Register Here'|t }}</a></p>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- login-section end -->
+            <p class="ae-auth__foot">{{ 'web.auth.login.no_account'|t }} <a class="ae-auth__link" href="{{ url_for('frontend.register') }}{{ next_query }}">{{ 'web.auth.login.register'|t }}</a></p>
+        </div>
+    </div>
+</section>
 {% endblock %}
 
 {% block extra_js %}
@@ -86,10 +51,17 @@
 {{ render_page_data({
     'after_login_url': after_login_url,
     'i18n': {
-        'login_success': 'Login successful!' | t,
-        'login_failed': 'Login failed' | t,
-        'network_error': 'Network error. Please try again.' | t,
+        'login_success': 'web.auth.login.success' | t,
+        'login_failed': 'web.auth.login.failed' | t,
+        'locked': 'web.auth.login.locked' | t,
+        'disabled': 'web.auth.login.disabled' | t,
+        'telegram_only': 'web.forgot_password.telegram_hint' | t,
+        'network_error': 'web.auth.common.network_error' | t,
+        'rate_limited': 'web.auth.common.rate_limited' | t,
+        'required': 'web.auth.common.required' | t,
+        'check_fields': 'web.auth.common.check_fields' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/login.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/login.js') }}"></script>
 {% endblock %}

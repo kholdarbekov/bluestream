@@ -157,7 +157,7 @@
     function showError(host, message) {
         var error = errorOf(host);
         if (!error) {
-            error = el('p', 'order-actions__error text-danger mt-2 mb-0');
+            error = el('p', 'order-actions__error');
             error.setAttribute('role', 'alert');
             host.appendChild(error);
         }
@@ -210,8 +210,9 @@
         }
     }
 
-    function actionButton(kind, className, label, small) {
-        var button = el('button', 'btn ' + className + (small ? ' btn-sm' : ''), label);
+    // The site's buttons (ae-ui.css .ae-btn): `variant` is primary / secondary / navy / danger / danger-solid.
+    function actionButton(kind, variant, label, small) {
+        var button = el('button', 'ae-btn ae-btn--' + variant + (small ? ' ae-btn--sm' : ''), label);
         button.type = 'button';
         button.dataset.orderAction = kind;
         return button;
@@ -220,20 +221,20 @@
     // The inline confirm of a skip, cancel or decline: its sentence, a skip's reasons, Yes and Keep.
     function buildPanel(order, cancel, ctx, trigger) {
         var words = ctx.words;
-        var panel = el('div', 'order-actions__confirm mt-2');
+        var panel = el('div', 'order-actions__confirm');
         panel.setAttribute('role', 'group');
         panel.setAttribute('aria-label', cancel.label);
         panel.hidden = true;
-        panel.appendChild(el('p', 'mb-2', cancel.confirm_text));
+        panel.appendChild(el('p', 'order-actions__confirm-text', cancel.confirm_text));
 
         var other = null;
         var reasons = cancel.reasons || [];
         if (reasons.length) {
-            panel.appendChild(el('p', 'mb-1 small', words.reason_prompt));
+            panel.appendChild(el('p', 'order-actions__prompt', words.reason_prompt));
             reasons.forEach(function (reason) {
-                var row = el('div', 'mb-1');
-                var label = el('label', 'mb-0');
-                var radio = el('input', 'mr-2');
+                var row = el('div', 'order-actions__reason');
+                var label = el('label');
+                var radio = el('input');
                 radio.type = 'radio';
                 radio.name = 'order-skip-reason-' + order.id;
                 radio.value = reason.code;
@@ -242,7 +243,7 @@
                 row.appendChild(label);
                 panel.appendChild(row);
             });
-            other = el('textarea', 'order-actions__reason-text form-control mb-2');
+            other = el('textarea', 'ae-input order-actions__reason-text');
             other.rows = 2;
             other.maxLength = 500;
             other.placeholder = words.reason_text;
@@ -250,9 +251,9 @@
             panel.appendChild(other);
         }
 
-        var yes = actionButton('cancel-confirm', 'btn-danger', cancel.label, false);
+        var yes = actionButton('cancel-confirm', 'danger-solid', cancel.label, false);
         yes.removeAttribute('data-order-action');
-        var keep = actionButton('cancel-keep', 'btn-secondary', words.keep, false);
+        var keep = actionButton('cancel-keep', 'secondary', words.keep, false);
         keep.removeAttribute('data-order-action');
         panel.appendChild(yes);
         panel.appendChild(keep);
@@ -302,11 +303,11 @@
             container.addEventListener('click', function (event) { event.stopPropagation(); });
         }
 
-        var row = el('div', 'order-actions__buttons d-flex flex-wrap justify-content-end align-items-start');
+        var row = el('div', 'order-actions__buttons');
         container.appendChild(row);
 
         if (pay_.allowed) {
-            var payButton = actionButton('pay', 'btn-primary ml-2', pay_.label, small);
+            var payButton = actionButton('pay', 'primary', pay_.label, small);
             payButton.addEventListener('click', function () {
                 run(payButton, container, function () { return pay(order.id, pay_, { words: ctx.words }); },
                     Object.assign({}, ctx, { toast: false, redraw: false }));
@@ -314,7 +315,7 @@
             row.appendChild(payButton);
         }
         if (confirm_.allowed) {
-            var confirmButton = actionButton('confirm', 'btn-success ml-2', confirm_.label, small);
+            var confirmButton = actionButton('confirm', 'navy', confirm_.label, small);
             confirmButton.addEventListener('click', function () {
                 run(confirmButton, container, function () { return confirmOrder(order.id); }, ctx);
             });
@@ -322,7 +323,7 @@
         }
         var panel = null;
         if (cancel.allowed) {
-            var cancelButton = actionButton('cancel', 'btn-outline-danger ml-2', cancel.label, small);
+            var cancelButton = actionButton('cancel', 'danger', cancel.label, small);
             cancelButton.setAttribute('aria-expanded', 'false');
             panel = buildPanel(order, cancel, ctx, cancelButton);
             cancelButton.addEventListener('click', function () {
@@ -336,11 +337,11 @@
         }
 
         if (pay_.allowed && pay_.deadline_label) {
-            container.appendChild(el('small', 'order-actions__deadline text-muted d-block text-right mt-1', pay_.deadline_label));
+            container.appendChild(el('small', 'order-actions__deadline', pay_.deadline_label));
         }
         if (panel) container.appendChild(panel);
         if (cancel.subscription_id && options.subscriptionsUrl) {
-            var link = el('a', 'order-actions__subscription d-block text-right small mt-1', ctx.words.open_subscription);
+            var link = el('a', 'order-actions__subscription', ctx.words.open_subscription);
             link.href = options.subscriptionsUrl + '?sub=' + encodeURIComponent(cancel.subscription_id) + '#subscription';
             container.appendChild(link);
         }
@@ -358,12 +359,12 @@
         var restricted = !!(data.payment_restrictions && data.payment_restrictions.cod_restricted);
         container.textContent = '';
         container.hidden = false;
-        container.appendChild(el('p', 'order-actions__rescue mb-2', failure && failure.message));
+        container.appendChild(el('p', 'order-actions__rescue', failure && failure.message));
         var row = el('div', 'order-actions__buttons');
         container.appendChild(row);
 
         if (!restricted) {
-            var cash = actionButton('switch-to-cash', 'btn-primary mr-2', words.switch_to_cash, false);
+            var cash = actionButton('switch-to-cash', 'primary', words.switch_to_cash, false);
             cash.addEventListener('click', function () {
                 run(cash, container, async function () {
                     var result = await answer(function () {
@@ -380,7 +381,7 @@
             });
             row.appendChild(cash);
         }
-        var again = actionButton('try-again', 'btn-outline-secondary', words.try_again, false);
+        var again = actionButton('try-again', 'secondary', words.try_again, false);
         again.addEventListener('click', function () {
             if (inFlight) return;
             container.textContent = '';

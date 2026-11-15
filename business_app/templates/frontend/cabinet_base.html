@@ -1,288 +1,101 @@
 {% extends "frontend/base.html" %}
 
 {#
-  Cabinet Base Template
+  Cabinet Base Template: the one frame every account page sits in (design-system v1 "Cabinet").
 
-  This template provides consistent layout for all user account/cabinet pages.
-  Child templates should:
+  Child templates:
   1. Set {% set active_menu = 'dashboard'|'profile'|'orders'|'addresses'|'subscriptions'|'loyalty'|'security' %}
-  2. Override cabinet_title block for page title
-  3. Override cabinet_breadcrumb_items block for breadcrumb
-  4. Override cabinet_content block for main content
-  5. Optionally override cabinet_extra_css and cabinet_extra_js for page-specific assets
+  2. Override cabinet_title for the page title (the banner H1 repeats it unless cabinet_page_heading says otherwise)
+  3. Override cabinet_breadcrumb_items with the crumbs after "My account" (`<li>…</li>`; the last one is the page)
+  4. Override cabinet_content for the main column
+  5. Optionally override cabinet_extra_head / cabinet_extra_js for page assets
+
+  Layout: a compact soft banner (H1 + breadcrumb), then .ae-cabinet: from 992px a sticky sidebar (who is signed in,
+  the eight links, quiet logout); below it a horizontally scrollable tab strip under the header, so the content comes
+  first. Styles: static/css/pages/cabinet.css (scoped under .ae-cabinet-page). The hooks tests and base.js read stay:
+  .ae-cabinet-nav__name / .profile-info p.text-muted, .account-menu li, [data-action="logout"].
 #}
 
-{% block title %}{% block cabinet_title %}{{ 'landing.nav.my_account'|t }}{% endblock %} - {{ company_name }}{% endblock %}
+{% block title %}{% block cabinet_title %}{{ 'landing.nav.my_account'|t }}{% endblock %} — {{ company_name }}{% endblock %}
 
 {% block content %}
-<!-- page-title -->
-<section class="page-title">
-    <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+{#- The Home crumb keeps the visitor's language, as page_hero() and the nav do. -#}
+{%- set home_url = external_url_for_lang('frontend.index') if external_url_for_lang is defined else url_for('frontend.index') -%}
+{%- set more_crumbs = self.cabinet_breadcrumb_items()|trim -%}
+<section class="page-title centred ae-hero ae-hero--soft ae-cabinet-hero">
     <div class="auto-container">
         <div class="content-box">
             <h1>{% block cabinet_page_heading %}{{ self.cabinet_title() }}{% endblock %}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
+                <li><a href="{{ home_url }}">{{ 'landing.nav.home'|t }}</a></li>
+                {#- On the dashboard "My account" is the current page (the last crumb), never a link to itself. -#}
+                <li>{% if more_crumbs %}<a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a>{% else %}<span aria-current="page">{{ 'landing.nav.my_account'|t }}</span>{% endif %}</li>
                 {% block cabinet_breadcrumb_items %}{% endblock %}
             </ul>
         </div>
     </div>
 </section>
-<!-- page-title end -->
 
-<!-- cabinet-section -->
-<section class="cabinet-section account-section">
-    <div class="auto-container">
-        <div class="row clearfix">
-            <!-- Account Sidebar -->
-            <div class="col-lg-3 col-md-4 col-sm-12">
-                <div class="account-sidebar">
-                    <div class="profile-box">
-                        <div class="profile-info text-center">
-                            <div class="profile-avatar">
-                                <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                            </div>
-                            <h4>{{ user.full_name }}</h4>
-                            {% set contact = user.contact_email or user.phone %}{% if contact %}<p class="text-muted">{{ contact }}</p>{% endif %}
-                        </div>
-                    </div>
-
-                    <div class="account-menu">
-                        <ul class="list-unstyled">
-                            <li{% if active_menu == 'dashboard' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'landing.account.dashboard'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'profile' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'landing.account.profile'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'orders' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'addresses' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'landing.account.addresses'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'subscriptions' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'loyalty' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
-                                </a>
-                            </li>
-                            <li{% if active_menu == 'security' %} class="active"{% endif %}>
-                                <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'landing.account.security'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" data-action="logout">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                </a>
-                            </li>
-                        </ul>
+{%- set nav_items = [
+    ('dashboard', url_for('frontend.my_account'), 'fa-th-large', 'landing.nav.my_account'|t),
+    ('profile', url_for('frontend.profile_settings'), 'fa-user-edit', 'landing.account.profile'|t),
+    ('orders', url_for('frontend.my_orders'), 'fa-shopping-bag', 'landing.account.orders'|t),
+    ('addresses', url_for('frontend.addresses'), 'fa-map-marker-alt', 'landing.account.addresses'|t),
+    ('subscriptions', url_for('frontend.my_subscriptions'), 'fa-sync-alt', 'cabinet.subs.title'|t),
+    ('loyalty', url_for('frontend.my_loyalty'), 'fa-gem', 'landing.account.loyalty'|t),
+    ('security', url_for('frontend.account_security'), 'fa-shield-alt', 'landing.account.security'|t),
+] %}
+{#- One name for the whole cabinet: the greeting name the header and the dashboard greet with (shared.user_names: an
+    entity's company, a person's first name). The line under it is the person behind an entity, else the contact. -#}
+{%- set contact = user.contact_email or user.phone %}
+{%- set display_name = user.greeting_name or contact or '' %}
+{%- set person = user.full_name if user.is_entity_user and user.full_name and user.full_name != display_name else None %}
+{%- set sub_line = person or (contact if contact != display_name else None) %}
+<section class="ae-cabinet-page cabinet-section account-section">
+    <div class="ae-container">
+        <div class="ae-cabinet">
+            {#- The <nav> inside carries the landmark name; the <aside> needs none of its own. -#}
+            <aside class="ae-cabinet-nav account-sidebar">
+                <div class="ae-cabinet-nav__me profile-info">
+                    <span class="ae-cabinet-nav__avatar" aria-hidden="true">{{ (display_name|trim)[:1]|upper or '·' }}</span>
+                    <div class="ae-cabinet-nav__who">
+                        {#- A paragraph, not a heading: the page's outline is H1 (the banner), then the content's H2s. -#}
+                        <p class="ae-cabinet-nav__name">{{ display_name }}</p>
+                        {% if sub_line %}<p class="ae-cabinet-nav__sub text-muted">{{ sub_line }}</p>{% endif %}
                     </div>
                 </div>
-            </div>
+                <nav class="account-menu" aria-label="{{ 'web.cabinet.nav.label'|t }}">
+                    <ul class="ae-cabinet-nav__list">
+                        {%- for key, href, icon, label in nav_items %}
+                        <li{% if active_menu == key %} class="active"{% endif %}>
+                            <a class="ae-cabinet-nav__link" href="{{ href }}"{% if active_menu == key %} aria-current="page"{% endif %}>
+                                <i class="far {{ icon }}" aria-hidden="true"></i><span>{{ label }}</span>
+                            </a>
+                        </li>
+                        {%- endfor %}
+                        <li class="ae-cabinet-nav__out">
+                            <a class="ae-cabinet-nav__link ae-cabinet-nav__link--quiet" href="{{ url_for('frontend.logout') }}" data-action="logout">
+                                <i class="far fa-sign-out-alt" aria-hidden="true"></i><span>{{ 'landing.nav.logout'|t }}</span>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </aside>
 
-            <!-- Cabinet Content -->
-            <div class="col-lg-9 col-md-8 col-sm-12">
-                <div class="cabinet-content account-content">
-                    {% block cabinet_content %}{% endblock %}
-                </div>
+            <div class="ae-cabinet__main cabinet-content account-content">
+                {% block cabinet_content %}{% endblock %}
             </div>
         </div>
     </div>
 </section>
-<!-- cabinet-section end -->
 {% endblock %}
 
 {% block extra_head %}
-<style>
-/* Cabinet Sidebar Container */
-.cabinet-section .account-sidebar {
-    background: #ffffff;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    padding: 25px;
-    margin-bottom: 30px;
-    border: 1px solid #e8e8e8;
-}
-
-/* Profile Box */
-.cabinet-section .profile-box {
-    margin-bottom: 25px;
-    padding-bottom: 25px;
-    border-bottom: 2px solid #f0f0f0;
-}
-
-.cabinet-section .profile-info {
-    text-align: center;
-}
-
-.cabinet-section .profile-avatar {
-    margin-bottom: 15px;
-}
-
-.cabinet-section .profile-avatar i {
-    font-size: 70px !important;
-    color: #1890ff !important;
-    display: block;
-}
-
-.cabinet-section .profile-info h4 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #1a1a2e;
-    margin-bottom: 5px;
-    margin-top: 10px;
-}
-
-.cabinet-section .profile-info p {
-    font-size: 13px;
-    color: #666;
-    margin-bottom: 0;
-}
-
-/* Account Menu */
-.cabinet-section .account-menu {
-    padding: 0;
-}
-
-.cabinet-section .account-menu ul {
-    list-style: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-.cabinet-section .account-menu ul li {
-    margin-bottom: 8px;
-    list-style: none !important;
-}
-
-.cabinet-section .account-menu ul li:last-child {
-    margin-bottom: 0;
-}
-
-.cabinet-section .account-menu ul li a {
-    display: flex !important;
-    align-items: center;
-    padding: 14px 18px;
-    color: #4a4a4a;
-    text-decoration: none !important;
-    border-radius: 8px;
-    transition: all 0.3s ease;
-    font-size: 14px;
-    font-weight: 500;
-    background: #f8f9fa;
-    border: 1px solid transparent;
-}
-
-.cabinet-section .account-menu ul li a:hover {
-    background: #e6f4ff;
-    color: #1890ff;
-    border-color: #1890ff;
-    text-decoration: none !important;
-    transform: translateX(5px);
-}
-
-.cabinet-section .account-menu ul li.active a {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
-    color: #ffffff !important;
-    border-color: #1890ff;
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.35);
-}
-
-.cabinet-section .account-menu ul li.active a:hover {
-    background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
-    transform: translateX(0);
-}
-
-.cabinet-section .account-menu ul li a i {
-    width: 22px;
-    margin-right: 12px;
-    font-size: 16px;
-    text-align: center;
-}
-
-.cabinet-section .account-menu ul li.active a i {
-    color: #ffffff;
-}
-
-/* Logout link special styling */
-.cabinet-section .account-menu ul li:last-child a {
-    background: transparent;
-    color: #ff4d4f;
-    border: 1px dashed #ffccc7;
-}
-
-.cabinet-section .account-menu ul li:last-child a:hover {
-    background: #fff2f0;
-    color: #ff4d4f;
-    border-color: #ff4d4f;
-}
-
-/* Cabinet Content Styles */
-.cabinet-content .card {
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    margin-bottom: 25px;
-}
-
-.cabinet-content .card-header {
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
-    border-radius: 12px 12px 0 0 !important;
-    padding: 18px 25px;
-}
-
-.cabinet-content .card-header h5 {
-    margin: 0;
-    color: #1a1a2e;
-    font-weight: 600;
-}
-
-.cabinet-content .card-header i {
-    margin-right: 10px;
-    color: #1890ff;
-}
-
-.cabinet-content .card-body {
-    padding: 25px;
-}
-
-/* Responsive Design */
-@media (max-width: 991px) {
-    .cabinet-section .account-sidebar {
-        margin-bottom: 30px;
-    }
-}
-
-@media (max-width: 768px) {
-    .cabinet-section .account-sidebar {
-        padding: 20px;
-    }
-
-    .cabinet-section .account-menu ul li a {
-        padding: 12px 15px;
-        font-size: 13px;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/cabinet.css') }}">
 {% block cabinet_extra_head %}{% endblock %}
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ asset_url('js/pages/cabinet.js') }}"></script>
 {% block cabinet_extra_js %}{% endblock %}
 {% endblock %}

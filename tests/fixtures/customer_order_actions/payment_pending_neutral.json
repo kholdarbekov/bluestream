@@ -2,12 +2,12 @@
  "case": "payment_pending_neutral",
  "language": "en",
  "page": {
-  "html": "<section class=\"payment-pending-section\">\n<div class=\"auto-container\">\n<div class=\"pending-content\">\n<div class=\"pending-icon\">\n<i class=\"far fa-hourglass-half\"></i>\n</div>\n<h2>Payment Processing</h2>\n<p>Thank you! We're confirming your payment and will message you in the bot or by email once it's done.</p>\n<div class=\"action-buttons\">\n<a class=\"theme-btn btn-one\" href=\"https://t.me/aqua_element_bot\" rel=\"noopener noreferrer\" target=\"_blank\">\n<i class=\"fab fa-telegram-plane\"></i> Open the bot\n                </a>\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> landing.account.orders\n                </a>\n</div>\n</div>\n</div>\n</section>",
+  "html": "<section class=\"ae-section payment-pending-section\">\n<div class=\"ae-container\">\n<div class=\"ae-card ae-pay__card pending-content\">\n<span aria-hidden=\"true\" class=\"ae-pay__icon ae-pay__icon--info\"><i class=\"far fa-hourglass-half\"></i></span>\n<p class=\"ae-pay__text\">Thank you! We're confirming your payment and will message you in the bot or by email once it's done.</p>\n<div class=\"ae-pay__actions\">\n<a class=\"ae-btn ae-btn--primary\" href=\"https://t.me/aqua_element_bot\" rel=\"noopener noreferrer\" target=\"_blank\">\n<i aria-hidden=\"true\" class=\"fab fa-telegram-plane\"></i>landing.footer.open_bot\n                    </a>\n<a class=\"ae-btn ae-btn--secondary\" href=\"/my-orders\">My orders</a>\n</div>\n</div>\n</div>\n</section>",
   "island": {
    "cancel_url": null,
    "i18n": {
-    "failed": "Payment failed. Please try again.",
-    "timeout": "Payment verification is taking longer than expected. Please check your order status."
+    "failed": "The payment didn’t go through.",
+    "still_pending": "Click hasn’t confirmed it yet. The page keeps checking."
    },
    "order_actions": {
     "confirmed": "Thanks! Your order is confirmed.",

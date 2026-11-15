@@ -5,287 +5,21 @@
   Include it AFTER the base scripts (in `cabinet_extra_js`): its script reads getPageData, apiRequest and
   jQuery as it loads. Inside the content block it ran before them and threw.
 
+  Styles: css/pages/cabinet.css (.ae-modal skin from ae-ui.css + .ae-od-*), which every cabinet page loads.
+  Leaflet (the delivery map) is the vendored copy (static/vendor/leaflet), loaded through map-helper.js AEMap.load the
+  first time a map is drawn, not on every page: the island publishes its URLs (`leaflet`), as order_tracking.html does.
+
   Include this in your template with:
   {% include 'frontend/partials/order_detail_modal.html' %}
 #}
 
-<!-- Order Detail Modal CSS -->
-<style>
-/* Order Detail Modal Styles */
-.order-detail-content {
-    padding: 10px 0;
-}
-
-/* Order Status Badge */
-.order-status {
-    display: inline-block;
-    padding: 8px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    border-radius: 25px;
-    text-transform: capitalize;
-}
-
-.order-status.status-pending { background: #fff3cd; color: #856404; }
-.order-status.status-confirmed { background: #cce5ff; color: #004085; }
-.order-status.status-preparing { background: #d1ecf1; color: #0c5460; }
-.order-status.status-out_for_delivery { background: #d4edda; color: #155724; }
-.order-status.status-delivered { background: #28a745; color: #fff; }
-.order-status.status-cancelled { background: #f8d7da; color: #721c24; }
-/* Not an order status: a failed delivery waiting for a new date (F15). The label is a
-   sentence, so it is not capitalized word by word like the one-word statuses. */
-.order-status.status-awaiting_new_date { background: #fff3cd; color: #856404; text-transform: none; }
-
-/* order-actions.js draws into the modal, the My orders cards and the tracking page. */
-.order-actions__confirm { text-align: left; }
-.order-actions__confirm .btn { min-height: 44px; margin: 0 8px 8px 0; }
-
-/* Modal Order Items Styling */
-.modal-order-items {
-    width: 100%;
-}
-
-.modal-order-item {
-    display: flex;
-    align-items: center;
-    padding: 16px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.modal-order-item:last-child {
-    border-bottom: none;
-}
-
-.modal-order-item .item-image {
-    width: 72px;
-    height: 72px;
-    object-fit: cover;
-    border-radius: 10px;
-    margin-right: 16px;
-    background: #f8f9fa;
-    flex-shrink: 0;
-    border: 1px solid #eee;
-}
-
-.modal-order-item .item-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.modal-order-item .item-name {
-    font-weight: 600;
-    font-size: 15px;
-    color: #333;
-    margin-bottom: 4px;
-}
-
-.modal-order-item .item-sku {
-    font-size: 12px;
-    color: #888;
-}
-
-/* Improved Quantity Styling */
-.modal-order-item .item-qty {
-    text-align: center;
-    padding: 0 24px;
-    min-width: 100px;
-    flex-shrink: 0;
-}
-
-.modal-order-item .item-qty .qty-label {
-    font-size: 10px;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: block;
-    margin-bottom: 6px;
-}
-
-.modal-order-item .item-qty .qty-value {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecf8 100%);
-    border-radius: 10px;
-    font-weight: 700;
-    font-size: 18px;
-    color: #1890ff;
-    border: 2px solid #d0d9f0;
-    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.1);
-}
-
-.modal-order-item .item-total {
-    text-align: right;
-    min-width: 130px;
-    flex-shrink: 0;
-}
-
-.modal-order-item .item-total .total-label {
-    font-size: 10px;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: block;
-    margin-bottom: 4px;
-}
-
-.modal-order-item .item-total .total-value {
-    font-weight: 700;
-    font-size: 17px;
-    color: #1890ff;
-}
-
-/* Address Card Styling */
-.address-card-content {
-    padding: 8px 0;
-}
-
-.address-card-content .address-label {
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    font-size: 14px;
-}
-
-.address-card-content .address-label i {
-    margin-right: 10px;
-    color: #1890ff;
-    font-size: 13px;
-}
-
-.address-card-content .address-text {
-    margin-bottom: 12px;
-}
-
-.address-card-content .address-line {
-    color: #555;
-    margin-bottom: 3px;
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.address-card-content .address-line:last-of-type {
-    margin-bottom: 0;
-}
-
-.address-card-content .no-address {
-    color: #999;
-    font-style: italic;
-    padding: 10px 0;
-}
-
-/* Delivery Map Styling */
-#orderDeliveryMap {
-    height: 180px;
-    width: 100%;
-    border-radius: 10px;
-    margin-top: 12px;
-    border: 1px solid #e0e0e0;
-}
-
-/* Leaflet tile fixes for modal */
-#orderDeliveryMap .leaflet-tile-pane img,
-#orderDeliveryMap img.leaflet-tile {
-    max-width: none !important;
-    max-height: none !important;
-    width: 256px !important;
-    height: 256px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    opacity: 1 !important;
-}
-
-#orderDeliveryMap .leaflet-marker-shadow {
-    display: none !important;
-}
-
-#orderDeliveryMap .leaflet-marker-icon {
-    width: 25px !important;
-    height: 41px !important;
-    margin-left: -12px !important;
-    margin-top: -41px !important;
-}
-
-/* Order Summary Styling */
-.order-summary-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 10px;
-}
-
-.order-summary-row .label {
-    color: #666;
-}
-
-.order-summary-row .value {
-    font-weight: 500;
-    color: #333;
-}
-
-.order-summary-total {
-    display: flex;
-    justify-content: space-between;
-    padding-top: 12px;
-    border-top: 2px solid #f0f0f0;
-    margin-top: 12px;
-}
-
-.order-summary-total .label {
-    font-weight: 700;
-    font-size: 16px;
-    color: #333;
-}
-
-.order-summary-total .value {
-    font-weight: 700;
-    font-size: 18px;
-    color: #1890ff;
-}
-
-/* Tracking Section */
-.tracking-section {
-    background: #f8f9fa;
-    border-radius: 10px;
-    padding: 16px;
-    margin-top: 16px;
-}
-
-.tracking-section h5 {
-    margin-bottom: 12px;
-}
-
-@media (max-width: 768px) {
-    .modal-order-item {
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-
-    .modal-order-item .item-qty,
-    .modal-order-item .item-total {
-        min-width: auto;
-        padding: 8px 0;
-    }
-
-    .modal-order-item .item-qty {
-        padding: 0 16px;
-    }
-}
-</style>
-
 <!-- Order Detail Modal HTML -->
-<div class="modal fade" id="orderDetailModal" tabindex="-1" role="dialog" aria-labelledby="orderDetailModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl" role="document">
+<div class="modal fade ae-modal ae-od" id="orderDetailModal" tabindex="-1" role="dialog" aria-labelledby="orderDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="orderDetailModalLabel">{{ 'Order Details'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                <button type="button" class="close" data-dismiss="modal" aria-label="{{ 'web.order_modal.close'|t }}">
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
@@ -295,41 +29,51 @@
             <div class="modal-footer">
                 {# Pay, Cancel/Skip/Decline and Confirm: drawn here by order-actions.js from the order's
                    `customer_actions` (spec 2026-10-27 §5.3), the same answer the cards and the tracking page draw. #}
-                <div class="w-100" id="orderDetailActions"></div>
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'web.order_modal.close'|t }}</button>
-                {# Reorder: shown, with its label, from the order's `customer_actions.reorder` (order-detail-modal.js). #}
-                <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
-                    <i class="far fa-redo"></i> <span data-reorder-label></span>
-                </button>
+                <div class="ae-od__actions" id="orderDetailActions"></div>
+                <div class="ae-od__buttons">
+                    {# The order's own page (/order-tracking?order_id=N, for every kind of order): its href is set per order. #}
+                    <a class="ae-btn ae-btn--ghost" id="orderTrackLink" href="{{ url_for('frontend.order_tracking') }}">
+                        <i class="far fa-route" aria-hidden="true"></i><span>{{ 'web.checkout.order.track'|t }}</span>
+                    </a>
+                    <button type="button" class="ae-btn ae-btn--secondary" data-dismiss="modal">{{ 'web.order_modal.close'|t }}</button>
+                    {# Reorder: shown, with its label, from the order's `customer_actions.reorder` (order-detail-modal.js). #}
+                    <button type="button" class="ae-btn ae-btn--primary" id="reorderBtn" style="display: none;">
+                        <i class="far fa-redo" aria-hidden="true"></i> <span data-reorder-label></span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Leaflet CSS for map -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""/>
-
-<!-- Order Detail Modal JavaScript -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-        crossorigin=""></script>
 {% from "frontend/macros/page_data.html" import render_page_data %}
+{% from "frontend/macros/order_status.html" import order_status_label, ORDER_STATUS_TONES %}
+{% set od_status_labels = {} %}{% for code in ORDER_STATUS_TONES %}{% set _ = od_status_labels.update({code: order_status_label(code)|striptags}) %}{% endfor %}
 {{ render_page_data({
     'cart_url': url_for('frontend.cart'),
+    'track_url': url_for('frontend.order_tracking', order_id='ORDER_ID'),
     'subscriptions_url': url_for('frontend.my_subscriptions'),
+    'image_placeholder': url_for('static', filename='images/product-placeholder.svg'),
+    'leaflet': {
+        'js': url_for('static', filename='vendor/leaflet/leaflet.js'),
+        'css': url_for('static', filename='vendor/leaflet/leaflet.css'),
+        'images': url_for('static', filename='vendor/leaflet/images/'),
+    },
     'order_actions': order_actions_words(),
+    'status_tones': ORDER_STATUS_TONES,
     'i18n': {
-        'details_failed': 'Failed to load order details' | t,
+        'details_failed': 'web.cabinet.modal.load_failed' | t,
         'order': 'web.order_modal.order' | t,
-        'placed_on': 'Placed on' | t,
+        'order_number': 'web.cabinet.order_number' | t,
+        'placed_on': 'web.cabinet.orders.placed_on' | t,
         'order_items': 'Order Items' | t,
-        'sku': 'SKU' | t,
         'quantity': 'web.order_modal.quantity' | t,
+        'qty_price': 'web.cabinet.orders.qty_price' | t,
+        'reward': 'web.cabinet.orders.reward' | t,
         'price': 'web.order_modal.price' | t,
         'delivery_address': 'Delivery Address' | t,
-        'no_address': 'No delivery address provided' | t,
+        'district': 'web.checkout.addr.district' | t,
+        'no_address': 'web.cabinet.modal.no_address' | t,
         'order_summary': 'Order Summary' | t,
         'subtotal': 'web.order_modal.subtotal' | t,
         'delivery_fee': 'web.order_modal.delivery_fee' | t,
@@ -338,12 +82,12 @@
         'reward_discount': 'Reward discount' | t,
         'tax': 'Tax' | t,
         'total': 'web.order_modal.total' | t,
-        'order_tracking': 'Order Tracking' | t,
-        'tracking_number': 'Tracking Number' | t,
-        'track_package': 'Track Package' | t,
         'delivery_location': 'Delivery Location' | t,
-        'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
+        'zoom_in': 'web.cabinet.modal.zoom_in' | t,
+        'zoom_out': 'web.cabinet.modal.zoom_out' | t,
+        'status_labels': od_status_labels,
     },
 }, element_id='order-detail-modal-data') }}
-<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/order-detail-modal.js') }}"></script>
+<script src="{{ asset_url('js/map-helper.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-actions.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-detail-modal.js') }}"></script>

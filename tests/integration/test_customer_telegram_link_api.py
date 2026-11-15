@@ -293,6 +293,7 @@ def sms(monkeypatch):
 
     def _sms_task(user_id, otp_code, phone_number=None):
         sent.append({"user_id": user_id, "otp": otp_code, "phone": phone_number})
+        return {"success": True}  # the provider took it, as the real task answers
 
     monkeypatch.setattr("business_app.services.auth_service.send_verification_sms_task", _sms_task)
     return sent

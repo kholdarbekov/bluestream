@@ -9,7 +9,7 @@ ARTICLE = {
     "slug": "voda-dlya-ofisa-tashkent",
     "category": "lifestyle",
     "tags": "office,b2b,workplace,corporate,water-delivery,subscription",
-    "featured_image": "/static/images/news/news-4.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "water cooler in a modern office in Tashkent",
     "is_featured": False,
     "sort_order": 85,
@@ -225,39 +225,39 @@ ARTICLE = {
         },
         "uz": {
             "title": "Toshkentda ofis uchun suv: rejalashtirish, obuna va yetkazib berish",
-            "excerpt": "Toshkentdagi ofisda ichimlik suvini tashkil etish bo'yicha amaliy qo'llanma: hajm hisobi, 19 l idishlarni tanlash, kuler gigienasi, korporativ obuna va Aqua Element schyot-fakturasi.",
+            "excerpt": "Toshkentdagi ofisda ichimlik suvini tashkil etish bo‘yicha amaliy qo‘llanma: hajm hisobi, 19 l idishlarni tanlash, kuler gigienasi, korporativ obuna va Aqua Element schyot-fakturasi.",
             "meta_title": "Ofis uchun suv Toshkent — hisob, obuna, yetkazib berish | Aqua Element",
-            "meta_description": "Toshkentdagi ofisga qancha suv kerak? Xodimlar soni bo'yicha hisob, stsenariylar jadvali, to'xtatish bilan obuna va schyot-faktura. Aqua Element artezian suvi.",
+            "meta_description": "Toshkentdagi ofisga qancha suv kerak? Xodimlar soni bo‘yicha hisob, stsenariylar jadvali, to‘xtatish bilan obuna va schyot-faktura. Aqua Element artezian suvi.",
             "content": """
-<p class="lead">Toshkentda yozda harorat osongina 35–40 °C ga yetadi, ofislarda konditsionerlar to'la quvvatda ishlaydi va havoni — u bilan birga xodimlarni ham tez quritadi. Jamoada 10 dan 100 gacha odam bo'lganda, "kulerda suv bormi?" degan savol oddiy maishiy savol bo'lmay qoladi: u to'g'ridan-to'g'ri konsentratsiya, ish tezligi va ish beruvchi obro'siga ta'sir qiladi. Aqua Element'ning ushbu qo'llanmasi ofis menejeri yoki biznes egasiga suv hajmini rejalashtirishga, yetkazib berish formatini tanlashga va ortiqcha xarajat qilmaslikka yordam beradi.</p>
+<p class="lead">Toshkentda yozda harorat osongina 35–40 °C ga yetadi, ofislarda konditsionerlar to‘la quvvatda ishlaydi va havoni — u bilan birga xodimlarni ham tez quritadi. Jamoada 10 dan 100 gacha odam bo‘lganda, "kulerda suv bormi?" degan savol oddiy maishiy savol bo‘lmay qoladi: u to‘g‘ridan-to‘g‘ri konsentratsiya, ish tezligi va ish beruvchi obro‘siga ta’sir qiladi. Aqua Element’ning ushbu qo‘llanmasi ofis menejeri yoki biznes egasiga suv hajmini rejalashtirishga, yetkazib berish formatini tanlashga va ortiqcha xarajat qilmaslikka yordam beradi.</p>
 
 <h2>Nima uchun ofis suvi "mayda gap" emas</h2>
-<p>Gidratatsiya kognitiv ishlash bilan bevosita bog'liq. Tadqiqotlar tana vaznining 1–2% ni suyuqlik shaklida yo'qotish e'tibor, reaktsiya tezligi va qisqa muddatli xotirani pasaytirishini ko'rsatadi. Ofisda xodim ekran oldida 8–9 soat o'tkazadi, konditsionerli xona va muntazam kofe bilan suvsizlanish bilinmasdan rivojlanadi. Ish kunining oxiriga kelib bosh og'rig'i, jahldorlik va "miyada tuman" paydo bo'ladi — ko'pchilik buni charchoqqa bog'laydi.</p>
-<p>Toshkentda buning ustiga iqlim yuki qo'shiladi: yiliga 4–5 oy davomida tashqarida +30 °C dan yuqori, hatto qisqa tushlik chiqishi ham namlik yo'qotishni anglatadi. Biznes uchun bu oddiy ma'noni anglatadi: ish joyidan bir necha qadam masofada sifatli ichimlik suvi — "bonus" emas, balki internet va yorug'lik kabi asosiy infratuzilma.</p>
-<p>Mintaqaga xos qo'shimcha omillar:</p>
+<p>Gidratatsiya kognitiv ishlash bilan bevosita bog‘liq. Tadqiqotlar tana vaznining 1–2% ni suyuqlik shaklida yo‘qotish e’tibor, reaktsiya tezligi va qisqa muddatli xotirani pasaytirishini ko‘rsatadi. Ofisda xodim ekran oldida 8–9 soat o‘tkazadi, konditsionerli xona va muntazam kofe bilan suvsizlanish bilinmasdan rivojlanadi. Ish kunining oxiriga kelib bosh og‘rig‘i, jahldorlik va "miyada tuman" paydo bo‘ladi — ko‘pchilik buni charchoqqa bog‘laydi.</p>
+<p>Toshkentda buning ustiga iqlim yuki qo‘shiladi: yiliga 4–5 oy davomida tashqarida +30 °C dan yuqori, hatto qisqa tushlik chiqishi ham namlik yo‘qotishni anglatadi. Biznes uchun bu oddiy ma’noni anglatadi: ish joyidan bir necha qadam masofada sifatli ichimlik suvi — "bonus" emas, balki internet va yorug‘lik kabi asosiy infratuzilma.</p>
+<p>Mintaqaga xos qo‘shimcha omillar:</p>
 <ul>
-  <li>ofis binolarining aksariyatida jo'mrak suvi qo'shimcha filtrsiz ichish uchun mo'ljallanmagan;</li>
-  <li>yozda xodimlar ko'chadan qizib kelishadi va odatdagidan ko'proq ichishadi;</li>
-  <li>kuler ko'pincha norasmiy muloqot nuqtasiga aylanadi — uning bo'shligi jamoa tomonidan "biz haqimizda qayg'urilmaydi" signali sifatida qabul qilinadi.</li>
+  <li>ofis binolarining aksariyatida jo‘mrak suvi qo‘shimcha filtrsiz ichish uchun mo‘ljallanmagan;</li>
+  <li>yozda xodimlar ko‘chadan qizib kelishadi va odatdagidan ko‘proq ichishadi;</li>
+  <li>kuler ko‘pincha norasmiy muloqot nuqtasiga aylanadi — uning bo‘shligi jamoa tomonidan "biz haqimizda qayg‘urilmaydi" signali sifatida qabul qilinadi.</li>
 </ul>
 
 <h2>Ofisga qancha suv kerak: formula bilan hisoblaymiz</h2>
-<p>Jahon Sog'liqni saqlash tashkiloti kuniga ~2 litr suyuqlik (choy, kofe, sho'rva va mahsulotlardagi suv bilan birga) ni tavsiya qiladi. Lekin <strong>ish kunidagi shisha ichimlik suvi</strong>ni hisoblash uchun ikkita stsenariydan foydalanamiz:</p>
+<p>Jahon Sog‘liqni saqlash tashkiloti kuniga ~2 litr suyuqlik (choy, kofe, sho‘rva va mahsulotlardagi suv bilan birga) ni tavsiya qiladi. Lekin <strong>ish kunidagi shisha ichimlik suvi</strong>ni hisoblash uchun ikkita stsenariydan foydalanamiz:</p>
 <ul>
-  <li><strong>Konservativ:</strong> kishi boshiga 1,0 l. Ofisda ko'p choy/kofe ichilsa va xodimlar o'z suvini olib kelsa.</li>
-  <li><strong>Saxiy:</strong> kishi boshiga 1,5 l. Yoz, faol sotuvlar, call-markazlar, ko'p gapiriladigan jamoalar uchun.</li>
+  <li><strong>Konservativ:</strong> kishi boshiga 1,0 l. Ofisda ko‘p choy/kofe ichilsa va xodimlar o‘z suvini olib kelsa.</li>
+  <li><strong>Saxiy:</strong> kishi boshiga 1,5 l. Yoz, faol sotuvlar, call-markazlar, ko‘p gapiriladigan jamoalar uchun.</li>
 </ul>
 <p>Formula:</p>
 <p><em>Oylik litr = Xodimlar × Kishi boshiga litr × Oydagi ish kunlari</em></p>
-<p>O'zbekistonda besh kunlik hafta odatda 22 ish kuni hisoblanadi. Doimo yuqoriga yaxlitlang — juma kuni kechqurun suvsiz qolmaslik uchun.</p>
+<p>O‘zbekistonda besh kunlik hafta odatda 22 ish kuni hisoblanadi. Doimo yuqoriga yaxlitlang — juma kuni kechqurun suvsiz qolmaslik uchun.</p>
 
 <h3>Hisob namunasi: 20 kishilik ofis</h3>
-<p>Mirzo-Ulug'bek yoki Yunusobod tumanidagi BMda tipik ofis: 20 xodim, besh kunlik hafta, iyul (jazirama).</p>
+<p>Mirzo-Ulug‘bek yoki Yunusobod tumanidagi BMda tipik ofis: 20 xodim, besh kunlik hafta, iyul (jazirama).</p>
 <ul>
   <li>20 × 1,0 × 22 = <strong>440 l/oy</strong> (minimum).</li>
   <li>20 × 1,5 × 22 = <strong>660 l/oy</strong> (yoz uchun zaxira bilan).</li>
 </ul>
-<p>Standart 18,9 l (19 l) idishlarda: 440 ÷ 18,9 ≈ 24 idish/oy. Yozgi cho'qqida — 35 idish. Qulay obuna chastotasi — haftasiga 6–8 idish, ikki yetkazib berish bilan: dushanba va payshanba.</p>
+<p>Standart 18,9 l (19 l) idishlarda: 440 ÷ 18,9 ≈ 24 idish/oy. Yozgi cho‘qqida — 35 idish. Qulay obuna chastotasi — haftasiga 6–8 idish, ikki yetkazib berish bilan: dushanba va payshanba.</p>
 
 <h2>Rejalashtirish stsenariylari: jadval</h2>
 <p>Quyida Toshkentdagi tipik ofis formatlari uchun taxminiy hisob. Raqamlar yoz mavsumida 1,5 l/kishi/kun va 22 ish kunidan kelib chiqib berilgan.</p>
@@ -282,7 +282,7 @@ ARTICLE = {
       <td>haftada 1 marta</td>
     </tr>
     <tr>
-      <td>O'rta ofis</td>
+      <td>O‘rta ofis</td>
       <td>15</td>
       <td>495</td>
       <td>27</td>
@@ -307,126 +307,126 @@ ARTICLE = {
     </tr>
   </tbody>
 </table>
-<p>Zichlik qoidasi: <strong>har 12–15 kishiga 1 dispenser</strong>. Qavat uzun bo'lsa — markazda bittasiga navbat turishdan ko'ra, ikki uchida ikkita kuler yaxshiroq.</p>
+<p>Zichlik qoidasi: <strong>har 12–15 kishiga 1 dispenser</strong>. Qavat uzun bo‘lsa — markazda bittasiga navbat turishdan ko‘ra, ikki uchida ikkita kuler yaxshiroq.</p>
 
 <h2>Narx va sifat: yetkazib beruvchilarni qanday solishtirish kerak</h2>
-<p>Biznes uchun idish narxi emas, balki litr narxi va yetkazib berishning bashoratliligi muhim. Takliflarni solishtirayotganda to'rtta parametrga e'tibor bering:</p>
+<p>Biznes uchun idish narxi emas, balki litr narxi va yetkazib berishning bashoratliligi muhim. Takliflarni solishtirayotganda to‘rtta parametrga e’tibor bering:</p>
 <ul>
-  <li><strong>Obunada avtobuyurtma va yetkazib berish</strong>: tizim har bir buyurtmani jadval bo'yicha o'zi rasmiylashtiradi, yetkazib berish esa doim bepul. Obunadagi suv odatiy narxda hisoblanadi.</li>
+  <li><strong>Obunada avtobuyurtma va yetkazib berish</strong>: tizim har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi, yetkazib berish esa doim bepul. Obunadagi suv odatiy narxda hisoblanadi.</li>
   <li><strong>Idish uchun garov puli</strong>. Bozor standarti — keyingi yetkazib berishda qaytariladigan 19 l aylanma idish. Garov puli va qaytarish shartlarini aniqlang.</li>
-  <li><strong>Moslashuvchanlik</strong>: haftani o'tkazib yuborish (ta'til, korporativ, ofis ko'chish), avgustda chastotani oshirish, tadbir oldidan bir martalik partiya qo'shish.</li>
-  <li><strong>Buxgalteriya hujjatlari</strong>: schyot-faktura, yuridik shaxs bilan shartnoma, sverka dalolatnomasi. Ularsiz xarid kelishuvdan o'tmaydi.</li>
+  <li><strong>Moslashuvchanlik</strong>: haftani o‘tkazib yuborish (ta’til, korporativ, ofis ko‘chish), avgustda chastotani oshirish, tadbir oldidan bir martalik partiya qo‘shish.</li>
+  <li><strong>Buxgalteriya hujjatlari</strong>: schyot-faktura, yuridik shaxs bilan shartnoma, sverka dalolatnomasi. Ularsiz xarid kelishuvdan o‘tmaydi.</li>
 </ul>
-<p>Obuna ofis menejerining og'rig'ining katta qismini olib tashlaydi: jadval oldindan ma'lum, byudjet bashoratli, idishlar kutilmaganda tugamaydi.</p>
+<p>Obuna ofis menejerining og‘rig‘ining katta qismini olib tashlaydi: jadval oldindan ma’lum, byudjet bashoratli, idishlar kutilmaganda tugamaydi.</p>
 
-<h2>Kuler gigienasi: kim mas'ul va qanchalik tez-tez</h2>
-<p>Yopiq 19 litrlik idishdagi suvning o'zi o'rnatish paytigacha steril bo'lib qoladi. Lekin idish dispenserga ag'darilishi bilan tizimga xona havosi, poddonga esa kondensat va chang tushadi. Keyingi narsa kulerga qanchalik tez-tez va qanchalik puxta xizmat ko'rsatilishiga bog'liq.</p>
+<h2>Kuler gigienasi: kim mas’ul va qanchalik tez-tez</h2>
+<p>Yopiq 19 litrlik idishdagi suvning o‘zi o‘rnatish paytigacha steril bo‘lib qoladi. Lekin idish dispenserga ag‘darilishi bilan tizimga xona havosi, poddonga esa kondensat va chang tushadi. Keyingi narsa kulerga qanchalik tez-tez va qanchalik puxta xizmat ko‘rsatilishiga bog‘liq.</p>
 <p>Ofis uchun asosiy gigiena protokoli:</p>
 <ul>
-  <li><strong>Har kuni:</strong> jo'mrak va quyish zonasini 70% spirtli salfetka bilan artish.</li>
-  <li><strong>Har hafta:</strong> tomchi-yig'gich poddonni iliq suv va yuvish vositasi bilan yuvish, quruq artish.</li>
-  <li><strong>Har oyda:</strong> jo'mraklarni tashqi dezinfeksiyalash, oqishlarni tekshirish.</li>
-  <li><strong>Har 6 oyda:</strong> ixtisoslashgan xizmat yoki ishlab chiqaruvchi yo'riqnomasi bo'yicha o'z texnik xodimi tomonidan kuler ichki rezervuarlarini to'liq sanitariya tozalash.</li>
+  <li><strong>Har kuni:</strong> jo‘mrak va quyish zonasini 70% spirtli salfetka bilan artish.</li>
+  <li><strong>Har hafta:</strong> tomchi-yig‘gich poddonni iliq suv va yuvish vositasi bilan yuvish, quruq artish.</li>
+  <li><strong>Har oyda:</strong> jo‘mraklarni tashqi dezinfeksiyalash, oqishlarni tekshirish.</li>
+  <li><strong>Har 6 oyda:</strong> ixtisoslashgan xizmat yoki ishlab chiqaruvchi yo‘riqnomasi bo‘yicha o‘z texnik xodimi tomonidan kuler ichki rezervuarlarini to‘liq sanitariya tozalash.</li>
 </ul>
-<p>Mas'uliyat odatda ofis menejeri yoki AXOda. Yirik kompaniyalarda bu klining bo'yicha pudratchi bilan shartnomada yoziladi. Aqua Element aynan suv yetkazib beradi, shuning uchun dispenserning o'zi tozaligi uchun ijarachi/kuler egasi javobgardir.</p>
+<p>Mas’uliyat odatda ofis menejeri yoki AXOda. Yirik kompaniyalarda bu klining bo‘yicha pudratchi bilan shartnomada yoziladi. Aqua Element aynan suv yetkazib beradi, shuning uchun dispenserning o‘zi tozaligi uchun ijarachi/kuler egasi javobgardir.</p>
 
 <h2>Nega aylanma 19 l — ofis standarti</h2>
-<p>Toshkent bozorida 18,9 litrlik idish (ko'pincha "19 l" deb ataladi) — ofislar uchun eng keng tarqalgan format va bu tasodif emas:</p>
+<p>Toshkent bozorida 18,9 litrlik idish (ko‘pincha "19 l" deb ataladi) — ofislar uchun eng keng tarqalgan format va bu tasodif emas:</p>
 <ul>
-  <li><strong>Moslik:</strong> O'zbekistonda sotiladigan barcha standart top-load dispenserlarga to'g'ri keladi.</li>
+  <li><strong>Moslik:</strong> O‘zbekistonda sotiladigan barcha standart top-load dispenserlarga to‘g‘ri keladi.</li>
   <li><strong>Iqtisod:</strong> litr narxi kichik formatlardan (5 l, 10 l) past.</li>
-  <li><strong>Logistika:</strong> bitta idish — o'rta bo'lim uchun ish kuni, 1–2 kunda almashtirish bashoratli.</li>
-  <li><strong>Ekologiya:</strong> idish yetkazib beruvchiga qaytariladi, yuviladi va ko'p marta qayta ishlatiladi. Chiqindiga kamroq plastik.</li>
+  <li><strong>Logistika:</strong> bitta idish — o‘rta bo‘lim uchun ish kuni, 1–2 kunda almashtirish bashoratli.</li>
+  <li><strong>Ekologiya:</strong> idish yetkazib beruvchiga qaytariladi, yuviladi va ko‘p marta qayta ishlatiladi. Chiqindiga kamroq plastik.</li>
 </ul>
-<p>10 l format faqat muzokara xonalari va keytering uchun ma'noga ega, idish stolga qo'yilganda. Asosiy ichimlik rejimi uchun — bu kulerdagi 19 l.</p>
+<p>10 l format faqat muzokara xonalari va keytering uchun ma’noga ega, idish stolga qo‘yilganda. Asosiy ichimlik rejimi uchun — bu kulerdagi 19 l.</p>
 
 <h3>Ofis dispenserida nima muhim</h3>
-<p>Aqua Element kulerlar sotmaydi — biz faqat suv yetkazib beramiz. Lekin ofis uchun dispenser tanlashda quyidagilarga e'tibor bering:</p>
+<p>Aqua Element kulerlar sotmaydi — biz faqat suv yetkazib beramiz. Lekin ofis uchun dispenser tanlashda quyidagilarga e’tibor bering:</p>
 <ul>
-  <li>55 mm bo'g'iz bilan moslik (19 l standarti);</li>
+  <li>55 mm bo‘g‘iz bilan moslik (19 l standarti);</li>
   <li>isitish va sovutish (yoz uchun sovuq majburiy);</li>
   <li>tasodifiy issiq suvni yoqishdan himoya (mehmonlar bolalari va stajerlar uchun muhim);</li>
   <li>kundalik tozalash uchun poddonga oson kirish.</li>
 </ul>
 
 <h2>Aqua Element ofislarga qanday xizmat qiladi</h2>
-<p>Aqua Element — Quyichirchiq tumanidagi taxminan 120 m chuqurlikdagi quduqdan olingan artezian ichimlik suvi. Suv <a href="/process/11-step-filtration">11 bosqichli filtratsiya</a>dan o'tadi: kvarts qum, faollashtirilgan ko'mir, regeneratsiyali ion almashinuv yumshatgich, 5 va 1 mkm mexanik tozalash kartrijlari, teskari osmos, CIP membrana yuvish, ultrabinafsha, reminerallashtirish va yakuniy ozonlash. Mineral profil muvozanatda qoladi: TDS 30–50 mg/l, pH 7,5, kaltsiy 10–60, magniy 7–20, natriy 5–15 mg/l. Sifat Sanepid tomonidan tasdiqlangan.</p>
+<p>Aqua Element — Quyichirchiq tumanidagi taxminan 120 m chuqurlikdagi quduqdan olingan artezian ichimlik suvi. Suv <a href="/process/11-step-filtration">11 bosqichli filtratsiya</a>dan o‘tadi: kvarts qum, faollashtirilgan ko‘mir, regeneratsiyali ion almashinuv yumshatgich, 5 va 1 mkm mexanik tozalash kartrijlari, teskari osmos, CIP membrana yuvish, ultrabinafsha, reminerallashtirish va yakuniy ozonlash. Mineral profil muvozanatda qoladi: TDS 30–50 mg/l, pH 7,5, kaltsiy 10–60, magniy 7–20, natriy 5–15 mg/l. Sifat Sanepid tomonidan tasdiqlangan.</p>
 <p>Biznes uchun aynan nimani taklif qilamiz:</p>
 <ul>
   <li><strong>Obuna</strong> 19 l va 10 l uchun belgilangan jadval bilan — <a href="/subscriptions">Obunalar</a> sahifasida rasmiylashtiriladi.</li>
-  <li><strong>Moslashuvchanlik:</strong> ta'tilga to'xtatish, sanani ko'chirish, yoz oylariga chastotani kuchaytirish.</li>
-  <li><strong>Hujjatlar:</strong> yuridik shaxs bilan shartnoma, to'lov schyoti, schyot-faktura, dalolatnoma.</li>
-  <li><strong>Telegram-bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> ofis menejeri uchun: holatni ko'rish, qo'shimcha buyurtma berish, tadbir uchun bir martalik partiya qo'shish.</li>
-  <li><strong>Qaytariladigan tara:</strong> 19 l idishlar aylanma, keyingi yetkazib berishda bo'shlarini olib ketamiz.</li>
+  <li><strong>Moslashuvchanlik:</strong> ta’tilga to‘xtatish, sanani ko‘chirish, yoz oylariga chastotani kuchaytirish.</li>
+  <li><strong>Hujjatlar:</strong> yuridik shaxs bilan shartnoma, to‘lov schyoti, schyot-faktura, dalolatnoma.</li>
+  <li><strong>Telegram-bot</strong> <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> ofis menejeri uchun: holatni ko‘rish, qo‘shimcha buyurtma berish, tadbir uchun bir martalik partiya qo‘shish.</li>
+  <li><strong>Qaytariladigan tara:</strong> 19 l idishlar aylanma, keyingi yetkazib berishda bo‘shlarini olib ketamiz.</li>
   <li><strong>Xizmat hududi:</strong> Toshkent shahri va Toshkent viloyati.</li>
 </ul>
 
 <h2>Ofis hisobini qanday ochish kerak</h2>
 <p>Korporativ yetkazib berishni boshlash uchun uchta qadam:</p>
 <ol>
-  <li><a href="/contact">Kontaktlar</a> sahifasida shaklni to'ldiring yoki menejerga yozing: xodimlar soni, manzil, haftada qancha idish kerakligini ko'rsating.</li>
+  <li><a href="/contact">Kontaktlar</a> sahifasida shaklni to‘ldiring yoki menejerga yozing: xodimlar soni, manzil, haftada qancha idish kerakligini ko‘rsating.</li>
   <li>Biz jadval, tarif rejasi, shartnoma rekvizitlarini kelishib olamiz va hujjatlarni imzolaymiz.</li>
-  <li>Shundan keyin yetkazib berish jadval bo'yicha, eslatmalarsiz davom etadi.</li>
+  <li>Shundan keyin yetkazib berish jadval bo‘yicha, eslatmalarsiz davom etadi.</li>
 </ol>
-<p>Shartnoma rasmiylashtirmasdan assortiment va narxlarni baholash istasangiz — <a href="/shop">do'kon</a>ga qarang va jismoniy shaxs sifatida sinov buyurtma bering.</p>
+<p>Shartnoma rasmiylashtirmasdan assortiment va narxlarni baholash istasangiz — <a href="/shop">do‘kon</a>ga qarang va jismoniy shaxs sifatida sinov buyurtma bering.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 <h3>20 kishilik ofisga qancha idish kerak?</h3>
-<p>O'rtacha oyiga 24 ta 19 l idish (1 l/kishi/kun normada) va yozda 1,5 l/kishi/kun normada 30–35 ta. Qulay jadval — haftasiga 6–8 idish, ikki yetkazib berish.</p>
+<p>O‘rtacha oyiga 24 ta 19 l idish (1 l/kishi/kun normada) va yozda 1,5 l/kishi/kun normada 30–35 ta. Qulay jadval — haftasiga 6–8 idish, ikki yetkazib berish.</p>
 <h3>Siz kulerlar/dispenserlar yetkazib berasizmi?</h3>
-<p>Yo'q. Aqua Element — suv yetkazib beruvchi. Kulerni alohida sotib olasiz yoki ijaraga olasiz. Biz 19 l idish uchun mos top-load modelini tanlashga yordam beramiz.</p>
+<p>Yo‘q. Aqua Element — suv yetkazib beruvchi. Kulerni alohida sotib olasiz yoki ijaraga olasiz. Biz 19 l idish uchun mos top-load modelini tanlashga yordam beramiz.</p>
 <h3>Schyot-faktura va shartnoma olish mumkinmi?</h3>
-<p>Ha. Yuridik shaxslar uchun korporativ yetkazib berish shartnomasini, to'lov schyoti, schyot-faktura va sverka dalolatnomasini rasmiylashtiramiz.</p>
-<h3>Ta'til vaqtida yetkazib berishni to'xtatish mumkinmi?</h3>
-<p>Ha. Obuna istalgan miqdordagi haftalarni o'tkazib yuborish imkonini beradi — menejerga aytish yoki shaxsiy kabinet/botda "pauza" bosish kifoya.</p>
+<p>Ha. Yuridik shaxslar uchun korporativ yetkazib berish shartnomasini, to‘lov schyoti, schyot-faktura va sverka dalolatnomasini rasmiylashtiramiz.</p>
+<h3>Ta’til vaqtida yetkazib berishni to‘xtatish mumkinmi?</h3>
+<p>Ha. Obuna istalgan miqdordagi haftalarni o‘tkazib yuborish imkonini beradi — menejerga aytish yoki shaxsiy kabinet/botda "pauza" bosish kifoya.</p>
 <h3>Muzokara xonalari uchun shisha bormi?</h3>
-<p>Bizdagi standart ofis formati — 19 l va 10 l. Muzokara xonalari uchun stolga 10 litrlik idish qo'yish yoki kulerdan grafinlardan foydalanish mumkin. Alohida shisha xizmati haqida menejerdan so'rang.</p>
+<p>Bizdagi standart ofis formati — 19 l va 10 l. Muzokara xonalari uchun stolga 10 litrlik idish qo‘yish yoki kulerdan grafinlardan foydalanish mumkin. Alohida shisha xizmati haqida menejerdan so‘rang.</p>
 <h3>Yetkazib berishlar orasida kuler gigienasi uchun kim javobgar?</h3>
-<p>Dispenserning o'zi tozaligi — ofis tomonida (AXO, klining). Har 6 oyda ichki rezervuarlarni sanitariya tozalash tavsiya etiladi. Aqua Element idish o'rnatilgunga qadar suv sterilligi uchun javobgardir.</p>
+<p>Dispenserning o‘zi tozaligi — ofis tomonida (AXO, klining). Har 6 oyda ichki rezervuarlarni sanitariya tozalash tavsiya etiladi. Aqua Element idish o‘rnatilgunga qadar suv sterilligi uchun javobgardir.</p>
 <h3>Ofislar uchun obunaning qanday afzalliklari bor?</h3>
-<p>Asosiysi — avtobuyurtma: obuna har bir buyurtmani jadval bo'yicha o'zi rasmiylashtiradi, shuning uchun kulerdagi suv eng kerakli paytda tugab qolmaydi. Yetkazib berish doim bepul, har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi. Obunadagi suv odatiy narxda hisoblanadi. Yirik shartnomalar uchun (haftada 50+ idish) individual shartlarni kelishamiz — <a href="/contact">kontaktlar sahifasi</a> orqali murojaat qiling.</p>
+<p>Asosiysi — avtobuyurtma: obuna har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi, shuning uchun kulerdagi suv eng kerakli paytda tugab qolmaydi. Yetkazib berish doim bepul, har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi. Obunadagi suv odatiy narxda hisoblanadi. Yirik shartnomalar uchun (haftada 50+ idish) individual shartlarni kelishamiz — <a href="/contact">kontaktlar sahifasi</a> orqali murojaat qiling.</p>
 <h3>Kulerda suv kutilmaganda tugab qolsa nima qilish kerak?</h3>
-<p>Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali oddiy buyurtma bering. Suvsiz qolmaslik uchun kamida 1 kunlik zaxira — odatda 1–2 to'liq idish saqlang.</p>
+<p>Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali oddiy buyurtma bering. Suvsiz qolmaslik uchun kamida 1 kunlik zaxira — odatda 1–2 to‘liq idish saqlang.</p>
 <h3>Korporativ mijoz uchun minimal hajm qancha?</h3>
-<p>Eng kichik buyurtma shu maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; biz 5 kishilik kichik ofislarga ham xizmat ko'rsatamiz. Lekin avtobuyurtma oyiga 8 ta 19 l idishdan boshlab ofislar uchun ayniqsa qulay: tizim buyurtmalarni o'zi rasmiylashtiradi, shunda kuler eng kerakli paytda bo'sh qolmaydi.</p>
+<p>Eng kichik buyurtma shu maqola ostidagi «narx va yetkazib berish» blokida ko‘rsatilgan; biz 5 kishilik kichik ofislarga ham xizmat ko‘rsatamiz. Lekin avtobuyurtma oyiga 8 ta 19 l idishdan boshlab ofislar uchun ayniqsa qulay: tizim buyurtmalarni o‘zi rasmiylashtiradi, shunda kuler eng kerakli paytda bo‘sh qolmaydi.</p>
 
-<h2>Mavsumiy cho'qqilar va ularga tayyorgarlik</h2>
-<p>Toshkentda ofislardagi ichimlik suviga talab yil davomida bir tekis emas. Biz oldindan tayyorgarlik ko'rish kerak bo'lgan uchta aniq cho'qqini ko'ramiz:</p>
+<h2>Mavsumiy cho‘qqilar va ularga tayyorgarlik</h2>
+<p>Toshkentda ofislardagi ichimlik suviga talab yil davomida bir tekis emas. Biz oldindan tayyorgarlik ko‘rish kerak bo‘lgan uchta aniq cho‘qqini ko‘ramiz:</p>
 <ul>
-  <li><strong>Iyun oxiri — avgust.</strong> Cho'qqi jazirama. Sarf bahorga nisbatan 40–60% ga oshadi. Yetkazib berish chastotasini oshirishni va qavatga 2–3 ta zaxira idishni rejalashtiring.</li>
-  <li><strong>Sentyabr — o'quv va biznes yili boshi.</strong> Ko'p kompaniyalar ta'tildan qaytadi, shtatni kengaytiradi, treninglar o'tkazadi. Sarf yana oshadi.</li>
-  <li><strong>Dekabr oxiri.</strong> Korporativ tadbirlar, yakuniy uchrashuvlar, kengaytirilgan smenalar. Bu erda tadbir uchun bir martalik qo'shimcha buyurtma foydali.</li>
+  <li><strong>Iyun oxiri — avgust.</strong> Cho‘qqi jazirama. Sarf bahorga nisbatan 40–60% ga oshadi. Yetkazib berish chastotasini oshirishni va qavatga 2–3 ta zaxira idishni rejalashtiring.</li>
+  <li><strong>Sentyabr — o‘quv va biznes yili boshi.</strong> Ko‘p kompaniyalar ta’tildan qaytadi, shtatni kengaytiradi, treninglar o‘tkazadi. Sarf yana oshadi.</li>
+  <li><strong>Dekabr oxiri.</strong> Korporativ tadbirlar, yakuniy uchrashuvlar, kengaytirilgan smenalar. Bu erda tadbir uchun bir martalik qo‘shimcha buyurtma foydali.</li>
 </ul>
 <p>Aqua Element obunasi "yozgi rejim" — iyundan avgustgacha kuchaytirilgan chastotani sozlash va kuzda shartnomani qayta rasmiylashtirmasdan standart jadvalga avtomatik qaytish imkonini beradi.</p>
-<p>Agar kompaniyaning Toshkentning turli tumanlarida bir nechta ofisi bo'lsa (masalan, markazdagi bosh ofis va Sergelidagi ombor), biz alohida yetkazib berish jadvallari va oy oxirida yagona schyot-faktura bilan yagona shartnomani taklif qilamiz — bu buxgalteriya ishini sezilarli darajada osonlashtiradi.</p>
+<p>Agar kompaniyaning Toshkentning turli tumanlarida bir nechta ofisi bo‘lsa (masalan, markazdagi bosh ofis va Sergelidagi ombor), biz alohida yetkazib berish jadvallari va oy oxirida yagona schyot-faktura bilan yagona shartnomani taklif qilamiz — bu buxgalteriya ishini sezilarli darajada osonlashtiradi.</p>
 
 <h2>Ofis suvini tashkil qilishda keng tarqalgan xatolar</h2>
-<p>Korporativ mijozlar bilan ishlash yillari davomida biz takrorlanadigan xatolarni ko'ramiz. Ulardan qochish oson:</p>
+<p>Korporativ mijozlar bilan ishlash yillari davomida biz takrorlanadigan xatolarni ko‘ramiz. Ulardan qochish oson:</p>
 <ul>
-  <li><strong>30+ kishiga bitta kuler.</strong> Unga navbat turadi, xodimlar jo'mrak suvini ichishni yoki o'z suvini olib kelishni boshlaydi. Yechim — ikkinchi dispenser qo'shish.</li>
+  <li><strong>30+ kishiga bitta kuler.</strong> Unga navbat turadi, xodimlar jo‘mrak suvini ichishni yoki o‘z suvini olib kelishni boshlaydi. Yechim — ikkinchi dispenser qo‘shish.</li>
   <li><strong>"Tugagandan keyin" buyurtma.</strong> Juma, tushlik, idish tugadi — ofis yetkazib berishni suvsiz kutadi. Yechim — obuna va 1–2 idishlik bufer.</li>
-  <li><strong>Poddon gigienasini e'tiborsiz qoldirish.</strong> Unda namlik va chang to'planadi, hid paydo bo'ladi. Yechim — klining ro'yxatiga haftalik tozalashni kiritish.</li>
+  <li><strong>Poddon gigienasini e’tiborsiz qoldirish.</strong> Unda namlik va chang to‘planadi, hid paydo bo‘ladi. Yechim — klining ro‘yxatiga haftalik tozalashni kiritish.</li>
   <li><strong>Idishlarni quyoshda saqlash.</strong> Janub tomondagi deraza yonida turgan zaxira qiziydi. Yechim — zaxirani soyada yoki yordamchi xonada 5–25 °C haroratda saqlash.</li>
-  <li><strong>Aniq mas'ul shaxsning yo'qligi.</strong> "Suv — umumiy ish" bo'lganda, u bilan hech kim shug'ullanmaydi. Yechim — obuna va kuler tozaligi uchun ofis menejerini yoki AXOni mas'ul qilib tayinlash.</li>
+  <li><strong>Aniq mas’ul shaxsning yo‘qligi.</strong> "Suv — umumiy ish" bo‘lganda, u bilan hech kim shug‘ullanmaydi. Yechim — obuna va kuler tozaligi uchun ofis menejerini yoki AXOni mas’ul qilib tayinlash.</li>
 </ul>
 
 <h2>Xulosa</h2>
-<p>Ofis suvi — bu "sarflanadigan material" emas, balki infratuzilma. Formula bo'yicha hisoblang, har 12–15 kishiga 1 dispenser saqlang, pauza imkoniyati va schyot-faktura bilan obunani tanlang. Aqua Element vazifani kalit topshirib hal qiladi: <a href="/process/11-step-filtration">11 bosqichli artezian suvi</a>, moslashuvchan <a href="/subscriptions">korporativ obuna</a>, qaytariladigan 19 l tara va ofis menejeri uchun Telegram-bot. Yetkazib berishlarni boshlash uchun — <a href="/contact">Kontaktlar</a> sahifasidagi shaklni to'ldiring.</p>
+<p>Ofis suvi — bu "sarflanadigan material" emas, balki infratuzilma. Formula bo‘yicha hisoblang, har 12–15 kishiga 1 dispenser saqlang, pauza imkoniyati va schyot-faktura bilan obunani tanlang. Aqua Element vazifani kalit topshirib hal qiladi: <a href="/process/11-step-filtration">11 bosqichli artezian suvi</a>, moslashuvchan <a href="/subscriptions">korporativ obuna</a>, qaytariladigan 19 l tara va ofis menejeri uchun Telegram-bot. Yetkazib berishlarni boshlash uchun — <a href="/contact">Kontaktlar</a> sahifasidagi shaklni to‘ldiring.</p>
 
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "20 kishilik ofisga qancha idish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "O'rtacha oyiga 24 ta 19 l idish, yozda 30–35 ta."}},
-    {"@type": "Question", "name": "Siz kulerlar yetkazib berasizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo'q. Aqua Element faqat suv yetkazib beradi. Kuler alohida sotib olinadi."}},
-    {"@type": "Question", "name": "Schyot-faktura olish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Yuridik shaxslar uchun shartnoma, to'lov schyoti, schyot-faktura va sverka dalolatnomasi rasmiylashtiriladi."}},
-    {"@type": "Question", "name": "Ta'til vaqtida to'xtatish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, obuna haftalarni o'tkazib yuborishga imkon beradi."}},
+    {"@type": "Question", "name": "20 kishilik ofisga qancha idish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "O‘rtacha oyiga 24 ta 19 l idish, yozda 30–35 ta."}},
+    {"@type": "Question", "name": "Siz kulerlar yetkazib berasizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q. Aqua Element faqat suv yetkazib beradi. Kuler alohida sotib olinadi."}},
+    {"@type": "Question", "name": "Schyot-faktura olish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Yuridik shaxslar uchun shartnoma, to‘lov schyoti, schyot-faktura va sverka dalolatnomasi rasmiylashtiriladi."}},
+    {"@type": "Question", "name": "Ta’til vaqtida to‘xtatish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, obuna haftalarni o‘tkazib yuborishga imkon beradi."}},
     {"@type": "Question", "name": "Muzokara xonalari uchun shisha bormi?", "acceptedAnswer": {"@type": "Answer", "text": "Standart format 19 l va 10 l. Muzokaralar uchun 10 litrlik idish yoki grafinlar mos."}},
     {"@type": "Question", "name": "Kuler gigienasi uchun kim javobgar?", "acceptedAnswer": {"@type": "Answer", "text": "Dispenserning tozaligi ofis tomonida. Aqua Element idishdagi suv sterilligi uchun javobgar."}},
-    {"@type": "Question", "name": "Ofislar uchun obunaning qanday afzalliklari bor?", "acceptedAnswer": {"@type": "Answer", "text": "Asosiysi — avtobuyurtma: obuna buyurtmalarni jadval bo'yicha o'zi rasmiylashtiradi. Yetkazib berish doim bepul, AquaCoins darajangiz stavkasida hisoblanadi. Yirik shartnomalar uchun individual shartlar."}},
-    {"@type": "Question", "name": "Suv tugab qolsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-bot @aqua_element_bot orqali buyurtma bering va zaxirada 1–2 to'liq idish saqlang."}},
-    {"@type": "Question", "name": "Minimal hajm qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Eng kichik buyurtma maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; avtobuyurtma oyiga 8 ta idishdan boshlab ofislar uchun ayniqsa qulay."}}
+    {"@type": "Question", "name": "Ofislar uchun obunaning qanday afzalliklari bor?", "acceptedAnswer": {"@type": "Answer", "text": "Asosiysi — avtobuyurtma: obuna buyurtmalarni jadval bo‘yicha o‘zi rasmiylashtiradi. Yetkazib berish doim bepul, AquaCoins darajangiz stavkasida hisoblanadi. Yirik shartnomalar uchun individual shartlar."}},
+    {"@type": "Question", "name": "Suv tugab qolsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Telegram-bot @aqua_element_bot orqali buyurtma bering va zaxirada 1–2 to‘liq idish saqlang."}},
+    {"@type": "Question", "name": "Minimal hajm qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Eng kichik buyurtma maqola ostidagi «narx va yetkazib berish» blokida ko‘rsatilgan; avtobuyurtma oyiga 8 ta idishdan boshlab ofislar uchun ayniqsa qulay."}}
   ]
 }
 </script>

@@ -16,12 +16,14 @@ import pytest
 from bs4 import BeautifulSoup
 
 from business_app.models.order import Order
+from business_app.models.translation import Translation
 from business_app.services import order_schedule_service
 from business_app.utils import display_labels
 from business_app.utils.local_windows import local_date
 from shared.constants import DISPLAY_TIMEZONE, get_delivery_statement
 from shared.enums import DeliveryStatus as DS
 from shared.enums import OrderStatus as OS
+from scripts.seed_web_ui_checkout_translations import TRANSLATIONS as CHECKOUT
 from tests.integration.public_page_builders import flat, seed_copy, shipped
 from tests.integration.sales_pay_builders import freeze_local_now
 from tests.integration.test_web_pages_show_awaiting_new_date import _seed_order, _stepper
@@ -34,14 +36,21 @@ PAGES = {
     "confirmation": "/order-confirmation?order_id={}&lang={}",
     "tracking": "/order-tracking?order_id={}&lang={}",
 }
-# The tracking page's Out for Delivery line. Its `|t` key is its English text and no seed ships a row for it, so it
-# renders as the key in every language.
-START_SOON = "Delivery will start soon"
+
+
+def _start_soon(lang) -> str:
+    """The tracking page's Out for Delivery line beside the statement (the checkout group's seed)."""
+    return CHECKOUT[lang]["web.checkout.track.start_soon"]
 
 
 @pytest.fixture(autouse=True)
 def order_copy(app, db):
     seed_copy(db, ("landing.order", "web.display_labels"))
+    for language, rows in CHECKOUT.items():
+        for key, value in rows.items():
+            if key.startswith("web.checkout.track."):
+                db.session.add(Translation(key=key, language=language, value=value, category="web", is_active=True))
+    db.session.commit()
     app.jinja_env.cache.clear()
     yield
     app.jinja_env.cache.clear()
@@ -112,7 +121,7 @@ def test_an_order_for_today_shows_the_statement_and_no_date(
     assert _statement_on(soup) == _statement(lang)
     assert "Estimated" not in text and shipped("landing.order.scheduled_for", lang) not in text
     if name == "tracking":  # the Out for Delivery step: the start-soon line stands beside the statement
-        assert _stepper(soup)[3] == ("", START_SOON)
+        assert _stepper(soup)[3] == ("", _start_soon(lang))
 
 
 def test_a_today_order_placed_before_the_first_shift_still_shows_the_statement(
@@ -169,7 +178,7 @@ def test_a_waiting_delivered_or_cancelled_order_shows_neither(
     assert _statement_on(soup) is None
     assert shipped("landing.order.scheduled_for", "en") not in _text(soup)
     if name == "tracking":  # no statement, so no "Delivery will start soon" either (a cancelled order printed it)
-        assert START_SOON not in [description for _state, description in _stepper(soup)]
+        assert _start_soon("en") not in [description for _state, description in _stepper(soup)]
 
 
 @pytest.mark.parametrize("lang", LANGS)

@@ -10,14 +10,14 @@ ARTICLE = {
     "slug": "podpiska-na-vodu-tashkent",
     "category": "company_news",
     "tags": "subscription,auto-order,recurring,plan,convenience,delivery,tashkent",
-    "featured_image": "/static/images/news/news-8.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "customer scheduling water-delivery subscription on a phone",
     "is_featured": False,
     "sort_order": 70,
     "translations": {
         "ru": {
             "title": "Подписка на воду в Ташкенте: автодоставка, возвратные бутыли, без перебоев",
-            "excerpt": "Подписка на воду в Ташкенте от Aqua Element — регулярная доставка 19 л и 10 л бутылей с удобной периодичностью. Пустая бутыль 19 л возвращается со следующей доставкой, расходы предсказуемы. Управляйте графиком на сайте, в Telegram-боте или по телефону.",
+            "excerpt": "Подписка на воду в Ташкенте от Aqua Element — регулярная доставка 19 л и 10 л бутылей с удобной периодичностью. Пустая бутыль 19 л возвращается со следующей доставкой, расходы предсказуемы. Управляйте графиком на сайте или в Telegram-боте.",
             "meta_title": "Подписка на воду в Ташкенте — автодоставка 19 л и 10 л | Aqua Element",
             "meta_description": "Подписка на воду в Ташкенте: автодоставка 19 л и 10 л, возврат бутылей 19 л, гибкий график, оформление в Telegram-боте и на сайте Aqua Element.",
             "content": """
@@ -47,10 +47,10 @@ ARTICLE = {
 <p>На каждой доставке курьер забирает пустые 19 л бутыли и привозит полные. Цикл закрытый: вы не храните пустую тару неделями, а возвратные бутыли проходят промышленную мойку и санитарную обработку перед повторным розливом.</p>
 
 <h3>4. Бесплатная доставка и AquaCoins</h3>
-<p>Доставка всегда бесплатная — и по подписке, и при разовом заказе. За каждую доставку по подписке вы получаете AquaCoins по ставке вашего уровня и можете обменивать их на награды. Воду по подписке вы покупаете по обычной цене; главное преимущество — автозаказ: система сама оформляет каждый заказ по графику, и вы больше не забываете заказать воду. Актуальные условия — на странице <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Доставка всегда бесплатная — и по подписке, и при разовом заказе. За каждую доставку по подписке вы получаете AquaCoins по ставке вашего уровня и можете обменивать их на награды. Воду по подписке вы покупаете по обычной цене; главное преимущество — автозаказ: система сама оформляет каждый заказ по графику, и вы больше не забываете заказать воду. Актуальные условия — на <a href="/subscriptions">странице подписки</a>.</p>
 
 <h3>5. Гибкость: пауза, пропуск, отмена</h3>
-<p>Уехали в отпуск на месяц? Поставьте подписку на паузу. Нужно пропустить одну доставку? Это делается в один клик. Хотите отменить — отмена доступна без штрафов в стандартных условиях. Подробности и текущие правила — на странице <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Уехали в отпуск на месяц? Поставьте подписку на паузу. Нужно пропустить одну доставку? Это делается в один клик. Хотите отменить — отмена доступна без штрафов в стандартных условиях. Подробности и текущие правила — на <a href="/subscriptions">странице подписки</a>.</p>
 
 <h3>6. Меньше пластика на единицу воды</h3>
 <p>Возвратная 19 л бутыль обслуживает десятки циклов. Это меньше одноразового пластика на литр выпитой воды, чем у мелкой расфасовки. Если для вас важна экологическая нагрузка — подписка с акцентом на 19 л формат уменьшает её ощутимо.</p>
@@ -116,12 +116,11 @@ ARTICLE = {
 
 <p>Если вы не уверены, начните с консервативной оценки и через 2–3 доставки скорректируйте план — изменить количество бутылей и периодичность можно в любой момент в личном кабинете или Telegram-боте.</p>
 
-<h2>Как оформить подписку: три канала</h2>
-<p>Aqua Element поддерживает три равноправных канала оформления подписки. Вы можете начать в одном и продолжить в другом — данные синхронизированы.</p>
+<h2>Как оформить подписку: два канала</h2>
+<p>Подписку Aqua Element можно оформить двумя равноправными способами. Вы можете начать в одном и продолжить в другом — данные синхронизированы.</p>
 <ul>
-<li><strong>Сайт</strong>: страница <a href="/subscriptions">/subscriptions</a> — выбор формата, количества, периодичности, адреса и оплаты в одном экране.</li>
+<li><strong>Сайт</strong>: <a href="/subscriptions">страница подписки</a> — выбор формата, количества, периодичности, адреса и оплаты в одном экране.</li>
 <li><strong>Telegram-бот</strong>: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Самый удобный канал для повторных клиентов — управление подпиской, история доставок, перенос, пауза и связь с менеджером в одном чате.</li>
-<li><strong>Телефон</strong>: классический способ — оператор согласует график и оформит подписку за вас. Подходит, если вы оформляете для офиса или предпочитаете говорить голосом.</li>
 </ul>
 
 <h2>Логистика возвратной тары на подписке</h2>
@@ -143,7 +142,7 @@ ARTICLE = {
 <li>Минерализация — возврат сбалансированного профиля Ca, Mg, Na, K, HCO₃.</li>
 <li>Озонирование — финальная санитарная обработка перед розливом.</li>
 </ol>
-<p>На выходе — стабильный профиль: TDS 30–50, pH 7,5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 мг/л. Подробное описание каждого этапа — на странице <a href="/process/11-step-filtration">/process/11-step-filtration</a>. Деятельность находится под надзором Sanepid.</p>
+<p>На выходе — стабильный профиль: TDS 30–50, pH 7,5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 мг/л. Подробное описание каждого этапа — на <a href="/process/11-step-filtration">странице об 11 этапах фильтрации</a>. Деятельность находится под надзором Sanepid.</p>
 
 <h2>Подписка как часть инфраструктуры дома и офиса</h2>
 <p>Когда вода приезжает по графику, она перестаёт быть задачей и становится инфраструктурой — как электричество или интернет. Это особенно ощутимо для офисов: HR и АХО получают предсказуемый расход и не разбираются с заявками каждую неделю. Для семей подписка — это один из тех «маленьких автоматизмов», которые суммарно высвобождают часы в месяц и убирают мелкие, но раздражающие провалы.</p>
@@ -153,7 +152,7 @@ ARTICLE = {
 <p>В Ташкенте расход питьевой воды заметно меняется по сезонам. С июня по август расход легко вырастает на 30–50% по сравнению с зимой: жара, спорт, больше чая со льдом и холодной воды для гостей. Подписка позволяет учесть это без хлопот: летом вы добавляете одну дополнительную бутыль в неделю или временно переходите на более частую периодичность, осенью возвращаетесь к привычному графику. Все изменения вносятся в личном кабинете или в Telegram-боте за минуту и применяются со следующей доставки. Не нужно держать таблицу расхода — достаточно реагировать на наблюдаемое: если за месяц вы один раз остались без воды или заказывали внеплановую доставку, увеличьте план на одну позицию.</p>
 
 <h2>Подписка для офисов: операционное удобство</h2>
-<p>Для бизнеса подписка — это не только удобство, но и операционное удобство. Офис-менеджер перестаёт каждую неделю запрашивать заявку, согласовывать оплату, контролировать остаток в кулере. Расходы на питьевую воду становятся предсказуемыми — это упрощает учёт и снимает споры о «лишних бутылях в этом месяце». Каждая доставка оформляется отдельным заказом и оплачивается выбранным способом: наличными при получении, через Click или с корпоративного счёта. Подробности — на странице <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Для бизнеса подписка — это не только удобство, но и операционное удобство. Офис-менеджер перестаёт каждую неделю запрашивать заявку, согласовывать оплату, контролировать остаток в кулере. Расходы на питьевую воду становятся предсказуемыми — это упрощает учёт и снимает споры о «лишних бутылях в этом месяце». Каждая доставка оформляется отдельным заказом и оплачивается выбранным способом: наличными при получении, через Click или с корпоративного счёта. Подробности — на <a href="/subscriptions">странице подписки</a>.</p>
 
 <h2>Часто задаваемые вопросы</h2>
 
@@ -167,7 +166,7 @@ ARTICLE = {
 <p>Да. Формат бутылей меняется в настройках подписки — изменения вступают в силу со следующей доставки. Если у вас нет кулера и вы хотите попробовать 19 л — добавьте помпу в заказ.</p>
 
 <h3>Какая минимальная продолжительность подписки?</h3>
-<p>Минимального обязательного срока нет. Вы можете начать подписку и отменить её в любой момент по стандартным условиям, описанным на <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Минимального обязательного срока нет. Вы можете начать подписку и отменить её в любой момент по стандартным условиям, описанным на <a href="/subscriptions">странице подписки</a>.</p>
 
 <h3>Есть ли плата за подключение или активацию?</h3>
 <p>Нет, активация подписки бесплатна. Залог за бутыли не берём — ни при первой доставке, ни при оформлении подписки.</p>
@@ -185,10 +184,10 @@ ARTICLE = {
 <p>Перенесите доставку через бот или личный кабинет. Курьер также свяжется с вами заранее, если в графике появятся вопросы.</p>
 
 <h3>Подписка действует в Ташкентской области?</h3>
-<p>Да, доставка покрывает Ташкент и Ташкентскую область. Точную зону по вашему адресу проверьте при оформлении на <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Да, доставка покрывает Ташкент и Ташкентскую область. Точную зону по вашему адресу проверьте при оформлении на <a href="/subscriptions">странице подписки</a>.</p>
 
 <h2>Готовы оформить подписку?</h2>
-<p>Если вы заказываете воду стабильно, подписка — это просто более удобная и предсказуемая форма того же потребления. Откройте страницу <a href="/subscriptions">/subscriptions</a>, выберите формат, количество и график — и забудьте про «надо заказать воду» как класс задач. Если вы предпочитаете чат — оформите и управляйте подпиской в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Качество воды за каждой доставкой обеспечивает 11-этапная очистка артезианской скважины — детали на <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p>Если вы заказываете воду стабильно, подписка — это просто более удобная и предсказуемая форма того же потребления. Откройте <a href="/subscriptions">страницу подписки</a>, выберите формат, количество и график — и забудьте про «надо заказать воду» как класс задач. Если вы предпочитаете чат — оформите и управляйте подпиской в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Качество воды за каждой доставкой обеспечивает 11-этапная очистка артезианской скважины — детали на <a href="/process/11-step-filtration">странице об 11 этапах фильтрации</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -210,7 +209,7 @@ ARTICLE = {
         },
         "uz": {
             "title": "Toshkentda suv obunasi: avtoyetkazib berish, qaytariladigan idishlar, uzilishsiz",
-            "excerpt": "Aqua Element’dan Toshkentda suv obunasi: 19 l va 10 l idishlarning siz tanlagan davriylikda yetkazib berilishi. Bo‘sh 19 l idish keyingi yetkazib berishda olib ketiladi, byudjet bashoratli. Saytda, Telegram-botda yoki telefon orqali boshqaring.",
+            "excerpt": "Aqua Element’dan Toshkentda suv obunasi: 19 l va 10 l idishlarning siz tanlagan davriylikda yetkazib berilishi. Bo‘sh 19 l idish keyingi yetkazib berishda olib ketiladi, byudjet bashoratli. Saytda yoki Telegram-botda boshqaring.",
             "meta_title": "Toshkentda suv obunasi — 19 l va 10 l avtoyetkazib berish | Aqua Element",
             "meta_description": "Toshkentda suv obunasi: 19 l va 10 l avtoyetkazib berish, 19 l idishni qaytarish, moslashuvchan jadval, Telegram-bot va saytda rasmiylashtirish.",
             "content": """
@@ -240,10 +239,10 @@ ARTICLE = {
 <p>Har yetkazib berishda kuryer bo‘sh 19 l idishlarni olib ketadi va to‘lalarini olib keladi. Sikl yopiq: bo‘sh idishlarni haftalab saqlamaysiz, qaytariladigan idishlar esa qayta to‘ldirishdan oldin sanoat yuvinishi va sanitariya ishlovidan o‘tadi.</p>
 
 <h3>4. Bepul yetkazib berish va AquaCoins</h3>
-<p>Yetkazib berish doim bepul — obunada ham, bir martalik buyurtmada ham. Obuna bo‘yicha har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi va ularni mukofotlarga almashtirish mumkin. Obunadagi suv odatiy narxda hisoblanadi; asosiy afzallik esa avtobuyurtma: tizim har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi va siz suv buyurtma qilishni unutmaysiz. Joriy shartlar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
+<p>Yetkazib berish doim bepul — obunada ham, bir martalik buyurtmada ham. Obuna bo‘yicha har bir yetkazib berish uchun AquaCoins darajangiz stavkasida hisoblanadi va ularni mukofotlarga almashtirish mumkin. Obunadagi suv odatiy narxda hisoblanadi; asosiy afzallik esa avtobuyurtma: tizim har bir buyurtmani jadval bo‘yicha o‘zi rasmiylashtiradi va siz suv buyurtma qilishni unutmaysiz. Joriy shartlar — <a href="/subscriptions">obuna</a> sahifasida.</p>
 
 <h3>5. Moslashuvchanlik: pauza, o‘tkazib yuborish, bekor qilish</h3>
-<p>Bir oyga ta’tilga ketdingizmi? Obunani pauzaga qo‘ying. Bitta yetkazib berishni o‘tkazib yuborish kerakmi? Bu bir bosishda bajariladi. Bekor qilish ham standart shartlarda jarimasiz mavjud. Tafsilotlar va joriy qoidalar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
+<p>Bir oyga ta’tilga ketdingizmi? Obunani pauzaga qo‘ying. Bitta yetkazib berishni o‘tkazib yuborish kerakmi? Bu bir bosishda bajariladi. Bekor qilish ham standart shartlarda jarimasiz mavjud. Tafsilotlar va joriy qoidalar — <a href="/subscriptions">obuna</a> sahifasida.</p>
 
 <h3>6. Litriga kamroq plastik</h3>
 <p>Qaytariladigan 19 l idish o‘nlab sikllarga xizmat qiladi. Bu, mayda paketlash bilan solishtirganda, ichilgan suvning litriga kamroq bir martalik plastik degani.</p>
@@ -309,12 +308,11 @@ ARTICLE = {
 
 <p>Agar shubhada bo‘lsangiz, ehtiyotkor baho bilan boshlang va 2–3 yetkazib berishdan so‘ng rejani moslang — idishlar soni va davriylikni istalgan paytda shaxsiy kabinet yoki Telegram-botda o‘zgartirish mumkin.</p>
 
-<h2>Obunani qanday rasmiylashtirish: uchta kanal</h2>
-<p>Aqua Element obunani rasmiylashtirishning uchta teng kanalini qo‘llab-quvvatlaydi. Birida boshlab, boshqasida davom ettirishingiz mumkin — ma’lumotlar sinxronlashtiriladi.</p>
+<h2>Obunani qanday rasmiylashtirish: ikki kanal</h2>
+<p>Aqua Element obunasini ikki teng usulda rasmiylashtirish mumkin. Birida boshlab, boshqasida davom ettirishingiz mumkin — ma’lumotlar sinxronlashtiriladi.</p>
 <ul>
-<li><strong>Sayt</strong>: <a href="/subscriptions">/subscriptions</a> sahifasi — format, son, davriylik, manzil va to‘lovni bitta ekranda tanlash.</li>
+<li><strong>Sayt</strong>: <a href="/subscriptions">obuna</a> sahifasi — format, son, davriylik, manzil va to‘lovni bitta ekranda tanlash.</li>
 <li><strong>Telegram-bot</strong>: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Takroriy mijozlar uchun eng qulay kanal — obunani boshqarish, yetkazib berish tarixi, ko‘chirish, pauza va menejer bilan bog‘lanish bitta chatda.</li>
-<li><strong>Telefon</strong>: klassik usul — operator jadvalni kelishadi va obunani siz uchun rasmiylashtiradi. Ofis uchun rasmiylashtirsangiz yoki ovozli muloqotni afzal ko‘rsangiz, mos.</li>
 </ul>
 
 <h2>Obunada qaytariladigan idish logistikasi</h2>
@@ -336,7 +334,7 @@ ARTICLE = {
 <li>Mineralizatsiya — Ca, Mg, Na, K, HCO₃ ning muvozanatli profilini qaytarish.</li>
 <li>Ozonlash — to‘ldirishdan oldingi yakuniy sanitariya ishlovi.</li>
 </ol>
-<p>Chiqishda barqaror profil: TDS 30–50, pH 7,5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 mg/l. Har bosqichning batafsil tavsifi — <a href="/process/11-step-filtration">/process/11-step-filtration</a> sahifasida. Faoliyat Sanepid nazorati ostida.</p>
+<p>Chiqishda barqaror profil: TDS 30–50, pH 7,5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 mg/l. Har bosqichning batafsil tavsifi — <a href="/process/11-step-filtration">11 bosqichli filtrlash</a> sahifasida. Faoliyat Sanepid nazorati ostida.</p>
 
 <h2>Obuna — uy va ofis infratuzilmasining qismi sifatida</h2>
 <p>Suv jadval bo‘yicha kelganda, u vazifa bo‘lishdan to‘xtaydi va elektr yoki internetdek infratuzilmaga aylanadi. Bu ofislar uchun ayniqsa sezilarli: HR va xo‘jalik xizmati bashoratli sarfni oladi va har hafta buyurtmalar bilan bosh qotirmaydi. Oilalar uchun obuna — oyiga soatlarni bo‘shatib, mayda lekin asabiy uzilishlarni olib tashlaydigan «kichik avtomatizmlar» qatoridan.</p>
@@ -346,7 +344,7 @@ ARTICLE = {
 <p>Toshkentda ichimlik suv sarfi mavsumlar bo‘yicha sezilarli o‘zgaradi. Iyundan avgustgacha sarf qishga nisbatan 30–50% gacha oshishi mumkin: jazirama, sport, ko‘proq muzli choy va mehmonlar uchun sovuq suv. Obuna buni qiyinchiliksiz hisobga olish imkonini beradi: yozda haftasiga bitta qo‘shimcha idish qo‘shasiz yoki vaqtincha tez-tez davriylikka o‘tasiz, kuzda esa odatdagi jadvalga qaytasiz. Barcha o‘zgarishlar shaxsiy kabinet yoki Telegram-botda bir daqiqada kiritiladi va keyingi yetkazib berishdan kuchga kiradi. Sarf jadvalini yuritish shart emas — kuzatilgan natijaga reaksiya qilish kifoya: agar bir oyda bir marta suvsiz qolgan bo‘lsangiz yoki rejadan tashqari yetkazib berish buyurtma qilgan bo‘lsangiz, rejani bitta pozitsiyaga oshiring.</p>
 
 <h2>Ofislar uchun obuna: operatsion qulaylik</h2>
-<p>Biznes uchun obuna — bu nafaqat qulaylik, balki operatsion qulaylik. Ofis menejer har hafta buyurtma berishni so‘rashni, to‘lovni kelishishni, kulerdagi qoldiqni nazorat qilishni to‘xtatadi. Ichimlik suv xarajatlari oldindan ma’lum bo‘ladi — bu hisob-kitobni soddalashtiradi va «bu oydagi ortiqcha idishlar» haqidagi bahslarni olib tashlaydi. Har bir yetkazib berish alohida buyurtma sifatida rasmiylashtiriladi va tanlangan usulda to‘lanadi: yetkazib berishda naqd pul, Click orqali yoki korporativ hisobdan. Tafsilotlar — <a href="/subscriptions">/subscriptions</a> sahifasida.</p>
+<p>Biznes uchun obuna — bu nafaqat qulaylik, balki operatsion qulaylik. Ofis menejer har hafta buyurtma berishni so‘rashni, to‘lovni kelishishni, kulerdagi qoldiqni nazorat qilishni to‘xtatadi. Ichimlik suv xarajatlari oldindan ma’lum bo‘ladi — bu hisob-kitobni soddalashtiradi va «bu oydagi ortiqcha idishlar» haqidagi bahslarni olib tashlaydi. Har bir yetkazib berish alohida buyurtma sifatida rasmiylashtiriladi va tanlangan usulda to‘lanadi: yetkazib berishda naqd pul, Click orqali yoki korporativ hisobdan. Tafsilotlar — <a href="/subscriptions">obuna</a> sahifasida.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 
@@ -360,7 +358,7 @@ ARTICLE = {
 <p>Ha. Idish formati obuna sozlamalarida o‘zgartiriladi — o‘zgarishlar keyingi yetkazib berishdan kuchga kiradi. Agar kuleringiz bo‘lmasa va 19 l ni sinab ko‘rmoqchi bo‘lsangiz, buyurtmaga pompani qo‘shing.</p>
 
 <h3>Obunaning minimal muddati qancha?</h3>
-<p>Majburiy minimal muddat yo‘q. Obunani istalgan paytda <a href="/subscriptions">/subscriptions</a> da ko‘rsatilgan standart shartlar bo‘yicha boshlash va bekor qilish mumkin.</p>
+<p>Majburiy minimal muddat yo‘q. Obunani istalgan paytda <a href="/subscriptions">obuna sahifasida</a> ko‘rsatilgan standart shartlar bo‘yicha boshlash va bekor qilish mumkin.</p>
 
 <h3>Ulash yoki faollashtirish uchun to‘lov bormi?</h3>
 <p>Yo‘q, obunani faollashtirish bepul. Idishlar uchun garov puli olinmaydi — birinchi yetkazib berishda ham, obunani rasmiylashtirishda ham.</p>
@@ -378,10 +376,10 @@ ARTICLE = {
 <p>Yetkazib berishni bot yoki shaxsiy kabinet orqali ko‘chiring. Kuryer ham jadvalda savollar yuzaga kelsa, sizga oldindan bog‘lanadi.</p>
 
 <h3>Obuna Toshkent viloyatida amal qiladimi?</h3>
-<p>Ha, yetkazib berish Toshkent shahri va Toshkent viloyatini qamrab oladi. Manzilingiz bo‘yicha aniq zonani <a href="/subscriptions">/subscriptions</a> da rasmiylashtirishda tekshiring.</p>
+<p>Ha, yetkazib berish Toshkent shahri va Toshkent viloyatini qamrab oladi. Manzilingiz bo‘yicha aniq zonani <a href="/subscriptions">obuna sahifasida</a> rasmiylashtirishda tekshiring.</p>
 
 <h2>Obunani rasmiylashtirishga tayyormisiz?</h2>
-<p>Agar suvni barqaror buyurtma qilsangiz, obuna shu iste’molning yanada qulay va bashoratli shakli. <a href="/subscriptions">/subscriptions</a> sahifasini oching, format, son va jadvalni tanlang — va «suv buyurtma qilish kerak» degan vazifalar sinfini unuting. Agar chatni afzal ko‘rsangiz — Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> da rasmiylashtiring va boshqaring. Har bir yetkazib berish ortidagi suv sifatini artezian quduqning 11 bosqichli tozalashi ta’minlaydi — tafsilotlar <a href="/process/11-step-filtration">/process/11-step-filtration</a> sahifasida.</p>
+<p>Agar suvni barqaror buyurtma qilsangiz, obuna shu iste’molning yanada qulay va bashoratli shakli. <a href="/subscriptions">obuna</a> sahifasini oching, format, son va jadvalni tanlang — va «suv buyurtma qilish kerak» degan vazifalar sinfini unuting. Agar chatni afzal ko‘rsangiz — Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> da rasmiylashtiring va boshqaring. Har bir yetkazib berish ortidagi suv sifatini artezian quduqning 11 bosqichli tozalashi ta’minlaydi — tafsilotlar <a href="/process/11-step-filtration">11 bosqichli filtrlash</a> sahifasida.</p>
 
 <script type="application/ld+json">
 {
@@ -403,7 +401,7 @@ ARTICLE = {
         },
         "en": {
             "title": "Water subscription in Tashkent: automatic delivery, returnable bottles, no run-outs",
-            "excerpt": "An Aqua Element water subscription in Tashkent is a scheduled, recurring delivery of 19 L and 10 L bottles on the cadence you choose. Empty 19 L bottles are collected on the next visit, your monthly water budget becomes predictable. Manage on web, Telegram bot, or phone.",
+            "excerpt": "An Aqua Element water subscription in Tashkent is a scheduled, recurring delivery of 19 L and 10 L bottles on the cadence you choose. Empty 19 L bottles are collected on the next visit, your monthly water budget becomes predictable. Manage it online or in the Telegram bot.",
             "meta_title": "Water subscription in Tashkent — 19 L and 10 L delivery plans | Aqua Element",
             "meta_description": "Water subscription in Tashkent: scheduled 19 L and 10 L delivery, returnable 19 L bottles, flexible cadence. Sign up via Aqua Element Telegram bot or web.",
             "content": """
@@ -433,10 +431,10 @@ ARTICLE = {
 <p>On every delivery the courier picks up the empty 19 L bottles and drops off full ones. The cycle is closed: you don't store empty bottles for weeks, and the returnable bottles go through industrial washing and sanitation before being filled again.</p>
 
 <h3>4. Free delivery and AquaCoins</h3>
-<p>Delivery is always free, on subscription deliveries as on every order. Earn AquaCoins on every subscription delivery at your tier's rate and redeem them for rewards. Subscription water is billed at the regular price; the real advantage is auto-order: the system places each order for you on schedule, so you never forget to order water. Current terms are on <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Delivery is always free, on subscription deliveries as on every order. Earn AquaCoins on every subscription delivery at your tier's rate and redeem them for rewards. Subscription water is billed at the regular price; the real advantage is auto-order: the system places each order for you on schedule, so you never forget to order water. Current terms are on <a href="/subscriptions">the subscription page</a>.</p>
 
 <h3>5. Flexibility: pause, skip, cancel</h3>
-<p>Travelling for a month? Pause the subscription. Need to skip one delivery? One click. Cancellation is available without penalties under standard terms. Specifics and current rules live on <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Travelling for a month? Pause the subscription. Need to skip one delivery? One click. Cancellation is available without penalties under standard terms. Specifics and current rules live on <a href="/subscriptions">the subscription page</a>.</p>
 
 <h3>6. Less plastic per litre consumed</h3>
 <p>A returnable 19 L bottle serves dozens of cycles. That is less single-use plastic per litre of water consumed than small-pack alternatives. If environmental footprint matters to you, a 19 L-heavy subscription reduces it noticeably.</p>
@@ -502,12 +500,11 @@ ARTICLE = {
 
 <p>If you are unsure, start on the conservative side and adjust after 2–3 deliveries — bottle count and cadence can be changed at any time in your account or the Telegram bot.</p>
 
-<h2>How to subscribe: three channels</h2>
-<p>Aqua Element supports three equally valid subscription channels. You can start in one and continue in another — the data is synced.</p>
+<h2>How to subscribe: two channels</h2>
+<p>Aqua Element supports two equally valid subscription channels. You can start in one and continue in another — the data is synced.</p>
 <ul>
-<li><strong>Website</strong>: the page <a href="/subscriptions">/subscriptions</a> — choose format, quantity, cadence, address, and payment in one screen.</li>
+<li><strong>Website</strong>: <a href="/subscriptions">the subscription page</a> — choose format, quantity, cadence, address, and payment in one screen.</li>
 <li><strong>Telegram bot</strong>: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. The most convenient channel for repeat customers — manage your subscription, view delivery history, reschedule, pause, and message a manager in one chat.</li>
-<li><strong>Phone</strong>: the classic option — an operator agrees on a schedule and sets up the subscription for you. Best if you are setting up an office plan or prefer voice.</li>
 </ul>
 
 <h2>Returnable-bottle logistics on a subscription</h2>
@@ -529,7 +526,7 @@ ARTICLE = {
 <li>Mineralisation — restoration of a balanced Ca, Mg, Na, K, HCO₃ profile.</li>
 <li>Ozonation — final sanitary treatment before bottling.</li>
 </ol>
-<p>The output is a stable profile: TDS 30–50, pH 7.5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 mg/L. Each stage is described on <a href="/process/11-step-filtration">/process/11-step-filtration</a>. The operation is overseen by Sanepid.</p>
+<p>The output is a stable profile: TDS 30–50, pH 7.5; Ca 10–60, Mg 7–20, Na 5–15, K 1–4, HCO₃ 50–120 mg/L. Each stage is described on <a href="/process/11-step-filtration">the 11-step filtration page</a>. The operation is overseen by Sanepid.</p>
 
 <h2>Subscription as household and office infrastructure</h2>
 <p>When water arrives on schedule, it stops being a task and becomes infrastructure — like electricity or internet. Offices feel this most: HR and facilities get a predictable spend and stop dealing with weekly orders. For families, a subscription is one of those small automations that, taken together, free up hours per month and remove minor but irritating gaps.</p>
@@ -546,7 +543,7 @@ ARTICLE = {
 <p>Yes. The bottle format is changed in subscription settings — the change applies from the next delivery. If you don't have a cooler and want to try 19 L, add a pump to your order.</p>
 
 <h3>What is the minimum subscription length?</h3>
-<p>There is no mandatory minimum length. You can start and cancel at any time under the standard terms described on <a href="/subscriptions">/subscriptions</a>.</p>
+<p>There is no mandatory minimum length. You can start and cancel at any time under the standard terms described on <a href="/subscriptions">the subscription page</a>.</p>
 
 <h3>Is there a setup or activation fee?</h3>
 <p>No, subscription activation is free. We charge no deposit for the bottles, on the first delivery or at sign-up.</p>
@@ -564,10 +561,10 @@ ARTICLE = {
 <p>Reschedule the delivery via the bot or the account. The courier will also reach out in advance if anything in the schedule needs clarifying.</p>
 
 <h3>Does the subscription work in Tashkent Region?</h3>
-<p>Yes, delivery covers Tashkent and Tashkent Region. Confirm the exact zone for your address at sign-up on <a href="/subscriptions">/subscriptions</a>.</p>
+<p>Yes, delivery covers Tashkent and Tashkent Region. Confirm the exact zone for your address at sign-up on <a href="/subscriptions">the subscription page</a>.</p>
 
 <h2>Ready to start a subscription?</h2>
-<p>If you order water on a steady cadence already, a subscription is simply a more convenient and predictable form of the same consumption. Open <a href="/subscriptions">/subscriptions</a>, pick format, quantity, and schedule — and stop thinking about "I need to order water" as a class of task. If you prefer chat, set up and manage your subscription in the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. The water quality behind every delivery is backed by 11-stage treatment of the artesian source — full details on <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p>If you order water on a steady cadence already, a subscription is simply a more convenient and predictable form of the same consumption. Open <a href="/subscriptions">the subscription page</a>, pick format, quantity, and schedule — and stop thinking about "I need to order water" as a class of task. If you prefer chat, set up and manage your subscription in the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. The water quality behind every delivery is backed by 11-stage treatment of the artesian source — full details on <a href="/process/11-step-filtration">the 11-step filtration page</a>.</p>
 
 <script type="application/ld+json">
 {

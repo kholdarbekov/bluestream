@@ -7,17 +7,18 @@
   fields; this template carries the containers and, in the page-data island, every word the renderer adds
   around those fields (`cabinet.subs.*`, island key = the key without that prefix). The consequence sentences
   and the action labels are the API's own (spec 2026-10-27 §16 M3), never island words. Styles: css/pages/
-  my-subscriptions.css, scoped under .subs (UX brief tokens).
+  my-subscriptions.css, scoped under .subs (UX brief tokens, valued from the site tokens in ae-ui.css); the cabinet
+  frame around it is cabinet_base.html + css/pages/cabinet.css.
 #}
 
 {% block cabinet_title %}{{ 'cabinet.subs.title'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'landing.nav.subscriptions'|t }}</li>
+<li><span aria-current="page">{{ 'cabinet.subs.title'|t }}</span></li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<link href="{{ url_for('static', filename='css/pages/my-subscriptions.css') }}" rel="stylesheet">
+<link href="{{ asset_url('css/pages/my-subscriptions.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block cabinet_content %}
@@ -112,7 +113,8 @@
     'address.legend', 'address.add', 'address.method_legend', 'address.load_failed',
     'payment.legend', 'payment.methods_failed',
 ] %}{% set _ = subs_copy.update({key: ('cabinet.subs.' ~ key)|t}) %}{% endfor %}
-{# The backend's own display labels the editors name things with (one wording per language, B11): the
+{# empty_perks: the empty state's three perks (what this page lets a subscriber do), under the builder's sentence.
+   The backend's own display labels the editors name things with (one wording per language, B11): the
    weekday chips and the payment methods. #}
 {% set weekday_names = [] %}{% set weekday_short_names = [] %}
 {% for day in range(7) %}
@@ -128,9 +130,18 @@
     'addresses_url': url_for('frontend.addresses'),
     'help_url': company_telegram_bot_url,
     'i18n': subs_copy,
+    'loyalty_eligible': loyalty_eligible|default(false),
+    'benefit_delivery': 'web.cabinet.subs.benefit_delivery'|t,
+    'benefit_coins': 'web.cabinet.subs.benefit_coins'|t,
+    'delivery_free': delivery_free|default(false),
+    'empty_perks': [
+        'web.cabinet.subs.perk_auto' | t,
+        'web.cabinet.subs.perk_skip' | t,
+        'web.cabinet.subs.perk_change' | t,
+    ],
     'weekday_names': weekday_names,
     'weekday_short_names': weekday_short_names,
     'method_labels': method_labels,
 }) }}
-<script src="{{ url_for('static', filename='js/pages/my-subscriptions.js') }}"></script>
+<script src="{{ asset_url('js/pages/my-subscriptions.js') }}"></script>
 {% endblock %}

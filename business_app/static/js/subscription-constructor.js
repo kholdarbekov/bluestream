@@ -5,12 +5,19 @@
  */
 
 // Everything the builder takes from the page, rendered by index.html (#subscription-constructor-data) in the
-// visitor's language: its words (`i18n`), the four frequency names and the seven weekday names (0 = Monday).
+// visitor's language: its words (`i18n`), the stepper and quantity labels (`ui`), each way to pay's label and note
+// (`method_labels`, `method_notes`), where addresses are added (`addresses_url`), the four frequency names and the
+// seven weekday names (0 = Monday).
 const CONSTRUCTOR_PAGE = (typeof getPageData === 'function' && getPageData('subscription-constructor-data')) || {};
 const CONSTRUCTOR_I18N = CONSTRUCTOR_PAGE.i18n || {};
+const CONSTRUCTOR_UI = CONSTRUCTOR_PAGE.ui || {};
 
 // Fills the `{name}` holes of one of the page's sentences.
 const constructorWords = (sentence, values) => String(sentence).replace(/\{(\w+)\}/g, (hole, name) => (name in values ? values[name] : hole));
+
+// The icon of each way to pay (Font Awesome); any other method gets the card.
+const PAYMENT_ICONS = { cash: 'far fa-money-bill-wave', click: 'far fa-credit-card', business_account: 'far fa-building' };
+const PRODUCT_PLACEHOLDER = '/static/images/product-placeholder.svg';
 
 class SubscriptionConstructor {
     constructor() {
@@ -57,11 +64,18 @@ class SubscriptionConstructor {
             // Restore saved state if exists
             this.restoreState();
 
-            // Load initial data
-            await this.loadProducts();
-
-            // Setup event listeners
+            // The controls answer from the start, whatever the catalog does: Next says what is missing while the
+            // water list loads, and a failed list offers its own retry.
             this.setupEventListeners();
+
+            // The water list. Until it answers, two placeholder cards hold its place; if it fails, the list says so
+            // with a retry and the builder waits on step 1 (nothing after it means anything without the catalog).
+            if (!(await this.loadCatalog())) {
+                this.currentStep = 1;
+                this.updateStepIndicators();
+                this.showStep(1);
+                return;
+            }
 
             // A restored schedule: step 2 shows it, and its slot list is asked, so step 2 and the review read the
             // backend's answer for it; every step from 3 to the restored one loads its data, as Next would have,
@@ -195,11 +209,62 @@ class SubscriptionConstructor {
                     else this.selectedProducts.delete(productId);
                 });
                 this.renderProducts();
+            } else {
+                throw new Error('The subscription catalog answered without a list');
             }
         } catch (error) {
             console.error('Error loading products:', error);
             throw error;
         }
+    }
+
+    // The catalog with its two visible states: placeholder cards while it is asked, and on failure a message with a
+    // "Try again" button that asks again. True once the list is shown.
+    async loadCatalog() {
+        const container = document.getElementById('products-grid');
+        if (container) {
+            container.setAttribute('aria-busy', 'true');
+            if (!this.products.length) this.renderProductsLoading();
+        }
+        try {
+            await this.loadProducts();
+            return true;
+        } catch (error) {
+            this.renderProductsFailed();
+            return false;
+        } finally {
+            if (container) container.removeAttribute('aria-busy');
+        }
+    }
+
+    renderProductsLoading() {
+        const container = document.getElementById('products-grid');
+        if (!container) return;
+        const placeholder = `
+            <div class="sc-product-skeleton" aria-hidden="true">
+                <span class="ae-skeleton sc-product-skeleton__img"></span>
+                <span class="ae-skeleton ae-skeleton--text sc-product-skeleton__name"></span>
+                <span class="ae-skeleton ae-skeleton--title sc-product-skeleton__price"></span>
+            </div>`;
+        container.innerHTML = placeholder + placeholder;
+    }
+
+    renderProductsFailed() {
+        const container = document.getElementById('products-grid');
+        if (!container) return;
+        container.innerHTML = `
+            <div class="ae-alert ae-alert--danger sc-catalog-failed" role="alert">
+                <i class="far fa-exclamation-circle ae-alert__icon" aria-hidden="true"></i>
+                <p class="sc-catalog-failed__text">${this.escapeHtml(CONSTRUCTOR_UI.catalog_failed || CONSTRUCTOR_I18N.error_load_failed || '')}</p>
+                <button type="button" class="ae-btn ae-btn--secondary ae-btn--sm sc-catalog-retry">${this.escapeHtml(CONSTRUCTOR_UI.retry || '')}</button>
+            </div>
+        `;
+    }
+
+    // "Try again" on a failed list: ask the catalog once more.
+    async retryCatalog() {
+        this.clearInlineError();
+        await this.loadCatalog();
     }
 
     // JS Date.getDay() counts from Sunday (0 = Sunday ... 6 = Saturday); the backend's
@@ -258,7 +323,7 @@ class SubscriptionConstructor {
         }
         this.timeSlots = offered.map(slot => ({
             id: slot.id,
-            label: `${slot.start_time} - ${slot.end_time}`,
+            label: `${slot.start_time}–${slot.end_time}`,
             value: slot.time_range || `${slot.start_time}-${slot.end_time}`
         }));
         this.timeSlotsAnswered = true;
@@ -300,6 +365,7 @@ class SubscriptionConstructor {
     }
 
     keepTimeSlot(event) {
+        this.clearInlineError();
         this.selectedTimeSlot = SubscriptionConstructor.parseSlotChoice(event.target.value);
         this.anyTimeAssumed = false;
         this.saveState();
@@ -338,9 +404,11 @@ class SubscriptionConstructor {
     }
 
     async loadPaymentMethods() {
-        // The ways to pay come from the backend SSOT so this menu can never
-        // diverge from checkout. Payme is not offered; `click` is labelled "Card".
-        const ICONS = { cash: '💵', click: '💳', business_account: '🏢' };
+        // The ways to pay come from the backend SSOT so this menu can never diverge from checkout. Each is named
+        // with the page's label for that method in the visitor's language (the backend's display_name is English),
+        // the backend's name only for a method the page has no label for.
+        const labels = CONSTRUCTOR_PAGE.method_labels || {};
+        const notes = CONSTRUCTOR_PAGE.method_notes || {};
         try {
             const response = await apiRequest(this.paymentMethodsQuery());
             if (!response.ok) throw new Error('payment methods refused');
@@ -348,9 +416,9 @@ class SubscriptionConstructor {
             const methods = (payload.data && payload.data.available_methods) || [];
             this.paymentMethods = methods.map((m) => ({
                 id: m.method,
-                name: m.display_name,
-                icon: ICONS[m.method] || '💳',
-                description: m.description || ''
+                name: labels[m.method] || m.display_name || m.method,
+                icon: PAYMENT_ICONS[m.method] || 'far fa-credit-card',
+                description: notes[m.method] || ''
             }));
         } catch (error) {
             // No method of our own: one the backend did not offer would be refused at creation.
@@ -376,26 +444,49 @@ class SubscriptionConstructor {
             const quantity = Math.max(isSelected ? this.selectedProducts.get(product.id).quantity : minQty, minQty);
             if (isSelected) this.selectedProducts.get(product.id).quantity = quantity;
 
-            const imageUrl = product.images?.[0] || '/static/images/product-placeholder.svg';
+            const imageUrl = product.images?.[0] || PRODUCT_PLACEHOLDER;
+            const name = this.escapeHtml(product.product_name);
+            const hint = minQty > 1 && CONSTRUCTOR_UI.min_quantity
+                ? `<span class="ae-qty__hint">${this.escapeHtml(constructorWords(CONSTRUCTOR_UI.min_quantity, { count: minQty }))}</span>`
+                : '';
 
+            // The card picks the product (a button, so a keyboard can too); the quantity works once it is picked.
             // The price is the catalog's label, the one the subscription will use.
             return `
-                <div class="product-card ${isSelected ? 'selected' : ''}" data-product-id="${product.id}">
-                    <img src="${imageUrl}"
-                         alt="${this.escapeHtml(product.product_name)}"
-                         class="product-image">
-                    <div class="product-name">${this.escapeHtml(product.product_name)}</div>
-                    <div class="product-price">${this.escapeHtml(product.unit_price_label || '')}</div>
-                    <div class="quantity-control">
-                        <button type="button" class="quantity-btn" data-action="decrease">-</button>
-                        <span class="quantity-display">${quantity}</span>
-                        <button type="button" class="quantity-btn" data-action="increase">+</button>
+                <div class="product-card ae-radio-card ${isSelected ? 'selected' : ''}" data-product-id="${product.id}">
+                    <button type="button" class="product-card__pick" aria-pressed="${isSelected}">
+                        <img src="${this.escapeHtml(imageUrl)}" alt="" class="product-image" width="160" height="160"
+                             loading="lazy" decoding="async" data-fallback="${PRODUCT_PLACEHOLDER}">
+                        <span class="product-name">${name}</span>
+                        <span class="product-price">${this.escapeHtml(product.unit_price_label || '')}</span>
+                    </button>
+                    <div class="product-card__qty">
+                        <div class="quantity-control ae-qty" role="group" aria-label="${this.escapeHtml(CONSTRUCTOR_UI.quantity || '')} ${name}">
+                            <button type="button" class="quantity-btn ae-qty__btn" data-action="decrease" aria-label="${this.escapeHtml(CONSTRUCTOR_UI.fewer || '')}"${!isSelected || quantity <= minQty ? ' disabled' : ''}><i class="far fa-minus" aria-hidden="true"></i></button>
+                            <span class="quantity-display ae-qty__input">${quantity}</span>
+                            <button type="button" class="quantity-btn ae-qty__btn" data-action="increase" aria-label="${this.escapeHtml(CONSTRUCTOR_UI.more || '')}"${isSelected ? '' : ' disabled'}><i class="far fa-plus" aria-hidden="true"></i></button>
+                        </div>
+                        ${hint}
                     </div>
                 </div>
             `;
         }).join('');
 
         container.innerHTML = productsHTML;
+    }
+
+    // A product card shows what the builder holds: picked or not, and a quantity it can lower only above the minimum.
+    syncProductCard(card) {
+        const productId = parseInt(card.dataset.productId, 10);
+        const picked = this.selectedProducts.has(productId);
+        const quantity = parseInt(card.querySelector('.quantity-display').textContent, 10);
+        card.classList.toggle('selected', picked);
+        const pick = card.querySelector('.product-card__pick');
+        if (pick) pick.setAttribute('aria-pressed', String(picked));
+        const decrease = card.querySelector('.quantity-btn[data-action="decrease"]');
+        const increase = card.querySelector('.quantity-btn[data-action="increase"]');
+        if (decrease) decrease.disabled = !picked || quantity <= this.minOrderQuantity(productId);
+        if (increase) increase.disabled = !picked;
     }
 
     renderTimeSlots() {
@@ -422,22 +513,7 @@ class SubscriptionConstructor {
         // Show what is held (the placeholder when nothing is)
         select.value = this.selectedTimeSlot === null ? '' : String(this.selectedTimeSlot);
 
-        // Setup change listener if not already done
-        // 3. Update Nice Select and Attach jQuery Listener
-        if (typeof $ !== 'undefined' && $(select).next().hasClass('nice-select')) {
-            // Refresh the visual dropdown to show new options
-            $(select).niceSelect('update');
-
-            // CRITICAL FIX: Use jQuery .on() to catch the event from Nice Select
-            // We use .off() first to ensure we don't add multiple listeners if this runs twice
-            $(select).off('change.subscription').on('change.subscription', (e) => this.keepTimeSlot(e));
-        } else {
-            // Fallback for vanilla JS if jQuery fails to load
-            if (!select.dataset.listenerAttached) {
-                select.addEventListener('change', (e) => this.keepTimeSlot(e));
-                select.dataset.listenerAttached = 'true';
-            }
-        }
+        // The change listener is bound once, in setupEventListeners: the select is a native one (no nice-select).
     }
 
     renderAddresses() {
@@ -446,43 +522,52 @@ class SubscriptionConstructor {
 
         if (this.addresses.length === 0) {
             container.innerHTML = `
-                <div style="text-align: center; padding: 40px; background: #fafafa; border-radius: 8px; border: 2px dashed #d9d9d9;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">📍</div>
-                    <h3 style="margin: 0 0 8px 0; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.address_none_title)}</h3>
-                    <p style="color: #8c8c8c; margin: 0 0 20px 0;">${this.escapeHtml(CONSTRUCTOR_I18N.address_none_body)}</p>
-                    <button type="button" class="theme-btn btn-one" onclick="subscriptionConstructor.showAddressForm()">
-                        ${this.escapeHtml(CONSTRUCTOR_I18N.address_add)}
-                    </button>
+                <div class="ae-empty sc-empty">
+                    <span class="ae-empty__icon" aria-hidden="true"><i class="far fa-map-marker-alt"></i></span>
+                    <h4 class="ae-empty__title">${this.escapeHtml(CONSTRUCTOR_I18N.address_none_title)}</h4>
+                    <p class="ae-empty__text">${this.escapeHtml(CONSTRUCTOR_I18N.address_none_body)}</p>
+                    <div class="ae-empty__actions">
+                        <a class="ae-btn ae-btn--primary" href="${this.escapeHtml(this.addressesUrl())}">
+                            <i class="far fa-plus" aria-hidden="true"></i>${this.escapeHtml(CONSTRUCTOR_I18N.address_add)}
+                        </a>
+                    </div>
                 </div>
             `;
             return;
         }
 
-        const addressesHTML = this.addresses.map(address => `
-            <div class="address-card ${this.selectedAddress?.id === address.id ? 'selected' : ''}"
-                 data-address-id="${address.id}">
-                <div class="address-header">
-                    <div class="address-type">${this.escapeHtml(address.title || '')}</div>
-                    ${this.selectedAddress?.id === address.id ? '<div class="selected-badge">✓</div>' : ''}
-                </div>
-                <div class="address-details">
-                    <div class="address-line">${this.escapeHtml(address.full_address || address.street_address)}</div>
-                    ${address.apartment_number ? `<div class="address-line">${this.escapeHtml(this.apartmentLabel(address))}</div>` : ''}
-                    <div class="address-line">${this.escapeHtml(address.city || '')}, ${this.escapeHtml(address.district || '')}</div>
-                    ${address.delivery_instructions ? `<div class="address-notes">${this.escapeHtml(address.delivery_instructions)}</div>` : ''}
-                </div>
-            </div>
-        `).join('');
+        const addressesHTML = this.addresses.map(address => {
+            const selected = this.selectedAddress?.id === address.id;
+            // The address as checkout and My addresses show it: its title, the full address (which already names the
+            // city and district) and the apartment. The API's raw `city` / `district` fields are never printed: the
+            // district is a key ("shaykhontohur") and the city is stored in English.
+            return `
+                <button type="button" class="address-card ae-radio-card ${selected ? 'selected' : ''}"
+                        data-address-id="${address.id}" aria-pressed="${selected}">
+                    <span class="address-type ae-radio-card__title">${this.escapeHtml(address.title || '')}</span>
+                    <span class="address-line ae-radio-card__text">${this.escapeHtml(address.full_address || address.street_address || '')}</span>
+                    ${address.apartment_number ? `<span class="address-line ae-radio-card__text">${this.escapeHtml(this.apartmentLabel(address))}</span>` : ''}
+                    ${address.delivery_instructions ? `<span class="address-notes ae-radio-card__text">${this.escapeHtml(address.delivery_instructions)}</span>` : ''}
+                </button>
+            `;
+        }).join('');
 
+        // A new address is added in My addresses; the builder keeps this tab's choices for when the visitor is back.
         container.innerHTML = `
             ${addressesHTML}
-            <div class="address-card add-new-address" onclick="subscriptionConstructor.showAddressForm()">
-                <div style="text-align: center; padding: 20px;">
-                    <div style="font-size: 32px; margin-bottom: 8px;">➕</div>
-                    <div style="font-weight: 500; color: #1890ff;">${this.escapeHtml(CONSTRUCTOR_I18N.address_add)}</div>
-                </div>
-            </div>
+            <a class="address-card add-new-address sc-add" href="${this.escapeHtml(this.addressesUrl())}">
+                <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-plus"></i></span>
+                <span class="sc-add__text">
+                    <span class="sc-add__title">${this.escapeHtml(CONSTRUCTOR_I18N.address_add)}</span>
+                    <span class="sc-add__hint">${this.escapeHtml(CONSTRUCTOR_I18N.address_add_elsewhere)}</span>
+                </span>
+            </a>
         `;
+    }
+
+    // My addresses, where a new address is added (the page publishes the link).
+    addressesUrl() {
+        return CONSTRUCTOR_PAGE.addresses_url || '/addresses';
     }
 
     apartmentLabel(address) {
@@ -493,15 +578,17 @@ class SubscriptionConstructor {
         const container = document.getElementById('payment-methods-grid');
         if (!container) return;
 
-        const methodsHTML = this.paymentMethods.map(method => `
-            <div class="payment-method-card ${this.selectedPaymentMethod === method.id ? 'selected' : ''}"
-                 data-payment-method="${method.id}">
-                <div class="payment-method-icon">${method.icon}</div>
-                <div class="payment-method-name">${method.name}</div>
-                <div class="payment-method-description">${method.description}</div>
-                ${this.selectedPaymentMethod === method.id ? '<div class="selected-indicator">✓</div>' : ''}
-            </div>
-        `).join('');
+        const methodsHTML = this.paymentMethods.map(method => {
+            const selected = this.selectedPaymentMethod === method.id;
+            return `
+                <button type="button" class="payment-method-card ae-radio-card ${selected ? 'selected' : ''}"
+                        data-payment-method="${this.escapeHtml(method.id)}" aria-pressed="${selected}">
+                    <span class="payment-method-icon ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="${method.icon}"></i></span>
+                    <span class="payment-method-name ae-radio-card__title">${this.escapeHtml(method.name)}</span>
+                    ${method.description ? `<span class="payment-method-description ae-radio-card__text">${this.escapeHtml(method.description)}</span>` : ''}
+                </button>
+            `;
+        }).join('');
 
         container.innerHTML = methodsHTML;
     }
@@ -534,180 +621,73 @@ class SubscriptionConstructor {
         const address = this.selectedAddress;
         const paymentMethod = this.paymentMethods.find(pm => pm.id === this.selectedPaymentMethod);
 
-        // Render comprehensive review
+        // One summary card: the name, the products with the preview's labels, the schedule, the address and the way
+        // to pay, then the cost (the backend's figures only). The data-review hooks are what the tests read.
+        const esc = (text) => this.escapeHtml(text);
+        const dayLabel = this.deliveryDayLabel();
+        const productRows = productsList.map(item => `
+            <li class="sc-review__line">
+                <span class="sc-review__item">
+                    <span class="sc-review__name">${esc(item.name)}</span>
+                    <span class="sc-review__qty">${esc(constructorWords(CONSTRUCTOR_I18N.review_quantity, { quantity: item.quantity }))}${item.priceLabel ? ' × ' : ''}<span class="ae-num" data-review="line-price">${esc(item.priceLabel)}</span></span>
+                </span>
+                <span class="sc-review__amount ae-num" data-review="line-total">${esc(item.totalLabel)}</span>
+            </li>
+        `).join('');
         preview.innerHTML = `
-            <div style="max-width: 800px; margin: 0 auto;">
-                <!-- Subscription Name Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #722ed1 0%, #531dab 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">✏️</span>
+            <div class="sc-review">
+                <div class="sc-review__main">
+                    <section class="sc-review__block">
+                        <h4 class="sc-review__title"><i class="far fa-pen" aria-hidden="true"></i>${esc(CONSTRUCTOR_I18N.review_name_title)}</h4>
+                        <div class="ae-field sc-review__field">
+                            <label class="ae-field__label" for="subscription-name-input">${esc(CONSTRUCTOR_I18N.review_name_label)}</label>
+                            <input type="text" id="subscription-name-input" class="ae-input" maxlength="200"
+                                   value="${esc(this.subscriptionName)}" placeholder="${esc(CONSTRUCTOR_I18N.review_name_placeholder)}"
+                                   aria-describedby="subscription-name-hint">
+                            <p class="ae-field__help" id="subscription-name-hint">${esc(CONSTRUCTOR_I18N.review_name_hint)}</p>
                         </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_name_title)}</h3>
-                    </div>
-                    <div>
-                        <label for="subscription-name-input" style="display: block; margin-bottom: 8px; font-size: 14px; color: #595959; font-weight: 500;">
-                            ${this.escapeHtml(CONSTRUCTOR_I18N.review_name_label)}
-                        </label>
-                        <input
-                            type="text"
-                            id="subscription-name-input"
-                            value="${this.escapeHtml(this.subscriptionName)}"
-                            maxlength="200"
-                            style="width: 100%; padding: 12px 16px; border: 2px solid #d9d9d9; border-radius: 8px; font-size: 16px; font-weight: 500; color: #262626; transition: all 0.3s ease;"
-                            placeholder="${this.escapeHtml(CONSTRUCTOR_I18N.review_name_placeholder)}"
-                        />
-                        <div style="margin-top: 8px; font-size: 13px; color: #8c8c8c;">
-                            <span style="margin-right: 8px;">💡</span>
-                            ${this.escapeHtml(CONSTRUCTOR_I18N.review_name_hint)}
-                        </div>
-                    </div>
-                </div>
+                    </section>
 
-                <!-- Selected Products Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">🛒</span>
-                        </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_products_title)}</h3>
-                    </div>
-                    <div>
-                        ${productsList.map((item, index) => `
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #fafafa; border-radius: 8px; margin-bottom: ${index < productsList.length - 1 ? '12px' : '0'};">
-                                <div style="flex: 1;">
-                                    <div style="font-size: 15px; font-weight: 500; color: #262626; margin-bottom: 6px;">
-                                        ${this.escapeHtml(item.name)}
-                                    </div>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span style="font-size: 13px; color: #8c8c8c;" data-review="line-price">
-                                            ${this.escapeHtml(item.priceLabel)}
-                                        </span>
-                                        <span style="color: #d9d9d9;">×</span>
-                                        <span style="font-size: 13px; font-weight: 500; color: #595959; background: white; padding: 2px 8px; border-radius: 4px;">
-                                            ${this.escapeHtml(constructorWords(CONSTRUCTOR_I18N.review_quantity, { quantity: item.quantity }))}
-                                        </span>
-                                    </div>
-                                </div>
-                                <div style="font-size: 16px; font-weight: 600; color: #52c41a; margin-left: 16px;" data-review="line-total">
-                                    ${this.escapeHtml(item.totalLabel)}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
+                    <section class="sc-review__block">
+                        <h4 class="sc-review__title"><i class="far fa-tint" aria-hidden="true"></i>${esc(CONSTRUCTOR_I18N.review_products_title)}</h4>
+                        <ul class="sc-review__lines">${productRows}</ul>
+                    </section>
 
-                <!-- Delivery Schedule Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">📅</span>
-                        </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_schedule_title)}</h3>
-                    </div>
-                    <div style="background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 16px;">
-                        <div style="display: grid; gap: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span style="font-size: 14px; color: #595959; font-weight: 500;">${this.escapeHtml(CONSTRUCTOR_I18N.review_frequency)}</span>
-                                <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.escapeHtml(this.getFrequencyName(this.selectedFrequency))}</span>
-                            </div>
-                            ${this.deliveryDayLabel() ? `
-                                <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #d9f7be;">
-                                    <span style="font-size: 14px; color: #595959; font-weight: 500;">${this.escapeHtml(CONSTRUCTOR_I18N.review_day)}</span>
-                                    <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.escapeHtml(this.deliveryDayLabel())}</span>
-                                </div>
-                            ` : ''}
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #d9f7be;">
-                                <span style="font-size: 14px; color: #595959; font-weight: 500;">${this.escapeHtml(CONSTRUCTOR_I18N.review_time)}</span>
-                                <span style="font-size: 15px; font-weight: 600; color: #262626;" data-review="time-slot">${this.escapeHtml(this.timeSlotReviewLabel())}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <section class="sc-review__block">
+                        <h4 class="sc-review__title"><i class="far fa-calendar-alt" aria-hidden="true"></i>${esc(CONSTRUCTOR_I18N.review_schedule_title)}</h4>
+                        <dl class="ae-dl sc-review__dl">
+                            <div class="ae-dl__row"><dt>${esc(CONSTRUCTOR_I18N.review_frequency)}</dt><dd>${esc(this.getFrequencyName(this.selectedFrequency))}</dd></div>
+                            ${dayLabel ? `<div class="ae-dl__row"><dt>${esc(CONSTRUCTOR_I18N.review_day)}</dt><dd class="sc-review__cap">${esc(dayLabel)}</dd></div>` : ''}
+                            <div class="ae-dl__row"><dt>${esc(CONSTRUCTOR_I18N.review_time)}</dt><dd data-review="time-slot">${esc(this.timeSlotReviewLabel())}</dd></div>
+                        </dl>
+                    </section>
 
-                <!-- Delivery Address Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #fa8c16 0%, #d46b08 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">📍</span>
-                        </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_address_title)}</h3>
-                    </div>
-                    <div style="background: #fff7e6; border: 1px solid #ffd591; border-radius: 8px; padding: 16px;">
-                        <div style="font-weight: 500; color: #262626; margin-bottom: 8px;">${this.escapeHtml(address?.title || '')}</div>
-                        <div style="color: #595959; line-height: 1.6;">
-                            ${this.escapeHtml(address?.full_address || '')}
-                            ${address?.apartment_number ? `<br>${this.escapeHtml(this.apartmentLabel(address))}` : ''}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Payment Method Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #13c2c2 0%, #08979c 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">💳</span>
-                        </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_payment_title)}</h3>
-                    </div>
-                    <div style="background: #e6fffb; border: 1px solid #87e8de; border-radius: 8px; padding: 16px; display: flex; align-items: center; gap: 12px;">
-                        <div style="font-size: 32px;">${paymentMethod?.icon || '💳'}</div>
+                    <section class="sc-review__block sc-review__block--split">
                         <div>
-                            <div style="font-weight: 600; color: #262626;">${paymentMethod?.name || ''}</div>
-                            <div style="font-size: 13px; color: #595959;">${paymentMethod?.description || ''}</div>
+                            <h4 class="sc-review__title"><i class="far fa-map-marker-alt" aria-hidden="true"></i>${esc(CONSTRUCTOR_I18N.review_address_title)}</h4>
+                            <p class="sc-review__strong">${esc(address?.title || '')}</p>
+                            <p class="sc-review__text">${esc(address?.full_address || '')}${address?.apartment_number ? `<br>${esc(this.apartmentLabel(address))}` : ''}</p>
                         </div>
-                    </div>
+                        <div>
+                            <h4 class="sc-review__title"><i class="far fa-wallet" aria-hidden="true"></i>${esc(CONSTRUCTOR_I18N.review_payment_title)}</h4>
+                            <p class="sc-review__strong">${paymentMethod ? `<i class="${paymentMethod.icon} sc-review__pay-icon" aria-hidden="true"></i>${esc(paymentMethod.name)}` : ''}</p>
+                            ${paymentMethod && paymentMethod.description ? `<p class="sc-review__text">${esc(paymentMethod.description)}</p>` : ''}
+                        </div>
+                    </section>
                 </div>
 
-                <!-- Cost Summary Card -->
-                <div style="background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e8e8;">
-                    <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #f0f0f0;">
-                        <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #722ed1 0%, #531dab 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 12px;">
-                            <span style="color: white; font-size: 20px;">💰</span>
-                        </div>
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #262626;">${this.escapeHtml(CONSTRUCTOR_I18N.review_cost_title)}</h3>
+                <aside class="sc-review__cost">
+                    <h4 class="sc-review__title">${esc(CONSTRUCTOR_I18N.review_cost_title)}</h4>
+                    <div class="sc-review__sum">
+                        <span class="sc-review__sum-label">${esc(CONSTRUCTOR_I18N.review_per_delivery)}<small>${esc(CONSTRUCTOR_I18N.review_per_delivery_hint)}</small></span>
+                        <strong class="sc-review__sum-value ae-num" data-review="per-delivery">${quote ? esc(quote.total_amount_label) : '&mdash;'}</strong>
                     </div>
-
-                    <!-- Per Delivery Total -->
-                    <div style="background: #fafafa; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <div style="font-size: 14px; color: #8c8c8c; margin-bottom: 4px;">${this.escapeHtml(CONSTRUCTOR_I18N.review_per_delivery)}</div>
-                                <div style="font-size: 13px; color: #bfbfbf;">${this.escapeHtml(CONSTRUCTOR_I18N.review_per_delivery_hint)}</div>
-                            </div>
-                            <div style="font-size: 22px; font-weight: 700; color: #262626;" data-review="per-delivery">
-                                ${quote ? this.escapeHtml(quote.total_amount_label) : '&mdash;'}
-                            </div>
-                        </div>
+                    <div class="sc-review__month">
+                        <span class="sc-review__sum-label">${esc(CONSTRUCTOR_I18N.review_per_month)}<small>${quote ? esc(quote.deliveries_per_month_label) : esc(CONSTRUCTOR_I18N.preview_after_sign_in)}</small></span>
+                        <strong class="sc-review__month-value ae-num" data-review="per-month">${quote ? esc(quote.estimated_monthly_cost_label) : '&mdash;'}</strong>
                     </div>
-
-                    <!-- Monthly Estimate -->
-                    <div style="background: linear-gradient(135deg, #722ed1 0%, #531dab 100%); border-radius: 10px; padding: 20px; position: relative; overflow: hidden;">
-                        <div style="position: absolute; top: -20px; right: -20px; width: 100px; height: 100px; background: rgba(255,255,255,0.1); border-radius: 50%;"></div>
-                        <div style="position: absolute; bottom: -30px; left: -30px; width: 120px; height: 120px; background: rgba(255,255,255,0.08); border-radius: 50%;"></div>
-                        <div style="position: relative; z-index: 1;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <div style="font-size: 15px; color: rgba(255,255,255,0.9); margin-bottom: 6px; font-weight: 500;">${this.escapeHtml(CONSTRUCTOR_I18N.review_per_month)}</div>
-                                    <div style="font-size: 12px; color: rgba(255,255,255,0.7);">
-                                        ${quote ? this.escapeHtml(quote.deliveries_per_month_label) : this.escapeHtml(CONSTRUCTOR_I18N.preview_after_sign_in)}
-                                    </div>
-                                </div>
-                                <div style="font-size: 28px; font-weight: 700; color: white; text-align: right;" data-review="per-month">
-                                    ${quote ? this.escapeHtml(quote.estimated_monthly_cost_label) : '&mdash;'}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Info Note -->
-                    <div style="margin-top: 16px; padding: 12px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 6px; display: flex; align-items: start; gap: 8px;">
-                        <span style="color: #1890ff; font-size: 16px; flex-shrink: 0;">ℹ️</span>
-                        <p style="margin: 0; font-size: 13px; color: #595959; line-height: 1.6;">
-                            ${this.escapeHtml(CONSTRUCTOR_I18N.review_note)}
-                        </p>
-                    </div>
-                </div>
+                    <p class="sc-review__note"><i class="far fa-info-circle" aria-hidden="true"></i><span>${esc(CONSTRUCTOR_I18N.review_note)}</span></p>
+                </aside>
             </div>
         `;
     }
@@ -718,15 +698,21 @@ class SubscriptionConstructor {
 
     setupEventListeners() {
         document.addEventListener('click', (e) => {
-            // Product selection
+            // "Try again" on a water list that failed to load
+            if (e.target.closest('.sc-catalog-retry')) {
+                this.retryCatalog();
+                return;
+            }
+
+            // Product selection: anywhere on the card but its quantity control
             const productCard = e.target.closest('.product-card');
-            if (productCard && !e.target.closest('.quantity-btn')) {
+            if (productCard && !e.target.closest('.quantity-control')) {
                 this.toggleProduct(productCard);
             }
 
-            // Quantity buttons
+            // Quantity buttons (a disabled one: below the minimum, or the product is not picked)
             const quantityBtn = e.target.closest('.quantity-btn');
-            if (quantityBtn) {
+            if (quantityBtn && !quantityBtn.disabled) {
                 const action = quantityBtn.dataset.action;
                 const card = quantityBtn.closest('.product-card');
                 this.updateQuantity(card, action);
@@ -756,24 +742,24 @@ class SubscriptionConstructor {
                 this.selectPaymentMethod(paymentCard);
             }
 
-            // Navigation buttons
-            if (e.target.classList.contains('nav-btn-prev')) {
+            // Navigation buttons (a click on the icon inside a button is the button's click)
+            if (e.target.closest('.nav-btn-prev')) {
                 this.previousStep();
             }
-            if (e.target.classList.contains('nav-btn-next')) {
+            if (e.target.closest('.nav-btn-next')) {
                 this.nextStep();
             }
-            if (e.target.classList.contains('nav-btn-submit')) {
+            if (e.target.closest('.nav-btn-submit')) {
                 this.submitSubscription();
             }
         });
 
-        // Day of the month (monthly). The theme turns this <select> into a nice-select, which reports the pick
-        // with jQuery's .trigger('change'): only a jQuery handler hears it (a native listener never did, so the
-        // day was never kept). jQuery's .on() hears a native change too.
+        // Day of the month (monthly): a native <select>. jQuery's .on() hears its native change, as a plain listener
+        // does when jQuery is missing.
         const monthDaySelect = document.getElementById('month-day-select');
         if (monthDaySelect) {
             const keepMonthDay = (e) => {
+                this.clearInlineError();
                 this.selectedDayOfMonth = e.target.value ? parseInt(e.target.value, 10) : null;
                 this.saveState();
             };
@@ -805,6 +791,8 @@ class SubscriptionConstructor {
             this.selectedProducts.set(productId, { product, quantity });
         }
 
+        this.syncProductCard(card);
+        this.clearInlineError();
         this.saveState();
     }
 
@@ -826,6 +814,7 @@ class SubscriptionConstructor {
             item.quantity = currentQty;
             this.saveState();
         }
+        this.syncProductCard(card);
     }
 
     // The product's minimum order quantity, as the subscription catalog publishes it. A
@@ -836,6 +825,7 @@ class SubscriptionConstructor {
     }
 
     selectFrequency(option) {
+        this.clearInlineError();
         this.selectedFrequency = option.dataset.frequency;
         // Forget the day this frequency does not use
         if (!this.usesWeekday()) this.selectedWeekday = null;
@@ -851,7 +841,9 @@ class SubscriptionConstructor {
     // held, nor hides one that is: the frequency, the day chooser it uses, the weekday button, the day of the month.
     syncScheduleControls() {
         document.querySelectorAll('.frequency-option').forEach(el => {
-            el.classList.toggle('selected', el.dataset.frequency === this.selectedFrequency);
+            const picked = el.dataset.frequency === this.selectedFrequency;
+            el.classList.toggle('selected', picked);
+            el.setAttribute('aria-pressed', String(picked));
         });
         const daySelector = document.getElementById('day-selector');
         const monthDaySelector = document.getElementById('month-day-selector');
@@ -859,43 +851,53 @@ class SubscriptionConstructor {
         if (monthDaySelector) monthDaySelector.style.display = this.usesDayOfMonth() ? 'block' : 'none';
         document.querySelectorAll('.day-btn').forEach(el => {
             const weekday = SubscriptionConstructor.weekdayFromJsDay(parseInt(el.dataset.day, 10));
-            el.classList.toggle('selected', this.selectedWeekday !== null && weekday === this.selectedWeekday);
+            const picked = this.selectedWeekday !== null && weekday === this.selectedWeekday;
+            el.classList.toggle('selected', picked);
+            el.setAttribute('aria-pressed', String(picked));
             // Only the delivery days the backend published are offered (spec 2026-10-27 §6.4).
             el.style.display = this.deliveryWeekdays && !this.deliveryWeekdays.includes(weekday) ? 'none' : '';
         });
         this.showMonthDay(this.selectedDayOfMonth);
     }
 
-    // The day-of-month <select> on `day` (its placeholder for none), and, under the theme, its nice-select, which
-    // shows the select's value only once told to redraw ('update').
+    // The day-of-month <select> on `day` (its placeholder for none).
     showMonthDay(day) {
         const select = document.getElementById('month-day-select');
         if (!select) return;
         select.value = day === null || day === undefined ? '' : String(day);
-        if (typeof $ !== 'undefined' && $(select).next().hasClass('nice-select')) {
-            $(select).niceSelect('update');
-        }
     }
 
     selectDay(btn) {
-        document.querySelectorAll('.day-btn').forEach(el => el.classList.remove('selected'));
-        btn.classList.add('selected');
+        this.clearInlineError();
         this.selectedWeekday = SubscriptionConstructor.weekdayFromJsDay(parseInt(btn.dataset.day, 10));
+        this.syncScheduleControls();
         this.saveState();
         return this.loadTimeSlots();
     }
 
     selectAddress(card) {
+        this.clearInlineError();
         const addressId = parseInt(card.dataset.addressId);
+        const hadFocus = document.activeElement === card;
         this.selectedAddress = this.addresses.find(a => a.id === addressId);
         this.renderAddresses();
+        if (hadFocus) this.refocus(`#addresses-list .address-card[data-address-id="${addressId}"]`);
         this.saveState();
     }
 
     selectPaymentMethod(card) {
+        this.clearInlineError();
+        const hadFocus = document.activeElement === card;
         this.selectedPaymentMethod = card.dataset.paymentMethod;
         this.renderPaymentMethods();
+        if (hadFocus) this.refocus(`#payment-methods-grid .payment-method-card[data-payment-method="${this.selectedPaymentMethod}"]`);
         this.saveState();
+    }
+
+    // A list re-rendered under the visitor's focus: the focus goes back to the choice just picked.
+    refocus(selector) {
+        const el = document.querySelector(selector);
+        if (el) el.focus();
     }
 
     showAddressForm() {
@@ -928,12 +930,13 @@ class SubscriptionConstructor {
 
             this.showError(CONSTRUCTOR_I18N.error_sign_in);
             setTimeout(() => {
-                window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+                window.location.href = this.signInUrl();
             }, 1500);
             return;
         }
 
         if (this.currentStep < this.totalSteps) {
+            this.clearInlineError();
             this.currentStep++;
 
             // Load data for the next step
@@ -946,10 +949,17 @@ class SubscriptionConstructor {
 
     previousStep() {
         if (this.currentStep > 1) {
+            this.clearInlineError();
             this.currentStep--;
             this.showStep(this.currentStep, true); // Scroll when navigating to previous step
             this.saveState();
         }
+    }
+
+    // Sign-in that brings the visitor back to this builder (the page publishes it: login's `next`, back to
+    // /#subscription-constructor), where this tab's saved choices are restored.
+    signInUrl() {
+        return CONSTRUCTOR_PAGE.sign_in_url || '/login';
     }
 
     async loadStepData(step) {
@@ -963,25 +973,14 @@ class SubscriptionConstructor {
             } else if (step === 5) {
                 await this.loadPreview();
                 this.renderReview();
-                // Attach event listener for subscription name input
-                setTimeout(() => {
-                    const nameInput = document.getElementById('subscription-name-input');
-                    if (nameInput) {
-                        nameInput.addEventListener('input', (e) => {
-                            this.subscriptionName = e.target.value;
-                            this.saveState();
-                        });
-                        // Add focus styling
-                        nameInput.addEventListener('focus', (e) => {
-                            e.target.style.borderColor = '#1890ff';
-                            e.target.style.boxShadow = '0 0 0 2px rgba(24, 144, 255, 0.2)';
-                        });
-                        nameInput.addEventListener('blur', (e) => {
-                            e.target.style.borderColor = '#d9d9d9';
-                            e.target.style.boxShadow = 'none';
-                        });
-                    }
-                }, 100);
+                // The name the visitor types is the name posted
+                const nameInput = document.getElementById('subscription-name-input');
+                if (nameInput) {
+                    nameInput.addEventListener('input', (e) => {
+                        this.subscriptionName = e.target.value;
+                        this.saveState();
+                    });
+                }
             }
         } catch (error) {
             console.error(`Error loading data for step ${step}:`, error);
@@ -1006,41 +1005,56 @@ class SubscriptionConstructor {
         // Update navigation buttons
         this.updateNavigation();
 
-        // Only scroll to constructor when explicitly requested (e.g., when clicking Next/Previous)
+        // Only on Next/Back: the builder's top comes into view (below the sticky header, the card's scroll-margin)
+        // and focus moves to the new step's title, so a keyboard or screen-reader user lands on the step.
         if (shouldScroll) {
-            const constructorSection = document.getElementById('subscription-constructor');
-            if (constructorSection) {
-                const offsetTop = constructorSection.offsetTop - 100;
-                window.scrollTo({ top: offsetTop, behavior: 'smooth' });
-            }
+            const card = document.querySelector('#subscription-constructor .constructor-container');
+            const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (card) card.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+            const title = currentPanel && currentPanel.querySelector('.sc-panel-title');
+            if (title) title.focus({ preventScroll: true });
         }
     }
 
+    // The stepper: the shared .ae-stepper states (is-done / is-current, aria-current) next to the builder's own
+    // active / completed, and on phones the compact "Step N of 5: label" line with its progress bar.
     updateStepIndicators() {
+        let currentLabel = '';
         for (let i = 1; i <= this.totalSteps; i++) {
             const step = document.querySelector(`.constructor-step[data-step="${i}"]`);
             if (!step) continue;
-
-            if (i < this.currentStep) {
-                step.classList.add('completed');
-                step.classList.remove('active');
-            } else if (i === this.currentStep) {
-                step.classList.add('active');
-                step.classList.remove('completed');
+            const done = i < this.currentStep;
+            const current = i === this.currentStep;
+            step.classList.toggle('completed', done);
+            step.classList.toggle('is-done', done);
+            step.classList.toggle('active', current);
+            step.classList.toggle('is-current', current);
+            if (current) {
+                step.setAttribute('aria-current', 'step');
+                const label = step.querySelector('.step-label');
+                currentLabel = label ? label.textContent.trim() : '';
             } else {
-                step.classList.remove('active', 'completed');
+                step.removeAttribute('aria-current');
             }
         }
+        const compact = document.querySelector('#subscription-constructor .sc-compact');
+        if (compact && CONSTRUCTOR_UI.step_of) {
+            const position = constructorWords(CONSTRUCTOR_UI.step_of, { current: this.currentStep, total: this.totalSteps });
+            compact.textContent = currentLabel ? `${position}: ${currentLabel}` : position;
+        }
+        const bar = document.querySelector('#subscription-constructor .sc-progress');
+        if (bar) bar.style.width = `${Math.round((this.currentStep / this.totalSteps) * 100)}%`;
     }
 
+    // Back from step 2, Next until the review, Create on the review. '' hands the display back to the stylesheet.
     updateNavigation() {
         const prevBtn = document.querySelector('.nav-btn-prev');
         const nextBtn = document.querySelector('.nav-btn-next');
         const submitBtn = document.querySelector('.nav-btn-submit');
 
-        if (prevBtn) prevBtn.style.display = this.currentStep === 1 ? 'none' : 'block';
-        if (nextBtn) nextBtn.style.display = this.currentStep === this.totalSteps ? 'none' : 'block';
-        if (submitBtn) submitBtn.style.display = this.currentStep === this.totalSteps ? 'block' : 'none';
+        if (prevBtn) prevBtn.style.display = this.currentStep === 1 ? 'none' : '';
+        if (nextBtn) nextBtn.style.display = this.currentStep === this.totalSteps ? 'none' : '';
+        if (submitBtn) submitBtn.style.display = this.currentStep === this.totalSteps ? '' : 'none';
     }
 
     // ============================================
@@ -1051,6 +1065,13 @@ class SubscriptionConstructor {
         switch (stepNumber) {
             case 1: // Products
                 if (this.selectedProducts.size === 0) {
+                    // A water list that failed to load already says so, next to its "Try again": Next takes the
+                    // visitor there instead of asking for a product there is none of.
+                    const retry = document.querySelector('#products-grid .sc-catalog-retry');
+                    if (retry) {
+                        retry.focus();
+                        return false;
+                    }
                     this.showError(CONSTRUCTOR_I18N.error_products);
                     return false;
                 }
@@ -1123,7 +1144,7 @@ class SubscriptionConstructor {
 
         if (!this.isAuthenticated) {
             this.saveState();
-            window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+            window.location.href = this.signInUrl();
             return;
         }
 
@@ -1241,7 +1262,7 @@ class SubscriptionConstructor {
             const productNames = [];
             this.selectedProducts.forEach(({ product, quantity }) => {
                 if (quantity > 1) {
-                    productNames.push(`${quantity}x ${product.product_name}`);
+                    productNames.push(`${quantity} × ${product.product_name}`);
                 } else {
                     productNames.push(product.product_name);
                 }
@@ -1261,7 +1282,7 @@ class SubscriptionConstructor {
             parts.push(constructorWords(CONSTRUCTOR_I18N.name_to, { place: this.selectedAddress.title }));
         }
 
-        return parts.join(' - ') || CONSTRUCTOR_I18N.name_default;
+        return parts.join(', ') || CONSTRUCTOR_I18N.name_default;
     }
 
     // The page's name for the frequency (rendered in the visitor's language).
@@ -1298,11 +1319,24 @@ class SubscriptionConstructor {
         if (overlay) overlay.classList.remove('active');
     }
 
+    // A problem is said once, inline above Back / Next, where the visitor is looking (the alert is announced). No
+    // toast as well: it repeated the same words, piled up over the builder, and was announced a second time.
     showError(message) {
-        // Use modern toast notification
-        if (typeof showNotification === 'function') {
-            showNotification(message, 'error');
+        const inline = document.getElementById('sc-error');
+        if (inline && message) {
+            const text = inline.querySelector('.sc-error__text');
+            // Emptied first, so the same message after another miss is announced again.
+            if (text) {
+                text.textContent = '';
+                text.textContent = message;
+            }
+            inline.hidden = false;
         }
+    }
+
+    clearInlineError() {
+        const inline = document.getElementById('sc-error');
+        if (inline) inline.hidden = true;
     }
 
     showSuccess(message) {

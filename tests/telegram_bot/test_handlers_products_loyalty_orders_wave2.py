@@ -965,17 +965,23 @@ class TestLoyaltyHandlerWave2:
         monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(loyalty_module, "api_client", FakeAPIClientContext(
             get_loyalty_history=_resp(success=True, data={"items": [
+                # Rows as GET /loyalty/history serializes them (serialize_loyalty_transaction publishes
+                # display_category, reward_name and order_id; the bot labels by those, never by its own mapping).
                 # Referral bonus — must read as "referral", not the old "other".
                 {"created_at": "2026-06-19", "points": 500, "transaction_type": "bonus",
-                 "action_type": "referral", "description": "Referral bonus for user #75"},
+                 "action_type": "referral", "description": "Referral bonus for user #75",
+                 "display_category": "referral", "reward_name": None, "order_id": None},
                 # Redemptions are stored negative — must render a single minus.
                 {"created_at": "2026-06-16", "points": -4000, "transaction_type": "redeemed",
-                 "description": "Redeemed reward: 19 litrlik suv"},
+                 "description": "Redeemed reward: 19 litrlik suv",
+                 "display_category": "redeem", "reward_name": "19 litrlik suv", "order_id": 143},
                 {"created_at": "2026-05-23", "points": 540, "transaction_type": "earned",
-                 "action_type": "purchase"},
+                 "action_type": "purchase", "display_category": "order_earn", "reward_name": None,
+                 "order_id": 140},
                 # Refund is a positive adjustment — must read as a green credit, not yellow.
                 {"created_at": "2026-06-16", "points": 2500, "transaction_type": "adjustment",
-                 "action_type": "reward_refund", "order_id": 144},
+                 "action_type": "reward_refund", "order_id": 144, "display_category": "refund",
+                 "reward_name": None},
             ]}),
         ))
 

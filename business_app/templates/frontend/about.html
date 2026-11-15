@@ -1,100 +1,81 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "О компании Aqua Element: опыт доставки воды, ценности сервиса и ориентация на клиента." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "About Aqua Element: water delivery background, service values, and customer-focused operations." %}
-{% else %}
-{% set meta_description = "Aqua Element haqida: suv yetkazib berish tajribasi, xizmat qadriyatlari va mijozga yonaltirilgan yondashuv." %}
-{% endif %}
+{#- /about (redesign step 3, group "info"). Only facts something else on the site backs: the source, the stages and the
+    regulator from /about/sources and the filtration page, the delivery zone from the coverage SSOT, the bottle photo,
+    sizes and links from the Product rows (offer facts). Served as Markdown to agents: the copy stays in <main>. -#}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/info_ui.html' import key_facts, link_card, order_band with context %}
 
-{% block title %}{{ 'landing.footer.about_us'|t }} - {{ company_name }}{% endblock %}
+{% set meta_description = 'web.info.about.meta'|t %}
+
+{% block title %}{{ 'web.info.about.title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-/* Professional Page Title with Wavy Border */
-.page-title {
-    position: relative;
-    padding: 180px 0 120px 0 !important;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    overflow: hidden;
-}
-
-.page-title .shape {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    height: 200px;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    z-index: 1;
-}
-
-.page-title .auto-container {
-    position: relative;
-    z-index: 2;
-}
-
-.page-title h1 {
-    font-size: 48px;
-    font-weight: 700;
-    color: #222;
-    margin-bottom: 15px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-}
-</style>
+<link href="{{ asset_url('css/pages/info.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.footer.about_us'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.about.breadcrumb'|t }}</li>
+{%- set lang = current_language -%}
+{%- set placeholder = url_for('static', filename='images/product-placeholder.svg') -%}
+<div class="info info--about">
+    {{ page_hero('web.info.about.title'|t, [('web.info.about.crumb'|t, None)], lead='web.info.about.lead'|t) }}
+
+    <section class="ae-section info-intro" aria-labelledby="about-intro-title">
+        <div class="ae-container">
+            <div class="info-intro__grid">
+                <div class="info-intro__copy">
+                    <h2 class="info-h2" id="about-intro-title">{{ 'web.info.about.intro_h'|t }}</h2>
+                    <p class="info-intro__lead">{{ 'web.info.about.intro_p1'|t }}</p>
+                    <p>{{ 'web.info.about.intro_p2'|t }}</p>
+                    <ul class="info-ticks">
+                        <li><i class="far fa-map-marker-alt" aria-hidden="true"></i><a href="{{ external_url_for_lang('frontend.coverage') }}">{{ coverage.summary }}</a></li>
+                        <li><i class="far fa-calendar-check" aria-hidden="true"></i>{{ 'landing.offer.every_day'|t }}</li>
                     </ul>
                 </div>
+                <figure class="info-intro__media">
+                    {%- if about_product %}
+                    <img src="{{ about_product.image or placeholder }}" data-fallback="{{ placeholder }}"
+                         alt="{{ 'web.home.hero.image_alt'|t(size=about_product.offer.size_text[lang]) }}"
+                         width="533" height="800" decoding="async">
+                    {%- else %}
+                    <img src="{{ placeholder }}" alt="" width="533" height="800" decoding="async">
+                    {%- endif %}
+                </figure>
             </div>
-        </section>
-        <!-- page-title end -->
+            {{ key_facts() }}
+        </div>
+    </section>
 
-        <!-- about-section -->
-        <section class="about-section">
-            <div class="auto-container">
-                <div class="row align-items-center clearfix">
-                    <div class="col-lg-6 col-md-12 col-sm-12 image-column">
-                        <div class="image_block_2">
-                            <div class="image-box">
-                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'landing.footer.about_us'|t }}"></figure>
-                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'landing.image.quality_water'|t }}"></figure>
-                                <div class="text">
-                                    <h2>10+</h2>
-                                    <h6>{{ 'landing.about.years_experience'|t }}</h6>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-6 col-md-12 col-sm-12 content-column">
-                        <div class="content_block_1">
-                            <div class="content-box">
-                                <div class="sec-title">
-                                    <h2>{{ 'landing.about.page.title'|t }}</h2>
-                                </div>
-                                <div class="text">
-                                    <p>{{ 'landing.about.page.description_1'|t }}</p>
-                                    <p>{{ 'landing.about.page.description_2'|t }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    <section class="ae-section ae-section--tint" aria-labelledby="about-path-title">
+        <div class="ae-container">
+            <div class="ae-section-head">
+                <h2 class="ae-section-head__title" id="about-path-title">{{ 'web.info.about.path_h'|t }}</h2>
             </div>
-        </section>
-        <!-- about-section end -->
+            <ol class="ae-steps ae-steps--row info-path">
+                {%- for n in range(1, 5) %}
+                <li>
+                    <h3 class="ae-steps__title">{{ ('web.info.about.step_%d.title' % n)|t }}</h3>
+                    <p class="ae-steps__text">{{ ('web.info.about.step_%d.text' % n)|t }}</p>
+                </li>
+                {%- endfor %}
+            </ol>
+        </div>
+    </section>
+
+    <section class="ae-section" aria-labelledby="about-more-title">
+        <div class="ae-container">
+            <div class="ae-section-head">
+                <h2 class="ae-section-head__title" id="about-more-title">{{ 'web.info.about.more_h'|t }}</h2>
+                <p class="ae-section-head__lead">{{ 'web.info.about.more_lead'|t }}</p>
+            </div>
+            <div class="ae-grid ae-grid--2 info-links">
+                {{ link_card(external_url_for_lang('frontend.process_filtration'), 'far fa-filter', 'web.shell.footer.filtration'|t, 'web.info.link.process_text'|t) }}
+                {{ link_card(external_url_for_lang('frontend.about_sources'), 'far fa-book-open', 'web.info.sources.title'|t, 'web.info.link.sources_text'|t) }}
+                {{ link_card(external_url_for_lang('frontend.quality_standards'), 'far fa-badge-check', 'web.shell.footer.quality'|t, 'web.info.link.quality_text'|t) }}
+                {{ link_card(external_url_for_lang('frontend.coverage'), 'far fa-map-marked-alt', 'landing.coverage.title'|t, 'web.info.link.coverage_text'|t) }}
+            </div>
+        </div>
+    </section>
+
+    {{ order_band(offer_facts) }}
+</div>
 {% endblock %}

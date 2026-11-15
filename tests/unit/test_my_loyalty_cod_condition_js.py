@@ -1,74 +1,67 @@
 """/my-loyalty must show the tier discount's payment condition.
 
-Source-level, because business_app/static/js has no JS runtime in the backend
-test environment — that file is served as-is, and only admin_ui/ has a test
-runner. The two properties pinned here are the ones that silently re-open the
+Since the 2026-11-14 redesign the levels are rendered by the server (templates/frontend/loyalty.html, from
+get_loyalty_handbook_context) instead of loyalty.js; the rendered behaviour is driven end to end in
+tests/integration/test_web_account_loyalty.py. These source pins keep the properties that silently re-open the
 "unconditional discount" promise:
 
-1. The condition is READ FROM THE API RESPONSE, so the browser holds no second
-   copy of the sentence that can drift from the backend rule or the language.
-2. The condition is rendered inside the same block as the percentage — a
-   percentage that ships without it is the bug this feature exists to close.
+1. The condition is the BACKEND'S SENTENCE (`api.loyalty.tier_discount_condition`, the one GET /loyalty/tiers also
+   publishes), so the page holds no second copy that can drift from the rule or the language.
+2. It is rendered inside the same block as the percentages it qualifies.
+3. Neither loyalty.js nor the page-data island restates it.
+4. Without a discounted level there is no condition, no marker and no empty wrapper.
 """
 
 from pathlib import Path
 
-LOYALTY_JS = (
-    Path(__file__).resolve().parents[2] / "business_app" / "static" / "js" / "pages" / "loyalty.js"
-)
+ROOT = Path(__file__).resolve().parents[2]
+TEMPLATE = ROOT / "business_app" / "templates" / "frontend" / "loyalty.html"
+LOYALTY_JS = ROOT / "business_app" / "static" / "js" / "pages" / "loyalty.js"
 
 
-def _source() -> str:
-    return LOYALTY_JS.read_text(encoding="utf-8")
+def _template() -> str:
+    return TEMPLATE.read_text(encoding="utf-8")
 
 
-def test_loyalty_js_exists():
+def _levels_block() -> str:
+    src = _template()
+    return src.split('id="membershipTiersContainer"', 1)[1].split("</section>", 1)[0]
+
+
+def test_the_page_files_exist():
+    assert TEMPLATE.is_file(), f"{TEMPLATE} moved — update this guard rather than deleting it"
     assert LOYALTY_JS.is_file(), f"{LOYALTY_JS} moved — update this guard rather than deleting it"
 
 
-def test_condition_is_taken_from_the_tiers_response():
-    src = _source()
-
-    assert "renderMembershipTiers(result.data.tiers, result.data.tier_discount_condition)" in src
-    assert "function renderMembershipTiers(tiers, discountCondition)" in src
+def test_condition_is_the_backend_sentence():
+    assert "'api.loyalty.tier_discount_condition'|t" in _levels_block()
 
 
-def test_condition_is_rendered_inside_the_discount_block():
-    src = _source()
-    block = src.split("var discountBlock", 1)[1].split(": '';", 1)[0]
+def test_condition_is_rendered_inside_the_levels_block_with_the_percentage():
+    block = _levels_block()
 
-    assert "escapeHtml(discountCondition)" in block
     assert "tier.discount_percentage" in block
+    assert block.index("tier.discount_percentage") < block.index("api.loyalty.tier_discount_condition")
 
 
-def test_the_sentence_is_not_re_stated_in_the_page_island():
-    """One expression only. A copy in the render_page_data island would be a
-    second, silently divergent statement of the same rule."""
-    src = _source()
+def test_the_sentence_is_not_re_stated_in_the_script_or_the_page_island():
+    """One expression only. A copy in loyalty.js or the render_page_data island would be a second, silently divergent
+    statement of the same rule."""
+    script = LOYALTY_JS.read_text(encoding="utf-8")
+    island = _template().split("render_page_data(", 1)[1]
 
-    assert "PAGE_DATA.i18n.cod" not in src
-    assert "cash on delivery" not in src.lower()
-    assert "cash-on-delivery" not in src.lower()
+    assert "tier_discount_condition" not in script
+    assert "tier_discount_condition" not in island
+    for text in (script.lower(), island.lower()):
+        assert "cash on delivery" not in text and "cash-on-delivery" not in text
 
 
 def test_discount_block_is_omitted_entirely_at_zero():
-    """CHANGE 3 pin (surface: /my-loyalty, ~loyalty.js:73). A customer whose
-    tier carries no discount — a 0% tier or a loyalty-ineligible entity, both
-    of which the API already reports as `discount_percentage: 0` (this
-    client function can only ever see the number, never why it is zero) —
-    must see no tag icon, no percentage, no payment-condition sentence and no
-    dangling wrapper `<div>`: the false branch of the ternary is the bare
-    empty string, not a div with nothing in it."""
-    src = _source()
+    """A level without a discount shows no percentage and no `*` marker; a program without any discounted level shows
+    no condition sentence (and no footnote wrapper)."""
+    block = _levels_block()
 
-    assert "var discountBlock = tier.discount_percentage > 0" in src, (
-        "the discount block is no longer gated on a positive rate"
-    )
-    # Same slice this file's `test_condition_is_rendered_inside_the_discount_block`
-    # uses to isolate the ternary's TRUE branch (everything up to the ": '';"
-    # that starts its FALSE branch) — reused here to pin that the false arm
-    # really is bare '', not a div with empty content.
-    true_branch = src.split("var discountBlock", 1)[1].split(": '';", 1)[0]
-    assert true_branch.rstrip().endswith("'</div>'"), (
-        f"expected the true branch to end right before a bare '' false arm: {true_branch!r}"
-    )
+    assert "{% if tier.discount_percentage > 0 %}" in block
+    assert "handbook.tiers|selectattr('discount_percentage', 'gt', 0)|list" in _template()
+    footnote = block.split("{% if has_discount %}", 1)[1].split("{% endif %}", 1)[0]
+    assert "api.loyalty.tier_discount_condition" in footnote and 'id="acl-discount-note"' in footnote

@@ -121,7 +121,40 @@ class PhoneValidator(Validator):
 
 
 class PasswordValidator(Validator):
-    """Password validation"""
+    """Password validation.
+
+    CHARACTER_RULES is the one definition of what a password must contain. `validate` enforces it and
+    `requirements` publishes it, so a sign-up or reset form ticks a live checklist from the rule the server
+    applies instead of re-deriving its own. The page checks with JavaScript what this class checks with Python
+    (static/js/pages/auth-form.js ruleMet: characters counted as code points like len(), and \\d read as \\p{Nd} like
+    Python's Unicode \\d); tests/fixtures/password_rule_cases.json holds the server's verdicts both test suites check.
+    """
+
+    # (id, pattern, message)
+    CHARACTER_RULES = (
+        ("lowercase", r"[a-z]", "must contain at least one lowercase letter"),
+        ("uppercase", r"[A-Z]", "must contain at least one uppercase letter"),
+        ("digit", r"\d", "must contain at least one digit"),
+    )
+
+    @classmethod
+    def requirements(cls, min_length: int = None) -> List[Dict[str, Any]]:
+        """The rule as data a form can check: the minimum length, then one entry per required character class."""
+        if min_length is None:
+            min_length = business_config.PASSWORD_MIN_LENGTH
+        return [{"id": "min_length", "min_length": min_length}] + [
+            {"id": rule_id, "pattern": pattern} for rule_id, pattern, _message in cls.CHARACTER_RULES
+        ]
+
+    @classmethod
+    def unmet_requirements(cls, password: str, min_length: int = None) -> List[str]:
+        """The ids of the published requirements (`requirements`) the password does not meet, in their order."""
+        if min_length is None:
+            min_length = business_config.PASSWORD_MIN_LENGTH
+        unmet = ["min_length"] if len(password) < min_length else []
+        return unmet + [
+            rule_id for rule_id, pattern, _message in cls.CHARACTER_RULES if not re.search(pattern, password)
+        ]
 
     def validate(self, min_length: int = None):
         """Validate password strength"""
@@ -130,20 +163,16 @@ class PasswordValidator(Validator):
 
         if self.value:
             password = str(self.value)
+            unmet = self.unmet_requirements(password, min_length)
 
             # Length check
-            if len(password) < min_length:
+            if "min_length" in unmet:
                 self.errors.append(f"{self.field_name} must be at least {min_length} characters long")
 
             # Complexity checks
-            if not re.search(r"[a-z]", password):
-                self.errors.append(f"{self.field_name} must contain at least one lowercase letter")
-
-            if not re.search(r"[A-Z]", password):
-                self.errors.append(f"{self.field_name} must contain at least one uppercase letter")
-
-            if not re.search(r"\d", password):
-                self.errors.append(f"{self.field_name} must contain at least one digit")
+            for rule_id, _pattern, message in self.CHARACTER_RULES:
+                if rule_id in unmet:
+                    self.errors.append(f"{self.field_name} {message}")
 
             # Check for common weak passwords
             weak_passwords = [

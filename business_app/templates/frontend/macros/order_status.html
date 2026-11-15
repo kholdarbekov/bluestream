@@ -1,15 +1,41 @@
 {#
-  The status label a customer sees on the server-rendered order pages (F15).
-  `display_status` is the backend's published answer
-  (OrderScheduleService.customer_display_status): the wait for a new date, or the
-  order's own status. The wait is not an order status, so it has its own copy. Every
-  other value is the status itself. Pages label the value and never work the wait out.
-  The JS pages carry the same copy in PAGE_DATA `i18n.status_labels`.
+  An order's status as the customer reads it on the website: the ONE place its words and its colour are decided.
+
+  `display_status` is the backend's published answer (OrderScheduleService.customer_display_status): the wait for a
+  new date (F15), or the order's own status. Pages label the value and never work the wait out.
+
+  - order_status_label(code): the words. The wait keeps its own sentence; every other status is
+    `web.cabinet.status.<code>` (scripts/seed_web_ui_cabinet_translations.py). Before that seed has run (a deploy
+    window) a status reads as its own name, "Out for delivery", never as a raw key.
+  - ORDER_STATUS_TONES: the colour (.ae-status tone): placed and being prepared are blue, on the way is navy, delivered
+    is green, waiting for a new date is amber, cancelled and returned are grey (the subscription page's chips use the
+    same colours for the same outcomes).
+  - order_status_pill(code): label + tone as a pill. The class `status-<code>` stays for scripts and tests.
+  The script-drawn pills (orders.js, order-detail-modal.js) read the same two answers from their page-data island
+  (`i18n.status_labels`, `status_tones`), which the templates fill from this file (a loop over ORDER_STATUS_TONES
+  through order_status_label(code)|striptags): no script holds a copy.
 #}
+{%- set ORDER_STATUS_TONES = {
+    'pending': 'info',
+    'confirmed': 'info',
+    'preparing': 'info',
+    'out_for_delivery': 'progress',
+    'awaiting_new_date': 'warn',
+    'delivered': 'ok',
+    'cancelled': 'muted',
+    'returned': 'muted',
+} -%}
+
 {% macro order_status_label(display_status) -%}
 {%- if display_status == 'awaiting_new_date' -%}
 {{ 'Awaiting a new delivery date'|t }}
 {%- else -%}
-{{ display_status|replace('_', ' ')|title }}
+{%- set key = 'web.cabinet.status.' ~ display_status -%}
+{%- set label = key|t -%}
+{{ label if label != key else (display_status|string|replace('_', ' ')|capitalize) }}
 {%- endif -%}
+{%- endmacro %}
+
+{% macro order_status_pill(display_status) -%}
+<span class="ae-status ae-status--{{ ORDER_STATUS_TONES.get(display_status, 'muted') }} status-{{ display_status }}">{{ order_status_label(display_status) }}</span>
 {%- endmacro %}

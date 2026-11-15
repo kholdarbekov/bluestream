@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple, List
 from flask import current_app, request
 import redis
+from sqlalchemy import case
 from sqlalchemy.exc import IntegrityError
 
 from business_app.models.user import User, UserAddress, UserSession
@@ -15,11 +16,18 @@ from business_app.utils.exceptions import ValidationError, UnauthorizedError, Co
 from business_app.utils.security_validators import SecurityValidator
 from business_app.utils.validators import EmailValidator, PhoneValidator, PasswordValidator
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
+from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
 from shared.enums import UserRole, UserStatus, UserType
 from shared import business_config
 from shared.user_names import GENERATED_TELEGRAM_NAME
-from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_BOT, PLACEHOLDER_EMAIL_DOMAIN_LOCAL, is_deliverable_email
+from shared.redis_keyspace import RedisKeyspace
+from shared.validators import (
+    PLACEHOLDER_EMAIL_DOMAIN_BOT,
+    PLACEHOLDER_EMAIL_DOMAIN_LOCAL,
+    is_deliverable_email,
+    normalize_phone_number,
+)
 from business_app.services.session_revocation_service import REVOKED_BY_PASSWORD_RESET, SessionRevocationService
 from business_app.services.shared_place.permissions import SHARED_PLACE_REVIEW_PERMISSIONS
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
@@ -59,14 +67,30 @@ def may_sign_in(user: Optional[User]) -> bool:
 def has_website_password(user: Optional[User]) -> bool:
     """The one "has a real website password" rule: a password someone chose, never one we made up.
 
-    A bot signup (`registration_source == "telegram"`) counts as having none, even after an admin
-    typed a real email on it: its stored password is ours, the TELEGRAM_PLACEHOLDER_PASSWORD_HASH
-    literal (telegram-register) or the hash of a random token nobody knows (the telegram-login
-    signup), and nothing stored tells a password it set later apart from those.
+    It reads `password_set_at`, which AuthService._set_chosen_password stamps whenever a person chooses a password
+    (register, phone register, reset, change) and a merge carries along with the password. An account whose stored
+    password is ours has none: a bot signup (the TELEGRAM_PLACEHOLDER_PASSWORD_HASH literal, or the hash of a random
+    token nobody knows) until it sets one through the emailed link, and an account an admin, an agent or staff created
+    with a random secret. Accounts older than the column keep the old guess (migration 290c1500d908 stamped exactly
+    what it answered): one an admin, an agent or staff created before then counts as having one, and a bot signup that
+    set a password before then counts as having none until it sets one again.
     """
-    if user is None or not user.password_hash or user.password_hash == TELEGRAM_PLACEHOLDER_PASSWORD_HASH:
-        return False
-    return user.registration_source != "telegram"
+    return user is not None and user.password_set_at is not None
+
+
+def canonical_sign_in_identifier(identifier: Optional[str]) -> str:
+    """The one form of what a customer types to sign in or to ask for a new password: an address lowercased, a
+    phone number in E.164 whichever common format it was typed in (shared `normalize_phone_number`: +998 90 123
+    45 67, 90 123 45 67, 8 90 123 45 67, 00998...), anything else trimmed as typed.
+
+    The account lookup uses it, so typing the same number another way finds the same account and spends that
+    account's one budget of tries; an identifier that names no account is counted under it (owner decision
+    2026-11-14).
+    """
+    typed = (identifier or "").strip()
+    if "@" in typed:
+        return typed.lower()
+    return normalize_phone_number(typed) or typed
 
 
 def mask_person_name(first_name: Optional[str], last_name: Optional[str]) -> str:
@@ -88,6 +112,17 @@ def mask_account_email(email: Optional[str]) -> Optional[str]:
     if len(parts) == 2:
         return parts[0][:2] + "***@" + parts[1]
     return None
+
+
+class SmsCodeStillValid(Exception):
+    """No new code went out: the code this number already holds is still valid, and it stays the code to enter.
+
+    `seconds_left` is that code's remaining life, rounded up (AuthService.sms_code_resend_wait).
+    """
+
+    def __init__(self, seconds_left: int):
+        super().__init__(f"The code sent to this number is valid for {seconds_left} more seconds")
+        self.seconds_left = seconds_left
 
 
 class AuthService:
@@ -194,12 +229,12 @@ class AuthService:
             phone=formatted_phone,
             first_name=first_name.strip() if first_name else "",
             last_name=last_name.strip() if last_name else "",
-            password_hash=self._hash_password(password),
             role=UserRole.CUSTOMER.value,
             status=UserStatus.PENDING_VERIFICATION.value,
             registration_method=registration_method,
             **filtered_kwargs,
         )
+        self._set_chosen_password(user, password)
 
         db.session.add(user)
         db.session.commit()
@@ -228,7 +263,7 @@ class AuthService:
         Login user with email/phone and password
 
         Args:
-            identifier: Email or phone number
+            identifier: Email or phone number, the phone in any common format (`canonical_sign_in_identifier`)
             password: User password
 
         Returns:
@@ -238,33 +273,77 @@ class AuthService:
             UnauthorizedError: If credentials are invalid
             ValidationError: If account is locked
         """
-        # Check for account lockout
-        self._check_account_lockout(identifier)
+        # Every way of typing the same address or number names the same account, and an account has ONE budget of
+        # wrong passwords whichever of them was typed. An identifier that names no account spends its own.
+        canonical = canonical_sign_in_identifier(identifier)
+        user = self._find_sign_in_account(identifier)
+        keys = self._account_lockout_keys(user.id) if user else self._unknown_identifier_lockout_keys(canonical)
 
-        # Find user by email or phone
-        user = User.query.filter((User.email == identifier.lower()) | (User.phone == identifier)).first()
+        self._check_account_lockout(keys, user)
 
+        # Each refusal carries an error_code the login route publishes, so a page can word it in its own copy.
         if not user:
-            self._increment_failed_attempts(identifier)
-            raise UnauthorizedError(get_translation("api.auth.invalid_credentials"))
+            self._increment_failed_attempts(keys)
+            raise UnauthorizedError(get_translation("api.auth.invalid_credentials"), error_code="INVALID_CREDENTIALS")
 
         # Check if this is a telegram-only user trying to login with placeholder email
-        if self._is_telegram_only_user(user) and identifier.lower() == user.email:
-            raise UnauthorizedError(get_translation("api.auth.telegram_account_password_required"))
+        if self._is_telegram_only_user(user) and canonical == user.email:
+            raise UnauthorizedError(
+                get_translation("api.auth.telegram_account_password_required"), error_code="TELEGRAM_PASSWORD_REQUIRED"
+            )
 
         if not self._verify_password(password, user.password_hash):
             # Increment failed login attempts
-            self._increment_failed_attempts(identifier)
-            raise UnauthorizedError(get_translation("api.auth.invalid_credentials"))
+            self._increment_failed_attempts(keys, user)
+            raise UnauthorizedError(get_translation("api.auth.invalid_credentials"), error_code="INVALID_CREDENTIALS")
 
         # Check if user is active
         if not may_sign_in(user):
-            raise UnauthorizedError(get_translation("api.auth.account_disabled"))
+            raise UnauthorizedError(get_translation("api.auth.account_disabled"), error_code="ACCOUNT_DISABLED")
 
         # Reset failed login attempts
-        self._reset_failed_attempts(identifier)
+        self._reset_failed_attempts(keys, user)
 
         return user, self.issue_web_login(user)
+
+    @staticmethod
+    def _find_sign_in_account(identifier: Optional[str]) -> Optional[User]:
+        """The account a typed sign-in identifier names (login, password reset): by its canonical form or exactly as
+        typed, then, for a number, among the phones stored before every writer saved E.164 (`_legacy_phone_holder`),
+        so such an account is found in any format too.
+
+        A phone stored exactly as typed comes first, so an identifier that found an account before any format was
+        read (the exact match) still finds that same one."""
+        typed = (identifier or "").strip()
+        if not typed:
+            return None
+        canonical = canonical_sign_in_identifier(typed)
+        user = (
+            User.query.filter((User.email == canonical) | User.phone.in_({typed, canonical}))
+            .order_by(case((User.phone == typed, 0), else_=1), User.id)
+            .first()
+        )
+        return user or AuthService._legacy_phone_holder(canonical)
+
+    @staticmethod
+    def _legacy_phone_holder(phone: str) -> Optional[User]:
+        """The account whose phone is stored in another form of the E.164 number `phone`, oldest first; None when
+        `phone` is not a number (an address, an unreadable string).
+
+        The old /verify-phone saved the number as typed ("998901234567", "+998 90 123 45 67"), and no migration
+        rewrote those rows. Each stored phone that is not already E.164 is read through the shared normaliser, the
+        same rule as the typed side, rather than a second definition of a number's forms in SQL."""
+        if normalize_phone_number(phone) != phone:
+            return None
+        legacy = (
+            User.query.with_entities(User.id, User.phone)
+            .filter(User.phone.isnot(None), ~User.phone.like("+998_________"))  # 13 characters: E.164, matched above
+            .order_by(User.id)
+        )
+        for user_id, stored in legacy:
+            if normalize_phone_number(stored) == phone:
+                return db.session.get(User, user_id)
+        return None
 
     def issue_web_login(self, user: User) -> Dict[str, str]:
         """A website login for `user`, once a door has proven who they are: the password (`login_user`) or a
@@ -366,52 +445,78 @@ class AuthService:
 
     def send_verification_sms(self, user_id: int, phone: str = None) -> bool:
         """
-        Send SMS verification
+        Send an SMS code to `phone` (else the account's own number), kept for otp_expiry.
 
         Never writes the number to the account: a new number is saved only by
         verify_phone, once the code sent to it is entered.
 
-        Args:
-            user_id: User ID
-            phone: Phone number to send OTP to (optional, uses user's phone if not provided)
+        Returns:
+            Whether the provider took the code. One it refused, or a send that failed, leaves no code behind.
+        """
+        target = self._sms_code_target(user_id, phone)
+        return bool(target) and self._send_sms_code(*target)
+
+    def send_phone_verification_code(self, user_id: int, phone: str = None) -> bool:
+        """
+        The code that confirms a number for the user's own account: POST /auth/send-otp, /auth/change-phone and
+        /auth/resend-sms-verification all send through here.
+
+        A number gets a new code only once the code it holds expires (owner, 2026-11-14: "send a new code" only at
+        expiry). Before then nothing is sent and SmsCodeStillValid carries the seconds left; that code stays the one
+        to enter. Another number (a typo fixed) gets its code at once.
 
         Returns:
-            Success status
+            Whether the provider took the code, as send_verification_sms.
         """
+        target = self._sms_code_target(user_id, phone)
+        if not target:
+            return False
+        wait = self.sms_code_resend_wait(user_id, target[1])
+        if wait:
+            raise SmsCodeStillValid(wait)
+        return self._send_sms_code(*target)
+
+    def _sms_code_target(self, user_id: int, phone: Optional[str]) -> Optional[Tuple[User, str]]:
+        """The account and the formatted number its code goes to (`phone`, else the account's own), or None."""
         user = User.query.get(user_id)
         if not user:
-            return False
+            return None
 
-        # Use provided phone or user's phone
         target_phone = phone or user.phone
         if not target_phone:
             logger.error(f"No phone number available for user {user_id}")
-            return False
+            return None
 
-        # Validate phone number
         phone_validator = PhoneValidator(target_phone, "phone")
         phone_validator.validate()
         if not phone_validator.is_valid():
             logger.error(f"Invalid phone number for SMS verification: {target_phone}")
-            return False
+            return None
 
-        # Format phone number
-        formatted_phone = format_phone_number(target_phone)
+        return user, format_phone_number(target_phone)
 
-        # Generate OTP
+    def _send_sms_code(self, user: User, sent_to: str) -> bool:
+        """Store a new code for `sent_to` and send it.
+
+        Sent in-process, not through Celery, so the provider's answer is known here. A code the provider did not take
+        is forgotten: it reached nobody, so it must neither be entered nor hold the number's resend wait.
+        """
         otp = generate_otp()
+        self._store_sms_code(user.id, otp, sent_to, self.otp_expiry)
 
-        # Store OTP in Redis
-        self._store_sms_code(user.id, otp, formatted_phone, self.otp_expiry)
-
-        # Send SMS - call directly instead of using Celery to avoid connection issues
         try:
-            send_verification_sms_task(user.id, otp, formatted_phone)
-            logger.info(f"SMS verification sent to {formatted_phone} for user {user_id}")
-            return True
+            result = send_verification_sms_task(user.id, otp, sent_to)
         except Exception:
             logger.exception("Failed to send SMS verification")
-            return False
+            result = None
+
+        if isinstance(result, dict) and result.get("success"):
+            logger.info(f"SMS verification sent to {sent_to} for user {user.id}")
+            return True
+
+        logger.error(f"SMS verification to {sent_to} for user {user.id} was not sent: {result}")
+        self._forget_sms_code(user.id)
+        return False
 
     def verify_email(self, token: str) -> bool:
         """Verify email with token"""
@@ -472,8 +577,7 @@ class AuthService:
             if self.find_phone_holder(phone, exclude_user_id=user_id):
                 raise ConflictError(get_translation("api.auth.phone_already_registered"))
 
-        # Remove OTP from Redis
-        self.redis_client.delete(key, f"sms_verification_phone:{user_id}")
+        self._forget_sms_code(user_id)
 
         user = User.query.get(user_id)
         if user:
@@ -512,9 +616,9 @@ class AuthService:
 
         Emails a reset link. An account with no deliverable email (a bot customer's placeholder address) gets
         nothing sent: it has no password to reset and signs in with "Open on website" in the bot (spec 2026-10-27 §9).
-        Returns True in every case (prevents enumeration).
+        Returns True in every case (prevents enumeration). The phone may be typed in any common format.
         """
-        user = User.query.filter((User.email == identifier.lower()) | (User.phone == identifier)).first()
+        user = self._find_sign_in_account(identifier)
 
         if not user or not is_deliverable_email(user.email):
             return True
@@ -543,7 +647,7 @@ class AuthService:
 
         user = User.query.get(user_id)
         if user:
-            user.password_hash = self._hash_password(new_password)
+            self._set_chosen_password(user, new_password)
             # Every login made before the reset ends now, on every device (spec 2026-10-19 R9)
             SessionRevocationService.revoke_all(user.id, reason=REVOKED_BY_PASSWORD_RESET)
             db.session.commit()
@@ -574,7 +678,7 @@ class AuthService:
             )
 
         # Update password
-        user.password_hash = self._hash_password(new_password)
+        self._set_chosen_password(user, new_password)
         db.session.commit()
 
         # Send telegram notification if user has telegram_id
@@ -821,7 +925,6 @@ class AuthService:
             email=None,  # Email is optional for phone registration
             first_name=first_name.strip(),
             last_name=last_name.strip() if last_name else None,
-            password_hash=self._hash_password(password),
             role=UserRole.CUSTOMER.value,
             status=UserStatus.ACTIVE.value,  # Active immediately - phone already verified
             is_verified=True,
@@ -830,6 +933,7 @@ class AuthService:
             registration_method="phone",
             preferred_language=language,
         )
+        self._set_chosen_password(user, password)
 
         db.session.add(user)
         db.session.commit()
@@ -1042,13 +1146,13 @@ class AuthService:
             email=email.lower().strip(),
             first_name=first_name,
             last_name=last_name,
-            password_hash=self._hash_password(password),
             user_type=UserType.STAFF.value,
             role=UserRole.ADMIN.value,
             status=UserStatus.ACTIVE.value,
             phone_verified_at=datetime.now(timezone.utc),
             email_verified_at=datetime.now(timezone.utc),
         )
+        self._set_chosen_password(admin_user, password)
 
         db.session.add(admin_user)
         db.session.commit()
@@ -1678,10 +1782,18 @@ class AuthService:
             "landmark",
             "floor_number",
             "apartment_number",
+            "is_business",
         )
         for field in updatable_fields:
             if field in data:
                 setattr(address, field, data[field])
+
+        # The same "one default per user" rule as add_user_address / set_default_user_address: the website's
+        # address wizard sends is_default on edit, which used to be dropped silently. False never un-defaults
+        # (that would leave the user with no default address); another address becoming default does.
+        if data.get("is_default") and not address.is_default:
+            UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
+            address.is_default = True
 
         db.session.commit()
         return address
@@ -1727,7 +1839,12 @@ class AuthService:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            raise ValidationError("Cannot delete an address referenced by existing records")
+            # Orders, bottle balances and the like keep a foreign key to the address. The customer reads this
+            # message (website cabinet, bot), so it is a translation, not the old hard-coded English sentence.
+            message = get_translation("web.checkout.addr.in_use")
+            if message == "web.checkout.addr.in_use":
+                message = "Cannot delete an address referenced by existing records"
+            raise ValidationError(message)
 
     def set_default_user_address(self, user_id: int, address_id: int) -> UserAddress:
         """Set a specific user-owned address as default."""
@@ -2008,10 +2125,27 @@ class AuthService:
         self.redis_client.setex(f"sms_verification:{user_id}", ttl, otp)
         self.redis_client.setex(f"sms_verification_phone:{user_id}", ttl, sent_to)
 
+    def _forget_sms_code(self, user_id: int) -> None:
+        """Drop the user's current SMS code and the number it went to."""
+        self.redis_client.delete(f"sms_verification:{user_id}", f"sms_verification_phone:{user_id}")
+
     def _sms_code_was_sent_to(self, user_id: int, phone: str) -> bool:
         """Whether the user's current SMS code went to this number. Every flow keeps one code per user."""
         sent_to = self.redis_client.get(f"sms_verification_phone:{user_id}")
         return bool(sent_to) and sent_to.decode() == format_phone_number(phone)
+
+    def sms_code_resend_wait(self, user_id: int, phone: str) -> int:
+        """
+        Seconds before another code may go to this number: what is left of the user's current code when that code
+        went to it, else 0. A new code to a number goes out only once the one it holds expires (owner, 2026-11-14),
+        so send_phone_verification_code refuses it before then and the page's countdown shows "send a new code" at
+        expiry. Another number (a typo fixed) waits for nothing. Rounded up, so a client counting it down never asks a
+        moment early.
+        """
+        if not self._sms_code_was_sent_to(user_id, phone):
+            return 0
+        left_ms = self.redis_client.pttl(f"sms_verification:{user_id}")
+        return -(-left_ms // 1000) if isinstance(left_ms, int) and left_ms > 0 else 0
 
     def _validate_registration_data(
         self, email: Optional[str], password: str, phone: Optional[str], first_name: str, last_name: Optional[str]
@@ -2061,6 +2195,16 @@ class AuthService:
     def _hash_password(self, password: str) -> str:
         """Hash password with configured bcrypt rounds"""
         return hash_password(password)
+
+    def _set_chosen_password(self, user: User, password: str) -> None:
+        """Store a password the person chose: its hash, and when (`password_set_at`, read by has_website_password).
+
+        The one writer for every door where someone types a password: register (web, email, the admin create-user
+        form), phone register, reset and change. A random or placeholder secret never comes through here, and the
+        bcrypt re-hash at login (_verify_password) keeps the old stamp: the password is the same one.
+        """
+        user.password_hash = self._hash_password(password)
+        user.password_set_at = datetime.now(timezone.utc)
 
     def _verify_password(self, password: str, password_hash: str) -> bool:
         """Verify password and optionally rehash if needed"""
@@ -2226,23 +2370,35 @@ class AuthService:
 
     # Removed _blacklist_token method - now using TokenService.blacklist_token_by_string()
 
-    def _check_account_lockout(self, identifier: str):
-        """Check if account is locked due to failed attempts (checks both Redis and DB)"""
+    @staticmethod
+    def _account_lockout_keys(user_id: int) -> Tuple[str, str]:
+        """The Redis attempt counter and lock of one account: its address and its number, typed in any format,
+        spend this one budget of wrong passwords."""
+        return RedisKeyspace.sign_in_attempts(user_id), RedisKeyspace.sign_in_lockout(user_id)
+
+    @staticmethod
+    def _unknown_identifier_lockout_keys(identifier: str) -> Tuple[str, str]:
+        """The Redis attempt counter and lock of an identifier that names no account, so it is refused like one."""
+        return RedisKeyspace.sign_in_attempts_unknown(identifier), RedisKeyspace.sign_in_lockout_unknown(identifier)
+
+    def _check_account_lockout(self, keys: Tuple[str, str], user: Optional[User] = None):
+        """Refuse while the Redis lock `keys` (`_account_lockout_keys` / `_unknown_identifier_lockout_keys`) holds
+        or, as the fallback that survives a Redis restart, while the account's own DB lock (`user`) runs."""
         # Check Redis first (primary lockout mechanism)
-        key = f"login_attempts:{identifier}"
-        attempts = self.redis_client.get(key)
+        attempts_key, lockout_key = keys
+        attempts = self.redis_client.get(attempts_key)
 
         if attempts and int(attempts) >= self.max_login_attempts:
-            lockout_key = f"account_lockout:{identifier}"
             if self.redis_client.exists(lockout_key):
                 raise ValidationError(get_translation("api.auth.account_locked"))
 
+        if user is None:
+            return
+
         # Also check database as fallback (in case Redis was restarted)
         try:
-            user = User.query.filter((User.email == identifier) | (User.phone == identifier)).first()
-
-            if user and user.account_locked_until:
-                if user.account_locked_until > datetime.now(timezone.utc):
+            if user.account_locked_until:
+                if ensure_utc(user.account_locked_until) > datetime.now(timezone.utc):
                     raise ValidationError(get_translation("api.auth.account_locked"))
                 else:
                     # Lockout has expired, clear it
@@ -2254,49 +2410,44 @@ class AuthService:
         except Exception:
             logger.exception("Error checking DB lockout")
 
-    def _increment_failed_attempts(self, identifier: str):
-        """Increment failed login attempts and lock account in DB if max reached"""
-        key = f"login_attempts:{identifier}"
-        attempts = self.redis_client.incr(key)
-        self.redis_client.expire(key, self.lockout_duration)
+    def _increment_failed_attempts(self, keys: Tuple[str, str], user: Optional[User] = None):
+        """Count a wrong password against `keys`; at the limit lock them and, in the DB, the account `user`."""
+        attempts_key, lockout_key = keys
+        attempts = self.redis_client.incr(attempts_key)
+        self.redis_client.expire(attempts_key, self.lockout_duration)
 
         if attempts >= self.max_login_attempts:
             # Set Redis lockout key
-            lockout_key = f"account_lockout:{identifier}"
             self.redis_client.setex(lockout_key, self.lockout_duration, "1")
 
             # Also update account_locked_until in database for persistence
             # This allows admin to see/unlock accounts and survives Redis restarts
+            if user is None:
+                return
             try:
                 lockout_until = datetime.now(timezone.utc) + timedelta(seconds=self.lockout_duration)
 
-                # Look up user by email or phone
-                user = User.query.filter((User.email == identifier) | (User.phone == identifier)).first()
+                user.account_locked_until = lockout_until
+                user.failed_login_attempts = attempts
+                db.session.commit()
+                logger.warning(f"Account locked for user {user.id} until {lockout_until}")
 
-                if user:
-                    user.account_locked_until = lockout_until
-                    user.failed_login_attempts = attempts
-                    db.session.commit()
-                    logger.warning(f"Account locked for user {user.id} until {lockout_until}")
-
-                    # Send notification about account lockout
-                    self._send_account_locked_notification(user, lockout_until)
+                # Send notification about account lockout
+                self._send_account_locked_notification(user, lockout_until)
             except Exception:
                 logger.exception("Failed to update account_locked_until in DB")
                 # Don't fail the overall operation - Redis lockout still works
 
-    def _reset_failed_attempts(self, identifier: str):
-        """Reset failed login attempts and clear account lockout"""
-        key = f"login_attempts:{identifier}"
-        lockout_key = f"account_lockout:{identifier}"
+    def _reset_failed_attempts(self, keys: Tuple[str, str], user: Optional[User] = None):
+        """Clear the count and lock `keys` and, when given, the account's DB lock."""
+        self.redis_client.delete(*keys)
 
-        self.redis_client.delete(key, lockout_key)
+        if user is None:
+            return
 
         # Also clear account_locked_until in database
         try:
-            user = User.query.filter((User.email == identifier) | (User.phone == identifier)).first()
-
-            if user and (user.account_locked_until or user.failed_login_attempts > 0):
+            if user.account_locked_until or user.failed_login_attempts > 0:
                 user.account_locked_until = None
                 user.failed_login_attempts = 0
                 db.session.commit()
@@ -2327,14 +2478,9 @@ class AuthService:
 
             raise NotFoundError(f"User {user_id} not found")
 
-        # Determine identifier for Redis keys (email or phone)
-        identifier = user.email or user.phone
-
-        if identifier:
-            # Clear Redis lockout keys
-            key = f"login_attempts:{identifier}"
-            lockout_key = f"account_lockout:{identifier}"
-            self.redis_client.delete(key, lockout_key)
+        # Clear the account's Redis lockout: one budget for its address and its number in any format (before, only
+        # the email's counter was cleared, so a customer locked out by phone stayed locked)
+        self._reset_failed_attempts(self._account_lockout_keys(user.id))
 
         # Clear DB fields
         was_locked = user.account_locked_until is not None
@@ -2515,7 +2661,9 @@ class AuthService:
 
         # Reset any failed login attempts
         logger.info("Resetting any failed login attempts")
-        self._reset_failed_attempts(str(telegram_id))
+        # Only the counter of the Telegram id typed as an identifier: a Telegram sign-in never lifts the account's
+        # password lockout, and the id is never read as a phone number (a 9-digit id would name a stranger's)
+        self._reset_failed_attempts(self._unknown_identifier_lockout_keys(str(telegram_id)))
 
         logger.info("=== TELEGRAM USER AUTHENTICATION SUCCESS ===")
         return user, tokens

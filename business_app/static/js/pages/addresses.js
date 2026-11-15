@@ -1,172 +1,201 @@
+/**
+ * My addresses (/addresses): lists the customer's saved addresses (GET /auth/addresses) and runs the card actions.
+ * Adding and editing open the address wizard (static/js/address-wizard.js); the list reloads on its
+ * 'ae:address-saved' event. "Make main" uses PATCH /auth/addresses/<id>/set-default, delete asks in a modal first.
+ */
 (function () {
-    var PAGE_DATA = getPageData();
-    var addresses = [];
+    'use strict';
 
-    function escapeHtml(str) {
-        if (str === null || str === undefined) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    var PAGE_DATA = getPageData();
+    var T = PAGE_DATA.i18n || {};
+    var addresses = [];
+    var pendingDeleteId = null;
+
+    function el(id) { return document.getElementById(id); }
+    function esc(value) { return window.AE.escapeHtml(value); }
+
+    async function readJson(response) {
+        try { return await response.json(); } catch (error) { return {}; }
+    }
+
+    function wizardReady() {
+        var ready = window.AddressWizard && window.AddressWizard.ready;
+        return ready ? ready.catch(function () { return null; }) : Promise.resolve(null);
+    }
+
+    function districtName(key) {
+        return window.AddressWizard ? window.AddressWizard.districtName(key) : '';
     }
 
     async function loadAddresses() {
+        var list = el('addressesList');
+        list.setAttribute('aria-busy', 'true');
+        var ok = false;
         try {
             var response = await apiRequest('/auth/addresses');
-            var result = await response.json();
-
+            var result = await readJson(response);
             if (response.ok && result.success) {
-                addresses = result.data.addresses;
+                addresses = (result.data && result.data.addresses) || [];
+                ok = true;
             }
         } catch (error) {
-            console.error('Error loading addresses:', error);
+            ok = false;
         }
-        renderAddresses();
+        await wizardReady();
+        list.setAttribute('aria-busy', 'false');
+        if (ok) render();
+        else showError();
     }
 
-    function renderAddresses() {
-        var addressesList = document.getElementById('addressesList');
-
-        if (addresses.length === 0) {
-            addressesList.innerHTML =
-                '<div class="text-center py-5" id="noAddressesMessage">' +
-                '<i class="far fa-map-marker-alt" style="font-size: 4rem; color: #ccc;"></i>' +
-                '<h4 class="mt-3">' + escapeHtml(PAGE_DATA.i18n.no_addresses) + '</h4>' +
-                '<p class="text-muted">' + escapeHtml(PAGE_DATA.i18n.add_first_hint) + '</p>' +
-                '<button class="btn btn-primary" data-action="show-add-address">' +
-                '<i class="far fa-plus"></i> ' + escapeHtml(PAGE_DATA.i18n.add_first_button) +
-                '</button></div>';
-            return;
-        }
-
-        var html = addresses.map(function (address) {
-            var addressLine = address.full_address || address.street_address || '';
-            var cityLine = address.city + (address.district ? ', ' + address.district : '');
-            var apartment = address.apartment_number
-                ? '<p><strong>' + escapeHtml(PAGE_DATA.i18n.apartment) + ':</strong> <span>' + escapeHtml(address.apartment_number) + '</span></p>'
-                : '';
-            var landmark = address.landmark
-                ? '<p><strong>' + escapeHtml(PAGE_DATA.i18n.landmark) + ':</strong> <span>' + escapeHtml(address.landmark) + '</span></p>'
-                : '';
-            var instructions = address.delivery_instructions
-                ? '<p><strong>' + escapeHtml(PAGE_DATA.i18n.instructions) + ':</strong> <span>' + escapeHtml(address.delivery_instructions) + '</span></p>'
-                : '';
-            var defaultBadge = address.is_default
-                ? '<span class="default-badge">' + escapeHtml(PAGE_DATA.i18n.default_badge) + '</span>' : '';
-            var businessBadge = address.is_business
-                ? '<span class="business-badge">' + escapeHtml(PAGE_DATA.i18n.business_badge) + '</span>' : '';
-            var nonDefaultActions = !address.is_default
-                ? '<button class="btn btn-outline-success btn-sm" data-action="set-default" data-id="' + address.id + '">' +
-                  '<i class="far fa-check-circle"></i> ' + escapeHtml(PAGE_DATA.i18n.set_default) + '</button>' +
-                  '<button class="btn btn-outline-danger btn-sm" data-action="delete-address" data-id="' + address.id + '">' +
-                  '<i class="far fa-trash-alt"></i> ' + escapeHtml(PAGE_DATA.i18n.delete) + '</button>'
-                : '';
-
-            return '<div class="address-card ' + (address.is_default ? 'default' : '') + '">' +
-                '<div class="address-card-content">' +
-                '<div class="address-icon">' +
-                '<i class="fas ' + (address.is_business ? 'fa-building' : 'fa-map-marker-alt') + '"></i>' +
-                '</div>' +
-                '<div class="address-info">' +
-                '<div class="address-header">' +
-                '<div class="address-title-wrapper">' +
-                '<h5 class="address-title">' + escapeHtml(address.title) + '</h5>' +
-                defaultBadge + businessBadge +
-                '</div>' +
-                '<div class="address-actions">' +
-                '<button class="btn btn-outline-primary btn-sm" data-action="edit-address" data-id="' + address.id + '">' +
-                '<i class="far fa-edit"></i> ' + escapeHtml(PAGE_DATA.i18n.edit) + '</button>' +
-                nonDefaultActions +
-                '</div></div>' +
-                '<div class="address-details">' +
-                '<p><strong>' + escapeHtml(PAGE_DATA.i18n.address_label) + ':</strong> <span>' + escapeHtml(addressLine) + '</span></p>' +
-                '<p><strong>' + escapeHtml(PAGE_DATA.i18n.city) + ':</strong> <span>' + escapeHtml(cityLine) + '</span></p>' +
-                apartment + landmark + instructions +
-                '</div></div></div></div>';
-        }).join('');
-
-        addressesList.innerHTML = html;
+    function showError() {
+        el('addressesList').innerHTML = '';
+        el('addressesHead').hidden = true;
+        el('noAddressesMessage').hidden = true;
+        el('addressesError').hidden = false;
     }
 
-    function editAddress(addressId) {
-        var address = addresses.find(function (a) { return a.id === addressId; });
+    function render() {
+        var list = el('addressesList');
+        var empty = addresses.length === 0;
+        el('addressesError').hidden = true;
+        el('noAddressesMessage').hidden = !empty;
+        el('addressesHead').hidden = empty;
+        var sorted = addresses.slice().sort(function (a, b) {
+            return (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.id - b.id;
+        });
+        list.innerHTML = sorted.map(cardHtml).join('');
+    }
+
+    function fact(label, value) {
+        if (!value) return '';
+        return '<li><span class="ae-addr-card__fact-label">' + esc(label) + '</span> ' + esc(value) + '</li>';
+    }
+
+    function cardHtml(address) {
+        var id = Number(address.id);
+        var text = address.full_address || address.street_address || '';
+        // A district saved by key shows its localized name; free text from older rows shows as it was typed.
+        var district = address.district ? (districtName(address.district) || address.district) : '';
+        var facts = [
+            fact(T.district, district),
+            address.full_address ? fact(T.street, address.street_address) : '',
+            fact(T.floor, address.floor_number),
+            fact(T.apartment, address.apartment_number)
+        ].join('');
+        var notes = '';
+        if (address.landmark) {
+            notes += '<p class="ae-addr-card__note"><i class="far fa-flag" aria-hidden="true"></i>' +
+                '<span><span class="visually-hidden">' + esc(T.landmark) + ': </span>' + esc(address.landmark) + '</span></p>';
+        }
+        if (address.delivery_instructions) {
+            notes += '<p class="ae-addr-card__note"><i class="far fa-comment-alt" aria-hidden="true"></i>' +
+                '<span><span class="visually-hidden">' + esc(T.instructions) + ': </span>' + esc(address.delivery_instructions) + '</span></p>';
+        }
+        var badges = (address.is_default ? '<span class="ae-badge ae-badge--main">' + esc(T.default_badge) + '</span>' : '') +
+            (address.is_business ? '<span class="ae-badge ae-badge--muted">' + esc(T.business_badge) + '</span>' : '');
+        var actions = '<button type="button" class="ae-btn ae-btn--secondary ae-btn--sm" data-action="edit-address" data-id="' + id + '">' +
+            '<i class="far fa-pen" aria-hidden="true"></i><span>' + esc(T.edit) + '</span></button>';
+        if (!address.is_default) {
+            actions += '<button type="button" class="ae-btn ae-btn--ghost ae-btn--sm" data-action="set-default" data-id="' + id + '">' +
+                '<i class="far fa-check-circle" aria-hidden="true"></i><span>' + esc(T.make_default) + '</span></button>' +
+                '<button type="button" class="ae-btn ae-btn--ghost ae-btn--sm ae-addr-card__delete" data-action="delete-address" data-id="' + id + '">' +
+                '<i class="far fa-trash-alt" aria-hidden="true"></i><span>' + esc(T.delete) + '</span></button>';
+        }
+        return '<article class="ae-addr-card' + (address.is_default ? ' is-default' : '') + '" role="listitem" data-address-id="' + id + '">' +
+            '<span class="ae-icon-tile ae-icon-tile--sm ae-addr-card__icon" aria-hidden="true"><i class="far ' +
+            (address.is_business ? 'fa-building' : 'fa-map-marker-alt') + '"></i></span>' +
+            '<div class="ae-addr-card__body">' +
+            '<div class="ae-addr-card__head"><h2 class="ae-addr-card__title">' + esc(address.title) + '</h2>' + badges + '</div>' +
+            (text ? '<p class="ae-addr-card__address">' + esc(text) + '</p>' : '') +
+            (facts ? '<ul class="ae-addr-card__facts">' + facts + '</ul>' : '') +
+            notes +
+            '<div class="ae-addr-card__actions">' + actions + '</div>' +
+            '</div></article>';
+    }
+
+    function find(id) {
+        return addresses.find(function (a) { return a.id === id; });
+    }
+
+    async function setDefault(id, button) {
+        if (button) button.disabled = true;
+        try {
+            var response = await apiRequest('/auth/addresses/' + id + '/set-default', { method: 'PATCH' });
+            var result = await readJson(response);
+            if (response.ok && result.success !== false) {
+                showNotification(T.default_updated, 'success');
+                await loadAddresses();
+            } else {
+                showNotification(result.message || T.default_failed, 'error');
+            }
+        } catch (error) {
+            showNotification(T.network_error, 'error');
+        } finally {
+            if (button && button.isConnected) button.disabled = false;
+        }
+    }
+
+    function askDelete(id) {
+        var address = find(id);
         if (!address) return;
-
-        if (typeof editAddressWizard === 'function') {
-            editAddressWizard(address);
-        } else {
-            console.error('Address wizard not loaded');
-        }
+        pendingDeleteId = id;
+        el('addressDeleteText').textContent = String(T.delete_text || '').replace('{title}', address.title || '');
+        $('#addressDeleteModal').modal('show');
     }
 
-    async function setDefaultAddress(addressId) {
+    async function confirmDelete() {
+        var id = pendingDeleteId;
+        if (!id) return;
+        var button = el('addressDeleteConfirm');
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
         try {
-            var response = await apiRequest('/auth/addresses/' + addressId, {
-                method: 'PUT',
-                body: JSON.stringify({ is_default: true })
-            });
-
-            var result = await response.json();
-
-            if (response.ok) {
-                showNotification(PAGE_DATA.i18n.default_updated, 'success');
+            var response = await apiRequest('/auth/addresses/' + id, { method: 'DELETE' });
+            var result = await readJson(response);
+            $('#addressDeleteModal').modal('hide');
+            if (response.ok && result.success !== false) {
+                showNotification(T.deleted, 'success');
                 await loadAddresses();
             } else {
-                showNotification(result.message || PAGE_DATA.i18n.set_default_failed, 'error');
+                showNotification(result.message || T.delete_failed, 'error');
             }
         } catch (error) {
-            showNotification(PAGE_DATA.i18n.network_error, 'error');
+            showNotification(T.network_error, 'error');
+        } finally {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            pendingDeleteId = null;
         }
     }
 
-    async function deleteAddress(addressId) {
-        if (!confirm(PAGE_DATA.i18n.delete_confirm)) return;
-
-        try {
-            var response = await apiRequest('/auth/addresses/' + addressId, {
-                method: 'DELETE'
-            });
-
-            var result = await response.json();
-
-            if (response.ok) {
-                showNotification(PAGE_DATA.i18n.delete_success, 'success');
-                await loadAddresses();
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.delete_failed, 'error');
-            }
-        } catch (error) {
-            showNotification(PAGE_DATA.i18n.network_error, 'error');
-        }
+    function openWizard(address) {
+        if (!window.AddressWizard) return;
+        if (address) window.AddressWizard.open({ address: address });
+        else window.AddressWizard.open({ makeDefault: addresses.length === 0 });
     }
 
-    document.addEventListener('DOMContentLoaded', function () {
-        loadAddresses();
+    function init() {
+        // Bootstrap modals must sit directly in <body>, outside the cabinet's layout boxes.
+        var confirmModal = el('addressDeleteModal');
+        if (confirmModal && confirmModal.parentNode !== document.body) document.body.appendChild(confirmModal);
+        el('addressDeleteConfirm').addEventListener('click', confirmDelete);
+        document.addEventListener('ae:address-saved', loadAddresses);
 
-        document.body.addEventListener('click', function (e) {
-            var target = e.target.closest('[data-action]');
+        el('addressesPage').addEventListener('click', function (event) {
+            var target = event.target.closest('[data-action]');
             if (!target) return;
-            var action = target.dataset.action;
             var id = parseInt(target.dataset.id, 10);
-
-            switch (action) {
-                case 'show-add-address':
-                    if (typeof window.showAddAddressModal === 'function') {
-                        window.showAddAddressModal();
-                    }
-                    break;
-                case 'edit-address':
-                    editAddress(id);
-                    break;
-                case 'set-default':
-                    setDefaultAddress(id);
-                    break;
-                case 'delete-address':
-                    deleteAddress(id);
-                    break;
+            switch (target.dataset.action) {
+                case 'show-add-address': openWizard(null); break;
+                case 'edit-address': openWizard(find(id)); break;
+                case 'set-default': setDefault(id, target); break;
+                case 'delete-address': askDelete(id); break;
+                case 'reload-addresses': loadAddresses(); break;
             }
         });
-    });
+        loadAddresses();
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
 })();

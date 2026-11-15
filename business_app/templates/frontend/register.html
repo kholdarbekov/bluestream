@@ -1,215 +1,164 @@
+{#- Create an account (register.js). Sign-up is by phone (an SMS code, then /auth/phone/register/verify, which signs the
+    customer in) or by email (/auth/register, then the verify-email page): the customer picks one, so nothing typed for
+    the other way is dropped silently. The password checklist reads the server's rule (`password_rules`). -#}
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/macros/ui.html' import telegram_panel with context %}
+{% from 'frontend/macros/auth.html' import auth_head, field, password_field, password_rules as rules_list, otp_field, or_divider, form_alert with context %}
 
-{% block title %}{{ 'landing.nav.register'|t }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'web.auth.register.page_title'|t }} — {{ company_name }}{% endblock %}
+{% set meta_description = 'web.auth.register.meta'|t %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.nav.register'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.nav.register'|t }}</li>
-                    </ul>
+{%- set next_query = ('?next=' ~ (request.args.get('next')|urlencode)) if request.args.get('next') else '' %}
+{{ page_hero('web.auth.register.hero'|t, [('web.auth.register.hero'|t, None)], variant='soft') }}
+
+<section class="ae-section ae-auth">
+    <div class="ae-container">
+        <div class="ae-auth__card ae-auth__card--wide">
+            <div id="registerStep">
+                {{ auth_head('web.auth.register.title'|t, 'web.auth.register.lead'|t) }}
+
+                {{ form_alert('registerAlert') }}
+
+                <form id="registerForm" class="ae-auth__form" novalidate>
+                    <div class="ae-auth__method">
+                        <p class="ae-field__label" id="registerMethodLabel">{{ 'web.auth.register.method'|t }}</p>
+                        <div class="ae-segmented ae-auth__segmented" role="group" aria-labelledby="registerMethodLabel">
+                            <button type="button" data-method="phone" aria-pressed="true"><i class="fas fa-mobile-alt" aria-hidden="true"></i>{{ 'web.auth.register.by_phone'|t }}</button>
+                            <button type="button" data-method="email" aria-pressed="false"><i class="far fa-envelope" aria-hidden="true"></i>{{ 'web.auth.register.by_email'|t }}</button>
+                        </div>
+                    </div>
+
+                    {#- A number or address that already has an account (a 409): the field says so and the panel under
+                        it offers the way in, signing in or, for a customer who signed up in the bot, the bot. -#}
+                    <div data-method-panel="phone">
+                        {{ field('phone', 'web.auth.register.phone'|t, type='tel', autocomplete='tel', inputmode='tel', placeholder='+998 90 123 45 67', help='web.auth.register.phone_help'|t) }}
+                        <div class="ae-auth__taken" id="phoneTaken" hidden>
+                            <p>{{ 'web.forgot_password.telegram_hint'|t }}</p>
+                            <div class="ae-auth__taken-actions">
+                                <a class="ae-btn ae-btn--primary ae-btn--sm" href="{{ url_for('frontend.login') }}{{ next_query }}">{{ 'web.auth.register.login'|t }}</a>
+                                <a class="ae-btn ae-btn--secondary ae-btn--sm" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div data-method-panel="email" hidden>
+                        {{ field('email', 'web.auth.register.email'|t, type='email', autocomplete='email', inputmode='email', placeholder='name@mail.uz', help='web.auth.register.email_help'|t, attrs='disabled') }}
+                        <div class="ae-auth__taken" id="emailTaken" hidden>
+                            <p>{{ 'web.auth.register.email_taken_hint'|t }}</p>
+                            <div class="ae-auth__taken-actions">
+                                <a class="ae-btn ae-btn--primary ae-btn--sm" href="{{ url_for('frontend.login') }}{{ next_query }}">{{ 'web.auth.register.login'|t }}</a>
+                                <a class="ae-btn ae-btn--secondary ae-btn--sm" href="{{ url_for('frontend.forgot_password') }}">{{ 'web.auth.register.reset_password'|t }}</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ae-auth__row">
+                        {{ field('first_name', 'web.auth.register.first_name'|t, autocomplete='given-name') }}
+                        {{ field('last_name', 'web.auth.register.last_name'|t, autocomplete='family-name', required=False, optional=True) }}
+                    </div>
+
+                    {{ password_field('password', 'web.auth.common.password'|t, 'new-password', describedby='passwordRules') }}
+                    {{ rules_list(password_rules) }}
+                    {{ password_field('confirm_password', 'web.auth.common.confirm_password'|t, 'new-password') }}
+
+                    {#- A friend's link (/my-loyalty shares /register?ref=CODE, loyalty_service referral_link) fills the code in
+                        and shows it. Only a code-shaped value (ASCII letters and digits, at most the 20 characters
+                        User.referral_code holds) is taken; anything else is ignored. -#}
+                    {%- set ref_arg = (request.args.get('ref') or '')|trim %}
+                    {%- set ref_code = ref_arg if (ref_arg and ref_arg|length <= 20 and ref_arg.isascii() and ref_arg.isalnum()) else none %}
+                    <details class="ae-auth__more"{% if ref_code %} open{% endif %}>
+                        <summary>{{ 'web.auth.register.have_referral'|t }}</summary>
+                        {{ field('referral_code', 'web.auth.register.referral'|t, autocomplete='off', required=False, value=ref_code) }}
+                    </details>
+
+                    <div class="ae-field ae-auth__consent" data-field="terms">
+                        {%- set terms_link %}<a href="{{ url_for('frontend.terms') }}" target="_blank" rel="noopener">{{ 'web.auth.register.consent_terms'|t }}</a>{% endset %}
+                        {%- set privacy_link %}<a href="{{ url_for('frontend.privacy') }}" target="_blank" rel="noopener">{{ 'web.auth.register.consent_privacy'|t }}</a>{% endset %}
+                        <label class="ae-check">
+                            <input type="checkbox" name="terms" id="terms" required aria-describedby="terms-error">
+                            {{ ('web.auth.register.consent'|t)|e|replace('{terms}', terms_link)|replace('{privacy}', privacy_link) }}
+                        </label>
+                        <p class="ae-field__error" id="terms-error"></p>
+                    </div>
+
+                    <button type="submit" class="ae-btn ae-btn--primary ae-btn--block ae-btn--lg btn-auth"><span>{{ 'web.auth.register.submit'|t }}</span></button>
+                </form>
+
+                {{ or_divider() }}
+                <div class="ae-auth__telegram">
+                    {{ telegram_panel('web.auth.register.telegram_text'|t, company_telegram_bot_url) }}
                 </div>
+
+                <p class="ae-auth__foot">{{ 'web.auth.register.have_account'|t }} <a class="ae-auth__link" href="{{ url_for('frontend.login') }}{{ next_query }}">{{ 'web.auth.register.login'|t }}</a></p>
             </div>
-        </section>
-        <!-- page-title end -->
 
-        <!-- register-section -->
-        <section class="auth-section">
-            <div class="auto-container">
-                <div class="auth-card register-card">
-                    <!-- Card Header -->
-                    <div class="auth-card-header">
-                        <div class="logo-icon">
-                            <i class="fas fa-user-plus"></i>
-                        </div>
-                        <h2>{{ 'Create Account'|t }}</h2>
-                        <p>{{ 'Join us today and enjoy premium water delivery services'|t }}</p>
-                    </div>
-
-                    <!-- Step 1: Register Form -->
-                    <form id="registerForm" class="auth-form">
-                        <!-- Name Row -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <div class="input-wrapper">
-                                    <input type="text" name="first_name" class="form-control" placeholder="{{ 'First Name'|t }}" required>
-                                    <i class="fas fa-user input-icon"></i>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <div class="input-wrapper">
-                                    <input type="text" name="last_name" class="form-control" placeholder="{{ 'Last Name'|t }}" required>
-                                    <i class="fas fa-user input-icon"></i>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Phone Input (Preferred for Uzbekistan) -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="tel" name="phone" id="phone" class="form-control" placeholder="{{ 'Phone Number'|t }} (+998...)">
-                                <i class="fas fa-phone input-icon"></i>
-                            </div>
-                            <small class="input-hint">{{ 'Format: +998 XX XXX XX XX (preferred)'|t }}</small>
-                        </div>
-
-                        <!-- Email Input -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="email" name="email" id="email" class="form-control" placeholder="{{ 'Email Address'|t }}">
-                                <i class="fas fa-envelope input-icon"></i>
-                            </div>
-                            <small class="input-hint">{{ 'At least phone or email is required'|t }}</small>
-                        </div>
-
-                        <!-- Password Row -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <div class="input-wrapper">
-                                    <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
-                                    <i class="fas fa-lock input-icon"></i>
-                                    <button type="button" class="password-toggle" data-target="password" tabindex="-1">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                                <div class="password-strength" id="passwordStrength" style="display: none;">
-                                    <div class="strength-bar">
-                                        <div class="strength-fill" id="strengthFill"></div>
-                                    </div>
-                                    <span class="strength-text" id="strengthText"></span>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <div class="input-wrapper">
-                                    <input type="password" name="confirm_password" id="confirm_password" class="form-control" placeholder="{{ 'Confirm Password'|t }}" required>
-                                    <i class="fas fa-lock input-icon"></i>
-                                    <button type="button" class="password-toggle" data-target="confirm_password" tabindex="-1">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Referral Code -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="text" name="referral_code" class="form-control" placeholder="{{ 'Referral Code (Optional)'|t }}">
-                                <i class="fas fa-gift input-icon"></i>
-                            </div>
-                        </div>
-
-                        <!-- Terms & Newsletter -->
-                        <div class="checkbox-group">
-                            <label class="auth-checkbox">
-                                <input type="checkbox" name="terms" required>
-                                <span class="checkbox-label">{{ 'I agree to the'|t }} <a href="#">{{ 'Terms & Conditions'|t }}</a></span>
-                            </label>
-                            <label class="auth-checkbox">
-                                <input type="checkbox" name="newsletter">
-                                <span class="checkbox-label">{{ 'Subscribe to our newsletter for updates and offers'|t }}</span>
-                            </label>
-                        </div>
-
-                        <!-- Submit Button -->
-                        <div class="form-group">
-                            <button type="submit" class="btn-auth">{{ 'Create Account'|t }}</button>
-                        </div>
-                    </form>
-
-                    <!-- Step 2: OTP Verification Form (hidden initially) -->
-                    <div id="otpVerificationSection" class="auth-form" style="display: none;">
-                        <div class="otp-header">
-                            <div class="otp-icon">
-                                <i class="fas fa-sms"></i>
-                            </div>
-                            <h3>{{ 'Verify Your Phone'|t }}</h3>
-                            <p>{{ 'We sent a verification code to'|t }} <strong id="maskedPhone"></strong></p>
-                        </div>
-
-                        <form id="otpForm">
-                            <!-- OTP Input -->
-                            <div class="form-group">
-                                <div class="otp-inputs">
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="0" inputmode="numeric" pattern="[0-9]" required>
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="1" inputmode="numeric" pattern="[0-9]" required>
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="2" inputmode="numeric" pattern="[0-9]" required>
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="3" inputmode="numeric" pattern="[0-9]" required>
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="4" inputmode="numeric" pattern="[0-9]" required>
-                                    <input type="text" maxlength="1" class="otp-digit" data-index="5" inputmode="numeric" pattern="[0-9]" required>
-                                </div>
-                                <input type="hidden" id="otpCode" name="otp_code">
-                            </div>
-
-                            <!-- Timer and Resend -->
-                            <div class="otp-timer-section">
-                                <p id="otpTimerText">{{ 'Code expires in'|t }} <span id="otpTimer">3:00</span></p>
-                                <button type="button" id="resendOtpBtn" class="btn-link" style="display: none;">
-                                    {{ 'Resend Code'|t }}
-                                </button>
-                            </div>
-
-                            <!-- Submit Button -->
-                            <div class="form-group">
-                                <button type="submit" class="btn-auth" id="verifyOtpBtn">{{ 'Verify & Create Account'|t }}</button>
-                            </div>
-                        </form>
-
-                        <!-- Back Button -->
-                        <div class="otp-back">
-                            <button type="button" id="goBackToFormBtn" class="btn-link">
-                                <i class="fas fa-arrow-left"></i> {{ 'Change phone number'|t }}
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Footer -->
-                    <div class="auth-footer">
-                        <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Login Here'|t }}</a></p>
-                    </div>
+            {#- Step 2: the SMS code. It replaces the whole card body (head included). -#}
+            <div id="otpVerificationSection" hidden>
+                <div class="ae-auth__head">
+                    <span class="ae-icon-tile ae-icon-tile--lg ae-auth__step-icon" aria-hidden="true"><i class="fas fa-sms"></i></span>
+                    <h2 class="ae-auth__title" id="otpTitle" tabindex="-1">{{ 'web.auth.otp.title'|t }}</h2>
+                    <p class="ae-auth__lead">{{ 'web.auth.otp.sent_to'|t }} <strong class="ae-num" id="maskedPhone"></strong></p>
                 </div>
+
+                {{ form_alert('otpAlert') }}
+
+                <form id="otpForm" class="ae-auth__form" novalidate>
+                    {{ otp_field() }}
+
+                    <button type="submit" class="ae-btn ae-btn--primary ae-btn--block ae-btn--lg" id="verifyOtpBtn"><span>{{ 'web.auth.otp.submit'|t }}</span></button>
+                </form>
+
+                <p class="ae-auth__foot">
+                    <button type="button" id="goBackToFormBtn" class="ae-auth__link-btn"><i class="fas fa-arrow-left" aria-hidden="true"></i>{{ 'web.auth.otp.change_phone'|t }}</button>
+                </p>
             </div>
-        </section>
-        <!-- register-section end -->
+        </div>
+    </div>
+</section>
 {% endblock %}
 
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'locale': g.locale or 'uz',
-    'verify_email_url': url_for('frontend.verify_email'),
-    'login_url': url_for('frontend.login'),
+    'locale': sms_language,
+    'verify_email_url': verify_email_url,
+    'after_register_url': after_register_url,
     'i18n': {
-        'need_phone_or_email': 'Please provide either a phone number or email address' | t,
-        'invalid_uz_phone': 'Please enter a valid Uzbekistan phone number (+998 XX XXX XX XX)' | t,
-        'invalid_email': 'Please enter a valid email address' | t,
-        'passwords_mismatch': 'Passwords do not match' | t,
-        'code_sent': 'Verification code sent to your phone' | t,
-        'send_failed': 'Failed to send verification code' | t,
-        'network_error': 'Network error. Please try again.' | t,
-        'account_created_email': 'Account created successfully! Please check your email to verify your account.' | t,
-        'registration_failed': 'Registration failed' | t,
-        'account_created_verified': 'Account created and phone verified successfully!' | t,
-        'verification_failed': 'Verification failed' | t,
-        'incomplete_otp': 'Please enter the complete 6-digit code' | t,
-        'code_expired': 'Code expired' | t,
-        'sending': 'Sending...' | t,
-        'new_code_sent': 'New verification code sent' | t,
-        'resend_failed': 'Failed to resend code' | t,
-        'resend_code': 'Resend Code' | t,
-        'weak_password': 'Weak password' | t,
-        'fair_password': 'Fair password' | t,
-        'good_password': 'Good password' | t,
-        'strong_password': 'Strong password' | t,
+        'required': 'web.auth.common.required' | t,
+        'need_phone': 'web.auth.register.need_phone' | t,
+        'need_email': 'web.auth.register.need_email' | t,
+        'invalid_phone': 'web.auth.register.invalid_phone' | t,
+        'invalid_email': 'web.auth.register.invalid_email' | t,
+        'phone_taken': 'web.auth.register.phone_taken' | t,
+        'email_taken': 'web.auth.register.email_taken' | t,
+        'need_terms': 'web.auth.register.need_terms' | t,
+        'password_rules': 'web.auth.password_rule.not_met' | t,
+        'password_too_common': 'web.auth.password_rule.too_common' | t,
+        'passwords_mismatch': 'web.auth.common.passwords_mismatch' | t,
+        'rule_met': 'web.auth.password_rule.met' | t,
+        'rule_unmet': 'web.auth.password_rule.unmet' | t,
+        'send_failed': 'web.auth.register.send_failed' | t,
+        'resend_wait': 'web.auth.otp.resend_wait' | t,
+        'network_error': 'web.auth.common.network_error' | t,
+        'rate_limited': 'web.auth.common.rate_limited' | t,
+        'account_created_email': 'web.auth.register.created_email' | t,
+        'registration_failed': 'web.auth.register.failed' | t,
+        'account_created_verified': 'web.auth.register.created_phone' | t,
+        'verification_failed': 'web.auth.otp.failed' | t,
+        'incomplete_otp': 'web.auth.otp.incomplete' | t,
+        'wrong_code': 'web.auth.otp.wrong' | t,
+        'too_many_codes': 'web.auth.otp.too_many' | t,
+        'code_expired': 'web.auth.otp.expired' | t,
+        'new_code_sent': 'web.auth.otp.new_code_sent' | t,
+        'resend_failed': 'web.auth.otp.resend_failed' | t,
+        'check_fields': 'web.auth.common.check_fields' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/register.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/register.js') }}"></script>
 {% endblock %}

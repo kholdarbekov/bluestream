@@ -72,14 +72,15 @@ describe('the website builder weekday convention (JS getDay 0 = Sunday -> backen
     expect([0, 1, 2, 3, 4, 5, 6].map((d) => Builder.weekdayFromJsDay(d))).toEqual([6, 0, 1, 2, 3, 4, 5]);
   });
 
-  it('maps each day button of the shipped template to its weekday name, Monday = 0', () => {
+  it('names each day button of the shipped template with the weekday name the review uses, Monday = 0', () => {
     const { Builder } = load();
-    const buttons = [...TEMPLATE.matchAll(/class="day-btn" data-day="(\d)">\{\{ 'landing\.custom_subscription\.day\.(\w+)'\|t \}\}/g)]
-      .map((m) => [Number(m[1]), m[2]]);
+    // The buttons print web.display_labels.weekday.N, the key family of the island's weekday_names (N = 0 is Monday).
+    const buttons = [...TEMPLATE.matchAll(/class="day-btn" data-day="(\d)">\{\{ 'web\.display_labels\.weekday\.(\d)'\|t \}\}/g)]
+      .map((m) => [Number(m[1]), Number(m[2])]);
     expect(buttons).toHaveLength(7);
-    const names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    buttons.forEach(([jsDay, name]) => {
-      expect(names[Builder.weekdayFromJsDay(jsDay)]).toBe(name);
+    expect(new Set(buttons.map(([jsDay]) => jsDay)).size).toBe(7);
+    buttons.forEach(([jsDay, weekday]) => {
+      expect(Builder.weekdayFromJsDay(jsDay)).toBe(weekday);
     });
   });
 });
@@ -221,12 +222,10 @@ describe('the review step shows the backend monthly estimate', () => {
 });
 
 // Spec 2026-10-26 §9 / §12: "the homepage builder's monthly day picker: likely broken (nice-select vs a native
-// listener)". The theme (business_app/static/js/script.js) turns every <select> without `.ignore` into a
-// nice-select, which hides the real <select> and reports the customer's pick with jQuery's
-// `.trigger('change')`. That reaches jQuery handlers only, never a native addEventListener one, so a monthly
-// customer's day was never stored and step 2 kept asking for it. Driven here with the shipped jQuery, the
-// shipped nice-select plugin and the shipped builder, the customer clicking the day in the nice-select list.
-describe('the monthly day picker under the theme\'s nice-select', () => {
+// listener)". The theme's nice-select is gone from the site (review SITE-05, 2026-11-14): the day-of-month select is
+// a native <select class="ae-input">. Driven here with the shipped jQuery, the shipped theme script and the shipped
+// builder: the customer picks the 15th and the builder keeps it.
+describe('the monthly day picker is a native select', () => {
   // Repo files named in this test (never user input).
   // eslint-disable-next-line security/detect-non-literal-fs-filename
   const read = (file) => fs.readFileSync(path.join(REPO, file), 'utf8');
@@ -242,27 +241,27 @@ describe('the monthly day picker under the theme\'s nice-select', () => {
     );
     const { window } = dom;
     window.eval(read('business_app/static/js/jquery.js'));
-    window.eval(read('business_app/static/js/jquery.nice-select.min.js'));
+    window.eval(THEME);
     window.eval(`${SOURCE}\n;window.SubscriptionConstructor = SubscriptionConstructor;`);
-    window.$('select:not(.ignore)').niceSelect();  // the theme's own call (asserted below)
     const builder = Object.create(window.SubscriptionConstructor.prototype);
     Object.assign(builder, { selectedDayOfMonth: null, stateKey: 'k', saveState() {} });
     builder.setupEventListeners();
     return { window, builder };
   };
 
-  it('the theme applies nice-select to the builder\'s day-of-month select', () => {
-    expect(THEME).toContain("$('select:not(.ignore)').niceSelect();");
-    expect(MONTH_SELECT).not.toMatch(/class="[^"]*\bignore\b/);
+  it('no script replaces the builder\'s selects (no nice-select left in the theme or the builder)', () => {
+    expect(THEME).not.toMatch(/niceSelect\(/);
+    expect(SOURCE).not.toMatch(/niceSelect/);
+    expect(MONTH_SELECT).toMatch(/class="ae-input"/);
   });
 
-  it('a day picked in the nice-select list is the day the builder keeps', async () => {
+  it('a day picked in the select is the day the builder keeps', async () => {
     const { window, builder } = await page();
-    const option = window.document.querySelector('.nice-select .option[data-value="15"]');
-    expect(option).not.toBeNull();
-    option.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    expect(window.document.getElementById('month-day-select').value).toBe('15');
+    const select = window.document.getElementById('month-day-select');
+    select.value = '15';
+    select.dispatchEvent(new window.Event('change', { bubbles: true }));
     expect(builder.selectedDayOfMonth).toBe(15);
+    expect(window.document.querySelector('.nice-select')).toBeNull();
   });
 });
 
@@ -305,7 +304,8 @@ describe('no slot offered for the schedule', () => {
 });
 
 // A page with the builder's real step markup (the template's own day buttons and day-of-month select), the shipped
-// jQuery, nice-select (applied as the theme applies it) and the shipped builder. `answers` serves the requests.
+// jQuery and the shipped builder. The selects are native (no nice-select since review SITE-05): `pick` chooses an
+// option the way a browser reports it, a `change` event. `answers` serves the requests.
 const QUOTES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests/fixtures/web_subscription_builder_quotes.json'), 'utf8'));
 // Repo files named in this test (never user input).
 // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -325,7 +325,8 @@ const builderPage = async ({ slots = SLOTS, lang = 'en', answer = () => undefine
     `<div id="day-selector" style="display: none;">${dayButtons}</div>` +
     `<div id="month-day-selector" style="display: none;">${monthSelect}<option value="">Pick a day</option>${days}</select></div>` +
     '<select id="time-slots-select"><option value="">Pick a time</option></select><div id="addresses-list"></div>' +
-    '<div id="payment-methods-grid"></div><div id="review-container"></div></body></html>',
+    '<div id="payment-methods-grid"></div><div id="review-container"></div>' +
+    '<div id="sc-error" role="alert" hidden><p class="sc-error__text"></p></div></body></html>',
     { url: 'http://localhost/', runScripts: 'outside-only' },
   );
   const { window } = dom;
@@ -337,8 +338,10 @@ const builderPage = async ({ slots = SLOTS, lang = 'en', answer = () => undefine
     requests.push({ url, options });
     return { ok: true, json: async () => QUOTES.catalog.response };
   };
+  // What the builder says to the visitor: every showError, which writes the inline alert (#sc-error) and nothing else.
   const errors = [];
-  window.showNotification = (text, type) => { if (type === 'error') errors.push(text); };
+  const toasts = [];
+  window.showNotification = (text, type) => { toasts.push([type, text]); };
   window.apiRequest = async (url, options = {}) => {
     requests.push({ url, options });
     const answered = answer(url);
@@ -351,9 +354,12 @@ const builderPage = async ({ slots = SLOTS, lang = 'en', answer = () => undefine
     return { ok: true, json: async () => ({ time_slots: slots }) };
   };
   window.eval(readRepo('business_app/static/js/jquery.js'));
-  window.eval(readRepo('business_app/static/js/jquery.nice-select.min.js'));
   window.eval(`${SOURCE}\n;window.SubscriptionConstructor = SubscriptionConstructor;`);
-  window.$('select:not(.ignore)').niceSelect();
+  const { showError } = window.SubscriptionConstructor.prototype;
+  window.SubscriptionConstructor.prototype.showError = function said(message) {
+    errors.push(message);
+    return showError.call(this, message);
+  };
   let builder;
   if (saved) {
     // The page as a returning visitor opens it: this tab's saved state, then the real constructor and its init().
@@ -378,11 +384,17 @@ const builderPage = async ({ slots = SLOTS, lang = 'en', answer = () => undefine
     await new Promise((resolve) => { window.setTimeout(resolve, 0); });
   };
   const $1 = (selector) => window.document.querySelector(selector);
-  return { window, builder, requests, errors, click, $1 };
+  const pick = async (selector, value) => {
+    const select = $1(selector);
+    select.value = value;
+    select.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => { window.setTimeout(resolve, 0); });
+  };
+  return { window, builder, requests, errors, toasts, click, pick, $1 };
 };
 
 const slotOptions = ($1) => [...$1('#time-slots-select').options].map((o) => [o.value, o.textContent.trim()]);
-const shownSlot = ($1) => $1('#time-slots-select').nextElementSibling.querySelector('.current').textContent;
+const shownSlot = ($1) => $1('#time-slots-select').selectedOptions[0].textContent;
 const MORNING = { id: 22, name: 'Morning', start_time: '10:00', end_time: '12:00', time_range: '10:00-12:00' };
 const EVENING = { id: 23, name: 'Evening', start_time: '18:00', end_time: '20:00', time_range: '18:00-20:00' };
 const slotsFor = (byUrl) => (url) => {
@@ -394,28 +406,28 @@ const slotsFor = (byUrl) => (url) => {
 // with no slot offered it is the only choice, and it is held.
 describe('the builder offers Any time', () => {
   it('next to the offered slots, never chosen for the visitor', async () => {
-    const { builder, click, $1 } = await builderPage();
+    const { builder, click, pick, $1 } = await builderPage();
     await click($1('.frequency-option[data-frequency="monthly"]'));
 
-    expect(slotOptions($1)).toEqual([['', 'Select a time slot'], ['any', 'Any time'], ['22', '10:00 - 12:00']]);
+    expect(slotOptions($1)).toEqual([['', 'Select a time slot'], ['any', 'Any time'], ['22', '10:00–12:00']]);
     expect(builder.selectedTimeSlot).toBeNull();
     expect(shownSlot($1)).toBe('Select a time slot');
   });
 
   it('a visitor choosing Any time, or a slot, in the list is held as exactly that', async () => {
-    const { builder, click, $1 } = await builderPage();
+    const { builder, click, pick, $1 } = await builderPage();
     await click($1('.frequency-option[data-frequency="monthly"]'));
 
-    await click($1('#time-slots-select + .nice-select .option[data-value="any"]'));
+    await pick('#time-slots-select', 'any');
     expect(builder.selectedTimeSlot).toBe('any');
-    await click($1('#time-slots-select + .nice-select .option[data-value="22"]'));
+    await pick('#time-slots-select', '22');
     expect(builder.selectedTimeSlot).toBe(22);
-    await click($1('#time-slots-select + .nice-select .option[data-value=""]'));
+    await pick('#time-slots-select', '');
     expect(builder.selectedTimeSlot).toBeNull();
   });
 
   it('as the only choice when none is offered: held, and named on the review', async () => {
-    const { builder, click, $1 } = await builderPage({ slots: [] });
+    const { builder, click, pick, $1 } = await builderPage({ slots: [] });
     await click($1('.frequency-option[data-frequency="monthly"]'));
 
     expect(slotOptions($1)).toEqual([['any', 'Any time']]);
@@ -426,7 +438,7 @@ describe('the builder offers Any time', () => {
   });
 
   it('a weekday change keeps Any time and drops a slot the new day lacks', async () => {
-    const { builder, click, $1 } = await builderPage({
+    const { builder, click, pick, $1 } = await builderPage({
       answer: slotsFor({
         '/delivery/time-slots?weekday=3&frequency=weekly': [MORNING],
         '/delivery/time-slots?weekday=4&frequency=weekly': [EVENING],
@@ -434,21 +446,21 @@ describe('the builder offers Any time', () => {
     });
     await click($1('.frequency-option[data-frequency="weekly"]'));
     await click($1('.day-btn[data-day="4"]'));
-    await click($1('#time-slots-select + .nice-select .option[data-value="any"]'));
+    await pick('#time-slots-select', 'any');
 
     await click($1('.day-btn[data-day="5"]'));
     expect(builder.selectedTimeSlot).toBe('any');
-    expect(slotOptions($1)).toEqual([['', 'Select a time slot'], ['any', 'Any time'], ['23', '18:00 - 20:00']]);
+    expect(slotOptions($1)).toEqual([['', 'Select a time slot'], ['any', 'Any time'], ['23', '18:00–20:00']]);
     expect(shownSlot($1)).toBe('Any time');
 
-    await click($1('#time-slots-select + .nice-select .option[data-value="23"]'));
+    await pick('#time-slots-select', '23');
     await click($1('.day-btn[data-day="4"]'));
     expect(builder.selectedTimeSlot).toBeNull();
     expect(shownSlot($1)).toBe('Select a time slot');
   });
 
   it('Any time held only because none was offered is not kept once slots are offered', async () => {
-    const { builder, click, $1 } = await builderPage({
+    const { builder, click, pick, $1 } = await builderPage({
       answer: slotsFor({
         '/delivery/time-slots?weekday=any&frequency=monthly': [],
         '/delivery/time-slots?weekday=any&frequency=daily': [MORNING],
@@ -548,8 +560,8 @@ describe.each(['uz', 'ru'])('%s: the builder speaks the page language', (lang) =
     expect(words.any_time).not.toBe(ISLAND.en.i18n.any_time);
   });
 
-  it('every error is the page language', async () => {
-    const { builder, errors } = await builderPage({ lang });
+  it('every error is the page language, said once: inline, never as a toast too', async () => {
+    const { builder, errors, toasts, $1 } = await builderPage({ lang });
     builder.selectedProducts = new Map();
     builder.validateStep(1);
     builder.selectedFrequency = null;
@@ -572,6 +584,9 @@ describe.each(['uz', 'ru'])('%s: the builder speaks the page language', (lang) =
       words.error_products, words.error_frequency, words.error_day, words.error_time,
       words.error_address, words.error_payment, words.select_day_of_month,
     ]);
+    expect(toasts).toEqual([]);
+    expect($1('#sc-error').hidden).toBe(false);
+    expect($1('#sc-error .sc-error__text').textContent).toBe(words.select_day_of_month);
   });
 
   it('the address list and the review carry no English word', async () => {
@@ -619,8 +634,13 @@ describe.each(['uz', 'ru'])('%s: the builder speaks the page language', (lang) =
     ]);
 
     expect(builder.generateSubscriptionName()).toBe(
-      `${ISLAND[lang].frequency_names.weekly} - A, B ${words.name_more.replace('{count}', '1')} - ` +
+      `${ISLAND[lang].frequency_names.weekly}, A, B ${words.name_more.replace('{count}', '1')}, ` +
       `${words.name_to.replace('{place}', 'Home')}`,
+    );
+    // A quantity above one reads "3 × name" (a multiplication sign, not "3x"), and parts never join with " - ".
+    builder.selectedProducts = new Map([[1, { product: { id: 1, product_name: 'A' }, quantity: 3 }]]);
+    expect(builder.generateSubscriptionName()).toBe(
+      `${ISLAND[lang].frequency_names.weekly}, 3 × A, ${words.name_to.replace('{place}', 'Home')}`,
     );
     builder.selectedProducts = new Map();
     builder.selectedFrequency = null;
@@ -696,26 +716,25 @@ describe('the builder never invents what the backend did not answer', () => {
 });
 
 // Re-review G9: switching frequency forgets the day the new frequency does not use, and the screen must forget it
-// too, the theme's nice-select included, so it never shows a day the builder no longer holds.
+// too, so it never shows a day the builder no longer holds.
 describe('switching frequency clears the day controls the builder forgot', () => {
   it('monthly 15, then weekly, then monthly again: no day is shown and none is held', async () => {
-    const { builder, click, $1 } = await builderPage();
+    const { builder, click, pick, $1 } = await builderPage();
     await click($1('.frequency-option[data-frequency="monthly"]'));
-    await click($1('#month-day-selector .nice-select .option[data-value="15"]'));
+    await pick('#month-day-select', '15');
     expect(builder.selectedDayOfMonth).toBe(15);
-    expect($1('#month-day-selector .nice-select .current').textContent).toBe('15');
+    expect($1('#month-day-select').selectedOptions[0].textContent).toBe('15');
 
     await click($1('.frequency-option[data-frequency="weekly"]'));
     await click($1('.frequency-option[data-frequency="monthly"]'));
 
     expect(builder.selectedDayOfMonth).toBeNull();
     expect($1('#month-day-select').value).toBe('');
-    expect($1('#month-day-selector .nice-select .current').textContent).toBe('Pick a day');
-    expect($1('#month-day-selector .nice-select .option.selected').dataset.value).toBe('');
+    expect($1('#month-day-select').selectedOptions[0].textContent).toBe('Pick a day');
   });
 
   it('weekly Thursday, then monthly: no weekday button stays highlighted', async () => {
-    const { builder, click, $1 } = await builderPage();
+    const { builder, click, pick, $1 } = await builderPage();
     await click($1('.frequency-option[data-frequency="weekly"]'));
     await click($1('.day-btn[data-day="4"]'));
     expect(builder.selectedWeekday).toBe(3);
@@ -727,7 +746,7 @@ describe('switching frequency clears the day controls the builder forgot', () =>
   });
 
   it('weekly to biweekly keeps the weekday and its button, both use it', async () => {
-    const { builder, click, $1 } = await builderPage();
+    const { builder, click, pick, $1 } = await builderPage();
     await click($1('.frequency-option[data-frequency="weekly"]'));
     await click($1('.day-btn[data-day="4"]'));
 
@@ -790,9 +809,9 @@ describe('only a slot list the backend answered means "no slot offered"', () => 
   const failing = (url) => (url.startsWith('/delivery/time-slots') ? { ok: false, json: async () => ({ success: false }) } : undefined);
 
   it('a failed slot list keeps step 2, says so, asks again, and never reads "Time to be confirmed"', async () => {
-    const { builder, requests, errors, click, $1 } = await builderPage({ answer: failing });
+    const { builder, requests, errors, click, pick, $1 } = await builderPage({ answer: failing });
     await click($1('.frequency-option[data-frequency="monthly"]'));
-    await click($1('#month-day-selector .nice-select .option[data-value="15"]'));
+    await pick('#month-day-select', '15');
     const asked = requests.filter((r) => r.url.startsWith('/delivery/time-slots')).length;
 
     expect(builder.validateStep(2)).toBe(false);
@@ -846,7 +865,7 @@ describe('only a slot list the backend answered means "no slot offered"', () => 
     await click($1('.day-btn[data-day="4"]'));
 
     expect([...$1('#time-slots-select').options].map((o) => o.textContent.trim()))
-      .toEqual(['Select a time slot', 'Any time', '10:00 - 12:00']);
+      .toEqual(['Select a time slot', 'Any time', '10:00–12:00']);
     expect(SOURCE).not.toMatch(/slot \(optional\)/i);
   });
 });
@@ -892,7 +911,7 @@ describe('a builder restored from this tab', () => {
     await builder.nextStep();
 
     expect(builder.currentStep).toBe(5);
-    expect($1('[data-review="time-slot"]').textContent.trim()).toBe('10:00 - 12:00');
+    expect($1('[data-review="time-slot"]').textContent.trim()).toBe('10:00–12:00');
     expect(builder.buildSubscriptionBody('x').delivery_time_slot_id).toBe(22);
   });
 
@@ -910,7 +929,9 @@ describe('a builder restored from this tab', () => {
       '/subscriptions/preview',
     ]);
     const review = $1('#review-container').textContent;
-    expect(review).toContain('Card');
+    // Named with the page's label for the method posted (the island's method_labels), not the API's English name.
+    expect(review).toContain(ISLAND.en.method_labels.click);
+    expect(review).not.toContain(ISLAND.en.method_labels.cash);
     expect(review).not.toContain('Cash on Delivery');
     expect(builder.buildSubscriptionBody('x').payment_method).toBe('click');
   });
@@ -921,17 +942,17 @@ describe('a builder restored from this tab', () => {
     expect($1('#review-container').textContent).not.toContain('Cash on Delivery');
   });
 
-  it('a restored monthly day is shown in the nice-select, and choosing monthly again keeps it shown', async () => {
-    const { builder, click, $1 } = await builderPage({
+  it('a restored monthly day is shown in the select, and choosing monthly again keeps it shown', async () => {
+    const { builder, click, pick, $1 } = await builderPage({
       saved: { ...weeklyThursday, currentStep: 2, selectedFrequency: 'monthly', selectedWeekday: null, selectedDayOfMonth: 15, selectedTimeSlot: null },
     });
     expect($1('#month-day-selector').style.display).toBe('block');
-    expect($1('#month-day-selector .nice-select .current').textContent).toBe('15');
+    expect($1('#month-day-select').selectedOptions[0].textContent).toBe('15');
 
     await click($1('.frequency-option[data-frequency="monthly"]'));
 
     expect(builder.selectedDayOfMonth).toBe(15);
     expect($1('#month-day-select').value).toBe('15');
-    expect($1('#month-day-selector .nice-select .current').textContent).toBe('15');
+    expect($1('#month-day-select').selectedOptions[0].textContent).toBe('15');
   });
 });

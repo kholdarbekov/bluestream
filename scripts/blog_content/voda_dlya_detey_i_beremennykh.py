@@ -9,7 +9,7 @@ ARTICLE = {
     "slug": "voda-dlya-detey-i-beremennykh",
     "category": "health_tips",
     "tags": "health,babies,pregnancy,family,kids,infants,low-mineralisation",
-    "featured_image": "/static/images/news/news-5.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "pregnant woman drinking a glass of clean water",
     "is_featured": True,
     "sort_order": 88,
@@ -152,7 +152,7 @@ ARTICLE = {
 
 <p>Гигиена бутыли — отдельная, простая, но важная тема. Кулер и горлышко бутыли стоит протирать мягким раствором, рекомендованным производителем кулера; не оставлять открытую бутыль на солнце; не использовать просроченную воду. Перед приготовлением смеси воду <strong>обязательно кипятить</strong> и охлаждать в соответствии с инструкциями педиатра и производителя смеси.</p>
 
-<p>Заказ воды доступен на сайте <a href="/shop">/shop</a>, через Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> и по телефону. Условия доставки и обращение с тарой описаны на странице <a href="/water-delivery-faq">«Часто задаваемые вопросы по доставке»</a>.</p>
+<p>Заказать воду можно в <a href="/shop">магазине на сайте</a> или в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Условия доставки и обращение с тарой описаны на странице <a href="/water-delivery-faq">«Часто задаваемые вопросы по доставке»</a>.</p>
 
 <h2>FAQ — частые вопросы родителей и будущих мам</h2>
 
@@ -200,7 +200,7 @@ ARTICLE = {
 
 <p><em>Эта статья излагает общие сведения о питьевой воде, опираясь на источники общественного здравоохранения и публичный профиль продукта Aqua Element. Это <strong>не медицинская консультация</strong>. Решения о вскармливании младенцев, приготовлении смеси и питании во время беременности всегда обсуждайте с педиатром, акушером-гинекологом или другим квалифицированным медицинским специалистом. Качество местной воды и индивидуальные обстоятельства различаются.</em></p>
 
-<p><strong>Готовы оформить доставку?</strong> Изучите ассортимент на <a href="/shop">/shop</a>, прочитайте условия на <a href="/water-delivery-faq">/water-delivery-faq</a> или ознакомьтесь с обработкой воды на <a href="/process/11-step-filtration">/process/11-step-filtration</a>. Заказ также доступен через <a href="https://t.me/aqua_element_bot">Telegram-бот</a>.</p>
+<p><strong>Готовы оформить доставку?</strong> Изучите ассортимент в <a href="/shop">магазине на сайте</a>, прочитайте условия на <a href="/water-delivery-faq">странице вопросов о доставке</a> или ознакомьтесь с обработкой воды на <a href="/process/11-step-filtration">странице об 11 этапах фильтрации</a>. Заказ также доступен через <a href="https://t.me/aqua_element_bot">Telegram-бот</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -209,12 +209,12 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "Можно ли использовать Aqua Element для детской смеси?", "acceptedAnswer": {"@type": "Answer", "text": "Профиль низкоминерализованный (TDS 30–50 мг/л), низкий натрий. Воду для смеси обязательно кипятить и охлаждать по указанию педиатра."}},
     {"@type": "Question", "name": "Что такое TDS?", "acceptedAnswer": {"@type": "Answer", "text": "TDS — суммарное содержание растворённых солей в мг/л; интегральный показатель минерализации."}},
-    {"@type": "Question", "name": "Раскрывает ли Aqua Element фтор?", "acceptedAnswer": {"@type": "Answer", "text": "Фтор не указан в опубликованном профиле. Запросите актуальный лабораторный отчёт через /contact."}},
+    {"@type": "Question", "name": "Раскрывает ли Aqua Element фтор?", "acceptedAnswer": {"@type": "Answer", "text": "Фтор не указан в опубликованном профиле. Запросите актуальный лабораторный отчёт через страницу контактов."}},
     {"@type": "Question", "name": "Безопасно ли пить во время беременности?", "acceptedAnswer": {"@type": "Answer", "text": "Вода прошла 11-этапную обработку и контролируется Санэпидом; решения по гидратации обсуждайте с акушером-гинекологом."}},
     {"@type": "Question", "name": "Почему 10 л удобен для кухни?", "acceptedAnswer": {"@type": "Answer", "text": "Компактный объём, удобный для хранения в шкафу и использования без кулера."}},
     {"@type": "Question", "name": "Нужно ли кипятить перед приготовлением смеси?", "acceptedAnswer": {"@type": "Answer", "text": "Да. Низкая минерализация не заменяет кипячение. Следуйте указаниям педиатра."}},
-    {"@type": "Question", "name": "Как оформить регулярную доставку?", "acceptedAnswer": {"@type": "Answer", "text": "Оформите подписку на /shop или через Telegram-бот @aqua_element_bot."}},
-    {"@type": "Question", "name": "Где посмотреть процесс очистки?", "acceptedAnswer": {"@type": "Answer", "text": "На странице /process/11-step-filtration описаны все 11 этапов."}}
+    {"@type": "Question", "name": "Как оформить регулярную доставку?", "acceptedAnswer": {"@type": "Answer", "text": "Оформите подписку в магазине на сайте или через Telegram-бот @aqua_element_bot."}},
+    {"@type": "Question", "name": "Где посмотреть процесс очистки?", "acceptedAnswer": {"@type": "Answer", "text": "На странице об 11 этапах фильтрации описаны все 11 этапов."}}
   ]
 }
 </script>
@@ -358,7 +358,7 @@ ARTICLE = {
 
 <p>Idish gigienasi — alohida, oddiy, ammo muhim mavzu. Kuler va idish bo‘yinchasini kuler ishlab chiqaruvchisi tavsiya qilgan eritma bilan artish, ochiq idishni quyoshda qoldirmaslik, muddati o‘tgan suvdan foydalanmaslik kerak. Aralashma tayyorlashdan oldin suvni pediatr va aralashma ishlab chiqaruvchining ko‘rsatmalariga muvofiq <strong>albatta qaynatish</strong> va sovutish lozim.</p>
 
-<p>Suvga buyurtma berish <a href="/shop">/shop</a> sahifasida, <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> Telegram boti orqali va telefon orqali mavjud. Yetkazib berish shartlari va idishni qaytarish <a href="/water-delivery-faq">“Yetkazib berish bo‘yicha tez-tez beriladigan savollar”</a> sahifasida tasvirlangan.</p>
+<p>Suvga <a href="/shop">saytdagi do‘konda</a> yoki <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> Telegram boti orqali buyurtma berish mumkin. Yetkazib berish shartlari va idishni qaytarish <a href="/water-delivery-faq">“Yetkazib berish bo‘yicha tez-tez beriladigan savollar”</a> sahifasida tasvirlangan.</p>
 
 <h2>FAQ — ota-onalar va bo‘lajak onalarning tez-tez beradigan savollari</h2>
 
@@ -396,7 +396,7 @@ ARTICLE = {
 
 <p><em>Ushbu maqola jamoat sog‘liqni saqlash manbalari va Aqua Element mahsuloti haqida umumiy ma‘lumotlarni taqdim etadi. Bu <strong>tibbiy maslahat emas</strong>. Chaqaloqni oziqlantirish, sun‘iy aralashma tayyorlash yoki homiladorlik davridagi ovqatlanish bo‘yicha qarorlarni har doim pediatr, akusher-ginekolog yoki boshqa malakali tibbiyot mutaxassisi bilan muhokama qiling. Mahalliy suv sifati va shaxsiy holatlar har xil bo‘lishi mumkin.</em></p>
 
-<p><strong>Yetkazib berishni rasmiylashtirishga tayyormisiz?</strong> Mahsulotlarni <a href="/shop">/shop</a> da ko‘rib chiqing, shartlarni <a href="/water-delivery-faq">/water-delivery-faq</a> da o‘qing yoki suvga ishlov berish bilan <a href="/process/11-step-filtration">/process/11-step-filtration</a> sahifasida tanishing. Buyurtma <a href="https://t.me/aqua_element_bot">Telegram bot</a> orqali ham mavjud.</p>
+<p><strong>Yetkazib berishni rasmiylashtirishga tayyormisiz?</strong> Mahsulotlarni <a href="/shop">do‘konda</a> ko‘rib chiqing, shartlarni <a href="/water-delivery-faq">yetkazib berish savollari sahifasida</a> o‘qing yoki suvga ishlov berish bilan <a href="/process/11-step-filtration">11 bosqichli filtrlash</a> sahifasida tanishing. Buyurtma <a href="https://t.me/aqua_element_bot">Telegram bot</a> orqali ham mavjud.</p>
 
 <script type="application/ld+json">
 {
@@ -405,7 +405,7 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "Aqua Elementni chaqaloq aralashmasi uchun ishlatish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Profil kam minerallashgan (TDS 30–50 mg/l), natriy past. Aralashma uchun suvni pediatr ko‘rsatmasi bo‘yicha qaynatib sovutish shart."}},
     {"@type": "Question", "name": "TDS nima?", "acceptedAnswer": {"@type": "Answer", "text": "TDS — mg/l da erigan tuzlarning umumiy miqdori; minerallashuvning integral ko‘rsatkichi."}},
-    {"@type": "Question", "name": "Aqua Element ftorni ochib beradimi?", "acceptedAnswer": {"@type": "Answer", "text": "Ftor nashr etilgan profilda yo‘q. /contact orqali dolzarb laboratoriya hisobotini so‘rang."}},
+    {"@type": "Question", "name": "Aqua Element ftorni ochib beradimi?", "acceptedAnswer": {"@type": "Answer", "text": "Ftor nashr etilgan profilda yo‘q. aloqa sahifasi orqali dolzarb laboratoriya hisobotini so‘rang."}},
     {"@type": "Question", "name": "Homiladorlikda ichish xavfsizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Suv 11 bosqichdan o‘tgan va Sanepid nazoratida; gidratatsiya xususiyatlarini akusher-ginekolog bilan muhokama qiling."}},
     {"@type": "Question", "name": "10 l format nega oshxona uchun qulay?", "acceptedAnswer": {"@type": "Answer", "text": "Shkafda saqlash va kulersiz foydalanish uchun qulay ixcham hajm."}},
     {"@type": "Question", "name": "Aralashma uchun qaynatish kerakmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha. Past minerallashuv qaynatishning o‘rnini bosmaydi. Pediatr ko‘rsatmalariga rioya qiling."}},
@@ -554,7 +554,7 @@ ARTICLE = {
 
 <p>Bottle hygiene is a separate but simple topic. Wipe the cooler and bottle neck with the solution recommended by your cooler manufacturer; do not leave an open bottle in sunlight; do not use water past its date. Before formula preparation, water must be <strong>boiled</strong> and cooled per your paediatrician and the formula manufacturer's instructions.</p>
 
-<p>You can place an order on <a href="/shop">/shop</a>, through the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, or by phone. Delivery terms and bottle handling are described on the <a href="/water-delivery-faq">delivery FAQ page</a>.</p>
+<p>You can place an order in <a href="/shop">our online shop</a> or through the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Delivery terms and bottle handling are described on the <a href="/water-delivery-faq">delivery FAQ page</a>.</p>
 
 <h2>FAQ — common questions from parents and expectant mothers</h2>
 
@@ -592,7 +592,7 @@ ARTICLE = {
 
 <p><em>This article shares general drinking-water guidance from public-health sources and the Aqua Element product profile. It is <strong>not medical advice</strong>. For decisions about infant feeding, formula preparation, or pregnancy nutrition, always consult a paediatrician, obstetrician, or qualified health professional. Local water-quality conditions and individual health circumstances vary.</em></p>
 
-<p><strong>Ready to set up delivery?</strong> Browse the range on <a href="/shop">/shop</a>, read the terms on <a href="/water-delivery-faq">/water-delivery-faq</a>, or learn how the water is treated on <a href="/process/11-step-filtration">/process/11-step-filtration</a>. Orders are also available through the <a href="https://t.me/aqua_element_bot">Telegram bot</a>.</p>
+<p><strong>Ready to set up delivery?</strong> Browse the range in <a href="/shop">our online shop</a>, read the terms on <a href="/water-delivery-faq">the delivery FAQ page</a>, or learn how the water is treated on <a href="/process/11-step-filtration">the 11-step filtration page</a>. Orders are also available through the <a href="https://t.me/aqua_element_bot">Telegram bot</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -601,12 +601,12 @@ ARTICLE = {
   "mainEntity": [
     {"@type": "Question", "name": "Can I use Aqua Element for infant formula?", "acceptedAnswer": {"@type": "Answer", "text": "The profile is low-mineralised (TDS 30–50 mg/L) with low sodium. Water for formula must still be boiled and cooled per your paediatrician's instructions."}},
     {"@type": "Question", "name": "What is TDS?", "acceptedAnswer": {"@type": "Answer", "text": "TDS is total dissolved solids in mg/L; an integrated measure of mineralisation."}},
-    {"@type": "Question", "name": "Does Aqua Element disclose fluoride?", "acceptedAnswer": {"@type": "Answer", "text": "Fluoride is not in the published profile. Request the current lab report through /contact."}},
+    {"@type": "Question", "name": "Does Aqua Element disclose fluoride?", "acceptedAnswer": {"@type": "Answer", "text": "Fluoride is not in the published profile. Request the current lab report through the contact page."}},
     {"@type": "Question", "name": "Is it safe during pregnancy?", "acceptedAnswer": {"@type": "Answer", "text": "The water passes eleven treatment stages and is under Sanepid oversight; discuss hydration specifics with your obstetrician."}},
     {"@type": "Question", "name": "Why is 10 L good for a kitchen?", "acceptedAnswer": {"@type": "Answer", "text": "Compact volume, fits in a cupboard, usable without a cooler."}},
     {"@type": "Question", "name": "Is boiling needed for formula?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Low mineralisation does not replace boiling. Follow your paediatrician."}},
-    {"@type": "Question", "name": "How do I set up regular delivery?", "acceptedAnswer": {"@type": "Answer", "text": "Subscribe via /shop or through the @aqua_element_bot Telegram bot."}},
-    {"@type": "Question", "name": "Where can I see the treatment process?", "acceptedAnswer": {"@type": "Answer", "text": "All eleven stages are described on /process/11-step-filtration."}}
+    {"@type": "Question", "name": "How do I set up regular delivery?", "acceptedAnswer": {"@type": "Answer", "text": "Subscribe in our online shop or through the @aqua_element_bot Telegram bot."}},
+    {"@type": "Question", "name": "Where can I see the treatment process?", "acceptedAnswer": {"@type": "Answer", "text": "All eleven stages are described on the 11-step filtration page."}}
   ]
 }
 </script>

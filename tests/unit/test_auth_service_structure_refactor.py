@@ -253,6 +253,7 @@ def _stage_link(service, web_user, telegram_user):
 
     def _sms_task(user_id, otp_code, phone_number=None):
         sent.append((phone_number, otp_code))
+        return {"success": True}  # the provider took it, as the real task answers
 
     with patch("business_app.services.auth_service.send_verification_sms_task", side_effect=_sms_task):
         service.send_phone_link_otp(web_user.phone, telegram_user.telegram_id)

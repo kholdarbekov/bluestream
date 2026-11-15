@@ -1,0 +1,47 @@
+{#- Shared UI macros (design-system v1; styles in static/css/ae-ui.css).
+    The words come from the caller, or are keys the backend seed ships (landing.footer.open_bot), so a cabinet page
+    can import this file and keep tests/unit/test_cabinet_template_keys_are_seeded.py green.
+
+    An action is a dict: {'label': ..., 'url': ...} renders a link; {'label': ..., 'action': 'show-add-address'}
+    renders a <button data-action=...> for page scripts; optional 'icon' (Font Awesome classes). -#}
+
+{#- A status pill. tone: ok | warn | danger | info | progress | muted (the backend's success / warning / neutral
+    are accepted as the same tones). The label is the backend's published wording, printed as given. -#}
+{% macro status_pill(label, tone='muted') -%}
+<span class="ae-status ae-status--{{ tone }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro _action(action, variant) -%}
+{%- set icon = action.icon and ('<i class="' ~ action.icon ~ '" aria-hidden="true"></i>')|safe -%}
+{%- if action.url -%}
+<a class="ae-btn ae-btn--{{ variant }}" href="{{ action.url }}"{% if action.external %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ icon or '' }}{{ action.label }}</a>
+{%- else -%}
+<button type="button" class="ae-btn ae-btn--{{ variant }}"{% if action.action %} data-action="{{ action.action }}"{% endif %}>{{ icon or '' }}{{ action.label }}</button>
+{%- endif -%}
+{%- endmacro %}
+
+{#- An empty state: icon tile, title, one line, one primary action (and an optional secondary one). -#}
+{% macro empty_state(icon, title, text=None, action=None, secondary=None, heading_tag='h3') -%}
+<div class="ae-empty">
+    <span class="ae-empty__icon" aria-hidden="true"><i class="{{ icon }}"></i></span>
+    <{{ heading_tag }} class="ae-empty__title">{{ title }}</{{ heading_tag }}>
+    {%- if text %}
+    <p class="ae-empty__text">{{ text }}</p>
+    {%- endif %}
+    {%- if action or secondary %}
+    <div class="ae-empty__actions">
+        {%- if action %}{{ _action(action, 'primary') }}{% endif %}
+        {%- if secondary %}{{ _action(secondary, 'secondary') }}{% endif %}
+    </div>
+    {%- endif %}
+</div>
+{%- endmacro %}
+
+{#- The Telegram alternative: a flat panel with the bot icon, the caller's sentence and an "Open the bot" button. -#}
+{% macro telegram_panel(text, url, label=None) -%}
+<div class="ae-panel ae-tg-panel">
+    <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+    <p class="ae-tg-panel__text">{{ text }}</p>
+    <a class="ae-btn ae-btn--secondary ae-btn--sm" href="{{ url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ label or ('landing.footer.open_bot'|t) }}</a>
+</div>
+{%- endmacro %}

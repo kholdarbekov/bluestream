@@ -27,6 +27,7 @@ const REPO = path.resolve(process.cwd(), '..');
 const read = (file) => fs.readFileSync(path.join(REPO, file), 'utf8');
 const PAGE_DATA_JS = 'business_app/static/js/pages/_page-data.js';
 const BASE_JS = 'business_app/static/js/pages/base.js';
+const AUTH_FORM_JS = 'business_app/static/js/pages/auth-form.js';
 const LOGIN_JS = 'business_app/static/js/pages/login.js';
 const HOP_JS = 'business_app/static/js/pages/same-site-hop.js';
 const BASE = {
@@ -37,7 +38,7 @@ const LAPSED = { status: 401, body: { error: 'Token Expired', message: 'The toke
 
 function boot({
   search = '', cookies = [], answers = [], body = '', scripts = [PAGE_DATA_JS, BASE_JS], path = '/my-orders',
-  htmlAttributes = '',
+  htmlAttributes = '', beforeScripts = () => {},
 } = {}) {
   const dom = new JSDOM(
     `<!doctype html><html${htmlAttributes}><head></head><body><script type="application/json" id="base-page-data">${JSON.stringify(BASE)}</script>${body}</body></html>`,
@@ -63,6 +64,7 @@ function boot({
     const fragment = url.fragment ? `#${url.fragment}` : '';
     navigations.push({ to: `/${url.path.join('/')}${query}${fragment}`, replacement });
   };
+  beforeScripts(window);
   scripts.map(read).forEach((source) => window.eval(source));
   return { window, requests, navigations };
 }
@@ -167,28 +169,31 @@ describe('login.js', () => {
     after_login_url: '/my-account',
     i18n: { login_success: 'Signed in', login_failed: 'Login failed', network_error: 'Network error' },
   })}</script>
+    <div class="ae-alert" id="loginAlert" role="alert" hidden><p data-alert-text></p></div>
     <form id="loginForm">
       <input name="identifier" value="test@example.com"><input name="password" value="wrong">
       <button type="submit" class="btn-auth">Sign in</button>
     </form>`;
 
-  it('shows the message of a wrong password and stays on the page', async () => {
+  it('says a wrong password in the page copy and stays on the page', async () => {
+    // The page words the refusals it understands (review AUTH-R3) in the form alert, with no toast repeating it.
     const page = boot({
       path: '/login',
       body: FORM,
-      scripts: [PAGE_DATA_JS, BASE_JS, LOGIN_JS],
-      answers: [{ status: 401, body: { success: false, message: 'The email or password is not right.' } }],
+      scripts: [PAGE_DATA_JS, BASE_JS, AUTH_FORM_JS, LOGIN_JS],
+      answers: [{ status: 401, body: { success: false, message: 'Invalid email or password', data: { error_code: 'INVALID_CREDENTIALS' } } }],
     });
     const form = page.window.document.getElementById('loginForm');
 
     form.dispatchEvent(new page.window.Event('submit', { cancelable: true }));
 
     await vi.waitFor(() => {
-      expect(page.window.document.querySelector('.toast-message')?.textContent).toBe('The email or password is not right.');
+      expect(page.window.document.querySelector('#loginAlert [data-alert-text]').textContent).toBe('Login failed');
     });
+    expect(page.window.document.querySelector('.toast-message')).toBeNull();
     expect(sent(page.requests)).toEqual(['POST /api/v1/auth/login']);
     expect(page.navigations).toEqual([]);
-    expect(form.querySelector('.btn-auth').classList.contains('loading')).toBe(false);
+    expect(form.querySelector('.btn-auth').classList.contains('is-loading')).toBe(false);
   });
 });
 
@@ -264,5 +269,98 @@ describe('logout', () => {
     await page.window.logout();
 
     expect(page.requests[0].options.headers['X-CSRF-TOKEN']).toBe('csrf-access-value');
+  });
+});
+
+// window.AE.imgFallback: an <img data-fallback> that fails shows the placeholder. base.js runs at the end of the
+// page, after the images: one that already failed (jsdom loads no images, so "failed" is set up here as a browser
+// reports it: complete, with no width) fired its error before the listener existed and is caught on start.
+describe('image fallback', () => {
+  const PLACEHOLDER = '/static/images/product-placeholder.svg';
+  const markBroken = (window) => {
+    Object.defineProperty(window.HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get() { return this.getAttribute('src') === '/uploads/gone.jpg'; },
+    });
+  };
+
+  it('an eager image that failed before base.js ran gets the placeholder', () => {
+    const page = boot({
+      beforeScripts: markBroken,
+      body: `<img id="broken" src="/uploads/gone.jpg" data-fallback="${PLACEHOLDER}">`
+        + '<img id="loading" src="/uploads/still-loading.jpg" data-fallback="">'
+        + '<img id="not-opted-in" src="/uploads/gone.jpg">',
+    });
+    const src = (id) => page.window.document.getElementById(id).getAttribute('src');
+
+    expect([src('broken'), src('loading'), src('not-opted-in')]).toEqual([
+      PLACEHOLDER, '/uploads/still-loading.jpg', '/uploads/gone.jpg',
+    ]);
+  });
+
+  it('an image that fails later falls back once, through its error event', () => {
+    const page = boot();
+    const { document } = page.window;
+    const img = document.createElement('img');
+    img.setAttribute('data-fallback', '');
+    img.setAttribute('src', '/uploads/later.jpg');
+    document.body.appendChild(img);
+
+    img.dispatchEvent(new page.window.Event('error'));
+    img.dispatchEvent(new page.window.Event('error'));
+
+    expect([img.getAttribute('src'), img.dataset.aeFallback]).toEqual([PLACEHOLDER, 'done']);
+  });
+});
+
+// Toasts (showNotification): one polite live region holds them all; an error stays 10 s, the rest 5 s; hovering
+// or focusing a toast stops its clock and leaving it restarts the clock with the time that was left.
+describe('toasts', () => {
+  function bootWithClock() {
+    const page = boot();
+    const timers = [];
+    page.window.setTimeout = (callback, ms) => { timers.push({ callback, ms, cleared: false }); return timers.length; };
+    page.window.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; };
+    return { ...page, timers };
+  }
+
+  it('an error stays twice as long as a success, and no toast is its own live region', () => {
+    const page = bootWithClock();
+
+    const error = page.window.showNotification('Could not add', 'error');
+    const done = page.window.showNotification('Added', 'success');
+
+    expect(page.timers.map((t) => t.ms)).toEqual([10000, 5000]);
+    const container = page.window.document.getElementById('toast-container');
+    expect([container.getAttribute('aria-live'), error.getAttribute('role'), done.getAttribute('role')])
+      .toEqual(['polite', null, null]);
+    // No title word was published (i18n {}), so none is printed.
+    expect(error.querySelector('.toast-title')).toBeNull();
+  });
+
+  it('hovering stops the clock and leaving restarts it with the time that was left', () => {
+    const page = bootWithClock();
+    const toast = page.window.showNotification('Saved', 'info');
+    const progress = toast.querySelector('.toast-progress');
+
+    toast.dispatchEvent(new page.window.Event('mouseenter'));
+    expect([page.timers[0].cleared, progress.style.animationPlayState]).toEqual([true, 'paused']);
+
+    toast.dispatchEvent(new page.window.Event('mouseleave'));
+    expect(page.timers.length).toBe(2);
+    expect(page.timers[1].ms).toBeGreaterThan(4900);
+    expect(page.timers[1].ms).toBeLessThanOrEqual(5000);
+    expect(progress.style.animationPlayState).toBe('running');
+  });
+
+  it('focus inside the toast holds it even after the pointer leaves', () => {
+    const page = bootWithClock();
+    const toast = page.window.showNotification('Saved', 'success');
+
+    toast.querySelector('.toast-close').dispatchEvent(new page.window.FocusEvent('focusin', { bubbles: true }));
+    toast.dispatchEvent(new page.window.Event('mouseenter'));
+    toast.dispatchEvent(new page.window.Event('mouseleave'));
+
+    expect(page.timers.filter((t) => !t.cleared)).toEqual([]);
   });
 });

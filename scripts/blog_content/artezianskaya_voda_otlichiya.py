@@ -9,7 +9,7 @@ ARTICLE = {
     "slug": "artezianskaya-voda-otlichiya",
     "category": "water_benefits",
     "tags": "artesian,spring,tap-water,water-types,water-source,aquifer,uzbekistan",
-    "featured_image": "/static/images/news/news-7.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "Cross-section illustration of an artesian well drawing from a confined aquifer between impermeable layers",
     "is_featured": False,
     "sort_order": 75,
@@ -144,11 +144,11 @@ ARTICLE = {
 <h3>Можно ли пить дистиллированную воду каждый день?</h3>
 <p>Это не лучший выбор для регулярного питья. Дистиллят и не реминерализованный RO лишены полезных солей; для повседневного потребления обычно рекомендуется вода с естественной или восстановленной минерализацией.</p>
 <h3>Где заказать Aqua Element?</h3>
-<p>На странице <a href="/shop">магазина</a>, через Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> или по телефону. Подробнее об очистке — на странице <a href="/process/11-step-filtration">«11 ступеней очистки»</a>.</p>
+<p>На странице <a href="/shop">магазина</a> или через Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Подробнее об очистке — на странице <a href="/process/11-step-filtration">«11 ступеней очистки»</a>.</p>
 <h3>Чем Aqua Element отличается от обычной воды «обратный осмос»?</h3>
 <p>Источник: артезианская скважина ~120 м, а не водопровод. Цикл: 11 ступеней с реминерализацией, а не одна мембрана. Контроль: лабораторный, под надзором Санэпидемстанции (Sanepid).</p>
 
-<p><strong>Готовы попробовать?</strong> Оформите заказ на странице <a href="/shop">/shop</a> или прочитайте подробности процесса на <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p><strong>Готовы попробовать?</strong> Оформите заказ в <a href="/shop">магазине на сайте</a> или прочитайте подробности процесса на <a href="/process/11-step-filtration">странице об 11 этапах фильтрации</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -171,67 +171,67 @@ ARTICLE = {
             "meta_description": "Что такое артезианская вода, чем она отличается от родниковой, водопроводной, дистиллированной и обратноосмотической. Сравнение, FAQ и контекст Ташкента.",
         },
         "uz": {
-            "title": "Artezian suvi: buloq, jo'mrak va distillangan suvdan farqi",
-            "excerpt": "Artezian, buloq, jo'mrak, distillangan va teskari osmos suvi — gidrogeologik nuqtai nazardan haqiqiy farq nimada va Toshkent viloyati uchun bu nima uchun muhim. Aqua Element'dan to'liq qo'llanma, taqqoslash jadvali va savol-javoblar bilan.",
+            "title": "Artezian suvi: buloq, jo‘mrak va distillangan suvdan farqi",
+            "excerpt": "Artezian, buloq, jo‘mrak, distillangan va teskari osmos suvi — gidrogeologik nuqtai nazardan haqiqiy farq nimada va Toshkent viloyati uchun bu nima uchun muhim. Aqua Element’dan to‘liq qo‘llanma, taqqoslash jadvali va savol-javoblar bilan.",
             "content": """
-<p class="lead">Etiketkalardagi «artezian» so'zi shu qadar ko'p uchraydiki, ko'pchilik uni «sifatli»ning sinonimi deb tushunadi. Aslida bu — qat'iy gidrogeologik atama bo'lib, suvning aniq turdagi yer osti manbasini ifodalaydi. Ushbu maqolada artezian suvi buloq, jo'mrak (shahar tarmog'i), distillangan va faqat teskari osmos orqali olingan suvdan nimasi bilan farq qilishini ko'rib chiqamiz va Toshkent shahri hamda Toshkent viloyati sharoitida manba tanlovi nima uchun haqiqatan ham muhimligini tushuntiramiz. Aqua Element Quyi Chirchiq tumanidagi ~120 metrli artezian quduqdan suv oladi va uni 11 bosqichli tozalashdan o'tkazadi, shuning uchun mavzuni amaliyotchining ko'zi bilan ochib beramiz.</p>
+<p class="lead">Etiketkalardagi «artezian» so‘zi shu qadar ko‘p uchraydiki, ko‘pchilik uni «sifatli»ning sinonimi deb tushunadi. Aslida bu — qat’iy gidrogeologik atama bo‘lib, suvning aniq turdagi yer osti manbasini ifodalaydi. Ushbu maqolada artezian suvi buloq, jo‘mrak (shahar tarmog‘i), distillangan va faqat teskari osmos orqali olingan suvdan nimasi bilan farq qilishini ko‘rib chiqamiz va Toshkent shahri hamda Toshkent viloyati sharoitida manba tanlovi nima uchun haqiqatan ham muhimligini tushuntiramiz. Aqua Element Quyi Chirchiq tumanidagi ~120 metrli artezian quduqdan suv oladi va uni 11 bosqichli tozalashdan o‘tkazadi, shuning uchun mavzuni amaliyotchining ko‘zi bilan ochib beramiz.</p>
 
 <h2>1. Qisqa gidrogeologik kirish: suv qayerdan keladi</h2>
-<p>Artezian suvi nima ekanini tushunish uchun suv aylanishidan boshlaymiz. Yog'ingarchilik yer yuzasiga tushadi, bir qismi daryolarga va suv omborlariga oqib (yer usti suvi), bir qismi tuproq orqali pastga singib, yer osti gorizontlariga to'planadi. Yer osti suvlari suvli qatlamlar — qum, shag'al yoki yorilgan ohaktoshdan iborat g'ovak jinslarda saqlanadi.</p>
-<p>Suvli gorizontlar ikki katta sinfga bo'linadi:</p>
+<p>Artezian suvi nima ekanini tushunish uchun suv aylanishidan boshlaymiz. Yog‘ingarchilik yer yuzasiga tushadi, bir qismi daryolarga va suv omborlariga oqib (yer usti suvi), bir qismi tuproq orqali pastga singib, yer osti gorizontlariga to‘planadi. Yer osti suvlari suvli qatlamlar — qum, shag‘al yoki yorilgan ohaktoshdan iborat g‘ovak jinslarda saqlanadi.</p>
+<p>Suvli gorizontlar ikki katta sinfga bo‘linadi:</p>
 <ul>
-<li><strong>Bosimsiz (grunt) gorizontlar</strong> — yer yuzasiga eng yaqin qatlamlar. Sathlari yer osti suvi sathiga to'g'ri keladi va yog'ingarchilik bilan o'zgaradi. Yer yuzasiga yaqinligi sababli oqava, o'g'it va maishiy ifloslanishlardan zaif himoyalangan.</li>
-<li><strong>Bosimli (artezian) gorizontlar</strong> — ikki yaroqsiz (suvni o'tkazmaydigan) qatlam orasida joylashgan. Suv ularda bosim ostida bo'ladi, ya'ni quduq orqali ochilganda u qatlamning yuqori chegarasidan balandroq ko'tariladi.</li>
+<li><strong>Bosimsiz (grunt) gorizontlar</strong> — yer yuzasiga eng yaqin qatlamlar. Sathlari yer osti suvi sathiga to‘g‘ri keladi va yog‘ingarchilik bilan o‘zgaradi. Yer yuzasiga yaqinligi sababli oqava, o‘g‘it va maishiy ifloslanishlardan zaif himoyalangan.</li>
+<li><strong>Bosimli (artezian) gorizontlar</strong> — ikki yaroqsiz (suvni o‘tkazmaydigan) qatlam orasida joylashgan. Suv ularda bosim ostida bo‘ladi, ya’ni quduq orqali ochilganda u qatlamning yuqori chegarasidan balandroq ko‘tariladi.</li>
 </ul>
 <p>Aynan shu farq oxirgi sifatdagi farqlarni belgilaydi.</p>
 
-<h2>2. «Artezian» so'zining qat'iy ma'nosi</h2>
-<p>Artezian suvi — bu <strong>ikki suv o'tkazmaydigan qatlam orasidagi bosimli gorizontdan</strong> olingan suv. Quduq ochilganda suv ustuni gorizontning yuqori qoplamasidan ham balandga ko'tariladi; ideal sharoitda nasos ishlatmasdan, o'z-o'zidan otilib chiqishi mumkin.</p>
+<h2>2. «Artezian» so‘zining qat’iy ma’nosi</h2>
+<p>Artezian suvi — bu <strong>ikki suv o‘tkazmaydigan qatlam orasidagi bosimli gorizontdan</strong> olingan suv. Quduq ochilganda suv ustuni gorizontning yuqori qoplamasidan ham balandga ko‘tariladi; ideal sharoitda nasos ishlatmasdan, o‘z-o‘zidan otilib chiqishi mumkin.</p>
 <p>Artezian suvining asosiy belgilari:</p>
 <ul>
-<li><strong>Chuqurlik va izolyatsiya.</strong> Gorizont tepadan suv o'tkazmaydigan qatlam bilan yopilgan, bu yuzaki ifloslanishni kesib tashlaydi.</li>
-<li><strong>Yoshi va barqarorligi.</strong> Bosimli gorizontlardagi suv ko'p o'n yillar yoki ming yillar davomida shakllangan; tarkibi mavsumlar bo'yicha barqaror.</li>
-<li><strong>Tabiiy minerallashuv.</strong> Jinslar bilan uzoq aloqada bo'lgan suv kaltsiy, magniy va gidrokarbonatlar bilan to'yingan bo'ladi.</li>
+<li><strong>Chuqurlik va izolyatsiya.</strong> Gorizont tepadan suv o‘tkazmaydigan qatlam bilan yopilgan, bu yuzaki ifloslanishni kesib tashlaydi.</li>
+<li><strong>Yoshi va barqarorligi.</strong> Bosimli gorizontlardagi suv ko‘p o‘n yillar yoki ming yillar davomida shakllangan; tarkibi mavsumlar bo‘yicha barqaror.</li>
+<li><strong>Tabiiy minerallashuv.</strong> Jinslar bilan uzoq aloqada bo‘lgan suv kaltsiy, magniy va gidrokarbonatlar bilan to‘yingan bo‘ladi.</li>
 </ul>
 <p>Shu bilan birga, «artezian» — bu <em>manba</em>ning xarakteristikasi, yakuniy stakaningizdagi sifat kafolati emas. Chuqur quduq qattiqlik, temir, marganets va mikrobiologik nazoratdan ozod qilmaydi.</p>
 
-<h2>3. Buloq suvi: qanday paydo bo'ladi</h2>
-<p>Buloq suvi — bu yer osti suvi yer yuzasi bilan kesishgan joyda tabiiy ravishda chiqib turadigan suv. Buloq manbasi ham bosimsiz, ham bosimli gorizont bo'lishi mumkin, shuning uchun «buloq» atamasi gidrogeologik jihatdan «artezian»dan kamroq qat'iy.</p>
-<p>Iste'molchi nuqtai nazaridan farqlar:</p>
+<h2>3. Buloq suvi: qanday paydo bo‘ladi</h2>
+<p>Buloq suvi — bu yer osti suvi yer yuzasi bilan kesishgan joyda tabiiy ravishda chiqib turadigan suv. Buloq manbasi ham bosimsiz, ham bosimli gorizont bo‘lishi mumkin, shuning uchun «buloq» atamasi gidrogeologik jihatdan «artezian»dan kamroq qat’iy.</p>
+<p>Iste’molchi nuqtai nazaridan farqlar:</p>
 <ul>
-<li>Buloq odatda chuqur emas va yuza zona bilan aloqada — yomg'ir va qor erishidan keyin tarkib o'zgaradi.</li>
-<li>Buloq suvi ko'pincha yoqimli, «tirik» ta'mga ega va o'rtacha minerallashgan, lekin yuzaki ifloslanishdan tasdiqlangan himoyasiz xavfsizligi kafolatlanmaydi.</li>
-<li>Sifatli buloq suvlari shishaga to'ldirilishdan oldin mexanik va mikrobiologik tozalashdan o'tadi.</li>
+<li>Buloq odatda chuqur emas va yuza zona bilan aloqada — yomg‘ir va qor erishidan keyin tarkib o‘zgaradi.</li>
+<li>Buloq suvi ko‘pincha yoqimli, «tirik» ta’mga ega va o‘rtacha minerallashgan, lekin yuzaki ifloslanishdan tasdiqlangan himoyasiz xavfsizligi kafolatlanmaydi.</li>
+<li>Sifatli buloq suvlari shishaga to‘ldirilishdan oldin mexanik va mikrobiologik tozalashdan o‘tadi.</li>
 </ul>
 <p>«Artezian va buloq farqi» bitta oddiy fikrga keladi: artezian manba geologik jihatdan yuza ifloslanishdan yaxshi izolyatsiyalangan, buloq esa yuzaga yaqin va atrof-muhitga sezgirroq.</p>
 
-<h2>4. Jo'mrak (shahar tarmog'i) suvi</h2>
-<p>Shahar tarmog'i suvi aralash manbalardan keladi: suv omborlari, daryolar, ba'zan sayoz yer osti suv olish nuqtalari. Suv markaziy tayyorlash stantsiyasidan o'tadi — koagulyatsiya, cho'ktirish, filtrlash, dezinfeksiya (odatda xlor, ba'zan ozon yoki UB).</p>
-<p>Stantsiyadan kvartiraga yo'lda suv ko'p kilometrlik quvurlar tarmog'iga tegadi. Bu odatdagi muammolarni keltirib chiqaradi:</p>
+<h2>4. Jo‘mrak (shahar tarmog‘i) suvi</h2>
+<p>Shahar tarmog‘i suvi aralash manbalardan keladi: suv omborlari, daryolar, ba’zan sayoz yer osti suv olish nuqtalari. Suv markaziy tayyorlash stantsiyasidan o‘tadi — koagulyatsiya, cho‘ktirish, filtrlash, dezinfeksiya (odatda xlor, ba’zan ozon yoki UB).</p>
+<p>Stantsiyadan kvartiraga yo‘lda suv ko‘p kilometrlik quvurlar tarmog‘iga tegadi. Bu odatdagi muammolarni keltirib chiqaradi:</p>
 <ul>
-<li><strong>Qoldiq xlor</strong> — dezinfeksiya uchun kerak, lekin xarakterli hid va ta'm beradi.</li>
+<li><strong>Qoldiq xlor</strong> — dezinfeksiya uchun kerak, lekin xarakterli hid va ta’m beradi.</li>
 <li><strong>Ikkilamchi ifloslanish</strong> — eski quvurlardagi zang, biopardalar, avariyali bosim pasayishlari.</li>
-<li><strong>Mavsumiy o'zgarishlar</strong> toshqinlar yoki ta'mirlash ishlari paytida.</li>
+<li><strong>Mavsumiy o‘zgarishlar</strong> toshqinlar yoki ta’mirlash ishlari paytida.</li>
 </ul>
-<p>Bu Toshkentdagi jo'mrak suvi «yomon» degani emas — stantsiya chiqishidagi sifati odatda me'yorga mos. Lekin stantsiya va jo'mrak orasida o'nlab kilometr infratuzilma joylashgan.</p>
+<p>Bu Toshkentdagi jo‘mrak suvi «yomon» degani emas — stantsiya chiqishidagi sifati odatda me’yorga mos. Lekin stantsiya va jo‘mrak orasida o‘nlab kilometr infratuzilma joylashgan.</p>
 
 <h2>5. Distillangan suv</h2>
-<p>Distillangan suv bug'lantirish va keyin bug'ni yana suyuqlikka aylantirish orqali olinadi. Bu jarayon suvni deyarli barcha eruvchan tuzlardan, mineraldan va organik birikmalardan ajratib oladi. Natija — ta'msiz, deyarli sof H₂O.</p>
+<p>Distillangan suv bug‘lantirish va keyin bug‘ni yana suyuqlikka aylantirish orqali olinadi. Bu jarayon suvni deyarli barcha eruvchan tuzlardan, mineraldan va organik birikmalardan ajratib oladi. Natija — ta’msiz, deyarli sof H₂O.</p>
 <p>Xususiyatlari:</p>
 <ul>
 <li>Nol minerallashuv (TDS taxminan nol).</li>
-<li>«Bo'sh», biroz noxush ta'm — tuzlar yo'q.</li>
-<li>Foydalanish — laboratoriya texnikasi, akkumulyatorlar, dazmollar, namlatgichlar, ba'zan farmatsevtika.</li>
+<li>«Bo‘sh», biroz noxush ta’m — tuzlar yo‘q.</li>
+<li>Foydalanish — laboratoriya texnikasi, akkumulyatorlar, dazmollar, namlatgichlar, ba’zan farmatsevtika.</li>
 </ul>
-<p>Kundalik ichimlik uchun distillangan suv odatda tavsiya etilmaydi: minerallarsiz suvni uzoq vaqt iste'mol qilish ichimlik suv gigiyenasi bo'yicha mutaxassis adabiyotlarda istalmagan stsenariy sifatida muhokama qilinadi.</p>
+<p>Kundalik ichimlik uchun distillangan suv odatda tavsiya etilmaydi: minerallarsiz suvni uzoq vaqt iste’mol qilish ichimlik suv gigiyenasi bo‘yicha mutaxassis adabiyotlarda istalmagan stsenariy sifatida muhokama qilinadi.</p>
 
 <h2>6. Faqat teskari osmos (RO) suvi</h2>
-<p>Teskari osmos (Reverse Osmosis, RO) — yarim o'tkazgich membrana orqali suvni bosim ostida o'tkazish texnologiyasi. Membrana eruvchan tuzlarning, og'ir metallarning, bakteriyalarning va organik moddalarning katta qismini ushlab qoladi.</p>
+<p>Teskari osmos (Reverse Osmosis, RO) — yarim o‘tkazgich membrana orqali suvni bosim ostida o‘tkazish texnologiyasi. Membrana eruvchan tuzlarning, og‘ir metallarning, bakteriyalarning va organik moddalarning katta qismini ushlab qoladi.</p>
 <p>«RO suvi» deganda odatda maishiy yoki sanoat RO filtri mahsuloti tushuniladi. Muhim nuqtalar:</p>
 <ul>
-<li>Manba <em>har qanday</em> suv bo'lishi mumkin — jo'mrak, quduq, buloq. RO o'zi manba haqida hech nima aytmaydi.</li>
-<li>«Toza» RO permeati juda past TDS ga ega va distillangan suvga yaqin. Ichish uchun uni odatda <strong>qayta minerallashtirish</strong> kerak — kaltsiy, magniy, gidrokarbonatlar qo'shiladi.</li>
-<li>RO yomonni ham, yaxshini ham olib tashlaydi. Shuning uchun savodli sxemalarda membranadan keyin minerallashuv bosqichi bo'ladi.</li>
+<li>Manba <em>har qanday</em> suv bo‘lishi mumkin — jo‘mrak, quduq, buloq. RO o‘zi manba haqida hech nima aytmaydi.</li>
+<li>«Toza» RO permeati juda past TDS ga ega va distillangan suvga yaqin. Ichish uchun uni odatda <strong>qayta minerallashtirish</strong> kerak — kaltsiy, magniy, gidrokarbonatlar qo‘shiladi.</li>
+<li>RO yomonni ham, yaxshini ham olib tashlaydi. Shuning uchun savodli sxemalarda membranadan keyin minerallashuv bosqichi bo‘ladi.</li>
 </ul>
 
 <h2>7. Suv turlarini taqqoslash jadvali</h2>
@@ -240,90 +240,90 @@ ARTICLE = {
 <tr><th>Suv turi</th><th>Manba tavsifi</th><th>Odatdagi minerallashuv</th><th>Odatdagi xavf zonasi</th><th>Odatdagi tozalash</th><th>Eslatma</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>Artezian</strong></td><td>Suv o'tkazmaydigan qatlamlar orasidagi bosimli gorizont, chuqur quduq</td><td>O'rta, barqaror</td><td>Qattiqlik, temir, marganets, shishalashda gigiyena</td><td>Mexanik tozalash, kerak bo'lsa yumshatish, dezinfeksiya</td><td>Yuzaki ifloslanishdan yaxshi izolyatsiyalangan</td></tr>
-<tr><td><strong>Buloq</strong></td><td>Yer osti suvining yuzaga tabiiy chiqishi</td><td>Past–o'rta</td><td>Mavsumiy yuza ifloslanishlari</td><td>Mexanik va mikrobiologik tozalash</td><td>Izolyatsiya darajasi har bir buloqda turlicha</td></tr>
-<tr><td><strong>Jo'mrak</strong></td><td>Suv omborlari, daryolar, ba'zan sayoz quduqlar</td><td>O'rta, o'zgaruvchan</td><td>Qoldiq xlor, quvurlardagi zang, ikkilamchi ifloslanish</td><td>Markaziy stantsiya: koagulyatsiya, filtrlash, xlorlash</td><td>«Jo'mrakdagi» sifat tarmoq holatiga bog'liq</td></tr>
-<tr><td><strong>Distillangan</strong></td><td>Bug'lantirilgan har qanday suv</td><td>Juda past (~0)</td><td>Mineral yo'qligi, «bo'sh» ta'm</td><td>Distillyatsiya</td><td>Kundalik ichish uchun tavsiya etilmaydi</td></tr>
-<tr><td><strong>Faqat RO</strong></td><td>Membrana orqali har qanday suv</td><td>Juda past</td><td>Mineral yo'qligi</td><td>Teskari osmos</td><td>Reminerallashtirilmasa, ta'm va foyda kam</td></tr>
-<tr><td><strong>Aqua Element</strong></td><td>~120 m artezian quduq, Quyi Chirchiq tumani</td><td>TDS 30–50 mg/l, muvozanatli</td><td>Har bir bosqichda nazorat ostida</td><td>11 bosqich: kvarts, ko'mir, ion almashish, regeneratsiya, PP 5/1 mkm, RO, CIP, UB, minerallashuv, ozon</td><td>Artezian manba + to'liq nazorat va minerallashuv</td></tr>
+<tr><td><strong>Artezian</strong></td><td>Suv o‘tkazmaydigan qatlamlar orasidagi bosimli gorizont, chuqur quduq</td><td>O‘rta, barqaror</td><td>Qattiqlik, temir, marganets, shishalashda gigiyena</td><td>Mexanik tozalash, kerak bo‘lsa yumshatish, dezinfeksiya</td><td>Yuzaki ifloslanishdan yaxshi izolyatsiyalangan</td></tr>
+<tr><td><strong>Buloq</strong></td><td>Yer osti suvining yuzaga tabiiy chiqishi</td><td>Past–o‘rta</td><td>Mavsumiy yuza ifloslanishlari</td><td>Mexanik va mikrobiologik tozalash</td><td>Izolyatsiya darajasi har bir buloqda turlicha</td></tr>
+<tr><td><strong>Jo‘mrak</strong></td><td>Suv omborlari, daryolar, ba’zan sayoz quduqlar</td><td>O‘rta, o‘zgaruvchan</td><td>Qoldiq xlor, quvurlardagi zang, ikkilamchi ifloslanish</td><td>Markaziy stantsiya: koagulyatsiya, filtrlash, xlorlash</td><td>«Jo‘mrakdagi» sifat tarmoq holatiga bog‘liq</td></tr>
+<tr><td><strong>Distillangan</strong></td><td>Bug‘lantirilgan har qanday suv</td><td>Juda past (~0)</td><td>Mineral yo‘qligi, «bo‘sh» ta’m</td><td>Distillyatsiya</td><td>Kundalik ichish uchun tavsiya etilmaydi</td></tr>
+<tr><td><strong>Faqat RO</strong></td><td>Membrana orqali har qanday suv</td><td>Juda past</td><td>Mineral yo‘qligi</td><td>Teskari osmos</td><td>Reminerallashtirilmasa, ta’m va foyda kam</td></tr>
+<tr><td><strong>Aqua Element</strong></td><td>~120 m artezian quduq, Quyi Chirchiq tumani</td><td>TDS 30–50 mg/l, muvozanatli</td><td>Har bir bosqichda nazorat ostida</td><td>11 bosqich: kvarts, ko‘mir, ion almashish, regeneratsiya, PP 5/1 mkm, RO, CIP, UB, minerallashuv, ozon</td><td>Artezian manba + to‘liq nazorat va minerallashuv</td></tr>
 </tbody>
 </table>
 
 <h2>8. Toshkent va Toshkent viloyati: nima uchun artezian manba bu yerda muhim</h2>
-<p>Toshkent viloyati iqlimi — keskin kontinental, yozi issiq, daryolarning oziqlanishi qor-yomg'irga bog'liq va o'zgaruvchan. Yer usti suvlari (Chirchiq, suv omborlari) loyqalik, antropogen yuk va mavsumiy o'zgarishlarga moyil. Aholi zich joylashgan tumanlardagi grunt gorizontlari ko'pincha xo'jalik faoliyati zonalari bilan aloqada bo'ladi.</p>
-<p>Bunday sharoitda yuzadan suv o'tkazmaydigan qatlam bilan ajratilgan bosimli (artezian) gorizont aniq afzallikka ega:</p>
+<p>Toshkent viloyati iqlimi — keskin kontinental, yozi issiq, daryolarning oziqlanishi qor-yomg‘irga bog‘liq va o‘zgaruvchan. Yer usti suvlari (Chirchiq, suv omborlari) loyqalik, antropogen yuk va mavsumiy o‘zgarishlarga moyil. Aholi zich joylashgan tumanlardagi grunt gorizontlari ko‘pincha xo‘jalik faoliyati zonalari bilan aloqada bo‘ladi.</p>
+<p>Bunday sharoitda yuzadan suv o‘tkazmaydigan qatlam bilan ajratilgan bosimli (artezian) gorizont aniq afzallikka ega:</p>
 <ul>
-<li>Tarkibi mavsumlar bo'yicha barqarorroq.</li>
-<li>Yuzaki ifloslanish manbalari bilan to'g'ridan-to'g'ri aloqasi geologik cheklangan.</li>
+<li>Tarkibi mavsumlar bo‘yicha barqarorroq.</li>
+<li>Yuzaki ifloslanish manbalari bilan to‘g‘ridan-to‘g‘ri aloqasi geologik cheklangan.</li>
 <li>Chuqurlikdagi suv harorati doimiy, bu mikrobiologik nazoratni soddalashtiradi.</li>
 </ul>
-<p>Bu sehrli himoya emas: chuqur quduqda ham qattiqlik yoki tabiiy temir bo'lishi mumkin. Lekin ichimlik suv ishlab chiqarish uchun boshlang'ich shartlar artezian manbada yer usti manbalariga qaraganda ob'ektiv yaxshiroq.</p>
+<p>Bu sehrli himoya emas: chuqur quduqda ham qattiqlik yoki tabiiy temir bo‘lishi mumkin. Lekin ichimlik suv ishlab chiqarish uchun boshlang‘ich shartlar artezian manbada yer usti manbalariga qaraganda ob’ektiv yaxshiroq.</p>
 
 <h3>Aqua Element geografiyasi</h3>
-<p>Aqua Element qudug'i Toshkent viloyatining Quyi Chirchiq tumanida joylashgan, chuqurligi taxminan 120 metr. Bu allaqachon chuqur, yuqoridan suv o'tkazmaydigan yotqiziqlar bilan qoplangan gorizont. Mintaqaning ochiq geologik ma'lumotlariga ko'ra, bunday chuqurlik odatda yuqori bosimsiz suvlardan ajratilgan bosimli gorizontga to'g'ri keladi.</p>
+<p>Aqua Element qudug‘i Toshkent viloyatining Quyi Chirchiq tumanida joylashgan, chuqurligi taxminan 120 metr. Bu allaqachon chuqur, yuqoridan suv o‘tkazmaydigan yotqiziqlar bilan qoplangan gorizont. Mintaqaning ochiq geologik ma’lumotlariga ko‘ra, bunday chuqurlik odatda yuqori bosimsiz suvlardan ajratilgan bosimli gorizontga to‘g‘ri keladi.</p>
 
-<h2>9. Aqua Element yuqoridagilar bilan qanday bog'liq</h2>
-<p>Aqua Element misolida «artezian» suv qanday qilib tayyor ichimlik suviga aylanishini ko'rsatish qulay. Chuqur manba — bu faqat xom ashyo. Keyin <a href="/process/11-step-filtration">11 bosqichli tozalash</a> ishga kiradi:</p>
+<h2>9. Aqua Element yuqoridagilar bilan qanday bog‘liq</h2>
+<p>Aqua Element misolida «artezian» suv qanday qilib tayyor ichimlik suviga aylanishini ko‘rsatish qulay. Chuqur manba — bu faqat xom ashyo. Keyin <a href="/process/11-step-filtration">11 bosqichli tozalash</a> ishga kiradi:</p>
 <ol>
 <li>Kvarts filtri — yirik mexanika.</li>
-<li>Aktivlangan ko'mir — xlor, organika, hidlar.</li>
+<li>Aktivlangan ko‘mir — xlor, organika, hidlar.</li>
 <li>Ion almashtirish yumshatgich — qattiqlikni kamaytirish.</li>
-<li>Smola regeneratsiyasi — sig'imni saqlash.</li>
+<li>Smola regeneratsiyasi — sig‘imni saqlash.</li>
 <li>PP 5 mkm — nozik mexanika.</li>
 <li>PP 1 mkm — yanada nozik mexanika.</li>
-<li>Teskari osmos — og'ir metall tuzlari, nitratlar, qoldiq organika.</li>
+<li>Teskari osmos — og‘ir metall tuzlari, nitratlar, qoldiq organika.</li>
 <li>Membrana CIP — gigiyenik yuvish.</li>
 <li>UB — reagentsiz dezinfeksiya.</li>
 <li>Minerallashuv — Ca, Mg, gidrokarbonatlarni qaytarish.</li>
 <li>Ozonlashtirish — shishalashdan oldin yakuniy mikrobiologik himoya.</li>
 </ol>
-<p>Natijada TDS 30–50 mg/l, pH taxminan 7,5, kaltsiy, magniy, natriy va kaliy bo'yicha muvozanatli profilga ega yumshoq, lekin «bo'sh» bo'lmagan suv olinadi. Buyurtma 18,9 l qaytariluvchi va 10 l formatlarida — <a href="/shop">do'kon</a> sahifasi yoki <a href="/subscriptions">obuna</a> orqali muntazam yetkazib berish mavjud.</p>
+<p>Natijada TDS 30–50 mg/l, pH taxminan 7,5, kaltsiy, magniy, natriy va kaliy bo‘yicha muvozanatli profilga ega yumshoq, lekin «bo‘sh» bo‘lmagan suv olinadi. Buyurtma 18,9 l qaytariluvchi va 10 l formatlarida — <a href="/shop">do‘kon</a> sahifasi yoki <a href="/subscriptions">obuna</a> orqali muntazam yetkazib berish mavjud.</p>
 
 <h2>10. Xulosa</h2>
-<p>Artezian suvi — marketing so'zi emas, balki aniq gidrogeologik vaziyat: ikki suv o'tkazmaydigan qatlam orasidagi bosimli gorizontdan olingan, yuza ifloslanishdan izolyatsiyalangan suv. Buloq suvi — yuzaga yaqin, atrof-muhitga bog'liq. Jo'mrak suvi — markaziy tayyorlangan, lekin tarmoqdagi ikkilamchi ifloslanish xavfi bilan. Distillangan va «toza» RO — deyarli minerallarsiz, kundalik ichish uchun reminerallashtirish kerak. Aqua Element artezian manbaning afzalliklarini to'liq tozalash va nazorat sikli bilan birlashtiradi.</p>
-<p>Etiketkadagi «artezian» yorlig'ini tushungandan so'ng, iste'molchi ongli tanlov qila oladi: manba qayerda joylashgan, qancha chuqurlikda, qanday tozalashdan o'tgan va qaysi tashkilot tomonidan nazorat qilinadi. Shu sababli Aqua Element o'z mijozlariga manba paspoorti, sifat profili va Sanepid hujjatlarini ko'rsatishga ochiq munosabatda bo'ladi — chunki ishonch faqat shaffoflik orqali quriladi.</p>
+<p>Artezian suvi — marketing so‘zi emas, balki aniq gidrogeologik vaziyat: ikki suv o‘tkazmaydigan qatlam orasidagi bosimli gorizontdan olingan, yuza ifloslanishdan izolyatsiyalangan suv. Buloq suvi — yuzaga yaqin, atrof-muhitga bog‘liq. Jo‘mrak suvi — markaziy tayyorlangan, lekin tarmoqdagi ikkilamchi ifloslanish xavfi bilan. Distillangan va «toza» RO — deyarli minerallarsiz, kundalik ichish uchun reminerallashtirish kerak. Aqua Element artezian manbaning afzalliklarini to‘liq tozalash va nazorat sikli bilan birlashtiradi.</p>
+<p>Etiketkadagi «artezian» yorlig‘ini tushungandan so‘ng, iste’molchi ongli tanlov qila oladi: manba qayerda joylashgan, qancha chuqurlikda, qanday tozalashdan o‘tgan va qaysi tashkilot tomonidan nazorat qilinadi. Shu sababli Aqua Element o‘z mijozlariga manba paspoorti, sifat profili va Sanepid hujjatlarini ko‘rsatishga ochiq munosabatda bo‘ladi — chunki ishonch faqat shaffoflik orqali quriladi.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 <h3>Har qanday artezian suv ishlovsiz xavfsizmi?</h3>
-<p>Yo'q. Artezian gorizont yuzadan yaxshi izolyatsiyalangan, lekin bu tabiiy qattiqlik, mumkin bo'lgan temir, marganets va shishalash paytidagi mikrobiologik xavfni bekor qilmaydi. Hatto artezian suv ham nazorat va tozalashni talab qiladi.</p>
-<h3>Aqua Element qudug'ining chuqurligi qancha?</h3>
+<p>Yo‘q. Artezian gorizont yuzadan yaxshi izolyatsiyalangan, lekin bu tabiiy qattiqlik, mumkin bo‘lgan temir, marganets va shishalash paytidagi mikrobiologik xavfni bekor qilmaydi. Hatto artezian suv ham nazorat va tozalashni talab qiladi.</p>
+<h3>Aqua Element qudug‘ining chuqurligi qancha?</h3>
 <p>Toshkent viloyati Quyi Chirchiq tumanida, taxminan 120 metr — bosimli gorizontda.</p>
-<h3>Bosimli va bosimsiz gorizont o'rtasidagi farq nima?</h3>
-<p>Bosimsiz (grunt) gorizont yer yuzasiga yaqin, sathi yer osti suvi sathi bilan mos. Bosimli (artezian) ikki suv o'tkazmaydigan qatlam orasida joylashgan, suvi bosim ostida.</p>
-<h3>Buloq suvi har doim jo'mrakdan tozaroqmi?</h3>
-<p>Shart emas. Aniq manbaga va shahar tarmog'i holatiga bog'liq.</p>
-<h3>Manba artezian bo'lsa, nima uchun Aqua Element teskari osmosdan foydalanadi?</h3>
-<p>Qoldiq og'ir metallar, nitratlar va boshqa potentsial ifloslanishlarni olib tashlash, barqaror tuz profilini ta'minlash uchun. RO dan keyin suv reminerallashtiriladi.</p>
+<h3>Bosimli va bosimsiz gorizont o‘rtasidagi farq nima?</h3>
+<p>Bosimsiz (grunt) gorizont yer yuzasiga yaqin, sathi yer osti suvi sathi bilan mos. Bosimli (artezian) ikki suv o‘tkazmaydigan qatlam orasida joylashgan, suvi bosim ostida.</p>
+<h3>Buloq suvi har doim jo‘mrakdan tozaroqmi?</h3>
+<p>Shart emas. Aniq manbaga va shahar tarmog‘i holatiga bog‘liq.</p>
+<h3>Manba artezian bo‘lsa, nima uchun Aqua Element teskari osmosdan foydalanadi?</h3>
+<p>Qoldiq og‘ir metallar, nitratlar va boshqa potentsial ifloslanishlarni olib tashlash, barqaror tuz profilini ta’minlash uchun. RO dan keyin suv reminerallashtiriladi.</p>
 <h3>Etiketkadagi «artezian» nimani anglatadi?</h3>
-<p>Suv suv o'tkazmaydigan qatlam bilan qoplangan bosimli gorizontdan olinganini.</p>
+<p>Suv suv o‘tkazmaydigan qatlam bilan qoplangan bosimli gorizontdan olinganini.</p>
 <h3>Shishadagi suv har doim buloqdanmi?</h3>
-<p>Yo'q. Shishadagi suv artezian, buloq, tozalangan jo'mrak yoki reminerallashtirilgan teskari osmos suvi bo'lishi mumkin.</p>
+<p>Yo‘q. Shishadagi suv artezian, buloq, tozalangan jo‘mrak yoki reminerallashtirilgan teskari osmos suvi bo‘lishi mumkin.</p>
 <h3>Distillangan suvni har kuni ichish mumkinmi?</h3>
-<p>Bu asosiy variant sifatida tavsiya etilmaydi: distillyatda foydali tuzlar yo'q.</p>
-<h3>Aqua Element'ni qayerdan buyurtma qilish mumkin?</h3>
-<p><a href="/shop">do'kon</a> sahifasi, Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> yoki telefon orqali. Tozalash haqida batafsil — <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifasida.</p>
+<p>Bu asosiy variant sifatida tavsiya etilmaydi: distillyatda foydali tuzlar yo‘q.</p>
+<h3>Aqua Element’ni qayerdan buyurtma qilish mumkin?</h3>
+<p><a href="/shop">do‘kon</a> sahifasi yoki Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali. Tozalash haqida batafsil — <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifasida.</p>
 
-<p><strong>Sinab ko'rishga tayyormisiz?</strong> <a href="/shop">/shop</a> sahifasidan buyurtma bering yoki <a href="/process/11-step-filtration">/process/11-step-filtration</a> jarayonini o'qing.</p>
+<p><strong>Sinab ko‘rishga tayyormisiz?</strong> <a href="/shop">do‘kon</a> sahifasidan buyurtma bering yoki <a href="/process/11-step-filtration">11 bosqichli filtrlash</a> jarayonini o‘qing.</p>
 
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "Har qanday artezian suv ishlovsiz xavfsizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo'q. Artezian gorizont yuzadan yaxshi izolyatsiyalangan, lekin tabiiy qattiqlik, temir, marganets va shishalash paytidagi mikrobiologik xavf saqlanib qoladi."}},
-    {"@type": "Question", "name": "Aqua Element qudug'ining chuqurligi qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Quyi Chirchiq tumanida taxminan 120 metr."}},
-    {"@type": "Question", "name": "Bosimli va bosimsiz gorizont o'rtasidagi farq nima?", "acceptedAnswer": {"@type": "Answer", "text": "Bosimsiz gorizont yuzaga yaqin; bosimli (artezian) ikki suv o'tkazmaydigan qatlam orasida bosim ostida joylashgan."}},
-    {"@type": "Question", "name": "Buloq suvi har doim jo'mrakdan tozaroqmi?", "acceptedAnswer": {"@type": "Answer", "text": "Shart emas. Manba va tarmoq holatiga bog'liq."}},
-    {"@type": "Question", "name": "Manba artezian bo'lsa, nima uchun Aqua Element RO dan foydalanadi?", "acceptedAnswer": {"@type": "Answer", "text": "Qoldiq og'ir metallar, nitratlar va boshqa potentsial ifloslanishlarni olib tashlash uchun; RO dan keyin minerallashtiriladi."}},
+    {"@type": "Question", "name": "Har qanday artezian suv ishlovsiz xavfsizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q. Artezian gorizont yuzadan yaxshi izolyatsiyalangan, lekin tabiiy qattiqlik, temir, marganets va shishalash paytidagi mikrobiologik xavf saqlanib qoladi."}},
+    {"@type": "Question", "name": "Aqua Element qudug‘ining chuqurligi qancha?", "acceptedAnswer": {"@type": "Answer", "text": "Quyi Chirchiq tumanida taxminan 120 metr."}},
+    {"@type": "Question", "name": "Bosimli va bosimsiz gorizont o‘rtasidagi farq nima?", "acceptedAnswer": {"@type": "Answer", "text": "Bosimsiz gorizont yuzaga yaqin; bosimli (artezian) ikki suv o‘tkazmaydigan qatlam orasida bosim ostida joylashgan."}},
+    {"@type": "Question", "name": "Buloq suvi har doim jo‘mrakdan tozaroqmi?", "acceptedAnswer": {"@type": "Answer", "text": "Shart emas. Manba va tarmoq holatiga bog‘liq."}},
+    {"@type": "Question", "name": "Manba artezian bo‘lsa, nima uchun Aqua Element RO dan foydalanadi?", "acceptedAnswer": {"@type": "Answer", "text": "Qoldiq og‘ir metallar, nitratlar va boshqa potentsial ifloslanishlarni olib tashlash uchun; RO dan keyin minerallashtiriladi."}},
     {"@type": "Question", "name": "Etiketkadagi «artezian» nimani anglatadi?", "acceptedAnswer": {"@type": "Answer", "text": "Suv bosimli gorizontdan olinganini bildiradi."}},
-    {"@type": "Question", "name": "Shishadagi suv har doim buloqdanmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo'q, har xil manbalardan bo'lishi mumkin."}},
-    {"@type": "Question", "name": "Distillangan suvni har kuni ichish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Tavsiya etilmaydi, chunki distillyatda mineral yo'q."}}
+    {"@type": "Question", "name": "Shishadagi suv har doim buloqdanmi?", "acceptedAnswer": {"@type": "Answer", "text": "Yo‘q, har xil manbalardan bo‘lishi mumkin."}},
+    {"@type": "Question", "name": "Distillangan suvni har kuni ichish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Tavsiya etilmaydi, chunki distillyatda mineral yo‘q."}}
   ]
 }
 </script>
 """,
-            "meta_title": "Artezian suvi: buloq, jo'mrak va distillangandan farqi | Aqua Element",
-            "meta_description": "Artezian suvi nima, buloq, jo'mrak, distillangan va RO suvidan farqi. Toshkent viloyati uchun taqqoslash jadvali va FAQ. Aqua Element.",
+            "meta_title": "Artezian suvi: buloq, jo‘mrak va distillangandan farqi | Aqua Element",
+            "meta_description": "Artezian suvi nima, buloq, jo‘mrak, distillangan va RO suvidan farqi. Toshkent viloyati uchun taqqoslash jadvali va FAQ. Aqua Element.",
         },
         "en": {
             "title": "Artesian, spring, tap, distilled, RO: what's the real difference?",
@@ -455,11 +455,11 @@ ARTICLE = {
 <h3>Can you drink distilled water every day?</h3>
 <p>Daily distilled water is not a great choice. Distilled and non-mineralised RO lack beneficial salts; for everyday consumption, naturally or restored-mineralised water is generally preferred.</p>
 <h3>Where can I order Aqua Element?</h3>
-<p>Through the <a href="/shop">shop</a>, the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, or by phone. Read more about the process at <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p>Through the <a href="/shop">shop</a> or the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Read more about the process at <a href="/process/11-step-filtration">the 11-step filtration page</a>.</p>
 <h3>How does Aqua Element differ from generic "RO water"?</h3>
 <p>Source: an artesian well at about 120 metres rather than a tap. Process: 11 stages with re-mineralisation rather than a single membrane. Oversight: laboratory monitoring under the Sanepid regulator.</p>
 
-<p><strong>Want to taste the difference?</strong> Place an order at <a href="/shop">/shop</a> or read the full process at <a href="/process/11-step-filtration">/process/11-step-filtration</a>.</p>
+<p><strong>Want to taste the difference?</strong> Place an order in <a href="/shop">our online shop</a> or read the full process at <a href="/process/11-step-filtration">the 11-step filtration page</a>.</p>
 
 <script type="application/ld+json">
 {

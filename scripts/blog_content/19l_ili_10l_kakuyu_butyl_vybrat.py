@@ -10,7 +10,7 @@ ARTICLE = {
     "slug": "19l-ili-10l-kakuyu-butyl-vybrat",
     "category": "lifestyle",
     "tags": "19L,10L,bottle-size,decision-guide,buying-guide",
-    "featured_image": "/static/images/news/news-3.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "19-litre and 10-litre water bottles side by side",
     "is_featured": True,
     "sort_order": 90,
@@ -142,7 +142,7 @@ ARTICLE = {
     <li>Менять расписание и количество прямо в Telegram-боте: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</li>
 </ul>
 
-<p>Возврат пустой 19-литровой тары происходит автоматически — курьер забирает её при следующей доставке, без отдельного заказа и звонка.</p>
+<p>Возврат пустой 19-литровой тары происходит автоматически — курьер забирает её при следующей доставке, без отдельного заказа.</p>
 
 <h2>Как Aqua Element отвечает за качество в обоих форматах</h2>
 <p>Независимо от того, выбираете вы 19 л или 10 л, в бутыли — одна и та же артезианская вода с одной и той же линии розлива. Состав минералов задан природой источника: TDS 30–50 мг/л, кальций 10–60, магний 7–20, натрий 5–15, гидрокарбонаты 50–120 мг/л. Очистка проходит <a href="/process/11-step-filtration">одиннадцать ступеней</a> — от кварцевого фильтра и активированного угля до обратного осмоса, ультрафиолета, минерализации и озонирования. Каждая партия контролируется в рамках требований Санэпиднадзора Республики Узбекистан.</p>
@@ -164,11 +164,8 @@ ARTICLE = {
 <h3>Сколько весит полная 19-литровая бутыль?</h3>
 <p>Около 20 килограммов: 19 кг воды плюс примерно 1 кг поликарбонатной тары. Поэтому при доставке курьер сам поднимает бутыль на нужный этаж, а на кулер её удобнее устанавливать с помпой или специальной подставкой.</p>
 
-<h3>Продаёте ли вы кулеры?</h3>
-<p>Аренду и продажу оборудования (кулеры, помпы, диспенсеры) уточняйте на странице <a href="/shop">/shop</a> и в Telegram-боте — ассортимент периодически обновляется.</p>
-
 <h3>Что делать, если бутыль протекает?</h3>
-<p>Не используйте такую тару, перезвоните в службу поддержки или напишите в Telegram-бот. Мы заменим бутыль на ближайшей доставке без дополнительных условий.</p>
+<p>Не используйте такую тару — напишите нам в чат Telegram-бота. Мы заменим бутыль на ближайшей доставке без дополнительных условий.</p>
 
 <h3>Возвращается ли 10-литровая бутыль?</h3>
 <p>10 л позиционируется как удобный формат для кухни и одного-двух человек. Бутыль 10 л остаётся у вас — возвращать её не нужно.</p>
@@ -186,10 +183,10 @@ ARTICLE = {
 <p>Подходят обе бутыли — это одна и та же артезианская вода с TDS 30–50 мг/л и сбалансированным минеральным составом. Для семьи с ребёнком обычно удобнее 19 л на кулере: горячая вода всегда под рукой.</p>
 
 <h3>Как заказать в первый раз?</h3>
-<p>Через сайт <a href="/shop">/shop</a>, в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> или по телефону. После первой доставки удобнее всего перейти на <a href="/subscriptions">подписку</a> — расписание подстраивается под реальный расход.</p>
+<p>В <a href="/shop">магазине на сайте</a> или в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. После первой доставки удобнее всего перейти на <a href="/subscriptions">подписку</a> — расписание подстраивается под реальный расход.</p>
 
 <h2>Готовы выбрать?</h2>
-<p>Если сомневаетесь, начните с того формата, который ближе к вашему сценарию: один человек без кулера — 10 л, семья от двух человек или офис — 19 л. Через 2–3 доставки вы увидите фактический расход и при необходимости измените подписку. Заказать первую бутыль можно на странице <a href="/shop">/shop</a>, а гибкое расписание — на <a href="/subscriptions">/subscriptions</a> или в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</p>
+<p>Если сомневаетесь, начните с того формата, который ближе к вашему сценарию: один человек без кулера — 10 л, семья от двух человек или офис — 19 л. Через 2–3 доставки вы увидите фактический расход и при необходимости измените подписку. Заказать первую бутыль можно в <a href="/shop">магазине на сайте</a>, а гибкое расписание — на <a href="/subscriptions">странице подписки</a> или в Telegram-боте <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -197,14 +194,13 @@ ARTICLE = {
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "Сколько весит полная 19-литровая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "Около 20 килограммов: 19 кг воды и примерно 1 кг поликарбонатной тары. Курьер сам поднимает бутыль на этаж, а на кулер её удобнее ставить с помпой или подставкой."}},
-    {"@type": "Question", "name": "Продаёте ли вы кулеры?", "acceptedAnswer": {"@type": "Answer", "text": "Аренду и продажу оборудования уточняйте на /shop и в Telegram-боте — ассортимент обновляется."}},
     {"@type": "Question", "name": "Что делать, если бутыль протекает?", "acceptedAnswer": {"@type": "Answer", "text": "Не используйте тару, свяжитесь с поддержкой или Telegram-ботом. Мы заменим бутыль на ближайшей доставке."}},
     {"@type": "Question", "name": "Возвращается ли 10-литровая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "10 л — удобный формат для кухни и небольших домохозяйств. Бутыль 10 л остаётся у вас — возвращать её не нужно."}},
     {"@type": "Question", "name": "Можно ли смешивать 19 л и 10 л в одной подписке?", "acceptedAnswer": {"@type": "Answer", "text": "Да, подписка позволяет любую комбинацию форматов и количества за одну доставку."}},
     {"@type": "Question", "name": "Сколько хранится вскрытая бутыль?", "acceptedAnswer": {"@type": "Answer", "text": "Мы рекомендуем выпить воду в пределах 7–10 дней после вскрытия, держать бутыль закрытой и хранить вертикально в прохладном месте."}},
     {"@type": "Question", "name": "Доставка только по Ташкенту?", "acceptedAnswer": {"@type": "Answer", "text": "Aqua Element обслуживает Ташкент и Ташкентскую область. По остальным регионам пока не работаем."}},
     {"@type": "Question", "name": "Какая вода лучше для детей и приготовления каш?", "acceptedAnswer": {"@type": "Answer", "text": "Подходят оба формата: это одна и та же артезианская вода с TDS 30–50 мг/л. Семьям с детьми обычно удобнее 19 л на кулере."}},
-    {"@type": "Question", "name": "Как заказать в первый раз?", "acceptedAnswer": {"@type": "Answer", "text": "Через /shop, Telegram-бот @aqua_element_bot или по телефону. Далее удобно перейти на подписку на /subscriptions."}}
+    {"@type": "Question", "name": "Как заказать в первый раз?", "acceptedAnswer": {"@type": "Answer", "text": "В магазине на сайте или в Telegram-боте @aqua_element_bot. Дальше удобно перейти на подписку на сайте."}}
   ]
 }
 </script>
@@ -212,20 +208,20 @@ ARTICLE = {
         },
         "uz": {
             "title": "19 litr yoki 10 litr: qaysi suv butilkasini tanlash kerak",
-            "excerpt": "Aqua Elementning 18,9 l va 10 l butilkalarini amaliy taqqoslash: og'irlik, kuler bilan moslik, qaytariladigan tara, oila va ofis uchun sarf, litr narxi, saqlash va obuna.",
+            "excerpt": "Aqua Elementning 18,9 l va 10 l butilkalarini amaliy taqqoslash: og‘irlik, kuler bilan moslik, qaytariladigan tara, oila va ofis uchun sarf, litr narxi, saqlash va obuna.",
             "meta_title": "19 l yoki 10 l: qaysi suv butilkasini tanlash — Aqua Element",
-            "meta_description": "18,9 l va 10 l butilkalar taqqoslovi: og'irlik, kuler, qaytariladigan tara, oila va ofis uchun sarf. Aqua Element formatini tanlashga yordam.",
+            "meta_description": "18,9 l va 10 l butilkalar taqqoslovi: og‘irlik, kuler, qaytariladigan tara, oila va ofis uchun sarf. Aqua Element formatini tanlashga yordam.",
             "content": """
-<p class="lead">Aqua Element ikkita formatdagi butilkalangan suvni taklif etadi: an'anaviy qaytariladigan <strong>18,9 litrlik</strong> butilka (ko'pincha "19 l" deyiladi) va ixchamroq <strong>10 litrlik</strong> butilka. Boshqa hajmlarni ishlab chiqarmaymiz — bu ongli tanlov: ikki format Toshkentdagi deyarli barcha kundalik va ofis stsenariylarini, bir kishidan yigirma xodimli ofisgacha, qoplaydi.</p>
+<p class="lead">Aqua Element ikkita formatdagi butilkalangan suvni taklif etadi: an’anaviy qaytariladigan <strong>18,9 litrlik</strong> butilka (ko‘pincha "19 l" deyiladi) va ixchamroq <strong>10 litrlik</strong> butilka. Boshqa hajmlarni ishlab chiqarmaymiz — bu ongli tanlov: ikki format Toshkentdagi deyarli barcha kundalik va ofis stsenariylarini, bir kishidan yigirma xodimli ofisgacha, qoplaydi.</p>
 
-<p>Bu material reklama emas, balki amaliy qaror qabul qilish bo'yicha qo'llanma. Biz og'irlik, kuler bilan moslik, taraning qaytarilish tartibi, turli kattalikdagi xonadonlar uchun suv sarfi, litr narxi, saqlash xususiyatlari va format kundalik stsenariyni qanday o'zgartirishini ko'rib chiqamiz. O'qib bo'lgach, sizda aniq javob bo'lishi kerak: <em>birinchi navbatda nima buyurtma qilish kerak — 19 l yoki 10 l</em>.</p>
+<p>Bu material reklama emas, balki amaliy qaror qabul qilish bo‘yicha qo‘llanma. Biz og‘irlik, kuler bilan moslik, taraning qaytarilish tartibi, turli kattalikdagi xonadonlar uchun suv sarfi, litr narxi, saqlash xususiyatlari va format kundalik stsenariyni qanday o‘zgartirishini ko‘rib chiqamiz. O‘qib bo‘lgach, sizda aniq javob bo‘lishi kerak: <em>birinchi navbatda nima buyurtma qilish kerak — 19 l yoki 10 l</em>.</p>
 
 <h2>Qisqacha: 18,9 l va 10 l qanday farq qiladi</h2>
-<p>Ikkala formatda ham bir xil suv: Toshkent viloyati Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi artezian quduqdan olingan, <a href="/process/11-step-filtration">o'n bir bosqichli filtratsiyadan</a> o'tgan suv. Mineral tarkibi, pH 7,5 va umumiy tuzlar darajasi TDS 30–50 mg/l ikkala butilkada bir xil. Farqlar faqat qadoqlash va foydalanish stsenariysida.</p>
+<p>Ikkala formatda ham bir xil suv: Toshkent viloyati Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi artezian quduqdan olingan, <a href="/process/11-step-filtration">o‘n bir bosqichli filtratsiyadan</a> o‘tgan suv. Mineral tarkibi, pH 7,5 va umumiy tuzlar darajasi TDS 30–50 mg/l ikkala butilkada bir xil. Farqlar faqat qadoqlash va foydalanish stsenariysida.</p>
 
 <ul>
-    <li><strong>18,9 l</strong> — O'zbekiston va MDH uchun standart polikarbonatdan tayyorlangan qaytariladigan butilka. Kuler, pompa va dispenserlarga to'g'ri keladi. Keyingi yetkazib berishda kuryer tomonidan olib ketiladi, yuviladi, sanitar ishlovdan o'tadi va yana muomalaga kiradi.</li>
-    <li><strong>10 l</strong> — kuler kerak bo'lmaydigan yoki uni qo'yishga joy yo'q bo'lganlar uchun ixcham format. "Oshxona uchun kanistra" sifatida ishlatiladi: lavabo yoniga yoki pastki shkafga qo'yiladi, dasta yoki maxsus moslama orqali quyiladi, muzlatkichga osongina sig'adi.</li>
+    <li><strong>18,9 l</strong> — O‘zbekiston va MDH uchun standart polikarbonatdan tayyorlangan qaytariladigan butilka. Kuler, pompa va dispenserlarga to‘g‘ri keladi. Keyingi yetkazib berishda kuryer tomonidan olib ketiladi, yuviladi, sanitar ishlovdan o‘tadi va yana muomalaga kiradi.</li>
+    <li><strong>10 l</strong> — kuler kerak bo‘lmaydigan yoki uni qo‘yishga joy yo‘q bo‘lganlar uchun ixcham format. "Oshxona uchun kanistra" sifatida ishlatiladi: lavabo yoniga yoki pastki shkafga qo‘yiladi, dasta yoki maxsus moslama orqali quyiladi, muzlatkichga osongina sig‘adi.</li>
 </ul>
 
 <h2>Taqqoslash jadvali</h2>
@@ -244,28 +240,28 @@ ARTICLE = {
             <td>10 litr</td>
         </tr>
         <tr>
-            <td>To'la butilkaning taxminiy og'irligi</td>
+            <td>To‘la butilkaning taxminiy og‘irligi</td>
             <td>~19 kg suv + ~1 kg tara ≈ <strong>20 kg</strong></td>
             <td>~10 kg suv + ~0,4 kg tara ≈ <strong>10,4 kg</strong></td>
         </tr>
         <tr>
             <td>Kuler va pompa bilan moslik</td>
-            <td>Ha, standart bo'g'iz</td>
-            <td>Yo'q, format kuler uchun mo'ljallanmagan</td>
+            <td>Ha, standart bo‘g‘iz</td>
+            <td>Yo‘q, format kuler uchun mo‘ljallanmagan</td>
         </tr>
         <tr>
             <td>Qaytariladigan tara</td>
             <td>Ha, keyingi yetkazib berishda kuryer oladi</td>
-            <td>Yo'q, sizda qoladi</td>
+            <td>Yo‘q, sizda qoladi</td>
         </tr>
         <tr>
             <td>Eng mos keladigan</td>
             <td>2+ kishilik oilalar, ofislar, kulerli xonadonlar</td>
-            <td>Yolg'iz yashovchilar, juftliklar, kulersiz oshxonalar</td>
+            <td>Yolg‘iz yashovchilar, juftliklar, kulersiz oshxonalar</td>
         </tr>
         <tr>
             <td>Saqlash uchun joy</td>
-            <td>Kuler yonida to'liq joy</td>
+            <td>Kuler yonida to‘liq joy</td>
             <td>Pastki shkaf, lavabo yonidagi javon</td>
         </tr>
         <tr>
@@ -277,93 +273,90 @@ ARTICLE = {
 </table>
 
 <h2>Sizning xonadoningiz haftada qancha suv ichadi</h2>
-<p>Format tanlashdan oldin haftalik sarfni baholash foydali. Quyidagi raqamlar ichimlik suvi me'yori (kuniga taxminan 1,5–2 l odamiga) hamda choy, qahva va sho'rva tayyorlashni hisobga olgan amaliy mo'ljallar.</p>
+<p>Format tanlashdan oldin haftalik sarfni baholash foydali. Quyidagi raqamlar ichimlik suvi me’yori (kuniga taxminan 1,5–2 l odamiga) hamda choy, qahva va sho‘rva tayyorlashni hisobga olgan amaliy mo‘ljallar.</p>
 
 <h3>Bir kishi</h3>
-<p>O'rtacha haftasiga 8–14 litr — ya'ni <strong>10 l odatda 5–7 kunga yetadi</strong>. Yolg'iz yashovchilar uchun 19 l butilka faqat ko'p ovqat tayyorlasangiz, doimiy uydan ishlasangiz, kulerli bo'lsangiz yoki tez-tez mehmon kutsangiz mantiqli. Aks holda 10 l qulayroq: og'irligi kam, joydan kam egallaydi, dispenser kerak emas.</p>
+<p>O‘rtacha haftasiga 8–14 litr — ya’ni <strong>10 l odatda 5–7 kunga yetadi</strong>. Yolg‘iz yashovchilar uchun 19 l butilka faqat ko‘p ovqat tayyorlasangiz, doimiy uydan ishlasangiz, kulerli bo‘lsangiz yoki tez-tez mehmon kutsangiz mantiqli. Aks holda 10 l qulayroq: og‘irligi kam, joydan kam egallaydi, dispenser kerak emas.</p>
 
 <h3>Juftlik (ikki kishilik)</h3>
-<p>Sarfi taxminan haftasiga 16–25 litr. <strong>19 l butilka — 5–10 kunga yetadigan tipik zaxira</strong>. Ikkalangiz ham ko'p ovqat tayyorlasangiz, haftada bitta yoki 10 kunda bitta 19 l ga obuna bo'lish ma'qul. Muqobil — haftada ikkita 10 l, lekin bu litr bo'yicha kamroq foydali.</p>
+<p>Sarfi taxminan haftasiga 16–25 litr. <strong>19 l butilka — 5–10 kunga yetadigan tipik zaxira</strong>. Ikkalangiz ham ko‘p ovqat tayyorlasangiz, haftada bitta yoki 10 kunda bitta 19 l ga obuna bo‘lish ma’qul. Muqobil — haftada ikkita 10 l, lekin bu litr bo‘yicha kamroq foydali.</p>
 
 <h3>3–4 kishilik oila</h3>
-<p>Bu 19 l butilkaning "oltin" segmenti. Haftasiga 30–55 litr sarf bilan bitta 19 l 4–7 kunga yetadi. Eng keng tarqalgan <a href="/subscriptions">obuna</a> — haftada ikkita 19 l yoki ikki haftada uchta. Kichik bolali va ko'p ovqat tayyorlovchi oilalar ko'pincha bir vaqtda ikkitasini oladi: ikkinchisi zaxirada turadi.</p>
+<p>Bu 19 l butilkaning "oltin" segmenti. Haftasiga 30–55 litr sarf bilan bitta 19 l 4–7 kunga yetadi. Eng keng tarqalgan <a href="/subscriptions">obuna</a> — haftada ikkita 19 l yoki ikki haftada uchta. Kichik bolali va ko‘p ovqat tayyorlovchi oilalar ko‘pincha bir vaqtda ikkitasini oladi: ikkinchisi zaxirada turadi.</p>
 
 <h3>5+ kishilik oila</h3>
-<p>Bu yerda bir yetkazib berishda bir nechta butilkali obuna haqida gapirish kerak. Bir nechta 19 l — og'irlik, yetkazib berish soni va litr narxi o'rtasida eng yaxshi muvozanat. Bu stsenariyda 10 l mantiqsiz: bo'sh tara bilan juda tez-tez ovora bo'lasiz.</p>
+<p>Bu yerda bir yetkazib berishda bir nechta butilkali obuna haqida gapirish kerak. Bir nechta 19 l — og‘irlik, yetkazib berish soni va litr narxi o‘rtasida eng yaxshi muvozanat. Bu stsenariyda 10 l mantiqsiz: bo‘sh tara bilan juda tez-tez ovora bo‘lasiz.</p>
 
 <h3>Ofis</h3>
-<p>Ofis uchun javob deyarli har doim bir xil — <strong>kulerga 19 l</strong>. Bu sanoat me'yori: bitta tugma bilan issiq va sovuq suv, xodimlar oshxonaga kuza ko'tarib bormaydi, mehmonga darhol quyib beriladi. Ofisda 10 l faqat 1–2 kishilik kichik studiya yoki kuler servisda turganda vaqtinchalik almashtirish sifatida o'rinli.</p>
+<p>Ofis uchun javob deyarli har doim bir xil — <strong>kulerga 19 l</strong>. Bu sanoat me’yori: bitta tugma bilan issiq va sovuq suv, xodimlar oshxonaga kuza ko‘tarib bormaydi, mehmonga darhol quyib beriladi. Ofisda 10 l faqat 1–2 kishilik kichik studiya yoki kuler servisda turganda vaqtinchalik almashtirish sifatida o‘rinli.</p>
 
-<h2>Kuler bormi yoki yo'qmi: asosiy ayri yo'l</h2>
-<p>Bu, ehtimol, eng amaliy mezon. Agar uyingizda kuler, pompa yoki 55 mm bo'g'izli stol dispenseri bo'lsa — 19 l olib oling, aks holda jihozlar bekor turadi. Agar kuler yo'q va uni qo'yishga joy yo'q bo'lsa (kam joy, dizayn, issiq suv kerak emas), 10 l muammoni soddaroq hal qiladi.</p>
+<h2>Kuler bormi yoki yo‘qmi: asosiy ayri yo‘l</h2>
+<p>Bu, ehtimol, eng amaliy mezon. Agar uyingizda kuler, pompa yoki 55 mm bo‘g‘izli stol dispenseri bo‘lsa — 19 l olib oling, aks holda jihozlar bekor turadi. Agar kuler yo‘q va uni qo‘yishga joy yo‘q bo‘lsa (kam joy, dizayn, issiq suv kerak emas), 10 l muammoni soddaroq hal qiladi.</p>
 
-<p>Kulerni odatda uchta sababga olishadi: choynaksiz issiq suv, muzlatkichsiz sovuq suv va doimiy "umumiy kirish" — bu oilalar uchun qulay va ofis uchun deyarli majburiy. Agar bu uchta nuqtadan birortasi muhim bo'lmasa, kuler shart emas: 10 l butilka va muzlatkichdagi grafin masalani undan kam hal qilmaydi.</p>
+<p>Kulerni odatda uchta sababga olishadi: choynaksiz issiq suv, muzlatkichsiz sovuq suv va doimiy "umumiy kirish" — bu oilalar uchun qulay va ofis uchun deyarli majburiy. Agar bu uchta nuqtadan birortasi muhim bo‘lmasa, kuler shart emas: 10 l butilka va muzlatkichdagi grafin masalani undan kam hal qilmaydi.</p>
 
-<h3>Hali kuler yo'q bo'lsa nima qilish kerak</h3>
-<p>Ko'pgina mijozlar suv ta'mi va yetkazib berish logistikasini sinash uchun 10 l dan boshlaydi, keyin bir oydan so'ng 19 l ga o'tadi — kuler yoki qo'l pompasi bilan. Obuna formatni shartnomani qayta tuzmasdan o'zgartirishga imkon beradi: haftada bitta 10 l dan boshlash mumkin, keyin 19 l ga yoki aralashtirilgan formatga o'tish mumkin.</p>
+<h3>Hali kuler yo‘q bo‘lsa nima qilish kerak</h3>
+<p>Ko‘pgina mijozlar suv ta’mi va yetkazib berish logistikasini sinash uchun 10 l dan boshlaydi, keyin bir oydan so‘ng 19 l ga o‘tadi — kuler yoki qo‘l pompasi bilan. Obuna formatni shartnomani qayta tuzmasdan o‘zgartirishga imkon beradi: haftada bitta 10 l dan boshlash mumkin, keyin 19 l ga yoki aralashtirilgan formatga o‘tish mumkin.</p>
 
 <h2>Qaytariladigan tara: bu qanday ishlaydi</h2>
-<p>18,9 l butilka — <strong>qaytariladigan</strong>. Ya'ni jismonan siz suv sotib olasiz, tara esa siz va yetkazib berish xizmati o'rtasida muomalada qoladi. Sikl shunday ko'rinadi:</p>
+<p>18,9 l butilka — <strong>qaytariladigan</strong>. Ya’ni jismonan siz suv sotib olasiz, tara esa siz va yetkazib berish xizmati o‘rtasida muomalada qoladi. Sikl shunday ko‘rinadi:</p>
 <ol>
-    <li>Kuryer to'la butilkani olib keladi va oldingi yetkazib berishdan bo'sh butilkani oladi.</li>
-    <li>Bo'sh tara yuvish uchastkasiga tushadi: tashqi va ichki ishlov, chayish, yoriq va mikroyoriqlar bo'yicha tekshirish.</li>
-    <li>Butilka sanitar ishlovdan o'tkaziladi, germetiklik tekshiriladi, yangi suv bilan to'ldiriladi, termoshrink qopqoq bilan yopiladi va yana yetkazib berishga jo'natiladi.</li>
+    <li>Kuryer to‘la butilkani olib keladi va oldingi yetkazib berishdan bo‘sh butilkani oladi.</li>
+    <li>Bo‘sh tara yuvish uchastkasiga tushadi: tashqi va ichki ishlov, chayish, yoriq va mikroyoriqlar bo‘yicha tekshirish.</li>
+    <li>Butilka sanitar ishlovdan o‘tkaziladi, germetiklik tekshiriladi, yangi suv bilan to‘ldiriladi, termoshrink qopqoq bilan yopiladi va yana yetkazib berishga jo‘natiladi.</li>
     <li>Zavoddagi tekshiruvda butilkada eskirish aniqlansa — u muomaladan chiqariladi. Polikarbonat qayta ishlashga topshiriladi.</li>
 </ol>
 
-<p>Qaytariladigan tizim bir martalikdan ikki sababga ko'ra ustun. <strong>Ekologik jihatdan</strong>: bitta 19 l butilka o'z umri davomida o'rtacha o'nlab bir martalik PET qadoqni almashtiradi. <strong>Iqtisodiy jihatdan</strong>: qaytariladigan butilkadagi litr narxi pastroq, chunki har bir yetkazib berishda yangi tara uchun pul to'lamaysiz.</p>
+<p>Qaytariladigan tizim bir martalikdan ikki sababga ko‘ra ustun. <strong>Ekologik jihatdan</strong>: bitta 19 l butilka o‘z umri davomida o‘rtacha o‘nlab bir martalik PET qadoqni almashtiradi. <strong>Iqtisodiy jihatdan</strong>: qaytariladigan butilkadagi litr narxi pastroq, chunki har bir yetkazib berishda yangi tara uchun pul to‘lamaysiz.</p>
 
 <h2>Litr narxi: nega 19 l odatda foydaliroq</h2>
-<p>Joriy narxlar shu maqola ostidagi «narx va yetkazib berish» blokida ko'rsatilgan; mantiq quyidagicha. Har bir yetkazib berishda qat'iy qism mavjud: butilkaning o'zi, transport, kuryer vaqti. Bu qism hajmga deyarli bog'liq emas. Siz 19 l uchun to'laganingizda, qat'iy qism 19 litrga "tarqaladi"; 10 l uchun — 10 litrga. Shuning uchun 19-litrli formatda solishtirma litr narxi odatda pastroq.</p>
+<p>Joriy narxlar shu maqola ostidagi «narx va yetkazib berish» blokida ko‘rsatilgan; mantiq quyidagicha. Har bir yetkazib berishda qat’iy qism mavjud: butilkaning o‘zi, transport, kuryer vaqti. Bu qism hajmga deyarli bog‘liq emas. Siz 19 l uchun to‘laganingizda, qat’iy qism 19 litrga "tarqaladi"; 10 l uchun — 10 litrga. Shuning uchun 19-litrli formatda solishtirma litr narxi odatda pastroq.</p>
 
-<p>Lekin "litr bo'yicha arzonroq" yagona mezon emas. Agar yolg'iz yashasangiz va 19 l ni tavsiya etilgan muddat ichida ichib ulgurmasangiz, tejam yo'q: suv yangiligini yo'qotadi. Shu paytda 10 l haqiqiy iste'mol bo'yicha yutadi, hatto qog'ozda litr biroz qimmatroq bo'lsa ham.</p>
+<p>Lekin "litr bo‘yicha arzonroq" yagona mezon emas. Agar yolg‘iz yashasangiz va 19 l ni tavsiya etilgan muddat ichida ichib ulgurmasangiz, tejam yo‘q: suv yangiligini yo‘qotadi. Shu paytda 10 l haqiqiy iste’mol bo‘yicha yutadi, hatto qog‘ozda litr biroz qimmatroq bo‘lsa ham.</p>
 
 <h2>Saqlash va butilka bilan muomala</h2>
 <p>Qoidalar ikkala format uchun bir xil:</p>
 <ul>
     <li><strong>Tik holatda</strong>, tekis sirtda saqlang, qopqoq germetik qolishi uchun.</li>
-    <li>To'g'ridan-to'g'ri quyosh nurlari va isish-dan saqlaning. Ideal harorat — 25 °C dan past, quruq va shamollatiladigan joy.</li>
-    <li>Kuchli hidlar manbalari yonida qo'ymang (kimyoviy moddalar, bo'yoq, kuchli ziravorlar): polikarbonat suvni o'tkazmaydi, lekin atrofdagi havodagi hidlar suv ta'mi idrokiga ta'sir qilishi mumkin.</li>
-    <li>Yorliqda <strong>quyish sanasi</strong> ko'rsatilgan. Ochilgandan so'ng biz 7–10 kun ichida ishlatishni tavsiya etamiz — uzoqroq muddatda ham xavfsiz, lekin ta'm va kislorod ulushi vaqt o'tishi bilan o'zgaradi.</li>
-    <li>Kulerga o'rnatishdan oldin bo'g'izni toza salfetka bilan arting va termo qopqoqni faqat o'rnatish paytida olib tashlang.</li>
+    <li>To‘g‘ridan-to‘g‘ri quyosh nurlari va isish-dan saqlaning. Ideal harorat — 25 °C dan past, quruq va shamollatiladigan joy.</li>
+    <li>Kuchli hidlar manbalari yonida qo‘ymang (kimyoviy moddalar, bo‘yoq, kuchli ziravorlar): polikarbonat suvni o‘tkazmaydi, lekin atrofdagi havodagi hidlar suv ta’mi idrokiga ta’sir qilishi mumkin.</li>
+    <li>Yorliqda <strong>quyish sanasi</strong> ko‘rsatilgan. Ochilgandan so‘ng biz 7–10 kun ichida ishlatishni tavsiya etamiz — uzoqroq muddatda ham xavfsiz, lekin ta’m va kislorod ulushi vaqt o‘tishi bilan o‘zgaradi.</li>
+    <li>Kulerga o‘rnatishdan oldin bo‘g‘izni toza salfetka bilan arting va termo qopqoqni faqat o‘rnatish paytida olib tashlang.</li>
 </ul>
 
-<h2>Formatlar o'rtasida qanday almashish va aralashtirish</h2>
+<h2>Formatlar o‘rtasida qanday almashish va aralashtirish</h2>
 <p>Aqua Element obunasi moslashuvchan tuzilgan. Bir hisob doirasida quyidagilar mumkin:</p>
 <ul>
     <li>Faqat 19 l buyurtma berish — oilalar va ofislar uchun eng keng tarqalgan tanlov.</li>
-    <li>Faqat 10 l buyurtma berish — yolg'iz yashovchilar va kichik oshxonalar uchun.</li>
+    <li>Faqat 10 l buyurtma berish — yolg‘iz yashovchilar va kichik oshxonalar uchun.</li>
     <li>Formatlarni aralashtirish: masalan, asosiy zaxira uchun ikkita 19 l va bitta 10 l — muzlatkichda yoki bola xonasida tursin.</li>
-    <li>Telegram-botda jadval va miqdorni o'zgartirish: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</li>
+    <li>Telegram-botda jadval va miqdorni o‘zgartirish: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</li>
 </ul>
 
-<p>Bo'sh 19 l tarani qaytarish avtomatik ravishda sodir bo'ladi — kuryer keyingi yetkazib berishda oladi, alohida buyurtma yoki qo'ng'iroq kerak emas.</p>
+<p>Bo‘sh 19 l tarani qaytarish avtomatik ravishda sodir bo‘ladi — kuryer keyingi yetkazib berishda oladi, alohida buyurtma kerak emas.</p>
 
 <h2>Aqua Element ikkala formatda sifatga qanday javob beradi</h2>
-<p>Siz 19 l yoki 10 l ni tanlasangiz ham, butilkada bir xil artezian suv, bir xil quyish liniyasidan. Mineral tarkibi manba tabiatidan: TDS 30–50 mg/l, kalsiy 10–60, magniy 7–20, natriy 5–15, gidrokarbonatlar 50–120 mg/l. Tozalash <a href="/process/11-step-filtration">o'n bir bosqichdan</a> o'tadi — kvars filtridan va faollangan ko'mirdan teskari osmos, ultrabinafsha nur, mineralizatsiya va ozonlashgacha. Har bir partiya O'zbekiston Respublikasi Sanepidnazorat talablari doirasida nazorat qilinadi.</p>
+<p>Siz 19 l yoki 10 l ni tanlasangiz ham, butilkada bir xil artezian suv, bir xil quyish liniyasidan. Mineral tarkibi manba tabiatidan: TDS 30–50 mg/l, kalsiy 10–60, magniy 7–20, natriy 5–15, gidrokarbonatlar 50–120 mg/l. Tozalash <a href="/process/11-step-filtration">o‘n bir bosqichdan</a> o‘tadi — kvars filtridan va faollangan ko‘mirdan teskari osmos, ultrabinafsha nur, mineralizatsiya va ozonlashgacha. Har bir partiya O‘zbekiston Respublikasi Sanepidnazorat talablari doirasida nazorat qilinadi.</p>
 
-<p>Formatlar o'rtasida o'zgaradigan narsa — qadoqlash, logistika va foydalanish stsenariysi. Suv sifati — yo'q.</p>
+<p>Formatlar o‘rtasida o‘zgaradigan narsa — qadoqlash, logistika va foydalanish stsenariysi. Suv sifati — yo‘q.</p>
 
 <h2>Stsenariylar: uchta tipik holatda qaysi formatni tanlash</h2>
-<h3>"Yolg'iz yashayman, kuler yo'q"</h3>
-<p>Haftada bitta 10 l butilkadan boshlang. Agar bir haftada ichib ulgurmasangiz — 10 kunda bitta 10 l ga o'ting. Aksincha, kam bo'lsa — 1,5–2 haftada bitta 19 l plus qo'l pompa.</p>
+<h3>"Yolg‘iz yashayman, kuler yo‘q"</h3>
+<p>Haftada bitta 10 l butilkadan boshlang. Agar bir haftada ichib ulgurmasangiz — 10 kunda bitta 10 l ga o‘ting. Aksincha, kam bo‘lsa — 1,5–2 haftada bitta 19 l plus qo‘l pompa.</p>
 
-<h3>"To'rt kishilik oila, faol ovqat tayyorlaymiz"</h3>
-<p>Haftada ikkita 19 l <a href="/subscriptions">obunasi</a> bilan oling. Kuler hayotni juda osonlashtiradi: choy va bo'tqa uchun issiq suv, yozda — sovuq. Bo'sh tarani qaytarish avtomatik.</p>
+<h3>"To‘rt kishilik oila, faol ovqat tayyorlaymiz"</h3>
+<p>Haftada ikkita 19 l <a href="/subscriptions">obunasi</a> bilan oling. Kuler hayotni juda osonlashtiradi: choy va bo‘tqa uchun issiq suv, yozda — sovuq. Bo‘sh tarani qaytarish avtomatik.</p>
 
 <h3>"8–15 kishilik ofis"</h3>
-<p>Faqat kulerga 19 l. Boshlang'ich hisob — haftada 5 kishiga bitta butilka. Obunani bot orqali sozlash eng oson, jadval haqiqatga qarab tuzatiladi.</p>
+<p>Faqat kulerga 19 l. Boshlang‘ich hisob — haftada 5 kishiga bitta butilka. Obunani bot orqali sozlash eng oson, jadval haqiqatga qarab tuzatiladi.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 
-<h3>To'la 19 litrlik butilka qancha og'ir?</h3>
-<p>Taxminan 20 kilogramm: 19 kg suv va taxminan 1 kg polikarbonat tara. Shuning uchun yetkazib berishda kuryer butilkani kerakli qavatga o'zi ko'taradi, kulerga esa pompa yoki maxsus tagi bilan o'rnatish qulayroq.</p>
+<h3>To‘la 19 litrlik butilka qancha og‘ir?</h3>
+<p>Taxminan 20 kilogramm: 19 kg suv va taxminan 1 kg polikarbonat tara. Shuning uchun yetkazib berishda kuryer butilkani kerakli qavatga o‘zi ko‘taradi, kulerga esa pompa yoki maxsus tagi bilan o‘rnatish qulayroq.</p>
 
-<h3>Kulerlarni sotasizmi?</h3>
-<p>Jihozlarni (kulerlar, pompalar, dispenserlar) ijaraga olish va sotish bo'yicha shartlarni <a href="/shop">/shop</a> sahifasida va Telegram-botda aniqlang — assortiment vaqti-vaqti bilan yangilanadi.</p>
-
-<h3>Butilka oqayotgan bo'lsa nima qilish kerak?</h3>
-<p>Bunday tarani ishlatmang, qo'llab-quvvatlash xizmatiga qo'ng'iroq qiling yoki Telegram-botga yozing. Biz butilkani yaqin yetkazib berishda qo'shimcha shartlarsiz almashtiramiz.</p>
+<h3>Butilka oqayotgan bo‘lsa nima qilish kerak?</h3>
+<p>Bunday tarani ishlatmang — Telegram-bot chatida bizga yozing. Biz butilkani yaqin yetkazib berishda qo‘shimcha shartlarsiz almashtiramiz.</p>
 
 <h3>10 litrlik butilka qaytariladimi?</h3>
 <p>10 l oshxona va 1–2 kishilik xonadon uchun qulay format sifatida taqdim etiladi. 10 l butilka sizda qoladi — qaytarish shart emas.</p>
@@ -375,31 +368,30 @@ ARTICLE = {
 <p>Biz ochilgandan keyin 7–10 kun ichida ichishni va foydalanishlar orasida butilkani yopiq saqlashni tavsiya etamiz. Saqlash — tik holatda, salqin joyda, quyoshda emas.</p>
 
 <h3>Yetkazib berish faqat Toshkent boyichami?</h3>
-<p>Ha, Aqua Element Toshkent shahri va Toshkent viloyatida ishlaydi. Boshqa hududlarda hozircha xizmat ko'rsatmaymiz.</p>
+<p>Ha, Aqua Element Toshkent shahri va Toshkent viloyatida ishlaydi. Boshqa hududlarda hozircha xizmat ko‘rsatmaymiz.</p>
 
-<h3>Kichik bolalar va bo'tqa tayyorlash uchun qaysi suv yaxshiroq?</h3>
-<p>Ikkala butilka ham mos: bu bir xil artezian suv, TDS 30–50 mg/l va muvozanatli mineral tarkib bilan. Bolali oilaga odatda kulerga 19 l qulayroq: issiq suv har doim qo'l ostida.</p>
+<h3>Kichik bolalar va bo‘tqa tayyorlash uchun qaysi suv yaxshiroq?</h3>
+<p>Ikkala butilka ham mos: bu bir xil artezian suv, TDS 30–50 mg/l va muvozanatli mineral tarkib bilan. Bolali oilaga odatda kulerga 19 l qulayroq: issiq suv har doim qo‘l ostida.</p>
 
 <h3>Birinchi marta qanday buyurtma berish kerak?</h3>
-<p>Sayt orqali <a href="/shop">/shop</a>, Telegram-botda <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> yoki telefon orqali. Birinchi yetkazib berishdan keyin <a href="/subscriptions">obunaga</a> o'tish qulayroq — jadval haqiqiy sarfga moslashadi.</p>
+<p>Saytdagi <a href="/shop">do‘kon</a> yoki Telegram-botimiz <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali. Birinchi yetkazib berishdan keyin <a href="/subscriptions">obunaga</a> o‘tish qulayroq — jadval haqiqiy sarfga moslashadi.</p>
 
 <h2>Tanlashga tayyormisiz?</h2>
-<p>Ikkilanayotgan bo'lsangiz, stsenariyingizga yaqin formatdan boshlang: kulersiz bir kishi — 10 l, ikki kishidan oilaviy yoki ofis — 19 l. 2–3 yetkazib berishdan keyin haqiqiy sarfni ko'rasiz va kerak bo'lsa obunani o'zgartirasiz. Birinchi butilkani <a href="/shop">/shop</a> sahifasida buyurtma qilish mumkin, moslashuvchan jadvalni esa <a href="/subscriptions">/subscriptions</a> sahifasida yoki Telegram-botda <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> sozlash mumkin.</p>
+<p>Ikkilanayotgan bo‘lsangiz, stsenariyingizga yaqin formatdan boshlang: kulersiz bir kishi — 10 l, ikki kishidan oilaviy yoki ofis — 19 l. 2–3 yetkazib berishdan keyin haqiqiy sarfni ko‘rasiz va kerak bo‘lsa obunani o‘zgartirasiz. Birinchi butilkani <a href="/shop">do‘kon</a> sahifasida buyurtma qilish mumkin, moslashuvchan jadvalni esa <a href="/subscriptions">obuna</a> sahifasida yoki Telegram-botda <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> sozlash mumkin.</p>
 
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "To'la 19 litrlik butilka qancha og'ir?", "acceptedAnswer": {"@type": "Answer", "text": "Taxminan 20 kilogramm: 19 kg suv va taxminan 1 kg polikarbonat tara. Kuryer butilkani qavatga o'zi ko'taradi, kulerga pompa yoki tagi bilan o'rnatish qulay."}},
-    {"@type": "Question", "name": "Kulerlarni sotasizmi?", "acceptedAnswer": {"@type": "Answer", "text": "Jihozlar bo'yicha shartlarni /shop sahifasida va Telegram-botda aniqlang — assortiment yangilanib turadi."}},
-    {"@type": "Question", "name": "Butilka oqayotgan bo'lsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Bunday tarani ishlatmang, qo'llab-quvvatlash yoki Telegram-botga murojaat qiling. Yaqin yetkazib berishda butilkani almashtiramiz."}},
+    {"@type": "Question", "name": "To‘la 19 litrlik butilka qancha og‘ir?", "acceptedAnswer": {"@type": "Answer", "text": "Taxminan 20 kilogramm: 19 kg suv va taxminan 1 kg polikarbonat tara. Kuryer butilkani qavatga o‘zi ko‘taradi, kulerga pompa yoki tagi bilan o‘rnatish qulay."}},
+    {"@type": "Question", "name": "Butilka oqayotgan bo‘lsa nima qilish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Bunday tarani ishlatmang, qo‘llab-quvvatlash yoki Telegram-botga murojaat qiling. Yaqin yetkazib berishda butilkani almashtiramiz."}},
     {"@type": "Question", "name": "10 litrlik butilka qaytariladimi?", "acceptedAnswer": {"@type": "Answer", "text": "10 l — oshxona va kichik xonadonlar uchun qulay format. 10 l butilka sizda qoladi — qaytarish shart emas."}},
     {"@type": "Question", "name": "Bir obunada 19 l va 10 l ni aralashtirish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, obuna bir yetkazib berishda formatlar va miqdorning har qanday kombinatsiyasini imkon beradi."}},
     {"@type": "Question", "name": "Ochilgan butilka qancha saqlanadi?", "acceptedAnswer": {"@type": "Answer", "text": "Ochilgandan keyin 7–10 kun ichida ishlatish, butilkani yopiq saqlash va salqin joyda tik holatda turishni tavsiya qilamiz."}},
-    {"@type": "Question", "name": "Yetkazib berish faqat Toshkent boyichami?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, Aqua Element Toshkent shahri va Toshkent viloyatida xizmat ko'rsatadi, boshqa hududlarda hozircha emas."}},
-    {"@type": "Question", "name": "Bolalar va bo'tqa uchun qaysi suv yaxshiroq?", "acceptedAnswer": {"@type": "Answer", "text": "Ikkala format mos: bu bir xil artezian suv TDS 30–50 mg/l. Bolali oilalarga odatda kulerga 19 l qulayroq."}},
-    {"@type": "Question", "name": "Birinchi marta qanday buyurtma berish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "/shop, Telegram-bot @aqua_element_bot yoki telefon orqali. Keyin /subscriptions sahifasida obunaga o'tish qulay."}}
+    {"@type": "Question", "name": "Yetkazib berish faqat Toshkent boyichami?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, Aqua Element Toshkent shahri va Toshkent viloyatida xizmat ko‘rsatadi, boshqa hududlarda hozircha emas."}},
+    {"@type": "Question", "name": "Bolalar va bo‘tqa uchun qaysi suv yaxshiroq?", "acceptedAnswer": {"@type": "Answer", "text": "Ikkala format mos: bu bir xil artezian suv TDS 30–50 mg/l. Bolali oilalarga odatda kulerga 19 l qulayroq."}},
+    {"@type": "Question", "name": "Birinchi marta qanday buyurtma berish kerak?", "acceptedAnswer": {"@type": "Answer", "text": "Saytdagi do‘kon yoki Telegram-bot @aqua_element_bot orqali. Keyin saytda obunaga o‘tish qulay."}}
   ]
 }
 </script>
@@ -532,7 +524,7 @@ ARTICLE = {
     <li>Adjust schedule and quantity straight from the Telegram bot: <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</li>
 </ul>
 
-<p>Returning the empty 19 L bottle is automatic — the courier collects it on the next delivery, no separate request or phone call needed.</p>
+<p>Returning the empty 19 L bottle is automatic — the courier collects it on the next delivery, no separate request needed.</p>
 
 <h2>How Aqua Element keeps quality consistent across both formats</h2>
 <p>Whether you choose 19 L or 10 L, the bottle holds the same artesian water from the same filling line. The mineral profile is set by the source: TDS 30–50 mg/L, calcium 10–60, magnesium 7–20, sodium 5–15, bicarbonates 50–120 mg/L. Treatment runs through <a href="/process/11-step-filtration">eleven stages</a> — from quartz filtration and activated carbon to reverse osmosis, UV, mineralisation and ozonation. Every batch is controlled under the requirements of Uzbekistan's Sanepid (Committee for Sanitary and Epidemiological Wellbeing).</p>
@@ -554,11 +546,8 @@ ARTICLE = {
 <h3>How heavy is a full 19-litre bottle?</h3>
 <p>About 20 kilograms: 19 kg of water plus roughly 1 kg of polycarbonate. That is why the courier carries the bottle to your floor, and on a cooler it is most comfortable to mount with a pump or stand.</p>
 
-<h3>Do you sell coolers?</h3>
-<p>Equipment rental and sales (coolers, pumps, dispensers) — check <a href="/shop">/shop</a> and the Telegram bot, the line-up is updated periodically.</p>
-
 <h3>What if my bottle is leaking?</h3>
-<p>Do not use it. Call support or message the Telegram bot. We will replace the bottle on the next delivery without extra conditions.</p>
+<p>Do not use it — message us in the Telegram bot chat. We will replace the bottle on the next delivery without extra conditions.</p>
 
 <h3>Is the 10 L bottle returnable?</h3>
 <p>The 10 L is positioned as a convenience format for kitchens and 1–2-person households. The 10 L bottle is yours to keep; there is nothing to return.</p>
@@ -576,10 +565,10 @@ ARTICLE = {
 <p>Both formats are equally suitable — same artesian source, TDS 30–50 mg/L and a balanced mineral profile. Families with children typically find 19 L on a cooler more convenient: hot water is always at hand.</p>
 
 <h3>How do I order for the first time?</h3>
-<p>Through the website at <a href="/shop">/shop</a>, via the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, or by phone. After the first delivery the easiest step is to switch to a <a href="/subscriptions">subscription</a> tailored to your real consumption.</p>
+<p>In <a href="/shop">our online shop</a> or via the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. After the first delivery the easiest step is to switch to a <a href="/subscriptions">subscription</a> tailored to your real consumption.</p>
 
 <h2>Ready to choose?</h2>
-<p>If you are unsure, start with the format closest to your scenario: one person without a cooler — 10 L; a household of two or more, or an office — 19 L. After two or three deliveries you will see the real consumption pattern and can adjust the subscription. Place your first order on <a href="/shop">/shop</a>, and configure a flexible schedule on <a href="/subscriptions">/subscriptions</a> or in the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</p>
+<p>If you are unsure, start with the format closest to your scenario: one person without a cooler — 10 L; a household of two or more, or an office — 19 L. After two or three deliveries you will see the real consumption pattern and can adjust the subscription. Place your first order in <a href="/shop">our online shop</a>, and configure a flexible schedule on <a href="/subscriptions">the subscription page</a> or in the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>.</p>
 
 <script type="application/ld+json">
 {
@@ -587,14 +576,13 @@ ARTICLE = {
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How heavy is a full 19-litre bottle?", "acceptedAnswer": {"@type": "Answer", "text": "About 20 kilograms: 19 kg of water plus roughly 1 kg of polycarbonate. The courier carries it to your floor, and on a cooler it is most comfortable to mount with a pump or stand."}},
-    {"@type": "Question", "name": "Do you sell coolers?", "acceptedAnswer": {"@type": "Answer", "text": "Equipment rental and sales (coolers, pumps, dispensers) — check /shop and the Telegram bot, the line-up updates periodically."}},
     {"@type": "Question", "name": "What if my bottle is leaking?", "acceptedAnswer": {"@type": "Answer", "text": "Do not use it. Contact support or the Telegram bot. We replace the bottle on the next delivery without extra conditions."}},
     {"@type": "Question", "name": "Is the 10 L bottle returnable?", "acceptedAnswer": {"@type": "Answer", "text": "The 10 L is a convenience format for kitchens and small households. The 10 L bottle is yours to keep; there is nothing to return."}},
     {"@type": "Question", "name": "Can I mix 19 L and 10 L in one subscription?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, subscriptions support any combination of formats and quantities per delivery."}},
     {"@type": "Question", "name": "How long can I keep an opened bottle?", "acceptedAnswer": {"@type": "Answer", "text": "Use within 7–10 days after opening, keep the cap on between uses, and store the bottle upright in a cool place away from sunlight."}},
     {"@type": "Question", "name": "Do you deliver only inside Tashkent?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, Aqua Element serves Tashkent city and Tashkent Region only."}},
     {"@type": "Question", "name": "Which water is better for small children and porridge?", "acceptedAnswer": {"@type": "Answer", "text": "Both formats are equally suitable — same artesian source, TDS 30–50 mg/L. Families with children usually prefer 19 L on a cooler for hot water on demand."}},
-    {"@type": "Question", "name": "How do I order for the first time?", "acceptedAnswer": {"@type": "Answer", "text": "Through /shop, the Telegram bot @aqua_element_bot, or by phone. After the first delivery, switching to /subscriptions is the easiest next step."}}
+    {"@type": "Question", "name": "How do I order for the first time?", "acceptedAnswer": {"@type": "Answer", "text": "In our online shop or via the Telegram bot @aqua_element_bot. After the first delivery, switching to a subscription is the easiest next step."}}
   ]
 }
 </script>

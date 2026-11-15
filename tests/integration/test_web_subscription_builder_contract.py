@@ -423,6 +423,19 @@ def _seed_builder_words(db, languages):
                 Translation(key=key, language=language, value=row[language], category=_category_for(key),
                             is_active=True)
             )
+    # The rest of the island (redesign 2026-11-14): the stepper / quantity words and each way to pay's note
+    # (the home page's seed), and each way to pay's name (the backend seed's display labels).
+    from scripts.seed_web_ui_home_translations import CATEGORY as HOME_CATEGORY, TRANSLATIONS as HOME
+
+    for language in languages:
+        for key, value in HOME[language].items():
+            if key.startswith("web.home.builder."):
+                db.session.add(Translation(key=key, language=language, value=value, category=HOME_CATEGORY,
+                                           is_active=True))
+        for key, row in BACKEND_TRANSLATIONS.items():
+            if key.startswith("web.display_labels.payment_method."):
+                db.session.add(Translation(key=key, language=language, value=row.get(language) or row["en"],
+                                           category=_category_for(key), is_active=True))
     db.session.commit()
 
 
@@ -505,7 +518,7 @@ def test_the_builder_seed_drops_the_old_unconfirmed_time_word_and_adds_the_frequ
 
     assert "Time to be confirmed" not in BACKEND_TRANSLATIONS  # the builder no longer shows it
     assert BACKEND_TRANSLATIONS[FREQUENCY_KEYS["biweekly"]] == {
-        "en": "Bi-Weekly", "uz": "Ikki haftada bir marta", "ru": "Раз в две недели",
+        "en": "Every two weeks", "uz": "Ikki haftada bir marta", "ru": "Раз в две недели",
     }
     assert BACKEND_TRANSLATIONS[FREQUENCY_KEYS["monthly"]]["ru"] == "Ежемесячно"
 

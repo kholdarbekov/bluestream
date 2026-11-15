@@ -161,6 +161,7 @@ async def test_a_number_held_by_another_account_merges_into_it_through_the_real_
 
     def _sms_task(user_id, otp_code, phone_number=None):  # the SMS gateway: the one external hop replaced
         codes.append(otp_code)
+        return {"success": True}  # the provider took it, as the real task answers
 
     monkeypatch.setattr("business_app.services.auth_service.send_verification_sms_task", _sms_task)
 

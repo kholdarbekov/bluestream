@@ -1,60 +1,71 @@
+/* Forgot-password page (templates/frontend/forgot_password.html). Posts {identifier} to /api/v1/auth/forgot-password.
+   The server answers the same for every identifier (no account enumeration), so the result card replaces the form
+   with one truthful sentence (and takes the focus, so it is announced; no toast on top); "Try another" brings the
+   form back. */
 (function () {
     var PAGE_DATA = getPageData();
+    var I18N = PAGE_DATA.i18n || {};
     var form = document.getElementById('forgotPasswordForm');
     if (!form) return;
+
+    var step = document.getElementById('forgotStep');
+    var done = document.getElementById('successMessage');
+    var foot = document.getElementById('forgotFoot');
+    AEAuth.clearOnInput(form);
+
+    function fail(message) {
+        AEAuth.showAlert('forgotAlert', message);
+    }
 
     form.addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        var formData = new FormData(this);
-        var identifier = formData.get('identifier');
+        var submitButton = form.querySelector('button[type="submit"]');
+        if (AEAuth.isBusy(submitButton)) return;
+        AEAuth.clearErrors(form);
+        AEAuth.hideAlert('forgotAlert');
 
+        var identifier = String(new FormData(form).get('identifier') || '').trim();
         if (!identifier) {
-            showNotification(PAGE_DATA.i18n.enter_identifier, 'error');
+            AEAuth.setFieldError(form, 'identifier', I18N.required);
+            AEAuth.focusFirstInvalid(form);
             return;
         }
 
-        var submitButton = this.querySelector('button[type="submit"]');
-        var originalText = submitButton.textContent;
-        submitButton.disabled = true;
-        submitButton.textContent = PAGE_DATA.i18n.sending;
-
+        AEAuth.setBusy(submitButton, true);
         try {
             var response = await apiRequest('/auth/forgot-password', {
                 method: 'POST',
                 body: JSON.stringify({ identifier: identifier })
             });
-            var result = await response.json();
+            var result = await AEAuth.readJson(response);
 
             if (response.ok) {
-                document.getElementById('forgotPasswordForm').style.display = 'none';
-                document.getElementById('successMessage').style.display = 'block';
-                showNotification(PAGE_DATA.i18n.sent_success, 'success');
+                step.hidden = true;
+                done.hidden = false;
+                if (foot) foot.hidden = true;
+                document.getElementById('forgotDoneTitle').focus();
+            } else if (response.status === 429) {
+                fail(I18N.rate_limited);
             } else {
-                showNotification(result.message || PAGE_DATA.i18n.send_failed, 'error');
+                fail(AEAuth.serverMessage(result, I18N.send_failed));
             }
         } catch (err) {
-            showNotification(PAGE_DATA.i18n.network_error, 'error');
+            fail(I18N.network_error);
         } finally {
-            submitButton.disabled = false;
-            submitButton.textContent = originalText;
+            AEAuth.setBusy(submitButton, false);
         }
     });
 
-    var identifierInput = document.querySelector('input[name="identifier"]');
-    if (identifierInput) {
-        identifierInput.addEventListener('input', function () {
-            var value = this.value.trim();
-            var isEmail = value.includes('@');
-            var isPhone = /^[\+]?[0-9\s\-\(\)]{10,}$/.test(value);
-
-            if (value.length === 0) {
-                this.placeholder = PAGE_DATA.i18n.placeholder_default;
-            } else if (isEmail) {
-                this.placeholder = PAGE_DATA.i18n.placeholder_email;
-            } else if (isPhone) {
-                this.placeholder = PAGE_DATA.i18n.placeholder_phone;
-            }
+    var again = document.getElementById('forgotAgainBtn');
+    if (again) {
+        again.addEventListener('click', function () {
+            done.hidden = true;
+            step.hidden = false;
+            if (foot) foot.hidden = false;
+            form.reset();
+            var input = form.querySelector('input[name="identifier"]');
+            if (input) input.focus();
         });
     }
 })();

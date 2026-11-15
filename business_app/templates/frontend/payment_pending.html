@@ -1,184 +1,74 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
 
-{% block title %}{{ 'Payment Processing'|t }} - {{ company_name }}{% endblock %}
+{#-
+  Where Click sends a payment back while it is still in flight (/payment/success; routes.payment_success decides
+  which page shows). static/js/pages/payment-pending.js polls the payment through the session cookie and moves on.
+  Without a session, or for someone else's order, the neutral variant names no order and no amount.
+  Hooks: section.payment-pending-section .pending-content, .order-info .info-row .info-value (the method is the
+  last row), [data-action=check-payment-status], #pending-live [data-pending-caption] (a manual check that is still
+  pending says so there), #pending-timeout. Styles: static/css/pages/checkout.css (.ae-pay).
+-#}
+
+{% block title %}{{ 'web.checkout.pay.pending_title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-.payment-pending-section {
-    padding: 100px 0;
-    min-height: 70vh;
-    display: flex;
-    align-items: center;
-}
-
-.pending-content {
-    max-width: 600px;
-    margin: 0 auto;
-    text-align: center;
-    background: #fff;
-    border-radius: 10px;
-    padding: 50px 30px;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
-}
-
-.pending-icon {
-    width: 100px;
-    height: 100px;
-    background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 30px;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        transform: scale(1);
-        opacity: 1;
-    }
-    50% {
-        transform: scale(1.05);
-        opacity: 0.8;
-    }
-}
-
-.pending-icon i {
-    font-size: 50px;
-    color: #fff;
-}
-
-.pending-content h2 {
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 15px;
-    color: #222;
-}
-
-.pending-content p {
-    font-size: 16px;
-    color: #666;
-    margin-bottom: 10px;
-    line-height: 1.6;
-}
-
-.order-info {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 30px 0;
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid #e5e5e5;
-}
-
-.info-row:last-child {
-    border-bottom: none;
-}
-
-.info-label {
-    font-weight: 600;
-    color: #666;
-}
-
-.info-value {
-    color: #222;
-}
-
-.action-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    margin-top: 30px;
-}
-
-.refresh-notice {
-    background: #e3f2fd;
-    border: 1px solid #90caf9;
-    border-radius: 5px;
-    padding: 15px;
-    margin-top: 20px;
-    font-size: 14px;
-    color: #1976d2;
-}
-
-@media (max-width: 767px) {
-    .pending-content {
-        padding: 40px 20px;
-    }
-
-    .pending-content h2 {
-        font-size: 24px;
-    }
-
-    .action-buttons {
-        grid-template-columns: 1fr;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
 {% endblock %}
 
 {% block content %}
-<section class="payment-pending-section">
-    <div class="auto-container">
-        <div class="pending-content">
-            <div class="pending-icon">
-                <i class="far fa-hourglass-half"></i>
-            </div>
+{{ page_hero('web.checkout.pay.pending_title'|t, crumbs=[('web.checkout.pay.crumb'|t, None)], variant='soft') }}
 
-            {% if order %}
-            <h2>{{ 'Payment Processing'|t }}</h2>
-            <p>{{ 'Your payment is being processed. This may take a few moments.'|t }}</p>
+<div class="ae-flow ae-pay">
+    <section class="ae-section payment-pending-section">
+        <div class="ae-container">
+            <div class="ae-card ae-pay__card pending-content">
+                <span class="ae-pay__icon ae-pay__icon--info" aria-hidden="true"><i class="far fa-hourglass-half"></i></span>
 
-            <div class="order-info">
-                <div class="info-row">
-                    <span class="info-label">{{ 'Order Number'|t }}:</span>
-                    <span class="info-value">{{ order.order_number }}</span>
+                {% if order %}
+                <p class="ae-pay__text">{{ 'web.checkout.pay.pending_text'|t }}</p>
+
+                <dl class="ae-dl ae-dl--end ae-pay__facts order-info">
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.order_number'|t }}</dt>
+                        <dd class="info-value ae-num">{{ order.order_number }}</dd>
+                    </div>
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.amount'|t }}</dt>
+                        <dd class="info-value ae-num">{{ order.total_amount|format_price }}</dd>
+                    </div>
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.method'|t }}</dt>
+                        <dd class="info-value">{{ payment_method_label }}</dd>
+                    </div>
+                </dl>
+
+                <p class="ae-pay__live" id="pending-live" role="status"><span class="ae-pay__dot" aria-hidden="true"></span><span data-pending-caption>{{ 'web.checkout.pay.auto_caption'|t }}</span></p>
+                <div class="ae-alert ae-alert--warn ae-pay__timeout" id="pending-timeout" role="status" hidden>
+                    <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-clock"></i></span>
+                    <p>{{ 'web.checkout.pay.timeout'|t }}</p>
                 </div>
-                <div class="info-row">
-                    <span class="info-label">{{ 'Total Amount'|t }}:</span>
-                    <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">{{ 'Payment Method'|t }}:</span>
-                    <span class="info-value">{{ payment_method_label }}</span>
-                </div>
-            </div>
 
-            <div class="refresh-notice">
-                <i class="far fa-info-circle"></i>
-                {{ 'This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.'|t }}
+                <div class="ae-pay__actions">
+                    <button type="button" data-action="check-payment-status" class="ae-btn ae-btn--primary">
+                        <i class="far fa-sync" aria-hidden="true"></i>{{ 'web.checkout.pay.check'|t }}
+                    </button>
+                    <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary">{{ 'web.checkout.pay.my_orders'|t }}</a>
+                </div>
+                {% else %}
+                {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
+                <p class="ae-pay__text">{{ 'web.payment_return.neutral_success'|t }}</p>
+                <div class="ae-pay__actions">
+                    <a href="{{ company_telegram_bot_url }}" class="ae-btn ae-btn--primary" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}
+                    </a>
+                    <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary">{{ 'web.checkout.pay.my_orders'|t }}</a>
+                </div>
+                {% endif %}
             </div>
-
-            <div class="action-buttons">
-                <button data-action="check-payment-status" class="theme-btn btn-one">
-                    <i class="far fa-sync"></i> {{ 'Check Status'|t }}
-                </button>
-                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-three">
-                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
-                </a>
-            </div>
-            {% else %}
-            {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
-            <h2>{{ 'Payment Processing'|t }}</h2>
-            <p>{{ 'web.payment_return.neutral_success'|t }}</p>
-            <div class="action-buttons">
-                <a href="{{ company_telegram_bot_url }}" class="theme-btn btn-one" target="_blank" rel="noopener noreferrer">
-                    <i class="fab fa-telegram-plane"></i> {{ 'Open the bot'|t }}
-                </a>
-                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
-                </a>
-            </div>
-            {% endif %}
         </div>
-    </div>
-</section>
+    </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -190,10 +80,10 @@
     'cancel_url': cancel_url if order else none,
     'order_actions': order_actions_words(),
     'i18n': {
-        'failed': 'Payment failed. Please try again.' | t,
-        'timeout': 'Payment verification is taking longer than expected. Please check your order status.' | t,
+        'failed': 'web.checkout.pay.failed' | t,
+        'still_pending': 'web.checkout.pay.still_pending' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/payment-pending.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-actions.js') }}"></script>
+<script src="{{ asset_url('js/pages/payment-pending.js') }}"></script>
 {% endblock %}

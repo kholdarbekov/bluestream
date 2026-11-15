@@ -108,10 +108,22 @@ WEB_LINK_GREETING_KEY = 'web_link_greeting'
 # Redis down included, is "try again in a minute" (D15f).
 _WEB_LINK_DEAD_CODES = frozenset({'WEB_LINK_EXPIRED', 'WEB_LINK_NOT_AVAILABLE'})
 _WEB_LINK_HAS_ACCOUNT = 'TELEGRAM_ALREADY_HAS_ACCOUNT'
+
 # The phone-link code refusals that end the step (auth_service.verify_phone_link_and_merge_accounts):
 # the code or its link request is gone, or an account it named is. Read from `error_code`, never from
 # the message, which arrives in the customer's language. Any other refusal asks for the code again.
 _LINK_CODE_DEAD_CODES = frozenset({'OTP_EXPIRED', 'USER_NOT_FOUND'})
+
+
+def _code_still_valid(response) -> bool:
+    """/auth/send-otp sent nothing because the code this number holds is still valid (429 RESEND_COOLDOWN).
+
+    The backend sends a number a new code only once its last one expires, so that
+    code is the one to type: the flow carries on as after a send.
+    """
+    body = response.data if isinstance(response.data, dict) else {}
+    details = body.get('data') if isinstance(body.get('data'), dict) else {}
+    return response.status_code == 429 and details.get('error_code') == 'RESEND_COOLDOWN'
 
 
 def _markdown_copy(key: str, language: str, **data: Any) -> str:
@@ -673,7 +685,8 @@ class ProfileHandlers(BaseHandler):
         accepted number only takes the share-contact keyboard down.
         """
         otp_response = await client.send_phone_verification(user_token, phone)
-        if not otp_response.success:
+        still_valid = _code_still_valid(otp_response)
+        if not otp_response.success and not still_valid:
             logger.error(f"Failed to send phone verification OTP: {otp_response.error}")
             if otp_response.status_code == 409:
                 # Another account already holds this number, in any typed format.
@@ -707,7 +720,8 @@ class ProfileHandlers(BaseHandler):
 
         await update.message.reply_text(
             i18n.get(
-                'telegram.phone.verification_code_sent_to_phone_prompt',
+                'telegram.phone.code_still_valid_prompt' if still_valid
+                else 'telegram.phone.verification_code_sent_to_phone_prompt',
                 language,
                 phone_masked=phone_masked
             )
@@ -719,10 +733,15 @@ class ProfileHandlers(BaseHandler):
         # correctly during OTP entry and the global catch-all won't fire.
         context.user_data['pending_phone_verification'] = phone
         # The code's lifetime starts now, not when the customer next taps away
-        # (`flow_exit.leave_all_flows` carries this into the durable prompt).
+        # (`flow_exit.leave_all_flows` carries this into the durable prompt). A
+        # code still valid from an earlier send is stamped now too: the stamp
+        # only bounds how long digits read as a code; the backend judges the code.
         context.user_data[PHONE_OTP_SENT_AT] = datetime.now(timezone.utc).isoformat()
 
-        logger.info(f"Phone verification OTP sent to {phone} for user {update.effective_user.id}")
+        logger.info(
+            f"Phone verification OTP {'still valid' if still_valid else 'sent'} for {phone}, "
+            f"user {update.effective_user.id}"
+        )
         return code_state
 
     async def phone_verify_name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1006,6 +1025,14 @@ class ProfileHandlers(BaseHandler):
                         await self.arm_phone_otp(context, user_id, phone, prompted_update_id=update.update_id)
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
+                    elif _code_still_valid(response):
+                        # A second tap within the code's life: the code already sent is the one to type.
+                        await self._ack(update.callback_query)
+                        await update.callback_query.message.reply_text(
+                            i18n.get('telegram.phone.code_still_valid_prompt', language, phone_masked=phone),
+                            reply_markup=ProfileKeyboards.phone_code_prompt(language),
+                        )
+                        await self.arm_phone_otp(context, user_id, phone, prompted_update_id=update.update_id)
                     else:
                         await self._ack(update.callback_query,
                             i18n.get('telegram.phone.verification_code_send_failed_toast', language)
@@ -1480,7 +1507,8 @@ class ProfileHandlers(BaseHandler):
             user_token = await get_auth_token(update, context, client)
             response = await client.send_phone_verification(user_token, phone) if user_token else None
 
-        if response is not None and response.success:
+        # A code still valid from a moment ago (_code_still_valid) is the one to type, as a new one would be.
+        if response is not None and (response.success or _code_still_valid(response)):
             sent = response.data.get('data', {}) if isinstance(response.data, dict) else {}
             context.user_data['pending_phone_verification'] = phone
             await context.bot.send_message(

@@ -5,6 +5,8 @@ from decimal import Decimal
 
 import pytest
 
+from business_app.models.translation import Translation
+from scripts.seed_web_ui_content_translations import CATEGORY as CONTENT_CATEGORY, TRANSLATIONS as CONTENT
 from tests.integration.public_page_builders import (  # noqa: F401 -- `offer_skus` is a fixture
     LANGS,
     flat,
@@ -23,7 +25,7 @@ PRICE = Decimal("17345")
 def test_title_h1_and_breadcrumb_are_translated(app, db, offer_skus, lang):
     soup = page(app, db, "/pricing-policy", lang)
     name = shipped("landing.pricing_policy.title", lang)
-    assert flat(soup.title.get_text()).startswith(f"{name} - ")
+    assert flat(soup.title.get_text()).startswith(f"{name} — ")  # the site's one separator (review SITE-14)
     assert soup.select_one(".page-title h1").get_text(strip=True) == name
     assert soup.select(".page-title .bread-crumb li")[-1].get_text(strip=True) == name
 
@@ -38,6 +40,12 @@ def test_the_page_shows_the_live_prices_first(app, db, offer_skus, lang):
 
 
 def test_the_zone_sentence_is_gone(app, db, offer_skus):
+    # The policy sections are keys of the content group's seed since the redesign (2026-11-14); their en values are
+    # the published English wording, so the page still reads "Displayed Prices" and "Price Updates".
+    for key, value in CONTENT["en"].items():
+        if key.startswith("web.content.pricing."):
+            db.session.add(Translation(key=key, language="en", value=value, category=CONTENT_CATEGORY, is_active=True))
+    db.session.commit()
     text = flat(page(app, db, "/pricing-policy", "en").select_one("main").get_text(" "))
     assert "address zone" not in text and "Delivery and Additional Charges" not in text
     assert "Displayed Prices" in text and "Price Updates" in text  # the other sections stay

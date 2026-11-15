@@ -52,7 +52,9 @@ NOT_STAFF_FACING: dict[str, str] = {
     "PERMISSION_DENIED": f"{_NOT_ON_ROUTE} (auth_middleware.py:143 require_permission, used by no route)",
     "PHONE_ALREADY_REGISTERED": f"{_NOT_ON_ROUTE} (auth_service.py:590/758/848: customer /auth/phone/*)",
     "RATE_LIMIT_ERROR": f"{_NOT_ON_ROUTE} (auth_middleware.py:315 rate_limit_by_user, used by no route)",
-    "RESEND_COOLDOWN": f"{_NOT_ON_ROUTE} (auth_service.py:603/858: /auth/phone/register/init, /auth/phone/resend-otp)",
+    "RESEND_COOLDOWN": f"{_NOT_ON_ROUTE} (auth_service.py:603/858: /auth/phone/register/init, /auth/phone/resend-otp; "
+    "api/auth.py _code_still_valid_response: /auth/send-otp (web /verify-phone, customer bot), /auth/change-phone, "
+    "/auth/resend-sms-verification)",
     "SESSION_VALIDATION_FAILED": f"{_NOT_ON_ROUTE} (auth_middleware.py:469, a decorator no route uses)",
     "TOKEN_BLACKLISTED": f"{_NOT_ON_ROUTE} (token_service.py:426 validate_token_integrity: /auth/validate-token)",
     "TOKEN_EXPIRED": f"{_NOT_ON_ROUTE} (token_service.py:443: /auth/validate-token)",
@@ -66,6 +68,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     "VALIDATION_FAILED": f"{_NOT_ON_ROUTE} (token_service.py:448: /auth/validate-token)",
     "VERIFICATION_CHECK_FAILED": f"{_NOT_ON_ROUTE} (auth_middleware.py:527 require_verified_user, used by no route)",
     "ERROR_CODE": f"{_NOT_ON_ROUTE} (utils/swagger_config.py:57, a placeholder in the API docs, never raised)",
+    # Customer sign-in refusals (auth_service.login_user: web POST /auth/login). Staff sign in at /staff/auth/login.
+    "INVALID_CREDENTIALS": f"{_NOT_ON_ROUTE} (auth_service.py login_user: web /auth/login)",
+    "ACCOUNT_DISABLED": f"{_NOT_ON_ROUTE} (auth_service.py login_user: web /auth/login)",
+    "TELEGRAM_PASSWORD_REQUIRED": f"{_NOT_ON_ROUTE} (auth_service.py login_user: web /auth/login)",
+    # The web checkout's schedule judge (api/orders.py _judge_checkout_schedule): customer POST /orders/ and
+    # /orders/cart/estimate. The staff bot places no order through either.
+    "SCHEDULE_MALFORMED": f"{_NOT_ON_ROUTE} (api/orders.py _judge_checkout_schedule: web /orders/, /orders/cart/estimate)",
     # The customer bot's phone-link merge (auth_service.py verify_phone_link_and_merge_accounts).
     "ACCOUNTS_LINKING_FAILED": f"{_NOT_ON_ROUTE} (auth_service.py verify_phone_link_and_merge_accounts: customer bot "
     "/auth/link-phone-account/verify)",

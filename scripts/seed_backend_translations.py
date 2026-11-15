@@ -45,17 +45,17 @@ BACKEND_TRANSLATIONS = {
     },
     'api.auth.invalid_credentials': {
         'en': 'Invalid email or password',
-        'uz': 'Noto\'g\'ri email yoki parol',
+        'uz': "Noto‘g‘ri email yoki parol",
         'ru': 'Неверный email или пароль'
     },
     'api.auth.account_locked': {
         'en': 'Account has been locked due to too many failed login attempts',
-        'uz': 'Hisob ko\'p marta noto\'g\'ri kirishlar tufayli bloklangan',
+        'uz': "Hisob ko‘p marta noto‘g‘ri kirishlar tufayli bloklangan",
         'ru': 'Аккаунт заблокирован из-за множества неудачных попыток входа'
     },
     'api.auth.email_already_exists': {
         'en': 'Email already registered',
-        'uz': 'Email allaqachon ro\'yxatdan o\'tgan',
+        'uz': "Email allaqachon ro‘yxatdan o‘tgan",
         'ru': 'Email уже зарегистрирован'
     },
     'api.auth.token_expired': {
@@ -98,6 +98,14 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Tasdiqlash kodi muddati tugagan. Iltimos, yangisini so\'rang.',
         'ru': 'Срок действия кода подтверждения истёк. Пожалуйста, запросите новый.'
     },
+    # POST /auth/send-otp's 429 RESEND_COOLDOWN: the code this number holds is still valid (owner 2026-11-14, a new
+    # code only once it expires). data.resend_available_in carries the seconds; the website page words it itself.
+    'api.auth.otp_resend_wait': {
+        'en': 'The code we already sent to this number still works — enter it. A new one can be sent once it expires.',
+        'uz': 'Bu raqamga yuborgan kodimiz hali amal qiladi — uni kiriting. Muddati tugagach, yangisini yuborish mumkin.',
+        'ru': 'Код, который мы уже отправили на этот номер, ещё действует — введите его. '
+              'Новый можно получить, когда истечёт его срок.',
+    },
     'api.auth.email_required_for_registration': {
         'en': 'Email is required for email registration. Use phone registration endpoints for phone-only signup.',
         'uz': 'Email orqali ro\'yxatdan o\'tish uchun email majburiy. Faqat telefon bilan ro\'yxatdan o\'tish uchun phone ro\'yxat endpointlaridan foydalaning.',
@@ -125,7 +133,7 @@ BACKEND_TRANSLATIONS = {
     },
     'api.auth.phone_already_registered': {
         'en': 'Phone number already registered',
-        'uz': 'Telefon raqami allaqachon ro\'yxatdan o\'tgan',
+        'uz': "Telefon raqami allaqachon ro‘yxatdan o‘tgan",
         'ru': 'Номер телефона уже зарегистрирован'
     },
     'api.auth.telegram_user_not_found': {
@@ -155,7 +163,7 @@ BACKEND_TRANSLATIONS = {
     },
     'api.auth.otp_send_failed': {
         'en': 'Failed to send OTP',
-        'uz': 'OTP yuborib bo\'lmadi',
+        'uz': 'OTP yuborib bo‘lmadi',
         'ru': 'Не удалось отправить OTP'
     },
     'api.auth.pending_link_not_found': {
@@ -561,7 +569,7 @@ BACKEND_TRANSLATIONS = {
     },
     'api.payments.error.already_paid': {
         'en': 'This order is already paid',
-        'uz': 'Bu buyurtma allaqachon to\'langan',
+        'uz': "Bu buyurtma allaqachon to‘langan",
         'ru': 'Этот заказ уже оплачен'
     },
     'api.payments.error.subscription_not_found': {
@@ -666,8 +674,7 @@ BACKEND_TRANSLATIONS = {
     'api.payments.error.lifecycle.advice_order_already_cancelled': {
         'en': 'This order is already cancelled - anything paid on it stays on your account as '
               'prepaid balance.',
-        'uz': 'Bu buyurtma allaqachon bekor qilingan - u bo\'yicha to\'langan summa hisobingizda '
-              'oldindan to\'lov sifatida saqlanadi.',
+        'uz': "Bu buyurtma allaqachon bekor qilingan - u bo‘yicha to‘langan summa hisobingizda oldindan to‘lov sifatida saqlanadi.",
         'ru': 'Этот заказ уже отменен - оплаченная по нему сумма останется на вашем счете как '
               'предоплата.'
     },
@@ -869,17 +876,17 @@ BACKEND_TRANSLATIONS = {
     },
     'api.addresses.error.coordinates_outside_supported_area': {
         'en': 'Coordinates are outside the supported delivery area (Tashkent)',
-        'uz': 'Koordinatalar qo\'llab-quvvatlanadigan yetkazib berish hududidan tashqarida (Toshkent)',
+        'uz': "Koordinatalar qo‘llab-quvvatlanadigan yetkazib berish hududidan tashqarida (Toshkent)",
         'ru': 'Координаты находятся вне поддерживаемой зоны доставки (Ташкент)'
     },
     'api.addresses.error.in_use_by_subscription': {
         'en': 'This address is currently used by an active subscription and cannot be deleted.',
-        'uz': 'Bu manzil hozir faol obuna tomonidan ishlatilmoqda va o\'chirib bo\'lmaydi.',
+        'uz': "Bu manzil hozir faol obuna tomonidan ishlatilmoqda va o‘chirib bo‘lmaydi.",
         'ru': 'Этот адрес используется активной подпиской и не может быть удалён.'
     },
     'api.addresses.error.in_place_group': {
         'en': 'This address belongs to a shared place and cannot be deleted. Remove it from the place first.',
-        'uz': 'Bu manzil umumiy joyga tegishli va o\'chirib bo\'lmaydi. Avval uni joydan chiqaring.',
+        'uz': "Bu manzil umumiy joyga tegishli va o‘chirib bo‘lmaydi. Avval uni joydan chiqaring.",
         'ru': 'Этот адрес принадлежит общему месту и не может быть удалён. Сначала удалите его из места.'
     },
     'api.addresses.region.tashkent_city': {
@@ -1454,7 +1461,7 @@ BACKEND_TRANSLATIONS = {
     # thank-you, never as a rejection.
     'api.loyalty.tier_discount_condition': {
         'en': 'Our thank-you for ordering in our Telegram bot or on our website: your tier discount comes off every order you place there yourself and pay on delivery in cash.',
-        'uz': "Telegram botimiz yoki saytimiz orqali buyurtma berganingiz uchun minnatdorchiligimiz: u yerda o'zingiz beradigan va yetkazib berishda naqd to'laydigan har bir buyurtmangizga daraja chegirmangiz avtomatik qo'llaniladi.",
+        'uz': "Telegram botimiz yoki saytimiz orqali buyurtma berganingiz uchun minnatdorchiligimiz: u yerda o‘zingiz beradigan va yetkazib berishda naqd to‘laydigan har bir buyurtmangizga daraja chegirmangiz avtomatik qo‘llaniladi.",
         'ru': 'Наша благодарность за заказы в Telegram-боте и на сайте: скидка вашего уровня автоматически применяется к каждому заказу, который вы оформляете там сами и оплачиваете при доставке наличными.'
     },
     'api.loyalty.points_earned': {
@@ -3191,22 +3198,22 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     'error.validation.required_field': {
         'en': 'This field is required',
-        'uz': 'Bu maydon to\'ldirilishi shart',
+        'uz': "Bu maydon to‘ldirilishi shart",
         'ru': 'Это поле обязательно для заполнения'
     },
     'error.validation.invalid_email': {
         'en': 'Invalid email format',
-        'uz': 'Noto\'g\'ri email formati',
+        'uz': "Noto‘g‘ri email formati",
         'ru': 'Неверный формат email'
     },
     'error.validation.invalid_phone': {
         'en': 'Invalid phone number format',
-        'uz': 'Noto\'g\'ri telefon raqami formati',
+        'uz': "Noto‘g‘ri telefon raqami formati",
         'ru': 'Неверный формат номера телефона'
     },
     'error.validation.password_too_short': {
         'en': 'Password must be at least 8 characters',
-        'uz': 'Parol kamida 8 ta belgidan iborat bo\'lishi kerak',
+        'uz': "Parol kamida 8 ta belgidan iborat bo‘lishi kerak",
         'ru': 'Пароль должен содержать не менее 8 символов'
     },
     'error.validation.passwords_dont_match': {
@@ -3216,7 +3223,7 @@ BACKEND_TRANSLATIONS = {
     },
     'error.validation.invalid_date': {
         'en': 'Invalid date format',
-        'uz': 'Noto\'g\'ri sana formati',
+        'uz': "Noto‘g‘ri sana formati",
         'ru': 'Неверный формат даты'
     },
     'error.validation.min_value': {
@@ -3241,12 +3248,12 @@ BACKEND_TRANSLATIONS = {
     },
     'error.validation.invalid_card_expiry': {
         'en': 'Invalid card expiry date',
-        'uz': 'Karta amal qilish muddati noto\'g\'ri',
+        'uz': "Karta amal qilish muddati noto‘g‘ri",
         'ru': 'Неверный срок действия карты'
     },
     'error.validation.invalid_boolean': {
         'en': 'Invalid boolean value',
-        'uz': 'Boolean qiymati noto\'g\'ri',
+        'uz': "Boolean qiymati noto‘g‘ri",
         'ru': 'Недопустимое булево значение'
     },
     'error.validation.invalid_expiry_format_mm_yy': {
@@ -4404,7 +4411,7 @@ BACKEND_TRANSLATIONS = {
     },
     'Pay cash on delivery and save {amount}': {
         'en': 'Pay cash on delivery and save {amount}',
-        'uz': 'Yetkazib berishda naqd to\'lasangiz {amount} tejaysiz',
+        'uz': "Yetkazib berishda naqd to‘lasangiz {amount} tejaysiz",
         'ru': 'Оплатите наличными при доставке и сэкономьте {amount}'
     },
 
@@ -4994,6 +5001,22 @@ BACKEND_TRANSLATIONS = {
         'uz': '📱 Tasdiqlash kodi {phone_masked} raqamiga yuborildi.\n\nIltimos, 6 xonali kodni kiriting:',
         'ru': '📱 Код подтверждения отправлен на {phone_masked}.\n\nПожалуйста, введите 6-значный код:'
     },
+    # /auth/send-otp's 429 RESEND_COOLDOWN in the customer bot: a number gets a new code only once its last one
+    # expires (owner 2026-11-14), so the code already sent is the one to type.
+    'telegram.phone.code_still_valid_prompt': {
+        'en': (
+            '📱 The code we sent to {phone_masked} still works.\n\n'
+            'Please enter its 6 digits — a new code can be sent once it expires.'
+        ),
+        'uz': (
+            '📱 {phone_masked} raqamiga yuborgan kodimiz hali amal qiladi.\n\n'
+            'Iltimos, 6 xonali kodni kiriting — muddati tugagach, yangi kod yuborish mumkin.'
+        ),
+        'ru': (
+            '📱 Код, который мы отправили на {phone_masked}, ещё действует.\n\n'
+            'Пожалуйста, введите его 6 цифр — новый код можно получить, когда истечёт его срок.'
+        ),
+    },
     'telegram.phone.session_expired_share_again': {
         'en': '❌ Session expired. Please share your phone number again.',
         'uz': '❌ Sessiya muddati tugadi. Iltimos, telefon raqamingizni qayta ulashing.',
@@ -5120,7 +5143,7 @@ BACKEND_TRANSLATIONS = {
     # The slot list's placeholder (index.html, and the builder's island when slots are offered: a slot is then
     # required). It was a database-only row; seeded with the values it already had.
     'landing.custom_subscription.select_time_slot': {
-        'en': 'Select a time slot', 'uz': "Vaqt oralig'ini tanlang", 'ru': 'Выберите временной интервал'
+        'en': 'Select a time slot', 'uz': "Vaqt oralig‘ini tanlang", 'ru': "Выберите время"
     },
     # ─── Public delivery-coverage page (/coverage) ───────────────────────
     'landing.nav.coverage': {
@@ -5171,11 +5194,11 @@ BACKEND_TRANSLATIONS = {
         'ru': 'К сожалению, это вне нашей зоны доставки.'
     },
     'landing.coverage.home_title': {
-        'en': 'Delivering across Tashkent', 'uz': 'Toshkent bo\'ylab yetkazib beramiz', 'ru': 'Доставляем по Ташкенту'
+        'en': 'Delivering across Tashkent', 'uz': "Toshkent bo‘ylab yetkazib beramiz", 'ru': 'Доставляем по Ташкенту'
     },
     'landing.coverage.home_text': {
         'en': 'All of Tashkent city plus neighbouring areas of the Tashkent Region.',
-        'uz': "Butun Toshkent shahri va Toshkent viloyatining qo'shni hududlari.",
+        'uz': "Butun Toshkent shahri va Toshkent viloyatining qo‘shni hududlari.",
         'ru': 'Весь город Ташкент и прилегающие районы Ташкентской области.'
     },
     'landing.coverage.home_cta': {
@@ -8505,63 +8528,63 @@ BACKEND_TRANSLATIONS.update(ADMIN_UI_BACKFILL_TRANSLATIONS)
 LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.meta.title': _ui_tr(
         'Loyalty Program Guide — Earn, Redeem & Rise',
-        "Sodiqlik dasturi qo'llanmasi — Yig'ing, sarflang, ko'tariling",
+        "Sodiqlik dasturi qo‘llanmasi — Yig‘ing, sarflang, ko‘tariling",
         'Гид по программе лояльности — копите, тратьте, растите',
     ),
     'loyalty_guide.meta.description': _ui_tr(
         'Everything about the Aqua Element loyalty program: how you earn AquaCoins, tiers and multipliers, expiry, and how to redeem rewards.',
-        "Aqua Element sodiqlik dasturi haqida hammasi: AquaCoins qanday yig'asiz, darajalar va koeffitsiyentlar, amal qilish muddati va mukofotlarni almashtirish.",
+        "Aqua Element sodiqlik dasturi haqida hammasi: AquaCoins qanday yig‘asiz, darajalar va koeffitsiyentlar, amal qilish muddati va mukofotlarni almashtirish.",
         'Всё о программе лояльности Aqua Element: как начисляются AquaCoins, уровни и множители, срок действия и как обменивать награды.',
     ),
     'loyalty_guide.hero.eyebrow': _ui_tr('Aqua Club · Loyalty Program', 'Aqua Club · Sodiqlik dasturi', 'Aqua Club · Программа лояльности'),
     'loyalty_guide.hero.title': _ui_tr('Every drop rewards you.', 'Har bir tomchi sizni mukofotlaydi.', 'Каждая капля вознаграждает вас.'),
     'loyalty_guide.hero.subtitle': _ui_tr(
-        'Earn AquaCoins on every order, climb through four tiers, and turn your loyalty into real discounts and free water.',
-        "Har bir buyurtmada AquaCoins to'plang, to'rtta darajadan ko'tariling va sodiqligingizni haqiqiy chegirma va bepul suvga aylantiring.",
-        'Зарабатывайте AquaCoins за каждый заказ, поднимайтесь по четырём уровням и превращайте лояльность в реальные скидки и бесплатную воду.',
+        "Earn AquaCoins on every order, climb the tiers, and turn your loyalty into real discounts and free water.",
+        "Har bir buyurtmada AquaCoins to‘plang, darajalar bo‘ylab ko‘tariling va sodiqligingizni haqiqiy chegirma va bepul suvga aylantiring.",
+        "Зарабатывайте AquaCoins за каждый заказ, поднимайтесь по уровням и превращайте лояльность в реальные скидки и бесплатную воду.",
     ),
-    'loyalty_guide.hero.cta_primary': _ui_tr('Start earning', "Yig'ishni boshlash", 'Начать копить'),
-    'loyalty_guide.hero.cta_secondary': _ui_tr('See the tiers', "Darajalarni ko'rish", 'Смотреть уровни'),
+    'loyalty_guide.hero.cta_primary': _ui_tr('Start earning', "Yig‘ishni boshlash", 'Начать копить'),
+    'loyalty_guide.hero.cta_secondary': _ui_tr('See the tiers', "Darajalarni ko‘rish", 'Смотреть уровни'),
 
     'loyalty_guide.unit.point': _ui_tr('AquaCoin', 'AquaCoin', 'AquaCoin'),
     'loyalty_guide.unit.points': _ui_tr('AquaCoins', 'AquaCoins', 'AquaCoins'),
-    'loyalty_guide.unit.uzs': _ui_tr('UZS', "so'm", 'сум'),
+    'loyalty_guide.unit.uzs': _ui_tr('UZS', "so‘m", 'сум'),
 
     'loyalty_guide.stat.rate_label': _ui_tr('for every {uzs} {unit} spent', 'har {uzs} {unit} uchun', 'за каждые {uzs} {unit}'),
     'loyalty_guide.stat.welcome_label': _ui_tr('welcome bonus', 'xush kelibsiz bonusi', 'приветственный бонус'),
     'loyalty_guide.stat.tiers_label': _ui_tr('status tiers', 'daraja', 'уровня статуса'),
     'loyalty_guide.stat.multiplier_label': _ui_tr('max AquaCoins rate', 'maksimal AquaCoins', 'макс. множитель'),
 
-    'loyalty_guide.earn.kicker': _ui_tr('Earning', "Yig'ish", 'Начисление'),
-    'loyalty_guide.earn.title': _ui_tr('How you earn AquaCoins', "AquaCoins qanday yig'asiz", 'Как вы зарабатываете AquaCoins'),
+    'loyalty_guide.earn.kicker': _ui_tr('Earning', "Yig‘ish", 'Начисление'),
+    'loyalty_guide.earn.title': _ui_tr('How you earn AquaCoins', "AquaCoins qanday yig‘asiz", 'Как вы зарабатываете AquaCoins'),
     'loyalty_guide.earn.subtitle': _ui_tr(
-        'Five easy ways to grow your balance — most of them happen automatically.',
-        "Balansingizni oshirishning beshta oson yo'li — aksariyati avtomatik.",
-        'Пять простых способов пополнить баланс — большинство происходит автоматически.',
+        "Easy ways to grow your balance — most of them happen automatically.",
+        "Balansingizni oshirishning oson yo‘llari — aksariyati avtomatik.",
+        "Простые способы пополнить баланс — большинство срабатывает автоматически.",
     ),
     'loyalty_guide.earn.purchase_title': _ui_tr('Every order', 'Har bir buyurtma', 'Каждый заказ'),
     'loyalty_guide.earn.purchase_desc': _ui_tr(
         'Earn 1 AquaCoin for every {uzs} {unit} you spend — then multiplied by your tier rate.',
-        "Sarflagan har {uzs} {unit} uchun 1 AquaCoin oling — so'ng darajangiz koeffitsiyentiga ko'paytiriladi.",
+        "Sarflagan har {uzs} {unit} uchun 1 AquaCoin oling — so‘ng darajangiz koeffitsiyentiga ko‘paytiriladi.",
         'Получайте 1 AquaCoin за каждые {uzs} {unit} — затем сумма умножается на множитель вашего уровня.',
     ),
-    'loyalty_guide.earn.welcome_title': _ui_tr('Welcome gift', 'Xush kelibsiz sovgʻasi', 'Приветственный подарок'),
+    'loyalty_guide.earn.welcome_title': _ui_tr('Welcome gift', "Xush kelibsiz sovg‘asi", 'Приветственный подарок'),
     'loyalty_guide.earn.welcome_desc': _ui_tr(
         'Get {pts} AquaCoins the moment you join. Our gift to start you off.',
-        "Qo'shilishingiz bilan {pts} AquaCoins oling. Boshlashingiz uchun sovgʻamiz.",
+        "Qo‘shilishingiz bilan {pts} AquaCoins oling. Boshlashingiz uchun sovg‘amiz.",
         'Получите {pts} AquaCoins сразу при регистрации. Наш подарок для старта.',
     ),
-    'loyalty_guide.earn.referral_title': _ui_tr('Invite friends', "Do'stlarni taklif qiling", 'Приглашайте друзей'),
+    'loyalty_guide.earn.referral_title': _ui_tr('Invite friends', "Do‘stlarni taklif qiling", 'Приглашайте друзей'),
     'loyalty_guide.earn.referral_desc': _ui_tr(
         'Invite a friend: you get {you} AquaCoins and they get {friend}, after their first delivered and paid order.',
-        "Do'stingizni taklif qiling: ularning birinchi yetkazib berilgan va to'langan buyurtmasidan so'ng siz {you} AquaCoins, ular {friend} AquaCoins olasiz.",
+        "Do‘stingizni taklif qiling: ularning birinchi yetkazib berilgan va to‘langan buyurtmasidan so‘ng siz {you} AquaCoins, ular {friend} AquaCoins olasiz.",
         'Пригласите друга: вы получите {you} AquaCoins, а он — {friend}, после его первого доставленного и оплаченного заказа.',
     ),
-    'loyalty_guide.earn.birthday_title': _ui_tr('Birthday bonus', "Tug'ilgan kun bonusi", 'Бонус на день рождения'),
+    'loyalty_guide.earn.birthday_title': _ui_tr('Birthday bonus', "Tug‘ilgan kun bonusi", 'Бонус на день рождения'),
     'loyalty_guide.earn.birthday_desc': _ui_tr(
-        'Celebrate with {pts} bonus AquaCoins on your birthday — even more at higher tiers.',
-        "Tug'ilgan kuningizda {pts} bonus AquaCoins bilan nishonlang — yuqori darajalarda yanada ko'proq.",
-        'Отпразднуйте с {pts} бонусными AquaCoins в день рождения — на высоких уровнях ещё больше.',
+        "Celebrate with {pts} bonus AquaCoins on your birthday.",
+        "Tug‘ilgan kuningizda {pts} bonus AquaCoins bilan nishonlang.",
+        "Отпразднуйте с {pts} бонусными AquaCoins в день рождения.",
     ),
     'loyalty_guide.earn.streak_title': _ui_tr('Order streak', 'Buyurtmalar seriyasi', 'Серия заказов'),
     'loyalty_guide.earn.streak_desc': _ui_tr(
@@ -8570,9 +8593,10 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'Сделайте {orders} заказа за {days} дней и получите бонус серии в {pts} AquaCoins.',
     ),
     'loyalty_guide.earn.streak_line': _ui_tr(
-        '{orders} orders / {days} days → +{pts} {unit}',
-        '{orders} buyurtma / {days} kun → +{pts} {unit}',
-        '{orders} заказа / {days} дней → +{pts} {unit}',
+        "{orders} orders within {days} days earn you +{pts} {unit}",
+        "{days} kun ichida {orders} ta buyurtma uchun +{pts} {unit}",
+        # Plural-safe: "Заказов: 5 за 21 дн." reads right for any count.
+        "Заказов: {orders} за {days} дн. — бонус +{pts} {unit}",
     ),
     'loyalty_guide.earn.streak_min': _ui_tr(
         'each order ≥ {uzs} {unit}',
@@ -8580,78 +8604,78 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         'каждый заказ ≥ {uzs} {unit}',
     ),
     'loyalty_guide.earn.consec_title': _ui_tr(
-        'Consecutive Streaks', 'Ketma-ket seriyalar', 'Серии подряд'),
+        "Consecutive streaks", 'Ketma-ket seriyalar', 'Серии подряд'),
     'loyalty_guide.earn.consec_and': _ui_tr('and', 'va', 'и'),
     'loyalty_guide.earn.consec_or': _ui_tr('or', 'yoki', 'или'),
     'loyalty_guide.earn.consec_line_all': _ui_tr(
-        'Achieve {strikes} {n} times in a row → +{pts} {unit}',
-        '{strikes} ni ketma-ket {n} marta bajaring → +{pts} {unit}',
-        'Выполните {strikes} {n} раз подряд → +{pts} {unit}'),
+        "Achieve {strikes} {n} times in a row to earn +{pts} {unit}",
+        "«{strikes}» shartini ketma-ket {n} marta bajaring va +{pts} {unit} oling",
+        "Выполните {strikes} {n} раз подряд и получите +{pts} {unit}"),
     'loyalty_guide.earn.consec_line_any': _ui_tr(
-        'Achieve {strikes} {n} times in a row → +{pts} {unit}',
-        '{strikes} dan birini ketma-ket {n} marta bajaring → +{pts} {unit}',
-        'Выполните {strikes} {n} раз подряд → +{pts} {unit}'),
+        "Achieve {strikes} {n} times in a row to earn +{pts} {unit}",
+        "«{strikes}» shartlaridan birini ketma-ket {n} marta bajaring va +{pts} {unit} oling",
+        "Выполните {strikes} {n} раз подряд и получите +{pts} {unit}"),
     'loyalty_guide.faq.q9': _ui_tr(
         'How do consecutive-streak rewards work?',
         'Ketma-ket seriya mukofotlari qanday ishlaydi?',
         'Как работают награды за серии подряд?'),
     'loyalty_guide.faq.a9': _ui_tr(
         'Keep achieving the same order goal in consecutive periods. Reach the required number of consecutive achievements and you earn bonus AquaCoins — then it repeats. Skipping a period resets the streak.',
-        'Bir xil buyurtma maqsadini ketma-ket davrlarda bajaring. Talab qilingan ketma-ket bajarishlar soniga yeting va bonus AquaCoins olasiz — keyin u takrorlanadi. Davrni o\'tkazib yuborsangiz seriya nolga tushadi.',
+        "Bir xil buyurtma maqsadini ketma-ket davrlarda bajaring. Talab qilingan ketma-ket bajarishlar soniga yeting va bonus AquaCoins olasiz — keyin u takrorlanadi. Davrni o‘tkazib yuborsangiz seriya nolga tushadi.",
         'Достигайте одной и той же цели по заказам в последовательные периоды. Наберите нужное число последовательных достижений и получите бонусные AquaCoins — затем всё повторяется. Пропуск периода сбрасывает серию.'),
     # Which orders get the tier discount. Appended to the FAQ (accordion +
     # FAQPage JSON-LD) only when some tier carries a rate - same condition as
     # the tier-grid footnote. NO literal percentage.
     'loyalty_guide.faq.q10': _ui_tr(
         'Which orders get my tier discount?',
-        "Daraja chegirmasi qaysi buyurtmalarga qo'llaniladi?",
+        "Daraja chegirmasi qaysi buyurtmalarga qo‘llaniladi?",
         'К каким заказам применяется скидка уровня?'),
     'loyalty_guide.faq.a10': _ui_tr(
         "Every order you place yourself in our Telegram bot or on our website and pay on delivery in cash. It's taken off automatically at checkout: our thank-you for ordering in the bot or on the website.",
-        "Telegram botimiz yoki saytimiz orqali o'zingiz beradigan va yetkazib berishda naqd to'laydigan har bir buyurtmangizga. Chegirma rasmiylashtirishda avtomatik qo'llaniladi — bu bot yoki sayt orqali buyurtma berganingiz uchun minnatdorchiligimiz.",
+        "Telegram botimiz yoki saytimiz orqali o‘zingiz beradigan va yetkazib berishda naqd to‘laydigan har bir buyurtmangizga. Chegirma rasmiylashtirishda avtomatik qo‘llaniladi — bu bot yoki sayt orqali buyurtma berganingiz uchun minnatdorchiligimiz.",
         'К каждому заказу, который вы оформляете сами в нашем Telegram-боте или на сайте и оплачиваете при доставке наличными. Скидка применяется автоматически при оформлении — это наша благодарность за заказ в боте или на сайте.'),
     'loyalty_guide.earn.surprise_title': _ui_tr('Surprise rewards', 'Kutilmagan mukofotlar', 'Сюрприз-награды'),
     'loyalty_guide.earn.surprise_desc': _ui_tr(
         "Every now and then we surprise members who order with a little extra — a bonus of AquaCoins that lands in your balance when you least expect it. No schedule, no formula; that's what keeps it a surprise.",
-        "Vaqti-vaqti bilan buyurtma bergan a'zolarni kichik sovg'a bilan xursand qilamiz — siz kutmagan paytda balansingizga AquaCoins bonusi tushadi. Jadval ham, formula ham yo'q; mana shu uni chinakam syurprizga aylantiradi.",
+        "Vaqti-vaqti bilan buyurtma bergan a’zolarni kichik sovg‘a bilan xursand qilamiz — siz kutmagan paytda balansingizga AquaCoins bonusi tushadi. Jadval ham, formula ham yo‘q; mana shu uni chinakam syurprizga aylantiradi.",
         'Время от времени мы радуем участников, которые делают заказы, приятным бонусом — AquaCoins появляются на вашем балансе тогда, когда вы меньше всего этого ждёте. Без расписания и без формул — именно это и делает его сюрпризом.',
     ),
 
-    'loyalty_guide.example.title': _ui_tr('See it in action', 'Amalda koʻring', 'Пример расчёта'),
+    'loyalty_guide.example.title': _ui_tr('See it in action', "Amalda ko‘ring", 'Пример расчёта'),
     'loyalty_guide.example.body': _ui_tr(
         "Spend {spend} {unit} as a {tier} tier member and you'll earn {base} base AquaCoins × {mult} = {points} AquaCoins.",
-        "{tier} darajasidagi aʼzo sifatida {spend} {unit} sarflang va {base} asosiy AquaCoins × {mult} = {points} AquaCoins yigʻasiz.",
+        "{tier} darajasidagi a’zo sifatida {spend} {unit} sarflang va {base} asosiy AquaCoins × {mult} = {points} AquaCoins yig‘asiz.",
         'Потратьте {spend} {unit} как участник уровня {tier} — и получите {base} базовых AquaCoins × {mult} = {points} AquaCoins.',
     ),
 
     # --- Referral section (dedicated "How referrals work" flow) ---
-    'loyalty_guide.referral.kicker': _ui_tr('Refer & earn', "Taklif qiling va yig'ing", 'Приглашайте и зарабатывайте'),
+    'loyalty_guide.referral.kicker': _ui_tr('Refer & earn', "Taklif qiling va yig‘ing", 'Приглашайте и зарабатывайте'),
     'loyalty_guide.referral.title': _ui_tr(
         'Invite friends, earn together',
-        "Do'stlarni taklif qiling — birga yig'ing",
+        "Do‘stlarni taklif qiling — birga yig‘ing",
         'Приглашайте друзей — зарабатывайте вместе',
     ),
     'loyalty_guide.referral.subtitle': _ui_tr(
         'Share your personal link. When a friend joins and completes their first order, you get {you} AquaCoins and they get {friend}.',
-        "Shaxsiy havolangizni ulashing. Do'stingiz qo'shilib, birinchi buyurtmasini yakunlaganda siz {you} AquaCoins, u esa {friend} AquaCoins oladi.",
+        "Shaxsiy havolangizni ulashing. Do‘stingiz qo‘shilib, birinchi buyurtmasini yakunlaganda siz {you} AquaCoins, u esa {friend} AquaCoins oladi.",
         'Поделитесь своей персональной ссылкой. Когда друг зарегистрируется и завершит первый заказ, вы получите {you} AquaCoins, а он — {friend}.',
     ),
     'loyalty_guide.referral.s1_title': _ui_tr('Share your link', 'Havolangizni ulashing', 'Поделитесь ссылкой'),
     'loyalty_guide.referral.s1_desc': _ui_tr(
         'Open the Loyalty section in our Telegram bot to get your personal referral link, then send it to a friend.',
-        "Telegram botimizdagi Sodiqlik bo'limini ochib, shaxsiy referal havolangizni oling va do'stingizga yuboring.",
+        "Telegram botimizdagi Sodiqlik bo‘limini ochib, shaxsiy referal havolangizni oling va do‘stingizga yuboring.",
         'Откройте раздел «Лояльность» в нашем Telegram-боте, получите персональную реферальную ссылку и отправьте другу.',
     ),
-    'loyalty_guide.referral.s2_title': _ui_tr('Your friend joins', "Do'stingiz qo'shiladi", 'Друг присоединяется'),
+    'loyalty_guide.referral.s2_title': _ui_tr('Your friend joins', "Do‘stingiz qo‘shiladi", 'Друг присоединяется'),
     'loyalty_guide.referral.s2_desc': _ui_tr(
         'They open your link, register and start ordering. The referral now shows as Pending.',
-        "U havolangizni ochadi, ro'yxatdan o'tadi va buyurtma bera boshlaydi. Referal endi «Kutilmoqda» holatida ko'rinadi.",
+        "U havolangizni ochadi, ro‘yxatdan o‘tadi va buyurtma bera boshlaydi. Referal endi «Kutilmoqda» holatida ko‘rinadi.",
         'Он переходит по ссылке, регистрируется и начинает заказывать. Реферал отображается как «Ожидается».',
     ),
-    'loyalty_guide.referral.s3_title': _ui_tr('You both earn', "Ikkalangiz ham yig'asiz", 'Вы оба зарабатываете'),
+    'loyalty_guide.referral.s3_title': _ui_tr('You both earn', "Ikkalangiz ham yig‘asiz", 'Вы оба зарабатываете'),
     'loyalty_guide.referral.s3_desc': _ui_tr(
         "Once your friend's first order is delivered and fully paid, you get {you} AquaCoins and they get {friend} — added automatically.",
-        "Do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langach, siz {you} AquaCoins, u esa {friend} AquaCoins olasiz — avtomatik qo'shiladi.",
+        "Do‘stingizning birinchi buyurtmasi yetkazib berilib, to‘liq to‘langach, siz {you} AquaCoins, u esa {friend} AquaCoins olasiz — avtomatik qo‘shiladi.",
         'Как только первый заказ друга доставлен и полностью оплачен, вы получаете {you} AquaCoins, а он — {friend} — начисляется автоматически.',
     ),
     'loyalty_guide.referral.note_title': _ui_tr(
@@ -8661,21 +8685,21 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.referral.note_body': _ui_tr(
         "A referral is successful only when your friend's first order is both delivered and fully paid. Until then it stays Pending — a delivered order that hasn't been paid yet (for example, cash on delivery awaiting collection) does not count.",
-        "Referal faqat do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langandagina muvaffaqiyatli hisoblanadi. Shu paytgacha u «Kutilmoqda» bo'lib qoladi — yetkazib berilgan, ammo hali to'lanmagan buyurtma (masalan, yetkazib berishda naqd to'lov hali yig'ilmagan) hisobga olinmaydi.",
+        "Referal faqat do‘stingizning birinchi buyurtmasi yetkazib berilib, to‘liq to‘langandagina muvaffaqiyatli hisoblanadi. Shu paytgacha u «Kutilmoqda» bo‘lib qoladi — yetkazib berilgan, ammo hali to‘lanmagan buyurtma (masalan, yetkazib berishda naqd to‘lov hali yig‘ilmagan) hisobga olinmaydi.",
         'Реферал считается успешным, только когда первый заказ друга доставлен и полностью оплачен. До этого он остаётся «Ожидается» — доставленный, но ещё не оплаченный заказ (например, наличными при доставке, оплата ещё не получена) не засчитывается.',
     ),
     'loyalty_guide.referral.timing': _ui_tr(
         'Bonuses are granted automatically and may take up to a day to appear after the order is delivered and paid.',
-        "Bonuslar avtomatik qo'shiladi va buyurtma yetkazib berilib, to'langach paydo bo'lishi bir kungacha vaqt olishi mumkin.",
+        "Bonuslar avtomatik qo‘shiladi va buyurtma yetkazib berilib, to‘langach paydo bo‘lishi bir kungacha vaqt olishi mumkin.",
         'Бонусы начисляются автоматически и могут появиться в течение суток после доставки и оплаты заказа.',
     ),
 
     'loyalty_guide.tiers.kicker': _ui_tr('Status', 'Maqom', 'Статус'),
-    'loyalty_guide.tiers.title': _ui_tr('Climb the tiers', "Darajalar bo'ylab ko'tariling", 'Поднимайтесь по уровням'),
+    'loyalty_guide.tiers.title': _ui_tr('Climb the tiers', "Darajalar bo‘ylab ko‘tariling", 'Поднимайтесь по уровням'),
     'loyalty_guide.tiers.subtitle': _ui_tr(
-        'The more you earn over a year, the higher you rise — and the faster every future AquaCoin adds up.',
-        "Bir yil davomida qancha ko'p yig'sangiz, shuncha yuqori ko'tarilasiz — va har bir kelajakdagi AquaCoin tezroq to'planadi.",
-        'Чем больше вы зарабатываете за год, тем выше поднимаетесь — и тем быстрее растут будущие AquaCoins.',
+        "The more AquaCoins you earn, the higher you rise — and the faster every future AquaCoin adds up.",
+        "Qancha ko‘p AquaCoins yig‘sangiz, shuncha yuqori ko‘tarilasiz — va har bir kelajakdagi AquaCoin tezroq to‘planadi.",
+        "Чем больше AquaCoins вы зарабатываете, тем выше поднимаетесь — и тем быстрее растут будущие AquaCoins.",
     ),
     'loyalty_guide.tier.from': _ui_tr('From {pts} AquaCoins', '{pts} AquaCoinsdan', 'От {pts} AquaCoins'),
     'loyalty_guide.tier.label_multiplier': _ui_tr('AquaCoins rate', 'AquaCoins koeffitsiyenti', 'множитель'),
@@ -8695,7 +8719,7 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.tier.perk_multiplier': _ui_tr('{mult}× AquaCoins on every order', 'Har buyurtmada {mult}× AquaCoins', '{mult}× AquaCoins за каждый заказ'),
     'loyalty_guide.tier.perk_discount': _ui_tr(
         '{pct}% off orders you place in our bot or on our website, paid on delivery',
-        "Botimiz yoki saytimiz orqali beriladigan, yetkazib berishda to'lanadigan buyurtmalarga {pct}% chegirma",
+        "Botimiz yoki saytimiz orqali beriladigan, yetkazib berishda to‘lanadigan buyurtmalarga {pct}% chegirma",
         'Скидка {pct}% на заказы в нашем боте или на сайте с оплатой при доставке',
     ),
     # Quiet fine-print footnote anchored to the tier stat's `*` marker (see
@@ -8707,52 +8731,51 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     # elsewhere on the card.
     'loyalty_guide.tier.discount_footnote': _ui_tr(
         "* Your tier discount is a perk of ordering in our Telegram bot or on our website: it's taken off automatically when you place the order yourself and pay on delivery in cash. Subscription deliveries keep their own subscription price; your tier perk is there whenever you place an extra order in the bot or on the website.",
-        "* Daraja chegirmasi — Telegram botimiz yoki saytimiz orqali buyurtma berishning afzalligi: buyurtmani o'zingiz berib, yetkazib berishda naqd to'laganingizda u avtomatik qo'llaniladi. Obuna yetkazmalari o'z obuna narxida qoladi; bot yoki sayt orqali qo'shimcha buyurtma berganingizda daraja bonusingiz doim siz bilan.",
+        "* Daraja chegirmasi — Telegram botimiz yoki saytimiz orqali buyurtma berishning afzalligi: buyurtmani o‘zingiz berib, yetkazib berishda naqd to‘laganingizda u avtomatik qo‘llaniladi. Obuna yetkazmalari o‘z obuna narxida qoladi; bot yoki sayt orqali qo‘shimcha buyurtma berganingizda daraja bonusingiz doim siz bilan.",
         '* Скидка уровня — преимущество заказа в нашем Telegram-боте и на сайте: она применяется автоматически, когда вы оформляете заказ сами и оплачиваете при доставке наличными. Доставки по подписке идут по своей цене подписки; бонус уровня всегда ждёт вас, когда вы оформляете дополнительный заказ в боте или на сайте.',
     ),
 
     # Tagline + qualitative benefit bullets are keyed by tier display_order (0=lowest
     # tier), a rename-proof identity — renaming a tier never drops its handbook copy.
-    'loyalty_guide.tier.0.tagline': _ui_tr('Where every member starts', "Har bir a'zo shu yerdan boshlaydi", 'С этого начинают все'),
-    'loyalty_guide.tier.0.benefit1': _ui_tr('Full access to the rewards catalog', "Mukofotlar katalogiga to'liq kirish", 'Полный доступ к каталогу наград'),
+    'loyalty_guide.tier.0.tagline': _ui_tr('Where every member starts', "Har bir a’zo shu yerdan boshlaydi", 'С этого начинают все'),
+    'loyalty_guide.tier.0.benefit1': _ui_tr('Full access to the rewards catalog', "Mukofotlar katalogiga to‘liq kirish", 'Полный доступ к каталогу наград'),
     'loyalty_guide.tier.0.benefit2': _ui_tr('Standard delivery, always free', 'Standart yetkazib berish, doim bepul', 'Стандартная доставка, всегда бесплатно'),
 
+    # Tiers 1-3 list only their live multiplier and discount: the support / VIP / manager perks were promises the
+    # business does not make (owner, 2026-11-13), and their rows are deleted on dev and prod.
     'loyalty_guide.tier.1.tagline': _ui_tr('For our regulars', 'Doimiy mijozlarimiz uchun', 'Для постоянных клиентов'),
-    'loyalty_guide.tier.1.benefit1': _ui_tr('Priority support', 'Ustuvor qo‘llab-quvvatlash', 'Приоритетная поддержка'),
 
     'loyalty_guide.tier.2.tagline': _ui_tr('For true water lovers', 'Haqiqiy suv ixlosmandlari uchun', 'Для настоящих ценителей воды'),
-    'loyalty_guide.tier.2.benefit1': _ui_tr('VIP support & early access to promos', 'VIP qo‘llab-quvvatlash va aksiyalarga erta kirish', 'VIP-поддержка и ранний доступ к акциям'),
 
-    'loyalty_guide.tier.3.tagline': _ui_tr('Our most valued members', "Eng qadrli a'zolarimiz", 'Самые ценные участники'),
-    'loyalty_guide.tier.3.benefit1': _ui_tr('Dedicated manager', 'Shaxsiy menejer', 'Персональный менеджер'),
+    'loyalty_guide.tier.3.tagline': _ui_tr('Our most valued members', "Eng qadrli a’zolarimiz", 'Самые ценные участники'),
 
     'loyalty_guide.promo.title': _ui_tr('How tier promotion works', 'Daraja oshirish qanday ishlaydi', 'Как происходит повышение уровня'),
-    'loyalty_guide.promo.s1_title': _ui_tr('Cross a threshold', "Chegaradan o'ting", 'Преодолейте порог'),
+    'loyalty_guide.promo.s1_title': _ui_tr('Cross a threshold', "Chegaradan o‘ting", 'Преодолейте порог'),
     'loyalty_guide.promo.s1_desc': _ui_tr(
         "Reach a tier's AquaCoin threshold and you're upgraded instantly — no waiting.",
-        'Daraja AquaCoins chegarasiga yeting va darhol koʻtarilasiz — kutishsiz.',
+        "Daraja AquaCoins chegarasiga yeting va darhol ko‘tarilasiz — kutishsiz.",
         'Достигните порога уровня — и повышение происходит мгновенно, без ожидания.',
     ),
-    'loyalty_guide.promo.s2_title': _ui_tr('Locked in for a year', 'Bir yilga mustahkamlanadi', 'Закреплён на год'),
+    'loyalty_guide.promo.s2_title': _ui_tr("Locked in for {days} days", "{days} kunga mustahkamlanadi", "Закреплён на {days} дней"),
     'loyalty_guide.promo.s2_desc': _ui_tr(
         "Your new tier is guaranteed for {days} days — you won't be downgraded while you stay active.",
-        'Yangi darajangiz {days} kunga kafolatlanadi — faol boʻlib turganingizda pasaytirilmaysiz.',
+        "Yangi darajangiz {days} kunga kafolatlanadi — faol bo‘lib turganingizda pasaytirilmaysiz.",
         'Ваш новый уровень гарантирован на {days} дней — вы не понизитесь, пока остаётесь активны.',
     ),
-    'loyalty_guide.promo.s3_title': _ui_tr('Stay active', 'Faol boʻling', 'Оставайтесь активны'),
+    'loyalty_guide.promo.s3_title': _ui_tr('Stay active', "Faol bo‘ling", 'Оставайтесь активны'),
     'loyalty_guide.promo.s3_desc': _ui_tr(
         'Keep ordering to refresh your status and hold your tier — or climb to the next one.',
-        'Maqomingizni yangilash va darajangizni saqlash uchun buyurtma berishda davom eting — yoki keyingisiga koʻtariling.',
+        "Maqomingizni yangilash va darajangizni saqlash uchun buyurtma berishda davom eting — yoki keyingisiga ko‘tariling.",
         'Продолжайте заказывать, чтобы обновлять статус и сохранять уровень — или подняться выше.',
     ),
-    'loyalty_guide.rolling.title': _ui_tr('Your status uses the last 12 months.', 'Maqomingiz soʻnggi 12 oyga asoslanadi.', 'Статус считается за последние 12 месяцев.'),
+    'loyalty_guide.rolling.title': _ui_tr("Your status uses the last {days} days.", "Maqomingiz so‘nggi {days} kunga asoslanadi.", "Статус считается за последние {days} дней."),
     'loyalty_guide.rolling.body': _ui_tr(
         'Only AquaCoins earned in the trailing {days} days count toward your tier. Spending AquaCoins on rewards never changes your status.',
-        'Faqat soʻnggi {days} kun ichida yigʻilgan AquaCoins darajangizga hisoblanadi. Mukofotlarga AquaCoins sarflash maqomingizni oʻzgartirmaydi.',
+        "Faqat so‘nggi {days} kun ichida yig‘ilgan AquaCoins darajangizga hisoblanadi. Mukofotlarga AquaCoins sarflash maqomingizni o‘zgartirmaydi.",
         'К уровню учитываются только AquaCoins за последние {days} дней. Трата AquaCoins на награды никогда не меняет статус.',
     ),
 
-    'loyalty_guide.twopoints.kicker': _ui_tr('Good to know', 'Bilib qoʻying', 'Важно знать'),
+    'loyalty_guide.twopoints.kicker': _ui_tr('Good to know', "Bilib qo‘ying", 'Важно знать'),
     'loyalty_guide.twopoints.title': _ui_tr('Two kinds of AquaCoins', 'Ikki xil AquaCoins', 'Два вида AquaCoins'),
     'loyalty_guide.twopoints.balance_title': _ui_tr('Spendable balance', 'Sarflanadigan balans', 'Доступный баланс'),
     'loyalty_guide.twopoints.balance_desc': _ui_tr(
@@ -8763,7 +8786,7 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.twopoints.status_title': _ui_tr('Status AquaCoins', 'Maqom AquaCoins', 'Статусные AquaCoins'),
     'loyalty_guide.twopoints.status_desc': _ui_tr(
         'AquaCoins earned in the last {days} days. These decide your tier — and redeeming never reduces them.',
-        'Soʻnggi {days} kun ichida yigʻilgan AquaCoins. Ular darajangizni belgilaydi — va almashtirish ularni kamaytirmaydi.',
+        "So‘nggi {days} kun ichida yig‘ilgan AquaCoins. Ular darajangizni belgilaydi — va almashtirish ularni kamaytirmaydi.",
         'AquaCoins за последние {days} дней. Они определяют уровень — и обмен их не уменьшает.',
     ),
     'loyalty_guide.twopoints.note': _ui_tr(
@@ -8782,38 +8805,38 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.rewards.discount_title': _ui_tr('Discounts', 'Chegirmalar', 'Скидки'),
     'loyalty_guide.rewards.discount_desc': _ui_tr(
         'Knock a fixed amount off your order total at checkout.',
-        'Toʻlov paytida buyurtma summangizdan belgilangan miqdorni chegiring.',
+        "To‘lov paytida buyurtma summangizdan belgilangan miqdorni chegiring.",
         'Снижайте сумму заказа на фиксированную величину при оформлении.',
     ),
     'loyalty_guide.rewards.product_title': _ui_tr('Free products', 'Bepul mahsulotlar', 'Бесплатные товары'),
     'loyalty_guide.rewards.product_desc': _ui_tr(
         'Add a free bottle of water straight to your order.',
-        'Buyurtmangizga bepul suv shishasini qoʻshing.',
+        "Buyurtmangizga bepul suv shishasini qo‘shing.",
         'Добавьте бесплатную бутылку воды прямо в заказ.',
     ),
     'loyalty_guide.redeem.title': _ui_tr('How to redeem', 'Qanday almashtirish', 'Как обменять'),
     'loyalty_guide.redeem.s1': _ui_tr(
-        'Pick a reward at checkout in the app or Telegram bot.',
-        'Ilova yoki Telegram botda toʻlov paytida mukofotni tanlang.',
-        'Выберите награду при оформлении в приложении или Telegram-боте.',
+        "Pick a reward at checkout on the website or in our Telegram bot.",
+        "Saytda yoki Telegram botda to‘lov paytida mukofotni tanlang.",
+        "Выберите награду при оформлении заказа на сайте или в Telegram-боте.",
     ),
     'loyalty_guide.redeem.s2': _ui_tr('Your AquaCoins are deducted instantly.', 'AquaCoins darhol yechib olinadi.', 'AquaCoins списываются мгновенно.'),
     'loyalty_guide.redeem.s3': _ui_tr(
         'The discount or free item applies to that order.',
-        'Chegirma yoki bepul mahsulot oʻsha buyurtmaga qoʻllaniladi.',
+        "Chegirma yoki bepul mahsulot o‘sha buyurtmaga qo‘llaniladi.",
         'Скидка или бесплатный товар применяется к этому заказу.',
     ),
     'loyalty_guide.redeem.note': _ui_tr(
         'One reward per order. Some rewards have a minimum order value. Cancel an order and your AquaCoins are refunded.',
-        'Har buyurtmaga bitta mukofot. Baʼzi mukofotlarda minimal buyurtma summasi bor. Buyurtmani bekor qilsangiz, AquaCoins qaytariladi.',
+        "Har buyurtmaga bitta mukofot. Ba’zi mukofotlarda minimal buyurtma summasi bor. Buyurtmani bekor qilsangiz, AquaCoins qaytariladi.",
         'Одна награда на заказ. У некоторых наград есть минимальная сумма заказа. При отмене заказа AquaCoins возвращаются.',
     ),
 
     'loyalty_guide.expiry.title': _ui_tr('Make them count.', 'AquaCoins ishlating.', 'Используйте вовремя.'),
     'loyalty_guide.expiry.body': _ui_tr(
-        'AquaCoins are valid for {days} days from the day you earn them, and we always use your oldest AquaCoins first — so put them to use within the year.',
-        'AquaCoins yigʻilgan kundan {days} kun amal qiladi va biz doim eng eski AquaCoins birinchi ishlatamiz — shuning uchun ularni yil davomida ishlating.',
-        'AquaCoins действуют {days} дней с момента начисления, и мы всегда используем самые старые AquaCoins первыми — поэтому используйте их в течение года.',
+        "AquaCoins are valid for {days} days from the day you earn them, and we always use your oldest AquaCoins first — so use them before they expire.",
+        "AquaCoins yig‘ilgan kundan {days} kun amal qiladi va biz doim eng eski AquaCoins birinchi ishlatamiz — shuning uchun ularni muddati tugashidan oldin ishlating.",
+        "AquaCoins действуют {days} дней с момента начисления, и мы всегда используем самые старые AquaCoins первыми — поэтому тратьте их, пока срок не истёк.",
     ),
     'loyalty_guide.delivery_note': _ui_tr(
         'Delivery is always free — you never spend AquaCoins on it.',
@@ -8826,31 +8849,31 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     'loyalty_guide.faq.q1': _ui_tr('Do my AquaCoins expire?', 'AquaCoins muddati tugaydimi?', 'Сгорают ли мои AquaCoins?'),
     'loyalty_guide.faq.a1': _ui_tr(
         'Yes — AquaCoins stay valid for {days} days from when you earn them. We always spend your oldest AquaCoins first.',
-        'Ha — AquaCoins yigʻilgan kundan {days} kun amal qiladi. Biz doim eng eski AquaCoins birinchi sarflaymiz.',
+        "Ha — AquaCoins yig‘ilgan kundan {days} kun amal qiladi. Biz doim eng eski AquaCoins birinchi sarflaymiz.",
         'Да — AquaCoins действуют {days} дней с момента начисления. Сначала всегда расходуются самые старые.',
     ),
     'loyalty_guide.faq.q2': _ui_tr('Does redeeming rewards lower my tier?', 'Mukofot almashtirish darajamni pasaytiradimi?', 'Понижает ли обмен наград мой уровень?'),
     'loyalty_guide.faq.a2': _ui_tr(
         "No. Your tier is based on the AquaCoins you've earned, not your spendable balance. Redeem freely — your status stays.",
-        'Yoʻq. Darajangiz sarflanadigan balansga emas, yigʻgan AquaCoins asoslanadi. Bemalol almashtiring — maqomingiz saqlanadi.',
+        "Yo‘q. Darajangiz sarflanadigan balansga emas, yig‘gan AquaCoins miqdoringizga asoslanadi. Bemalol almashtiring — maqomingiz saqlanadi.",
         'Нет. Уровень зависит от заработанных AquaCoins, а не от доступного баланса. Обменивайте свободно — статус сохраняется.',
     ),
     'loyalty_guide.faq.q3': _ui_tr('How is my tier decided?', 'Darajam qanday aniqlanadi?', 'Как определяется мой уровень?'),
     'loyalty_guide.faq.a3': _ui_tr(
-        "By the AquaCoins you earn in a rolling 12-month window. Cross a threshold and you're upgraded instantly, then locked in.",
-        'Soʻnggi 12 oy ichida yigʻgan AquaCoins boʻyicha. Chegaradan oʻtsangiz, darhol koʻtarilasiz va daraja mustahkamlanadi.',
-        'По AquaCoins за скользящие 12 месяцев. Преодолели порог — повышение мгновенно, затем уровень закрепляется.',
+        "By the AquaCoins you earn in the last {days} days. Cross a threshold and you're upgraded instantly, then locked in.",
+        "So‘nggi {days} kun ichida yig‘gan AquaCoins bo‘yicha. Chegaradan o‘tsangiz, darhol ko‘tarilasiz va daraja mustahkamlanadi.",
+        "По AquaCoins, заработанным за последние {days} дней. Преодолели порог — повышение мгновенно, затем уровень закрепляется.",
     ),
     'loyalty_guide.faq.q4': _ui_tr('How do I redeem a reward?', 'Mukofotni qanday almashtiraman?', 'Как обменять награду?'),
     'loyalty_guide.faq.a4': _ui_tr(
-        'Pick a reward at checkout in the app or our Telegram bot. Your AquaCoins are deducted and the benefit applies to that order.',
-        'Ilova yoki Telegram botimizda toʻlov paytida mukofotni tanlang. AquaCoins yechiladi va imtiyoz oʻsha buyurtmaga qoʻllaniladi.',
-        'Выберите награду при оформлении в приложении или Telegram-боте. AquaCoins спишутся, а выгода применится к заказу.',
+        "Pick a reward at checkout on the website or in our Telegram bot. Your AquaCoins are deducted and the benefit applies to that order.",
+        "Saytda yoki Telegram botimizda to‘lov paytida mukofotni tanlang. AquaCoins yechiladi va imtiyoz o‘sha buyurtmaga qo‘llaniladi.",
+        "Выберите награду при оформлении заказа на сайте или в Telegram-боте. AquaCoins спишутся, а выгода применится к заказу.",
     ),
-    'loyalty_guide.faq.q5': _ui_tr('Where can I see my balance and tier?', 'Balans va darajamni qayerdan koʻraman?', 'Где посмотреть баланс и уровень?'),
+    'loyalty_guide.faq.q5': _ui_tr('Where can I see my balance and tier?', "Balans va darajamni qayerdan ko‘raman?", 'Где посмотреть баланс и уровень?'),
     'loyalty_guide.faq.a5': _ui_tr(
         'Open the Loyalty section in our Telegram bot, or your account on the website — your balance, tier and history are all there.',
-        'Telegram botimizdagi Sodiqlik boʻlimini yoki saytdagi hisobingizni oching — balans, daraja va tarix shu yerda.',
+        "Telegram botimizdagi Sodiqlik bo‘limini yoki saytdagi hisobingizni oching — balans, daraja va tarix shu yerda.",
         'Откройте раздел «Лояльность» в Telegram-боте или личный кабинет на сайте — там баланс, уровень и история.',
     ),
     'loyalty_guide.faq.q6': _ui_tr('Is delivery free?', 'Yetkazib berish bepulmi?', 'Доставка бесплатная?'),
@@ -8866,7 +8889,7 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.faq.a7': _ui_tr(
         "When your invited friend's first order is both delivered and fully paid. Until then it shows as Pending; once both are done, you and your friend receive your AquaCoins automatically.",
-        "Taklif qilgan do'stingizning birinchi buyurtmasi yetkazib berilib, to'liq to'langanda. Shu paytgacha u «Kutilmoqda» bo'lib turadi; ikkala shart bajarilgach, siz va do'stingiz AquaCoins avtomatik olasiz.",
+        "Taklif qilgan do‘stingizning birinchi buyurtmasi yetkazib berilib, to‘liq to‘langanda. Shu paytgacha u «Kutilmoqda» bo‘lib turadi; ikkala shart bajarilgach, siz va do‘stingiz AquaCoins avtomatik olasiz.",
         'Когда первый заказ приглашённого друга доставлен и полностью оплачен. До этого он показывается как «Ожидается»; после выполнения обоих условий вы и ваш друг получаете AquaCoins автоматически.',
     ),
     'loyalty_guide.faq.q8': _ui_tr(
@@ -8876,14 +8899,14 @@ LOYALTY_GUIDE_TRANSLATIONS = {
     ),
     'loyalty_guide.faq.a8': _ui_tr(
         "Exactly what the name says — a little delight. Once in a while, members who order are picked at random to receive a bonus of AquaCoins. We won't say when it happens or how much it'll be; just keep ordering, and one might quietly land in your balance.",
-        "Nomidan ko'rinib turibdi — yoqimli kutilmagan sovg'a. Vaqti-vaqti bilan buyurtma bergan a'zolar tasodifan tanlanib, AquaCoins bonusini oladi. Qachon va qancha bo'lishini aytmaymiz; faqat buyurtma berishda davom eting — bonus balansingizga sokin tushib qolishi mumkin.",
+        "Nomidan ko‘rinib turibdi — yoqimli kutilmagan sovg‘a. Vaqti-vaqti bilan buyurtma bergan a’zolar tasodifan tanlanib, AquaCoins bonusini oladi. Qachon va qancha bo‘lishini aytmaymiz; faqat buyurtma berishda davom eting — bonus balansingizga sokin tushib qolishi mumkin.",
         'Ровно то, что следует из названия, — приятный сюрприз. Время от времени участники, которые делают заказы, случайно выбираются для бонуса AquaCoins. Мы не скажем, когда это случится и сколько это будет; просто продолжайте заказывать — и он может тихо появиться на вашем балансе.',
     ),
 
-    'loyalty_guide.cta.title': _ui_tr('Ready to start earning?', "Yig'ishni boshlashga tayyormisiz?", 'Готовы начать копить?'),
+    'loyalty_guide.cta.title': _ui_tr('Ready to start earning?', "Yig‘ishni boshlashga tayyormisiz?", 'Готовы начать копить?'),
     'loyalty_guide.cta.body': _ui_tr(
         'Every bottle brings you closer to your next reward. Place an order and watch your AquaCoins grow.',
-        'Har bir shisha sizni keyingi mukofotingizga yaqinlashtiradi. Buyurtma bering va AquaCoins oʻsishini kuzating.',
+        "Har bir shisha sizni keyingi mukofotingizga yaqinlashtiradi. Buyurtma bering va AquaCoins o‘sishini kuzating.",
         'Каждая бутылка приближает вас к следующей награде. Сделайте заказ и наблюдайте, как растут AquaCoins.',
     ),
     'loyalty_guide.cta.button': _ui_tr('Order now', 'Hozir buyurtma berish', 'Заказать сейчас'),
@@ -8988,37 +9011,23 @@ LOYALTY_GUIDE_TRANSLATIONS = {
         "Har bir xarid bilan AquaCoins to'plang va ularni ajoyib mukofotlarga almashtiring!",
         'Зарабатывайте AquaCoins с каждой покупкой и обменивайте их на удивительные награды!',
     ),
-    'landing.loyalty.public_title': {
-        'en': 'Join Aqua Club — earn AquaCoins on every order',
-        'uz': "Aqua Club'ga qo'shiling — har bir buyurtmada AquaCoins yig'ing",
-        'ru': 'Вступайте в Aqua Club — копите AquaCoins с каждого заказа'
-    },
-    'landing.loyalty.public_subtitle': {
-        'en': 'Our free loyalty programme rewards every delivered order. Earn AquaCoins, climb tiers, and redeem rewards.',
-        'uz': "Bepul sodiqlik dasturimiz har bir yetkazilgan buyurtmani mukofotlaydi. AquaCoins yig'ing, darajalar bo'ylab ko'tariling va sovg'alarni oling.",
-        'ru': 'Наша бесплатная программа лояльности вознаграждает каждый доставленный заказ. Копите AquaCoins, повышайте уровень и получайте награды.'
-    },
-    'landing.loyalty.public_earn_title': {
-        'en': 'Earn on every order', 'uz': 'Har bir buyurtmada yig\'ing', 'ru': 'Копите с каждого заказа'
-    },
+    # The home page's Aqua Club block reads public_earn, public_redeem(_title) and public_cta_primary; the old
+    # public_title / subtitle / earn_title / tiers_title rows were read by nothing and were deleted (review home-10).
     'landing.loyalty.public_earn': {
         'en': 'Get a {bonus} AquaCoins welcome bonus when you join, then earn on every delivered, paid order.',
-        'uz': "Qo'shilganingizda {bonus} AquaCoins kutib olish bonusini oling, so'ngra har bir yetkazilgan va to'langan buyurtmada yig'ing.",
+        'uz': "Qo‘shilganingizda {bonus} AquaCoins kutib olish bonusini oling, so‘ngra har bir yetkazilgan va to‘langan buyurtmada yig‘ing.",
         'ru': 'Получите приветственный бонус {bonus} AquaCoins при вступлении, затем копите с каждого доставленного оплаченного заказа.'
     },
-    'landing.loyalty.public_tiers_title': {
-        'en': 'Tiers that reward loyalty', 'uz': 'Sodiqlikni mukofotlovchi darajalar', 'ru': 'Уровни за лояльность'
-    },
     'landing.loyalty.public_redeem_title': {
-        'en': 'Redeem for rewards', 'uz': 'Sovg\'alarga almashtiring', 'ru': 'Обменивайте на награды'
+        'en': 'Redeem for rewards', 'uz': "Sovg‘alarga almashtiring", 'ru': 'Обменивайте на награды'
     },
     'landing.loyalty.public_redeem': {
         'en': 'Spend your AquaCoins on discounts and free products at checkout.',
-        'uz': "AquaCoins'ni to'lov vaqtida chegirmalar va bepul mahsulotlarga sarflang.",
+        'uz': "AquaCoins’ni to‘lov vaqtida chegirmalar va bepul mahsulotlarga sarflang.",
         'ru': 'Тратьте AquaCoins на скидки и бесплатные товары при оформлении заказа.'
     },
     'landing.loyalty.public_cta_primary': {
-        'en': 'See how Aqua Club works', 'uz': 'Aqua Club qanday ishlashini ko\'ring', 'ru': 'Узнать, как работает Aqua Club'
+        'en': 'See how Aqua Club works', 'uz': "Aqua Club qanday ishlashini ko‘ring", 'ru': 'Узнать, как работает Aqua Club'
     },
 }
 BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
@@ -9031,86 +9040,14 @@ BACKEND_TRANSLATIONS.update(LOYALTY_GUIDE_TRANSLATIONS)
 # schedule. Pinned by tests/integration/test_subscriptions_page_truthful_copy.py.
 # ============================================================================
 SUBSCRIPTION_PAGE_TRANSLATIONS = {
-    'Never Run Out': _ui_tr('Never Run Out', "Suvsiz qolmang", 'Вода всегда в запасе'),
-    'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.': _ui_tr(
-        'Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most.',
-        "Obunangiz har bir buyurtmani jadval bo'yicha o'zi beradi, shuning uchun suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz.",
-        'Подписка сама оформляет каждый заказ по расписанию, поэтому вы не забудете заказать воду и не останетесь без неё в самый нужный момент.',
-    ),
-    'Delivery is always free, on subscription deliveries as on every order.': _ui_tr(
-        'Delivery is always free, on subscription deliveries as on every order.',
-        "Yetkazib berish doim bepul: obuna bo'yicha yetkazishlarda ham, har bir buyurtmada ham.",
-        'Доставка всегда бесплатная: и для доставок по подписке, и для каждого заказа.',
-    ),
-    "Earn AquaCoins on every subscription delivery at your tier's rate, and redeem them for rewards.": _ui_tr(
-        "Earn AquaCoins on every subscription delivery at your tier's rate, and redeem them for rewards.",
-        "Obuna bo'yicha har bir yetkazishda darajangiz stavkasi bo'yicha AquaCoins yig'ing va ularni mukofotlarga almashtiring.",
-        'Получайте AquaCoins за каждую доставку по подписке по ставке вашего уровня и обменивайте их на награды.',
-    ),
-    'What do I get with a subscription?': _ui_tr(
-        'What do I get with a subscription?', 'Obuna nimalarni beradi?', 'Что я получаю с подпиской?',
-    ),
-    "Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most. Delivery is always free, and you earn AquaCoins on every subscription delivery at your tier's rate. Subscription deliveries are billed at the regular price.": _ui_tr(
-        "Your subscription places each order for you on schedule, so you never forget to order water and never run out when you need it most. Delivery is always free, and you earn AquaCoins on every subscription delivery at your tier's rate. Subscription deliveries are billed at the regular price.",
-        "Obunangiz har bir buyurtmani jadval bo'yicha o'zi beradi, shuning uchun suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz. Yetkazib berish doim bepul, obuna bo'yicha har bir yetkazishda esa darajangiz stavkasi bo'yicha AquaCoins yig'asiz. Obuna bo'yicha yetkazishlar oddiy narxda hisoblanadi.",
-        'Подписка сама оформляет каждый заказ по расписанию, поэтому вы не забудете заказать воду и не останетесь без неё в самый нужный момент. Доставка всегда бесплатная, а за каждую доставку по подписке вы получаете AquaCoins по ставке вашего уровня. Доставки по подписке оплачиваются по обычной цене.',
-    ),
-    'Auto': _ui_tr('Auto', 'Avto', 'Авто'),
-    'Orders placed for you': _ui_tr('Orders placed for you', "Buyurtmalar siz uchun beriladi", 'Заказы оформляем за вас'),
-    'Delivery on every order': _ui_tr('Delivery on every order', "Har bir buyurtmada yetkazib berish", 'Доставка с каждым заказом'),
-    'Let your water orders take care of themselves, and never run out.': _ui_tr(
-        'Let your water orders take care of themselves, and never run out.',
-        "Suv buyurtmalari o'z-o'zidan bajarilsin, suvsiz qolmang.",
-        'Пусть заказы воды оформляются сами, а вода никогда не заканчивается.',
-    ),
-    'Choose a delivery frequency below to preview your schedule': _ui_tr(
-        'Choose a delivery frequency below to preview your schedule',
-        "Jadvalingizni ko'rish uchun quyida yetkazib berish chastotasini tanlang",
-        'Выберите частоту доставки ниже, чтобы увидеть своё расписание',
-    ),
-    'Your Delivery Schedule': _ui_tr('Your Delivery Schedule', 'Yetkazib berish jadvalingiz', 'Ваше расписание доставки'),
-    'Build your subscription with the subscription builder on our home page, or start one in our Telegram bot. Pick your products and schedule, and we place every order for you.': _ui_tr(
-        'Build your subscription with the subscription builder on our home page, or start one in our Telegram bot. Pick your products and schedule, and we place every order for you.',
-        "Obunani bosh sahifadagi obuna konstruktorida yarating yoki Telegram botimizda boshlang. Mahsulotlar va jadvalni tanlang, har bir buyurtmani biz o'zimiz beramiz.",
-        'Создайте подписку в конструкторе подписки на главной странице или начните её в нашем Telegram-боте. Выберите товары и расписание, а каждый заказ мы оформим за вас.',
-    ),
-    'Open the Subscription Builder': _ui_tr('Open the Subscription Builder', 'Obuna konstruktorini ochish', 'Открыть конструктор подписки'),
-    'Subscribe in Telegram': _ui_tr('Subscribe in Telegram', "Telegramda obuna bo'lish", 'Оформить подписку в Telegram'),
-    'Create your subscription on our website or in our Telegram bot': _ui_tr(
-        'Create your subscription on our website or in our Telegram bot',
-        "Obunani saytimizda yoki Telegram botimizda yarating",
-        'Оформите подписку на сайте или в нашем Telegram-боте',
-    ),
-    "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or the schedule anytime in your online account or in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.": _ui_tr(
-        "Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or the schedule anytime in your online account or in our Telegram bot. New items and quantities apply from the next order we place, and a new frequency, day, or time slot sets your next delivery by the new schedule. An order we have already placed is not changed.",
-        "Albatta! Qat'iy tariflardan farqli o'laroq, obunalarimiz to'liq moslashtiriladi. Katalogimizdan istalgan mahsulotni tanlang, miqdorni o'zingiz belgilang, qulay yetkazib berish chastotasini tanlang va hatto aniq yetkazib berish kunlarini belgilang. Mahsulotlar, miqdor yoki jadvalni istalgan vaqtda shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin. Yangi mahsulotlar va miqdorlar biz beradigan keyingi buyurtmadan boshlab kuchga kiradi, yangi chastota, kun yoki vaqt oralig'i esa keyingi yetkazishni yangi jadval bo'yicha belgilaydi. Biz allaqachon bergan buyurtma o'zgarmaydi.",  # NATIVE-READ
-        'Конечно! В отличие от фиксированных тарифов, наши подписки полностью настраиваются. Выберите любые товары из каталога, задайте свои количества, выберите удобную частоту доставки и даже конкретные дни доставки. Менять товары, количество или расписание можно в любое время в личном кабинете или в нашем Telegram-боте. Новые товары и количества действуют со следующего заказа, который мы оформим, а новая частота, день или временной интервал определяют следующую доставку по новому расписанию. Уже оформленный заказ не меняется.',  # NATIVE-READ
-    ),
-    'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip any upcoming delivery in your online account or in our Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.': _ui_tr(
-        'You can pause your subscription whenever you like, for example during a vacation, and resume it when you are back, in your online account or in our Telegram bot. You can also skip any upcoming delivery in your online account or in our Telegram bot. Pausing, skipping, or cancelling cancels an upcoming order that is not yet paid. An order you have already paid for, or one already picked up for delivery, cannot be skipped or paused: it stays and is delivered, and the change applies from the following delivery.',
-        "Obunani istalgan vaqtda to'xtatib turishingiz mumkin, masalan ta'til paytida, va qaytganingizda davom ettirasiz: buni shaxsiy kabinetda yoki Telegram botimizda qilish mumkin. Istalgan navbatdagi yetkazishni ham shaxsiy kabinetda yoki Telegram botimizda o'tkazib yuborishingiz mumkin. To'xtatish, o'tkazib yuborish yoki bekor qilish hali to'lanmagan kelgusi buyurtmani bekor qiladi. Siz allaqachon to'lagan yoki kuryer yetkazib berish uchun olib ketgan buyurtmani o'tkazib yuborib ham, to'xtatib ham bo'lmaydi: u qoladi va yetkaziladi, o'zgarish esa keyingi yetkazishdan boshlab kuchga kiradi.",  # NATIVE-READ
-        'Вы можете приостановить подписку в любое время, например на время отпуска, и возобновить её, когда вернётесь, в личном кабинете или в нашем Telegram-боте. Любую предстоящую доставку тоже можно пропустить в личном кабинете или в нашем Telegram-боте. Приостановка, пропуск или отмена отменяют ближайший ещё не оплаченный заказ. Уже оплаченный заказ или заказ, который курьер уже забрал для доставки, нельзя пропустить или приостановить: он остаётся и будет доставлен, а изменение действует со следующей доставки.',  # NATIVE-READ
-    ),
-    'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in your online account or in our Telegram bot.': _ui_tr(
-        'A subscription can be paid by card through Click, in cash on delivery, or, for business customers, through a business account. Each scheduled delivery is placed as a regular order and paid with the payment method on your subscription, which you can change in your online account or in our Telegram bot.',
-        "Obunani Click orqali karta bilan, yetkazib berishda naqd pul bilan yoki biznes mijozlar uchun biznes hisobi orqali to'lash mumkin. Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi va obunangizdagi to'lov usuli bilan to'lanadi; uni shaxsiy kabinetda yoki Telegram botimizda o'zgartirishingiz mumkin.",  # NATIVE-READ
-        'Подписку можно оплачивать картой через Click, наличными при доставке, а бизнес-клиентам через бизнес-счёт. Каждая плановая доставка оформляется как обычный заказ и оплачивается способом оплаты, указанным в подписке; его можно изменить в личном кабинете или в нашем Telegram-боте.',  # NATIVE-READ
-    ),
-    'Your subscription delivers to the address you chose. You can change it in your online account or in our Telegram bot by picking one of your saved addresses. Your upcoming deliveries move to the new address too, unless the driver already has them.': _ui_tr(
-        'Your subscription delivers to the address you chose. You can change it in your online account or in our Telegram bot by picking one of your saved addresses. Your upcoming deliveries move to the new address too, unless the driver already has them.',
-        "Obunangiz siz tanlagan manzilga yetkaziladi. Uni shaxsiy kabinetda yoki Telegram botimizda saqlangan manzillaringizdan birini tanlab o'zgartirishingiz mumkin. Agar kuryer navbatdagi buyurtmalarni hali olmagan bo'lsa, ular ham yangi manzilga o'tadi.",  # NATIVE-READ
-        'Подписка доставляется на выбранный вами адрес. Изменить его можно в личном кабинете или в нашем Telegram-боте, выбрав один из сохранённых адресов. Ближайшие доставки тоже переедут на новый адрес, если курьер их ещё не забрал.',  # NATIVE-READ
-    ),
-    'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If a Click payment does not go through, you can pay the order again in your online account or in our Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.': _ui_tr(
-        'Each scheduled delivery is placed as a regular order, so it follows the same payment steps as any order. If a Click payment does not go through, you can pay the order again in your online account or in our Telegram bot until its pay-by time. If you need help, message us in our Telegram bot.',
-        "Har bir rejalashtirilgan yetkazish oddiy buyurtma sifatida beriladi, shuning uchun to'lov har qanday buyurtmadagi kabi amalga oshiriladi. Click orqali to'lov o'tmasa, buyurtmani to'lov muddati tugaguncha shaxsiy kabinetda yoki Telegram botimizda qayta to'lashingiz mumkin. Yordam kerak bo'lsa, Telegram botimizga yozing.",  # NATIVE-READ
-        'Каждая плановая доставка оформляется как обычный заказ, поэтому оплата проходит так же, как и для любого заказа. Если оплата через Click не прошла, заказ можно оплатить ещё раз в личном кабинете или в нашем Telegram-боте до срока оплаты. Если нужна помощь, напишите нам в Telegram-боте.',  # NATIVE-READ
-    ),
-    # /services blurb: DB-only until now, so the old "special discounts" text lived only in the database.
+    # The /subscriptions page's own copy ships in scripts/seed_web_ui_subs_translations.py (web.subs.*); the 21
+    # natural-English rows that lived here were read by nothing and were deleted on 2026-11-14 (review subs-r07).
+    # /services blurb: DB-only until now, so the old "special discounts" text lived only in the database. It makes no
+    # delivery-fee claim: the fee is the public offer's fact, printed where the page prints the offer.
     'landing.services.subscription_plans.description': _ui_tr(
-        'Set a delivery schedule and we place every order for you, so you never forget to order water and never run out when you need it most. Delivery is always free.',
-        "Yetkazib berish jadvalini belgilang, har bir buyurtmani biz o'zimiz beramiz: suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz. Yetkazib berish doim bepul.",
-        'Задайте расписание доставки, и каждый заказ мы оформим за вас: вы не забудете заказать воду и не останетесь без неё в самый нужный момент. Доставка всегда бесплатная.',
+        'Set a delivery schedule and we place every order for you, so you never forget to order water and never run out when you need it most.',
+        "Yetkazib berish jadvalini belgilang, har bir buyurtmani biz o‘zimiz beramiz: suv buyurtma qilishni unutmaysiz va eng kerakli paytda suvsiz qolmaysiz.",
+        'Задайте расписание доставки, и каждый заказ мы оформим за вас: вы не забудете заказать воду и не останетесь без неё в самый нужный момент.',
     ),
 }
 BACKEND_TRANSLATIONS.update(SUBSCRIPTION_PAGE_TRANSLATIONS)
@@ -9121,7 +9058,7 @@ SUBSCRIPTION_WEB_TRANSLATIONS = {
     'Day {day} of the month': _ui_tr('Day {day} of the month', 'Oyning {day}-kuni', '{day}-е число месяца'),
     'Shown once you are signed in': _ui_tr(
         'Shown once you are signed in',
-        "Tizimga kirganingizdan so'ng ko'rsatiladi",
+        "Tizimga kirganingizdan so‘ng ko‘rsatiladi",
         'Будет показано после входа в аккаунт',
     ),
     'Please select a day of the month': _ui_tr(
@@ -9281,8 +9218,7 @@ REORDER_UNSUBSCRIBE_PAGE_TRANSLATIONS = {
     },
     'reorder_unsubscribe.confirm_text': {
         'en': 'Stop reminders to reorder water? Order and delivery updates will still arrive.',
-        'uz': 'Suvni qayta buyurtma qilish eslatmalari oʻchirilsinmi? Buyurtma va yetkazib berish '
-              'xabarlari kelishda davom etadi.',
+        'uz': "Suvni qayta buyurtma qilish eslatmalari o‘chirilsinmi? Buyurtma va yetkazib berish xabarlari kelishda davom etadi.",
         'ru': 'Отключить напоминания о повторном заказе воды? Уведомления о заказах и доставке останутся.',
     },
     'reorder_unsubscribe.confirm_button': {
@@ -9737,13 +9673,7 @@ PRIVACY_REORDER_REMINDER_TRANSLATIONS = {
             "stop them at any time from the message itself, in the bot's notification settings, in your "
             "profile settings on our website, or with the unsubscribe link in the email."
         ),
-        'uz': (
-            "Buyurtmalar tarixingizga asoslangan qayta buyurtma eslatmalari (o'zingizning buyurtma berish "
-            "odatingizga ko'ra): odatdagidan kechroq buyurtma bersangiz, sizga Telegram yoki email orqali "
-            "ko'pi bilan ikkita eslatma yuborishimiz mumkin. Ularni istalgan vaqtda xabarning o'zidan, botning "
-            "bildirishnoma sozlamalarida, saytdagi profil sozlamalarida yoki emaildagi obunani bekor qilish "
-            "havolasi orqali to'xtatishingiz mumkin."
-        ),
+        'uz': "Buyurtmalar tarixingizga asoslangan qayta buyurtma eslatmalari (o‘zingizning buyurtma berish odatingizga ko‘ra): odatdagidan kechroq buyurtma bersangiz, sizga Telegram yoki email orqali ko‘pi bilan ikkita eslatma yuborishimiz mumkin. Ularni istalgan vaqtda xabarning o‘zidan, botning bildirishnoma sozlamalarida, saytdagi profil sozlamalarida yoki emaildagi obunani bekor qilish havolasi orqali to‘xtatishingiz mumkin.",
         'ru': (
             'Напоминания о повторном заказе на основе истории ваших заказов и вашей обычной частоты заказов: '
             'если вы заказываете позже обычного, мы можем отправить вам не более двух напоминаний в Telegram '
@@ -9765,12 +9695,12 @@ BACKEND_TRANSLATIONS.update(PRIVACY_REORDER_REMINDER_TRANSLATIONS)
 TELEGRAM_LINK_API_TRANSLATIONS = {
     'api.auth.telegram_link_not_available': {
         'en': "Telegram is already connected to this account, or it can't be connected here.",
-        'uz': "Bu hisobga Telegram allaqachon ulangan yoki uni bu yerda ulab bo'lmaydi.",
+        'uz': "Bu hisobga Telegram allaqachon ulangan yoki uni bu yerda ulab bo‘lmaydi.",
         'ru': 'Telegram уже подключён к этому аккаунту или его нельзя подключить здесь.',
     },
     'api.auth.telegram_link_store_unavailable': {
         'en': 'Something went wrong. Please try again in a minute.',
-        'uz': "Nimadir xato ketdi. Bir daqiqadan so'ng qayta urinib ko'ring.",
+        'uz': "Nimadir xato ketdi. Bir daqiqadan so‘ng qayta urinib ko‘ring.",
         'ru': 'Что-то пошло не так. Попробуйте ещё раз через минуту.',
     },
 }
@@ -9851,12 +9781,12 @@ BACKEND_TRANSLATIONS.update(TELEGRAM_LINK_BOT_TRANSLATIONS)
 TELEGRAM_LINK_WEB_TRANSLATIONS = {
     'Get delivery updates in Telegram': {
         'en': 'Get delivery updates in Telegram',
-        'uz': "Yetkazib berish xabarlarini Telegram'da oling",
+        'uz': "Yetkazib berish xabarlarini Telegram’da oling",
         'ru': 'Получайте уведомления о доставке в Telegram',
     },
     'Know when your order is confirmed, when the courier is on the way and when they arrive.': {
         'en': 'Know when your order is confirmed, when the courier is on the way and when they arrive.',
-        'uz': "Buyurtmangiz qachon tasdiqlangani, kuryer qachon yo'lga chiqqani va qachon yetib kelganini bilib turing.",
+        'uz': "Buyurtmangiz qachon tasdiqlangani, kuryer qachon yo‘lga chiqqani va qachon yetib kelganini bilib turing.",
         'ru': 'Узнавайте, когда заказ подтверждён, когда курьер в пути и когда он приехал.',
     },
     'Order again in a few taps': {
@@ -9866,17 +9796,17 @@ TELEGRAM_LINK_WEB_TRANSLATIONS = {
     },
     'Chat with us right in Telegram': {
         'en': 'Chat with us right in Telegram',
-        'uz': "Savollaringizni to'g'ridan-to'g'ri Telegram'da yozing",
+        'uz': "Savollaringizni to‘g‘ridan-to‘g‘ri Telegram’da yozing",
         'ru': 'Пишите нам прямо в Telegram',
     },
     'Open in Telegram': {
         'en': 'Open in Telegram',
-        'uz': "Telegram'da ochish",
+        'uz': "Telegram’da ochish",
         'ru': 'Открыть в Telegram',
     },
     'Telegram connected. Delivery updates now come to Telegram instead of email.': {
         'en': 'Telegram connected. Delivery updates now come to Telegram instead of email.',
-        'uz': "Telegram ulandi. Yetkazib berish xabarlari endi email o'rniga Telegram'ga keladi.",
+        'uz': "Telegram ulandi. Yetkazib berish xabarlari endi email o‘rniga Telegram’ga keladi.",
         'ru': 'Telegram подключён. Уведомления о доставке теперь приходят в Telegram, а не на email.',
     },
     'Open the bot': {
@@ -9886,12 +9816,12 @@ TELEGRAM_LINK_WEB_TRANSLATIONS = {
     },
     'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.': {
         'en': 'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.',
-        'uz': "Telegram ulangan, lekin botimiz Telegram'ingizda to'xtatilgan, shuning uchun xabarlar email orqali keladi. Ularni yana Telegram'da olish uchun botni oching va «Boshlash» tugmasini bosing.",
+        'uz': "Telegram ulangan, lekin botimiz Telegram’ingizda to‘xtatilgan, shuning uchun xabarlar email orqali keladi. Ularni yana Telegram’da olish uchun botni oching va «Boshlash» tugmasini bosing.",
         'ru': 'Telegram подключён, но наш бот остановлен в вашем Telegram, поэтому уведомления приходят на email. Откройте бота и нажмите «Запустить», чтобы снова получать их в Telegram.',
     },
     'Something went wrong. Please try again in a minute.': {
         'en': 'Something went wrong. Please try again in a minute.',
-        'uz': "Nimadir xato ketdi. Bir daqiqadan so'ng qayta urinib ko'ring.",
+        'uz': "Nimadir xato ketdi. Bir daqiqadan so‘ng qayta urinib ko‘ring.",
         'ru': 'Что-то пошло не так. Попробуйте ещё раз через минуту.',
     },
 }
@@ -10073,7 +10003,7 @@ WEB_DISPLAY_LABEL_TRANSLATIONS = {
     'web.display_labels.payment_method.payme': {'en': 'Payme', 'uz': 'Payme', 'ru': 'Payme'},
     'web.display_labels.payment_method.loyalty_points': {'en': 'AquaCoins', 'uz': 'AquaCoins', 'ru': 'AquaCoins'},
     'web.display_labels.payment_method.business_account': {
-        'en': 'Bank transfer', 'uz': "Bank o'tkazmasi", 'ru': 'Банковский перевод',
+        'en': 'Bank transfer', 'uz': "Bank o‘tkazmasi", 'ru': 'Банковский перевод',
     },
 }
 BACKEND_TRANSLATIONS.update(WEB_DISPLAY_LABEL_TRANSLATIONS)
@@ -10251,7 +10181,7 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     'cabinet.subs.load_failed': {
         'en': "We couldn't load your subscriptions just now. Please try again.",
-        'uz': "Obunalaringizni hozir yuklab bo'lmadi. Qayta urinib ko'ring.",
+        'uz': "Obunalaringizni hozir yuklab bo‘lmadi. Qayta urinib ko‘ring.",
         'ru': 'Сейчас не удалось загрузить подписки. Попробуйте ещё раз.',
     },
     'cabinet.subs.retry': {'en': 'Try again', 'uz': 'Qayta urinish', 'ru': 'Попробовать снова'},
@@ -10263,7 +10193,7 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     'cabinet.subs.strip.show_cancelled': {
         'en': 'Show cancelled ({count})',
-        'uz': "Bekor qilinganlarni ko'rsatish ({count})",
+        'uz': "Bekor qilinganlarni ko‘rsatish ({count})",
         'ru': 'Показать отменённые ({count})',
     },
     'cabinet.subs.strip.hide_cancelled': {
@@ -10271,27 +10201,27 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     'cabinet.subs.strip.new': {'en': 'New subscription', 'uz': 'Yangi obuna', 'ru': 'Новая подписка'},
     # A subscription's own state, beside its name (never "Active": the next date says it).
-    'cabinet.subs.chip.paused': {'en': 'Paused', 'uz': "To'xtatilgan", 'ru': 'Приостановлена'},
+    'cabinet.subs.chip.paused': {'en': 'Paused', 'uz': "To‘xtatilgan", 'ru': 'Приостановлена'},
     'cabinet.subs.chip.cancelled': {'en': 'Cancelled', 'uz': 'Bekor qilingan', 'ru': 'Отменена'},
-    'cabinet.subs.chip.on_the_way': {'en': 'On the way', 'uz': "Yo'lda", 'ru': 'В пути'},
+    'cabinet.subs.chip.on_the_way': {'en': 'On the way', 'uz': "Yo‘lda", 'ru': 'В пути'},
     # Phone-only jump links and the section headings.
     'cabinet.subs.jump.label': {'en': 'On this page', 'uz': 'Ushbu sahifada', 'ru': 'На этой странице'},
     'cabinet.subs.jump.orders': {'en': 'Orders', 'uz': 'Buyurtmalar', 'ru': 'Заказы'},
     'cabinet.subs.section.items': {'en': 'Items', 'uz': 'Mahsulotlar', 'ru': 'Товары'},
     'cabinet.subs.section.schedule': {'en': 'Schedule', 'uz': 'Jadval', 'ru': 'Расписание'},
-    'cabinet.subs.section.payment': {'en': 'Payment', 'uz': "To'lov", 'ru': 'Оплата'},
+    'cabinet.subs.section.payment': {'en': 'Payment', 'uz': "To‘lov", 'ru': 'Оплата'},
     'cabinet.subs.section.orders': {
         'en': 'Orders from this subscription', 'uz': 'Ushbu obuna buyurtmalari', 'ru': 'Заказы по этой подписке',
     },
-    'cabinet.subs.change': {'en': 'Change', 'uz': "O'zgartirish", 'ru': 'Изменить'},
+    'cabinet.subs.change': {'en': 'Change', 'uz': "O‘zgartirish", 'ru': 'Изменить'},
     'cabinet.subs.change_label.items': {
-        'en': 'Change items', 'uz': "Mahsulotlarni o'zgartirish", 'ru': 'Изменить товары',
+        'en': 'Change items', 'uz': "Mahsulotlarni o‘zgartirish", 'ru': 'Изменить товары',
     },
     'cabinet.subs.change_label.schedule': {
-        'en': 'Change schedule', 'uz': "Jadvalni o'zgartirish", 'ru': 'Изменить расписание',
+        'en': 'Change schedule', 'uz': "Jadvalni o‘zgartirish", 'ru': 'Изменить расписание',
     },
     'cabinet.subs.change_label.payment': {
-        'en': 'Change payment method', 'uz': "To'lov usulini o'zgartirish", 'ru': 'Изменить способ оплаты',
+        'en': 'Change payment method', 'uz': "To‘lov usulini o‘zgartirish", 'ru': 'Изменить способ оплаты',
     },
     # The next-delivery card.
     'cabinet.subs.hero.label': {'en': 'Next delivery', 'uz': 'Keyingi yetkazib berish', 'ru': 'Следующая доставка'},
@@ -10299,13 +10229,13 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     'cabinet.subs.hero.order': {'en': 'Order {number}', 'uz': 'Buyurtma {number}', 'ru': 'Заказ {number}'},
     'cabinet.subs.hero.will_place': {
         'en': "We'll place this order on {date}.",
-        'uz': "Buyurtmani o'zimiz rasmiylashtiramiz: {date}.",
+        'uz': "Buyurtmani o‘zimiz rasmiylashtiramiz: {date}.",
         'ru': 'Заказ оформим сами: {date}.',
     },
     'cabinet.subs.hero.paused_since': {
-        'en': 'Paused since {date}', 'uz': "{date}dan beri to'xtatilgan", 'ru': 'Приостановлена с {date}',
+        'en': 'Paused since {date}', 'uz': "{date}dan beri to‘xtatilgan", 'ru': 'Приостановлена с {date}',
     },
-    'cabinet.subs.hero.paused': {'en': 'Paused', 'uz': "To'xtatilgan", 'ru': 'Приостановлена'},
+    'cabinet.subs.hero.paused': {'en': 'Paused', 'uz': "To‘xtatilgan", 'ru': 'Приостановлена'},
     'cabinet.subs.hero.paused_note': {
         'en': 'No new orders until you resume. Your items and schedule are saved.',
         'uz': "Davom ettirmaguningizcha yangi buyurtmalar berilmaydi. Mahsulotlaringiz va jadvalingiz saqlangan.",
@@ -10316,19 +10246,18 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     'cabinet.subs.hero.cancelled': {'en': 'Cancelled', 'uz': 'Bekor qilingan', 'ru': 'Отменена'},
     'cabinet.subs.hero.cancelled_note': {
-        'en': 'Your past orders are below.', 'uz': "O'tgan buyurtmalaringiz quyida.", 'ru': 'Прошлые заказы — ниже.',
+        'en': 'Your past orders are below.', 'uz': "O‘tgan buyurtmalaringiz quyida.", 'ru': 'Прошлые заказы — ниже.',
     },
     'cabinet.subs.hero.date_window': {'en': '{date}, {window}', 'uz': '{date}, {window}', 'ru': '{date}, {window}'},
     'cabinet.subs.hero.on_the_way_note': {
         'en': 'Your driver has this order and is on the way.',
-        'uz': "Haydovchi bu buyurtmani olgan va yo'lda.",
+        'uz': "Haydovchi bu buyurtmani olgan va yo‘lda.",
         'ru': 'Курьер уже забрал этот заказ и везёт его.',
     },
     'cabinet.subs.hero.none_available': {
         'en': "None of these products are available any more, so we can't place your next order. "
               "Change your items to keep your deliveries coming.",
-        'uz': "Bu mahsulotlarning hech biri endi mavjud emas, shuning uchun keyingi buyurtmani bera olmaymiz. "
-              "Yetkazib berish davom etishi uchun mahsulotlarni o'zgartiring.",
+        'uz': "Bu mahsulotlarning hech biri endi mavjud emas, shuning uchun keyingi buyurtmani bera olmaymiz. Yetkazib berish davom etishi uchun mahsulotlarni o‘zgartiring.",
         'ru': 'Ни одного из этих товаров больше нет в продаже, поэтому мы не можем оформить следующий заказ. '
               'Измените товары, чтобы доставки продолжились.',
     },
@@ -10339,7 +10268,7 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     'cabinet.subs.hero.no_date': {
         'en': "Your next delivery date will show here once it's set.",
-        'uz': "Keyingi yetkazib berish sanasi belgilangach, shu yerda ko'rinadi.",
+        'uz': "Keyingi yetkazib berish sanasi belgilangach, shu yerda ko‘rinadi.",
         'ru': 'Дата следующей доставки появится здесь, как только её назначат.',
     },
     # The waterline: the next deliveries as bottles on a line.
@@ -10347,12 +10276,12 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     'cabinet.subs.wl.item': {'en': '{date}, {state}', 'uz': '{date}, {state}', 'ru': '{date}, {state}'},
     'cabinet.subs.wl.state.placed': {'en': 'order placed', 'uz': 'buyurtma berilgan', 'ru': 'заказ оформлен'},
     'cabinet.subs.wl.state.planned': {'en': 'planned', 'uz': 'rejalashtirilgan', 'ru': 'запланирована'},
-    'cabinet.subs.wl.state.skipped': {'en': 'skipped', 'uz': "o'tkazib yuborilgan", 'ru': 'пропущена'},
-    'cabinet.subs.wl.state.on_the_way': {'en': 'on the way', 'uz': "yo'lda", 'ru': 'в пути'},
+    'cabinet.subs.wl.state.skipped': {'en': 'skipped', 'uz': "o‘tkazib yuborilgan", 'ru': 'пропущена'},
+    'cabinet.subs.wl.state.on_the_way': {'en': 'on the way', 'uz': "yo‘lda", 'ru': 'в пути'},
     'cabinet.subs.wl.legend.placed': {'en': 'Order placed', 'uz': 'Buyurtma berilgan', 'ru': 'Заказ оформлен'},
     'cabinet.subs.wl.legend.planned': {'en': 'Planned', 'uz': 'Rejalashtirilgan', 'ru': 'Запланирована'},
-    'cabinet.subs.wl.legend.skipped': {'en': 'Skipped', 'uz': "O'tkazib yuborilgan", 'ru': 'Пропущена'},
-    'cabinet.subs.wl.legend.on_the_way': {'en': 'On the way', 'uz': "Yo'lda", 'ru': 'В пути'},
+    'cabinet.subs.wl.legend.skipped': {'en': 'Skipped', 'uz': "O‘tkazib yuborilgan", 'ru': 'Пропущена'},
+    'cabinet.subs.wl.legend.on_the_way': {'en': 'On the way', 'uz': "Yo‘lda", 'ru': 'В пути'},
     'cabinet.subs.wl.if_resume': {
         'en': 'If you resume today: {date}', 'uz': 'Bugun davom ettirsangiz: {date}', 'ru': 'Если возобновить сегодня: {date}',
     },
@@ -10362,11 +10291,12 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     'cabinet.subs.items.per_month': {'en': 'About a month', 'uz': 'Oyiga taxminan', 'ru': 'Примерно в месяц'},
     'cabinet.subs.items.benefit': {
         'en': "{free}, and every order earns AquaCoins at your tier's rate.",
-        'uz': "{free}, har bir buyurtma uchun esa darajangiz stavkasi bo'yicha AquaCoins olasiz.",
+        'uz': "{free}, har bir buyurtma uchun esa darajangiz stavkasi bo‘yicha AquaCoins olasiz.",
         'ru': '{free}, а за каждый заказ начисляются AquaCoins по ставке вашего уровня.',
     },
+    # Printed only while the public offer says delivery is free (my_subscriptions island `delivery_free`).
     'cabinet.subs.items.benefit_free': {
-        'en': 'Delivery is always free', 'uz': 'Yetkazib berish doim bepul', 'ru': 'Доставка всегда бесплатная',
+        'en': 'Delivery is free', 'uz': 'Yetkazib berish bepul', 'ru': 'Доставка бесплатная',
     },
     'cabinet.subs.items.unavailable': {
         'en': "No longer available. We'll deliver the rest of your order without it.",
@@ -10383,43 +10313,43 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     # Payment: the one-line consequence of each method.
     'cabinet.subs.payment.note.click': {
         'en': "Pay online for each order. We'll remind you before the deadline.",
-        'uz': "Har bir buyurtmani onlayn to'laysiz. Muddatdan oldin eslatamiz.",
+        'uz': "Har bir buyurtmani onlayn to‘laysiz. Muddatdan oldin eslatamiz.",
         'ru': 'Каждый заказ оплачивается онлайн. Мы напомним до срока оплаты.',
     },
     'cabinet.subs.payment.note.cash': {
         'en': 'Pay the driver at the door.',
-        'uz': "To'lovni eshik oldida haydovchiga qilasiz.",
+        'uz': "To‘lovni eshik oldida haydovchiga qilasiz.",
         'ru': 'Оплата курьеру при получении.',
     },
     'cabinet.subs.payment.note.business_account': {
         'en': 'Your company pays by bank transfer under its contract.',
-        'uz': "Kompaniyangiz shartnoma bo'yicha bank o'tkazmasi orqali to'laydi.",
+        'uz': "Kompaniyangiz shartnoma bo‘yicha bank o‘tkazmasi orqali to‘laydi.",
         'ru': 'Ваша компания оплачивает банковским переводом по договору.',
     },
     # Orders from this subscription.
-    'cabinet.subs.orders.pay': {'en': 'Pay', 'uz': "To'lash", 'ru': 'Оплатить'},
+    'cabinet.subs.orders.pay': {'en': 'Pay', 'uz': "To‘lash", 'ru': 'Оплатить'},
     'cabinet.subs.orders.pay_label': {
-        'en': 'Pay for order {number}', 'uz': "{number} buyurtmani to'lash", 'ru': 'Оплатить заказ {number}',
+        'en': 'Pay for order {number}', 'uz': "{number} buyurtmani to‘lash", 'ru': 'Оплатить заказ {number}',
     },
     'cabinet.subs.orders.more': {
-        'en': 'Show more orders', 'uz': "Yana buyurtmalarni ko'rsatish", 'ru': 'Показать ещё заказы',
+        'en': 'Show more orders', 'uz': "Yana buyurtmalarni ko‘rsatish", 'ru': 'Показать ещё заказы',
     },
     'cabinet.subs.orders.showing': {
         'en': 'Showing {shown} of {total} orders',
-        'uz': "{total} ta buyurtmadan {shown} tasi ko'rsatilmoqda",
+        'uz': "{total} ta buyurtmadan {shown} tasi ko‘rsatilmoqda",
         'ru': 'Показано {shown} из {total}',
     },
     'cabinet.subs.orders.empty_planned': {
         'en': 'Your first order will show up here once we place it on {date}.',
-        'uz': "Birinchi buyurtmangiz biz uni rasmiylashtirganimizdan keyin shu yerda ko'rinadi: {date}.",
+        'uz': "Birinchi buyurtmangiz biz uni rasmiylashtirganimizdan keyin shu yerda ko‘rinadi: {date}.",
         'ru': 'Первый заказ появится здесь, когда мы его оформим: {date}.',
     },
     'cabinet.subs.orders.empty': {
-        'en': 'Your orders will show up here.', 'uz': "Buyurtmalaringiz shu yerda ko'rinadi.", 'ru': 'Здесь появятся ваши заказы.',
+        'en': 'Your orders will show up here.', 'uz': "Buyurtmalaringiz shu yerda ko‘rinadi.", 'ru': 'Здесь появятся ваши заказы.',
     },
     'cabinet.subs.orders.load_failed': {
         'en': "We couldn't load your orders just now.",
-        'uz': "Buyurtmalarni hozir yuklab bo'lmadi.",
+        'uz': "Buyurtmalarni hozir yuklab bo‘lmadi.",
         'ru': 'Сейчас не удалось загрузить заказы.',
     },
     # The footer zone.
@@ -10429,17 +10359,18 @@ MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS = {
     },
     # No subscriptions yet.
     'cabinet.subs.empty.title': {
-        'en': 'Water that arrives on its own', 'uz': "O'zi yetib keladigan suv", 'ru': 'Вода, которая приезжает сама',
+        'en': 'Water that arrives on its own', 'uz': "O‘zi yetib keladigan suv", 'ru': 'Вода, которая приезжает сама',
     },
+    # No delivery-fee claim here: the empty state shows whatever the fee is (the items' benefit line is gated on it).
     'cabinet.subs.empty.body': {
         'en': "Pick your bottles and a day, and we'll place the order for you every time, so you never forget "
-              "and never run out. Delivery is always free.",
-        'uz': "Butilkalar va kunni tanlang, har safar buyurtmani biz o'zimiz beramiz: unutmaysiz va suvsiz "
-              "qolmaysiz. Yetkazib berish doim bepul.",
+              "and never run out.",
+        'uz': "Butilkalar va kunni tanlang, har safar buyurtmani biz o‘zimiz beramiz: unutmaysiz va suvsiz "
+              "qolmaysiz.",
         'ru': 'Выберите бутыли и день, и мы будем каждый раз оформлять заказ за вас: вы не забудете и не '
-              'останетесь без воды. Доставка всегда бесплатная.',
+              'останетесь без воды.',
     },
-    'cabinet.subs.empty.cta': {'en': 'Set up a subscription', 'uz': 'Obuna rasmiylashtirish', 'ru': 'Оформить подписку'},
+    'cabinet.subs.empty.cta': {'en': 'Set up a subscription', 'uz': "Obunani rasmiylashtirish", 'ru': 'Оформить подписку'},
     # The frequency names (my_account.html; the schedule editor).
     'cabinet.subs.frequency.daily': {'en': 'Daily', 'uz': 'Har kuni', 'ru': 'Ежедневно'},
     'cabinet.subs.frequency.weekly': {'en': 'Weekly', 'uz': 'Har hafta', 'ru': 'Еженедельно'},
@@ -10459,9 +10390,9 @@ BACKEND_TRANSLATIONS.update(MY_SUBSCRIPTIONS_PAGE_TRANSLATIONS)
 # ============================================================================
 MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     # Buttons while their request is in flight.
-    'cabinet.subs.busy.paying': {'en': 'Opening payment…', 'uz': "To'lov ochilmoqda…", 'ru': 'Открываем оплату…'},
-    'cabinet.subs.busy.skipping': {'en': 'Skipping…', 'uz': "O'tkazib yuborilmoqda…", 'ru': 'Пропускаем…'},
-    'cabinet.subs.busy.pausing': {'en': 'Pausing…', 'uz': "To'xtatilmoqda…", 'ru': 'Приостанавливаем…'},
+    'cabinet.subs.busy.paying': {'en': 'Opening payment…', 'uz': "To‘lov ochilmoqda…", 'ru': 'Открываем оплату…'},
+    'cabinet.subs.busy.skipping': {'en': 'Skipping…', 'uz': "O‘tkazib yuborilmoqda…", 'ru': 'Пропускаем…'},
+    'cabinet.subs.busy.pausing': {'en': 'Pausing…', 'uz': "To‘xtatilmoqda…", 'ru': 'Приостанавливаем…'},
     'cabinet.subs.busy.resuming': {'en': 'Resuming…', 'uz': 'Davom ettirilmoqda…', 'ru': 'Возобновляем…'},
     'cabinet.subs.busy.cancelling': {'en': 'Cancelling…', 'uz': 'Bekor qilinmoqda…', 'ru': 'Отменяем…'},
     'cabinet.subs.busy.saving': {'en': 'Saving…', 'uz': 'Saqlanmoqda…', 'ru': 'Сохраняем…'},
@@ -10469,22 +10400,22 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     # Errors, next to the control that failed; they stay until the next try.
     'cabinet.subs.error.action': {
         'en': "We couldn't do that just now. Please try again.",
-        'uz': "Buni hozir bajarib bo'lmadi. Qayta urinib ko'ring.",
+        'uz': "Buni hozir bajarib bo‘lmadi. Qayta urinib ko‘ring.",
         'ru': 'Сейчас не получилось. Попробуйте ещё раз.',
     },
     'cabinet.subs.error.pay': {
         'en': "We couldn't open the payment just now. Please try again.",
-        'uz': "To'lovni hozir ochib bo'lmadi. Qayta urinib ko'ring.",
+        'uz': "To‘lovni hozir ochib bo‘lmadi. Qayta urinib ko‘ring.",
         'ru': 'Сейчас не удалось открыть оплату. Попробуйте ещё раз.',
     },
     'cabinet.subs.error.save': {
         'en': "We couldn't save just now. Your changes are still here, so try again.",
-        'uz': "Hozir saqlab bo'lmadi. O'zgarishlaringiz shu yerda, qayta urinib ko'ring.",
+        'uz': "Hozir saqlab bo‘lmadi. O‘zgarishlaringiz shu yerda, qayta urinib ko‘ring.",
         'ru': 'Сейчас не удалось сохранить. Ваши изменения на месте, попробуйте ещё раз.',
     },
     'cabinet.subs.error.preview': {
         'en': "We couldn't check these changes just now. Please try again.",
-        'uz': "Bu o'zgarishlarni hozir tekshirib bo'lmadi. Qayta urinib ko'ring.",
+        'uz': "Bu o‘zgarishlarni hozir tekshirib bo‘lmadi. Qayta urinib ko‘ring.",
         'ru': 'Сейчас не удалось проверить изменения. Попробуйте ещё раз.',
     },
     # Skip: the inline two-step in the next-delivery card.
@@ -10494,18 +10425,18 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
         'ru': 'Расскажете почему? (необязательно)',
     },
     'cabinet.subs.skip.reason_text': {
-        'en': 'In a few words (optional)', 'uz': "Bir necha so'z bilan (ixtiyoriy)", 'ru': 'Пару слов (необязательно)',
+        'en': 'In a few words (optional)', 'uz': "Bir necha so‘z bilan (ixtiyoriy)", 'ru': 'Пару слов (необязательно)',
     },
     'cabinet.subs.skip.done': {
         'en': 'Skipped. Your next delivery is {date}.',
-        'uz': "O'tkazib yuborildi. Keyingi yetkazish: {date}.",
+        'uz': "O‘tkazib yuborildi. Keyingi yetkazish: {date}.",
         'ru': 'Пропущено. Следующая доставка: {date}.',
     },
-    'cabinet.subs.skip.done_plain': {'en': 'Skipped.', 'uz': "O'tkazib yuborildi.", 'ru': 'Пропущено.'},
+    'cabinet.subs.skip.done_plain': {'en': 'Skipped.', 'uz': "O‘tkazib yuborildi.", 'ru': 'Пропущено.'},
     # Pause (inline two-step only when it cancels an order) and Resume (never asks).
     'cabinet.subs.pause.done': {
         'en': "Paused. Tap Resume whenever you're ready.",
-        'uz': "To'xtatildi. Tayyor bo'lganingizda davom ettiring.",
+        'uz': "To‘xtatildi. Tayyor bo‘lganingizda davom ettiring.",
         'ru': 'Приостановлено. Возобновите, когда будете готовы.',
     },
     'cabinet.subs.resume.done': {
@@ -10527,7 +10458,7 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
         'uz': 'Joy kammi yoki suv hali bormi?',
         'ru': 'Мало места или вода ещё осталась?',
     },
-    'cabinet.subs.cancel.pause_instead': {'en': 'Pause instead', 'uz': "To'xtatib turish", 'ru': 'Лучше приостановить'},
+    'cabinet.subs.cancel.pause_instead': {'en': 'Pause instead', 'uz': "To‘xtatib turish", 'ru': 'Лучше приостановить'},
     'cabinet.subs.cancel.less_often': {'en': 'Deliver less often', 'uz': 'Kamroq yetkazing', 'ru': 'Доставлять реже'},
     'cabinet.subs.cancel.reason': {
         'en': 'Anything we could do better? (optional)',
@@ -10537,11 +10468,11 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     'cabinet.subs.cancel.close': {'en': 'Close', 'uz': 'Yopish', 'ru': 'Закрыть'},
     'cabinet.subs.cancel.done': {'en': 'Subscription cancelled.', 'uz': 'Obuna bekor qilindi.', 'ru': 'Подписка отменена.'},
     # The read-then-edit sections and their save bar.
-    'cabinet.subs.edit.unsaved': {'en': 'Unsaved changes', 'uz': "Saqlanmagan o'zgarishlar", 'ru': 'Несохранённые изменения'},
+    'cabinet.subs.edit.unsaved': {'en': 'Unsaved changes', 'uz': "Saqlanmagan o‘zgarishlar", 'ru': 'Несохранённые изменения'},
     'cabinet.subs.edit.discard': {'en': 'Discard', 'uz': 'Qaytarish', 'ru': 'Отменить изменения'},
     'cabinet.subs.edit.save': {'en': 'Save changes', 'uz': 'Saqlash', 'ru': 'Сохранить'},
     'cabinet.subs.edit.checking': {
-        'en': 'Checking your changes…', 'uz': "O'zgarishlar tekshirilmoqda…", 'ru': 'Проверяем изменения…',
+        'en': 'Checking your changes…', 'uz': "O‘zgarishlar tekshirilmoqda…", 'ru': 'Проверяем изменения…',
     },
     'cabinet.subs.edit.new_total': {
         'en': 'New total {amount} per delivery',
@@ -10550,7 +10481,7 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     },
     'cabinet.subs.edit.dirty_guard': {
         'en': 'Save or discard these changes first.',
-        'uz': "Avval bu o'zgarishlarni saqlang yoki qaytaring.",
+        'uz': "Avval bu o‘zgarishlarni saqlang yoki qaytaring.",
         'ru': 'Сначала сохраните или отмените эти изменения.',
     },
     'cabinet.subs.edit.saved': {'en': 'Saved.', 'uz': 'Saqlandi.', 'ru': 'Сохранено.'},
@@ -10566,28 +10497,28 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     },
     'cabinet.subs.edit.saved_payment': {
         'en': "Saved. You'll pay by {method}.",
-        'uz': "Saqlandi. To'lov usuli: {method}.",
+        'uz': "Saqlandi. To‘lov usuli: {method}.",
         'ru': 'Сохранено. Способ оплаты: {method}.',
     },
     # Items in edit mode and the product picker.
     'cabinet.subs.items.edit_note': {
         'en': 'Changes start with your next new order.',
-        'uz': "O'zgarishlar keyingi yangi buyurtmadan boshlanadi.",
+        'uz': "O‘zgarishlar keyingi yangi buyurtmadan boshlanadi.",
         'ru': 'Изменения начнут действовать со следующего нового заказа.',
     },
     'cabinet.subs.items.fewer': {'en': 'Fewer: {name}', 'uz': 'Kamaytirish: {name}', 'ru': 'Меньше: {name}'},
-    'cabinet.subs.items.more': {'en': 'More: {name}', 'uz': "Ko'paytirish: {name}", 'ru': 'Больше: {name}'},
+    'cabinet.subs.items.more': {'en': 'More: {name}', 'uz': "Ko‘paytirish: {name}", 'ru': 'Больше: {name}'},
     'cabinet.subs.items.quantity': {'en': 'Quantity: {name}', 'uz': 'Miqdori: {name}', 'ru': 'Количество: {name}'},
     'cabinet.subs.items.remove': {'en': 'Remove: {name}', 'uz': 'Olib tashlash: {name}', 'ru': 'Убрать: {name}'},
     'cabinet.subs.items.last_item': {
         'en': 'A subscription needs at least one product. Need a break instead? Pause.',
-        'uz': "Obunada kamida bitta mahsulot bo'lishi kerak. Tanaffus kerakmi? To'xtatib qo'ying.",
+        'uz': "Obunada kamida bitta mahsulot bo‘lishi kerak. Tanaffus kerakmi? To‘xtatib qo‘ying.",
         'ru': 'В подписке должен быть хотя бы один товар. Нужен перерыв? Приостановите её.',
     },
-    'cabinet.subs.items.add': {'en': 'Add a product', 'uz': "Mahsulot qo'shish", 'ru': 'Добавить товар'},
-    'cabinet.subs.picker.title': {'en': 'Add to your subscription', 'uz': "Obunangizga qo'shish", 'ru': 'Добавить в подписку'},
+    'cabinet.subs.items.add': {'en': 'Add a product', 'uz': "Mahsulot qo‘shish", 'ru': 'Добавить товар'},
+    'cabinet.subs.picker.title': {'en': 'Add to your subscription', 'uz': "Obunangizga qo‘shish", 'ru': 'Добавить в подписку'},
     'cabinet.subs.picker.add': {
-        'en': 'Add {quantity} × {name}', 'uz': "Qo'shish: {quantity} × {name}", 'ru': 'Добавить: {quantity} × {name}',
+        'en': 'Add {quantity} × {name}', 'uz': "Qo‘shish: {quantity} × {name}", 'ru': 'Добавить: {quantity} × {name}',
     },
     'cabinet.subs.picker.empty': {
         'en': 'Every product is already in your subscription.',
@@ -10596,7 +10527,7 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     },
     'cabinet.subs.picker.failed': {
         'en': "We couldn't load the products just now.",
-        'uz': "Mahsulotlarni hozir yuklab bo'lmadi.",
+        'uz': "Mahsulotlarni hozir yuklab bo‘lmadi.",
         'ru': 'Сейчас не удалось загрузить товары.',
     },
     # Schedule in edit mode.
@@ -10616,25 +10547,25 @@ MY_SUBSCRIPTIONS_WRITE_TRANSLATIONS = {
     'cabinet.subs.schedule.hint.monthly': {'en': 'once a month', 'uz': 'oyiga bir marta', 'ru': 'раз в месяц'},
     'cabinet.subs.schedule.slot_missing': {
         'en': "Your usual time isn't available on {day}. Choose another time or Any time.",
-        'uz': "Odatdagi vaqtingiz bu kunda yo'q: {day}. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'uz': "Odatdagi vaqtingiz bu kunda yo‘q: {day}. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
         'ru': 'Ваше обычное время недоступно в этот день: {day}. Выберите другое время или «В любое время».',  # NATIVE-READ
     },
     'cabinet.subs.schedule.slot_missing_plain': {
         'en': "Your usual time isn't available on this schedule. Choose another time or Any time.",
-        'uz': "Odatdagi vaqtingiz bu jadvalda yo'q. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
+        'uz': "Odatdagi vaqtingiz bu jadvalda yo‘q. Boshqa vaqtni yoki «Istalgan vaqtda»ni tanlang.",  # NATIVE-READ
         'ru': 'Ваше обычное время недоступно в этом расписании. Выберите другое время или «В любое время».',  # NATIVE-READ
     },
     'cabinet.subs.schedule.slots_failed': {
         'en': "We couldn't load the delivery times just now.",
-        'uz': "Yetkazish vaqtlarini hozir yuklab bo'lmadi.",
+        'uz': "Yetkazish vaqtlarini hozir yuklab bo‘lmadi.",
         'ru': 'Сейчас не удалось загрузить время доставки.',
     },
     'cabinet.subs.slot.window': {'en': '{start}–{end}', 'uz': '{start}–{end}', 'ru': '{start}–{end}'},
     # Payment in edit mode.
-    'cabinet.subs.payment.legend': {'en': 'How you pay', 'uz': "To'lov usuli", 'ru': 'Способ оплаты'},
+    'cabinet.subs.payment.legend': {'en': 'How you pay', 'uz': "To‘lov usuli", 'ru': 'Способ оплаты'},
     'cabinet.subs.payment.methods_failed': {
         'en': "We couldn't load the payment methods just now.",
-        'uz': "To'lov usullarini hozir yuklab bo'lmadi.",
+        'uz': "To‘lov usullarini hozir yuklab bo‘lmadi.",
         'ru': 'Сейчас не удалось загрузить способы оплаты.',
     },
 }
@@ -10691,7 +10622,7 @@ BACKEND_TRANSLATIONS.update(CUSTOMER_PAY_ACTION_TRANSLATIONS)
 STATE_CHANGED_TRANSLATIONS = {
     'api.common.state_changed': {
         'en': 'This changed. Refresh to see the latest.',
-        'uz': "Bu o'zgardi. Eng so'nggi holatni ko'rish uchun yangilang.",
+        'uz': "Bu o‘zgardi. Eng so‘nggi holatni ko‘rish uchun yangilang.",
         'ru': 'Это изменилось. Обновите, чтобы увидеть актуальное.',
     },
 }
@@ -11095,7 +11026,7 @@ WEB_ORDER_ACTIONS_TRANSLATIONS = {
     },
     'web.order_actions.failed': {
         'en': "That didn't go through. Please try again.",
-        'uz': "Amalga oshmadi. Qaytadan urinib ko'ring.",  # NATIVE-READ
+        'uz': "Amalga oshmadi. Qaytadan urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Не получилось. Попробуйте ещё раз.',  # NATIVE-READ
     },
     'web.order_actions.reason_prompt': {
@@ -11105,7 +11036,7 @@ WEB_ORDER_ACTIONS_TRANSLATIONS = {
     },
     'web.order_actions.reason_text': {
         'en': 'In a few words (optional)',
-        'uz': "Bir necha so'z bilan (ixtiyoriy)",  # NATIVE-READ
+        'uz': "Bir necha so‘z bilan (ixtiyoriy)",  # NATIVE-READ
         'ru': 'Пару слов (необязательно)',  # NATIVE-READ
     },
     'web.order_actions.confirmed': {
@@ -11120,12 +11051,12 @@ WEB_ORDER_ACTIONS_TRANSLATIONS = {
     },
     'web.order_actions.preparing_payment': {
         'en': "Preparing your payment. We're registering your items with the tax authority (Asl belgisi); Click opens in a moment.",
-        'uz': "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",  # NATIVE-READ
+        'uz': "To‘lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro‘yxatdan o‘tkazilmoqda; Click birozdan so‘ng ochiladi.",  # NATIVE-READ
         'ru': 'Готовим оплату. Регистрируем товары в налоговой системе («Asl belgisi»); Click откроется через мгновение.',  # NATIVE-READ
     },
     'web.order_actions.switch_to_cash': {
         'en': 'Pay with cash',
-        'uz': "Naqd pul bilan to'lash",  # NATIVE-READ
+        'uz': "Naqd pul bilan to‘lash",  # NATIVE-READ
         'ru': 'Оплатить наличными',  # NATIVE-READ
     },
     'web.order_actions.try_again': {
@@ -11135,7 +11066,7 @@ WEB_ORDER_ACTIONS_TRANSLATIONS = {
     },
     'web.order_actions.reorder_dropped': {
         'en': 'Some items from this order are no longer available and were left out.',
-        'uz': "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",  # NATIVE-READ
+        'uz': "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo‘shilmadi.",  # NATIVE-READ
         'ru': 'Некоторых товаров из этого заказа больше нет, они не добавлены.',  # NATIVE-READ
     },
     'api.orders.agent_confirmation.not_pending': {
@@ -11153,12 +11084,12 @@ BACKEND_TRANSLATIONS.update(WEB_ORDER_ACTIONS_TRANSLATIONS)
 PAYMENT_RETURN_TRANSLATIONS = {
     'web.payment_return.neutral_success': {
         'en': "Thank you! We're confirming your payment and will message you in the bot or by email once it's done.",
-        'uz': "Rahmat! To'lovingizni tasdiqlayapmiz va tayyor bo'lgach, botda yoki elektron pochta orqali xabar beramiz.",  # NATIVE-READ
+        'uz': "Rahmat! To‘lovingizni tasdiqlayapmiz va tayyor bo‘lgach, botda yoki elektron pochta orqali xabar beramiz.",  # NATIVE-READ
         'ru': 'Спасибо! Мы подтверждаем оплату и сообщим в боте или по почте, когда всё будет готово.',  # NATIVE-READ
     },
     'web.payment_return.neutral_cancel': {
         'en': "The payment wasn't completed, and no money was taken.",
-        'uz': "To'lov yakunlanmadi, hech qanday pul yechilmadi.",  # NATIVE-READ
+        'uz': "To‘lov yakunlanmadi, hech qanday pul yechilmadi.",  # NATIVE-READ
         'ru': 'Оплата не завершена, деньги не списаны.',  # NATIVE-READ
     },
     # The tax-system outage sentence for a customer the cash-debt limit keeps off cash: the same outage, without
@@ -11202,7 +11133,7 @@ CABINET_SUBS_ANY_TIME_ADDRESS_TRANSLATIONS = {
     },
     'cabinet.subs.change_label.address': {
         'en': 'Change the delivery address',
-        'uz': "Yetkazish manzilini o'zgartirish",  # NATIVE-READ
+        'uz': "Yetkazish manzilini o‘zgartirish",  # NATIVE-READ
         'ru': 'Изменить адрес доставки',  # NATIVE-READ
     },
     'cabinet.subs.address.legend': {
@@ -11212,17 +11143,17 @@ CABINET_SUBS_ANY_TIME_ADDRESS_TRANSLATIONS = {
     },
     'cabinet.subs.address.add': {
         'en': 'Add a new address',
-        'uz': "Yangi manzil qo'shish",  # NATIVE-READ
+        'uz': "Yangi manzil qo‘shish",  # NATIVE-READ
         'ru': 'Добавить новый адрес',  # NATIVE-READ
     },
     'cabinet.subs.address.method_legend': {
         'en': "Your usual way to pay isn't offered at this address. Choose how you'll pay there.",
-        'uz': "Odatdagi to'lov usulingiz bu manzilda yo'q. U yerda qanday to'lashingizni tanlang.",  # NATIVE-READ
+        'uz': "Odatdagi to‘lov usulingiz bu manzilda yo‘q. U yerda qanday to‘lashingizni tanlang.",  # NATIVE-READ
         'ru': 'Ваш обычный способ оплаты недоступен по этому адресу. Выберите, как будете платить там.',  # NATIVE-READ
     },
     'cabinet.subs.address.load_failed': {
         'en': "We couldn't load your addresses. Please try again.",
-        'uz': "Manzillaringizni yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "Manzillaringizni yuklab bo‘lmadi. Qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Не удалось загрузить ваши адреса. Попробуйте ещё раз.',  # NATIVE-READ
     },
     'cabinet.subs.edit.saved_address': {
@@ -11276,22 +11207,22 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
     },
     'landing.custom_subscription.error.payment': {
         'en': "Choose how you'll pay.",
-        'uz': "Qanday to'lashingizni tanlang.",  # NATIVE-READ
+        'uz': "Qanday to‘lashingizni tanlang.",  # NATIVE-READ
         'ru': 'Выберите, как будете платить.',  # NATIVE-READ
     },
     'landing.custom_subscription.error.slots_failed': {
         'en': "We couldn't load the delivery times. Please try again.",
-        'uz': "Yetkazib berish vaqtlarini yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "Yetkazib berish vaqtlarini yuklab bo‘lmadi. Qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Не удалось загрузить время доставки. Попробуйте ещё раз.',  # NATIVE-READ
     },
     'landing.custom_subscription.error.methods_failed': {
         'en': "We couldn't load the ways to pay. Please try again.",
-        'uz': "To'lov usullarini yuklab bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "To‘lov usullarini yuklab bo‘lmadi. Qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Не удалось загрузить способы оплаты. Попробуйте ещё раз.',  # NATIVE-READ
     },
     'landing.custom_subscription.error.load_failed': {
         'en': "We couldn't load the subscription builder. Please refresh the page.",
-        'uz': "Obuna konstruktorini yuklab bo'lmadi. Sahifani yangilang.",  # NATIVE-READ
+        'uz': "Obuna konstruktorini yuklab bo‘lmadi. Sahifani yangilang.",  # NATIVE-READ
         'ru': 'Не удалось загрузить конструктор подписки. Обновите страницу.',  # NATIVE-READ
     },
     'landing.custom_subscription.error.sign_in': {
@@ -11301,27 +11232,27 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
     },
     'landing.custom_subscription.error.create_failed': {
         'en': "We couldn't set up your subscription. Please try again.",
-        'uz': "Obunangizni rasmiylashtirib bo'lmadi. Qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "Obunangizni rasmiylashtirib bo‘lmadi. Qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Не удалось оформить подписку. Попробуйте ещё раз.',  # NATIVE-READ
     },
     'landing.custom_subscription.address.none_title': {
         'en': 'No addresses yet',
-        'uz': "Hozircha manzillar yo'q",  # NATIVE-READ
+        'uz': "Hozircha manzillar yo‘q",  # NATIVE-READ
         'ru': 'Адресов пока нет',  # NATIVE-READ
     },
     'landing.custom_subscription.address.none_body': {
         'en': 'Add a delivery address to continue.',
-        'uz': "Davom etish uchun yetkazib berish manzilini qo'shing.",  # NATIVE-READ
+        'uz': "Davom etish uchun yetkazib berish manzilini qo‘shing.",  # NATIVE-READ
         'ru': 'Добавьте адрес доставки, чтобы продолжить.',  # NATIVE-READ
     },
     'landing.custom_subscription.address.add': {
         'en': 'Add new address',
-        'uz': "Yangi manzil qo'shish",  # NATIVE-READ
+        'uz': "Yangi manzil qo‘shish",  # NATIVE-READ
         'ru': 'Добавить новый адрес',  # NATIVE-READ
     },
     'landing.custom_subscription.address.add_elsewhere': {
         'en': 'Add a new address in My addresses, then come back here.',
-        'uz': "Yangi manzilni «Manzillarim» bo'limida qo'shing, so'ng shu yerga qayting.",  # NATIVE-READ
+        'uz': "Yangi manzilni «Manzillarim» bo‘limida qo‘shing, so‘ng shu yerga qayting.",  # NATIVE-READ
         'ru': 'Добавьте новый адрес в разделе «Мои адреса», затем вернитесь сюда.',  # NATIVE-READ
     },
     'landing.custom_subscription.address.apartment': {
@@ -11346,7 +11277,7 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
     },
     'landing.custom_subscription.review.name_hint': {
         'en': 'We suggested a name from your choices. You can change it.',
-        'uz': "Tanlovlaringiz asosida nom taklif qildik. Uni o'zgartirishingiz mumkin.",  # NATIVE-READ
+        'uz': "Tanlovlaringiz asosida nom taklif qildik. Uni o‘zgartirishingiz mumkin.",  # NATIVE-READ
         'ru': 'Мы предложили название на основе вашего выбора. Его можно изменить.',  # NATIVE-READ
     },
     'landing.custom_subscription.review.products_title': {
@@ -11386,7 +11317,7 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
     },
     'landing.custom_subscription.review.payment_title': {
         'en': 'Payment method',
-        'uz': "To'lov usuli",  # NATIVE-READ
+        'uz': "To‘lov usuli",  # NATIVE-READ
         'ru': 'Способ оплаты',  # NATIVE-READ
     },
     'landing.custom_subscription.review.cost_title': {
@@ -11431,7 +11362,7 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
     },
     'landing.custom_subscription.review.note': {
         'en': 'Your subscription starts once you confirm. You can change, pause or cancel it any time in My subscriptions.',
-        'uz': "Obunangiz tasdiqlaganingizdan so'ng boshlanadi. Uni istalgan vaqtda «Obunalarim» bo'limida o'zgartirishingiz, to'xtatib turishingiz yoki bekor qilishingiz mumkin.",  # NATIVE-READ
+        'uz': "Obunangiz tasdiqlaganingizdan so‘ng boshlanadi. Uni istalgan vaqtda «Obunalarim» bo‘limida o‘zgartirishingiz, to‘xtatib turishingiz yoki bekor qilishingiz mumkin.",  # NATIVE-READ
         'ru': 'Подписка начнётся после вашего подтверждения. Изменить, приостановить или отменить её можно в любой момент в разделе «Мои подписки».',  # NATIVE-READ
     },
     'landing.custom_subscription.name.more': {
@@ -11455,7 +11386,7 @@ SUBSCRIPTION_BUILDER_TRANSLATIONS = {
         'ru': 'Еженедельно',  # NATIVE-READ
     },
     'landing.custom_subscription.frequency.biweekly': {
-        'en': 'Bi-Weekly',
+        'en': "Every two weeks",
         'uz': 'Ikki haftada bir marta',  # NATIVE-READ
         'ru': 'Раз в две недели',  # NATIVE-READ
     },
@@ -11616,7 +11547,7 @@ BACKEND_TRANSLATIONS.update(BOT_SUBSCRIPTION_ADDRESS_PAYMENT_TRANSLATIONS)
 TELEGRAM_LOGIN_PAGE_TRANSLATIONS = {
     'web.telegram_login.title': {
         'en': "We couldn't sign you in",
-        'uz': "Kirishning iloji bo'lmadi",  # NATIVE-READ
+        'uz': "Kirishning iloji bo‘lmadi",  # NATIVE-READ
         'ru': 'Не удалось войти',  # NATIVE-READ
     },
     'web.telegram_login.expired': {
@@ -11627,8 +11558,7 @@ TELEGRAM_LOGIN_PAGE_TRANSLATIONS = {
     'web.telegram_login.no_account': {
         'en': "We couldn't find your account. Open our Telegram bot, finish signing up there, then tap “Open on website”.",
         'uz': (
-            "Hisobingizni topa olmadik. Telegram botimizni oching, u yerda ro'yxatdan o'tishni yakunlang, "
-            "so'ng «Saytda ochish» tugmasini bosing."
+            "Hisobingizni topa olmadik. Telegram botimizni oching, u yerda ro‘yxatdan o‘tishni yakunlang, so‘ng «Saytda ochish» tugmasini bosing."
         ),  # NATIVE-READ
         'ru': (
             'Мы не нашли ваш аккаунт. Откройте нашего Telegram-бота, завершите там регистрацию '
@@ -11642,12 +11572,12 @@ TELEGRAM_LOGIN_PAGE_TRANSLATIONS = {
     },
     'web.telegram_login.busy': {
         'en': 'Too many sign-in attempts. Please try again in a few minutes.',
-        'uz': "Kirishga urinishlar juda ko'p. Bir necha daqiqadan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "Kirishga urinishlar juda ko‘p. Bir necha daqiqadan so‘ng qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Слишком много попыток входа. Попробуйте через несколько минут.',  # NATIVE-READ
     },
     'web.telegram_login.unavailable': {
         'en': "Signing in from the bot isn't available right now. Please try again in a few minutes.",
-        'uz': "Botdan kirish hozircha ishlamayapti. Bir necha daqiqadan so'ng qayta urinib ko'ring.",  # NATIVE-READ
+        'uz': "Botdan kirish hozircha ishlamayapti. Bir necha daqiqadan so‘ng qayta urinib ko‘ring.",  # NATIVE-READ
         'ru': 'Вход из бота сейчас недоступен. Попробуйте через несколько минут.',  # NATIVE-READ
     },
 }
@@ -11662,7 +11592,7 @@ OPEN_ON_WEBSITE_TRANSLATIONS = {
     },
     'web.forgot_password.telegram_hint': {
         'en': "Signed up in our Telegram bot? You don't need a password: open the bot, go to My Profile and tap “Open on website”.",
-        'uz': "Telegram botimizda ro'yxatdan o'tganmisiz? Parol kerak emas: botni oching, «Profilim» bo'limiga kiring va «Saytda ochish» tugmasini bosing.",  # NATIVE-READ
+        'uz': "Telegram botimizda ro‘yxatdan o‘tganmisiz? Parol kerak emas: botni oching, «Profilim» bo‘limiga kiring va «Saytda ochish» tugmasini bosing.",  # NATIVE-READ
         'ru': 'Регистрировались в нашем Telegram-боте? Пароль не нужен: откройте бота, перейдите в «Мой профиль» и нажмите «Открыть на сайте».',  # NATIVE-READ
     },
 }
@@ -11676,11 +11606,6 @@ CABINET_PAGE_TRANSLATIONS = {
         'en': 'Home',
         'uz': 'Uy',  # NATIVE-READ
         'ru': 'Дом',  # NATIVE-READ
-    },
-    'cabinet.loyalty.earn_more_to_keep': {
-        'en': 'Earn {count} more AquaCoins to keep your status',
-        'uz': "Maqomingizni saqlab qolish uchun yana {count} AquaCoins yig'ing",  # NATIVE-READ
-        'ru': 'Заработайте ещё {count} AquaCoins, чтобы сохранить статус',  # NATIVE-READ
     },
     'landing.account.dashboard': {
         'en': 'Dashboard',
@@ -11792,20 +11717,10 @@ CABINET_PAGE_TRANSLATIONS = {
         'uz': 'Manzillarni boshqarish',  # NATIVE-READ
         'ru': 'Управлять адресами',  # NATIVE-READ
     },
-    'cabinet.account.recent_orders': {
-        'en': 'Recent Orders',
-        'uz': "So'nggi buyurtmalar",  # NATIVE-READ
-        'ru': 'Последние заказы',  # NATIVE-READ
-    },
     'cabinet.account.tier': {
         'en': 'Tier',
         'uz': 'Daraja',  # NATIVE-READ
         'ru': 'Уровень',  # NATIVE-READ
-    },
-    'cabinet.account.view': {
-        'en': 'View',
-        'uz': "Ko'rish",  # NATIVE-READ
-        'ru': 'Просмотр',  # NATIVE-READ
     },
     'cabinet.security.active': {
         'en': 'Active',
@@ -11832,11 +11747,6 @@ CABINET_PAGE_TRANSLATIONS = {
         'uz': 'Tasdiqlash',  # NATIVE-READ
         'ru': 'Подтвердить',  # NATIVE-READ
     },
-    'cabinet.addresses.delete': {
-        'en': 'Delete',
-        'uz': "O'chirish",  # NATIVE-READ
-        'ru': 'Удалить',  # NATIVE-READ
-    },
     'cabinet.addresses.district': {
         'en': 'District',
         'uz': 'Tuman',  # NATIVE-READ
@@ -11851,11 +11761,6 @@ CABINET_PAGE_TRANSLATIONS = {
         'en': 'Floor',
         'uz': 'Qavat',  # NATIVE-READ
         'ru': 'Этаж',  # NATIVE-READ
-    },
-    'cabinet.addresses.full_address': {
-        'en': 'Full Address',
-        'uz': "To'liq manzil",  # NATIVE-READ
-        'ru': 'Полный адрес',  # NATIVE-READ
     },
     'cabinet.addresses.next': {
         'en': 'Next',
@@ -11881,11 +11786,6 @@ CABINET_PAGE_TRANSLATIONS = {
         'en': 'Tracking',
         'uz': 'Kuzatuv',  # NATIVE-READ
         'ru': 'Отслеживание',  # NATIVE-READ
-    },
-    'cabinet.orders.view_details': {
-        'en': 'View Details',
-        'uz': "Batafsil ko'rish",  # NATIVE-READ
-        'ru': 'Посмотреть детали',  # NATIVE-READ
     },
     'cabinet.loyalty.close': {
         'en': 'Close',
@@ -13218,27 +13118,13 @@ HONEST_ETA_TRANSLATIONS = {
 BACKEND_TRANSLATIONS.update(HONEST_ETA_TRANSLATIONS)
 
 
-# Honest-ETA Phase 1 (spec 2026-11-03 §4.13, §5). The landing page promised what the business does not offer. Dev's
-# call to action said delivery arrives "within 2 hours anywhere in the city", and prod's promised service "designed to
-# fit your schedule" (uz "kafolatlaymiz", ru "без лишних ожиданий"). The footer said "Delivery: 24/7". Both keys lived
-# only in the database until now, so no seed run could ever replace them; they ship from here. The call to action keeps
-# prod's first sentence, the owner's own wording (Tashkent and the region, their own fleet), and not the dev one
-# ("delivery partners across Uzbekistan"), which is less true. The sentence after it replaces both timing promises with
-# what is true for every customer: the delivery can be followed in the Telegram bot or on the website. It promises no
-# message either: the on-the-way message reaches only a customer with a linked bot or a real email, and a phone-only
-# website customer has neither (SMS is OTP-only). The "see your time before you order" claim waits for Phase 3. The
-# footer says "every day" and names no hours. The loyalty perks are not here: `loyalty_guide.tier.1.benefit1` and
-# `loyalty_guide.tier.3.benefit1` are edited in place in LOYALTY_GUIDE_TRANSLATIONS, each keeping its true half.
+# Honest-ETA Phase 1 (spec 2026-11-03 §4.13, §5). The landing page promised what the business does not offer. The
+# footer said "Delivery: 24/7"; it lived only in the database until now, so no seed run could ever replace it; it ships
+# from here and says "every day", naming no hours. The old call to action (`landing.cta.description`, "within 2 hours" on
+# dev, "our own dedicated delivery fleet" on prod) is read by no page since the home redesign (its lead is
+# web.home.how.lead) and was deleted (review home-10). The loyalty tiers promise no support level, manager or early access
+# (owner, 2026-11-13: no claim the business does not make), so tiers 1-3 carry no `benefit1` row at all.
 HONEST_ETA_PUBLIC_COPY = {
-    'landing.cta.description': {
-        'en': 'We proudly serve Tashkent and the surrounding region with our own dedicated delivery fleet. '
-              'Order in a few taps and follow your delivery in our Telegram bot or on the website.',
-        'uz': 'Biz Toshkent shahri va viloyati bo‘ylab o‘zimizning maxsus transport xizmatimizni taklif etamiz. '
-              'Bir necha bosishda buyurtma bering va yetkazib berishni Telegram botimizda yoki saytda '
-              'kuzatib boring.',  # NATIVE-READ
-        'ru': 'Мы обслуживаем Ташкент и область, используя собственный профессиональный автопарк. '
-              'Закажите в несколько касаний и следите за доставкой в нашем Telegram-боте или на сайте.',  # NATIVE-READ
-    },
     'landing.footer.delivery_hours': {
         'en': 'Delivery: every day',
         'uz': 'Yetkazib berish: har kuni',  # NATIVE-READ
@@ -13491,6 +13377,7 @@ def main():
         added_count = 0
         updated_count = 0
         skipped_count = 0
+        written = {}  # {language: {key: value}} of every row added or changed, for the cache drop below
 
         print(f"Processing {total_keys} translation keys ({total_translations} total translations)...")
         print()
@@ -13517,6 +13404,7 @@ def main():
                         existing.value = value
                         existing.is_active = True
                         existing.category = _category_for(key)
+                        written.setdefault(language, {})[key] = value
                         updated_count += 1
                     else:
                         skipped_count += 1
@@ -13531,10 +13419,14 @@ def main():
                         is_active=True
                     )
                     db.session.add(translation)
+                    written.setdefault(language, {})[key] = value
                     added_count += 1
 
         # Commit all changes
         db.session.commit()
+        # A changed row must show at once: drop the Redis entries of every row written (best-effort, like the
+        # web UI seeds' Translation.bulk_create_or_update), instead of serving the old copy until its TTL runs out.
+        Translation._invalidate_translation_cache(written)
 
         print()
         print("=" * 70)
@@ -13552,7 +13444,7 @@ def main():
         print("  1. Update API endpoints to use get_translation() for messages")
         print("  2. Update service layer to use translations")
         print("  3. Update exception classes to support i18n")
-        print("  4. Clear Redis cache: docker compose exec redis redis-cli FLUSHDB")
+        print("  4. The Redis entries of the rows written above were dropped; no cache flush is needed")
         print()
 
 

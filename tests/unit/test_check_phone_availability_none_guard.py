@@ -62,6 +62,7 @@ def test_verify_phone_link_reasserts_invariants_before_merge(app, db, monkeypatc
 
     def _sms_task(user_id, otp_code, phone_number=None):
         sent.append((phone_number, otp_code))
+        return {"success": True}  # the provider took it, as the real task answers
 
     monkeypatch.setattr("business_app.services.auth_service.send_verification_sms_task", _sms_task)
     svc = AuthService()

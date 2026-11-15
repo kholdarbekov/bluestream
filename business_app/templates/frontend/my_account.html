@@ -1,622 +1,177 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'dashboard' %}
 
+{#
+  The account dashboard (design-system v1): a greeting with the two ways to order, an inline notice only when there is
+  something to do, four real counts that link to their pages, the Telegram panel, and the newest orders.
+  Counts come from the view (my_account), so nothing changes after the page draws. Styles: css/pages/cabinet.css.
+#}
+
 {% block cabinet_title %}{{ 'landing.nav.my_account'|t }}{% endblock %}
 
 {# Dashboard is the account root, so no extra breadcrumb items needed #}
 {% block cabinet_breadcrumb_items %}{% endblock %}
 
-{% block cabinet_extra_head %}
-<!-- Leaflet CSS for map -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""/>
-<style>
-/* Welcome Section - Fixed contrast with white text on blue */
-.welcome-section .card {
-    border: none;
-    border-radius: 16px;
-    overflow: hidden;
-}
-
-.welcome-section .bg-gradient-primary {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
-    position: relative;
-}
-
-.welcome-section .bg-gradient-primary::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-    opacity: 0.5;
-}
-
-.welcome-section .card-body {
-    position: relative;
-    z-index: 1;
-    padding: 30px;
-}
-
-.welcome-section h3 {
-    color: #ffffff !important;
-    font-weight: 700;
-    margin-bottom: 10px;
-}
-
-.welcome-section p,
-.welcome-section small {
-    color: rgba(255, 255, 255, 0.9) !important;
-}
-
-.welcome-section .sync-status {
-    color: #ffffff;
-}
-
-.welcome-section .sync-status i {
-    color: #ffffff;
-}
-
-/* Stat Cards - Enhanced with colored icon backgrounds */
-.stat-card .card {
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-    transition: all 0.3s ease;
-    overflow: hidden;
-}
-
-.stat-card .card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
-}
-
-.stat-card.clickable {
-    cursor: pointer;
-}
-
-.stat-card .card-body {
-    padding: 25px 20px;
-}
-
-.stat-card .card-body i {
-    width: 60px;
-    height: 60px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 12px;
-    font-size: 1.5rem !important;
-    margin-bottom: 15px;
-}
-
-.stat-card .card-body i.text-primary {
-    background: rgba(24, 144, 255, 0.12);
-}
-
-.stat-card .card-body i.text-success {
-    background: rgba(82, 196, 26, 0.12);
-}
-
-.stat-card .card-body i.text-warning {
-    background: rgba(250, 173, 20, 0.12);
-}
-
-.stat-card .card-body i.text-info {
-    background: rgba(23, 162, 184, 0.12);
-}
-
-.stat-card h4 {
-    font-size: 32px;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin-bottom: 5px;
-}
-
-.stat-card p {
-    font-size: 14px;
-    color: #666;
-    margin-bottom: 10px;
-}
-
-.stat-card small {
-    font-weight: 600;
-    font-size: 13px;
-}
-
-/* Recent Orders Table - Better contrast */
-.recent-orders-section .table {
-    margin: 0;
-}
-
-.recent-orders-section .table thead th {
-    background: #f8f9fa;
-    border-bottom: 2px solid #e8e8e8;
-    color: #666;
-    font-weight: 600;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 14px 16px;
-}
-
-.recent-orders-section .table tbody tr {
-    transition: background 0.2s;
-}
-
-.recent-orders-section .table tbody tr:hover {
-    background: #f8f9fa;
-}
-
-.recent-orders-section .table tbody td {
-    padding: 16px;
-    vertical-align: middle;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-/* Badge Improvements */
-.badge-success {
-    background: #52c41a !important;
-    color: #fff !important;
-}
-
-.badge-primary {
-    background: #1890ff !important;
-    color: #fff !important;
-}
-
-.badge-warning {
-    background: #faad14 !important;
-    color: #fff !important;
-}
-
-.badge-info {
-    background: #13c2c2 !important;
-    color: #fff !important;
-}
-
-.badge-danger {
-    background: #ff4d4f !important;
-    color: #fff !important;
-}
-
-/* Enhanced status badges */
-.recent-orders-section .badge {
-    padding: 8px 14px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 20px;
-}
-
-/* Subscription Cards */
-.subscription-card .card {
-    border: 1px solid #f0f0f0;
-    border-radius: 10px;
-    height: 100%;
-    transition: all 0.3s ease;
-}
-
-.subscription-card .card:hover {
-    border-color: #1890ff;
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
-}
-
-.subscription-card h6 {
-    font-weight: 600;
-    color: #1a1a2e;
-}
-
-/* Activity Section */
-.platform-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.platform-item:last-child {
-    border-bottom: none;
-}
-
-.recent-activity-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.recent-activity-list li {
-    padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
-    color: #555;
-}
-
-.recent-activity-list li:last-child {
-    border-bottom: none;
-}
-
-.recent-activity-list i {
-    width: 24px;
-    margin-right: 10px;
-}
-
-/* Quick Actions - Enhanced buttons */
-.quick-actions-section .card-body .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-}
-
-.quick-actions-section .card-body .row > div {
-    flex: 1;
-    min-width: 180px;
-    max-width: calc(25% - 12px);
-    padding: 0;
-}
-
-.quick-actions-section .btn {
-    padding: 16px 20px;
-    border-radius: 10px;
-    font-weight: 500;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    height: 100%;
-    min-height: 56px;
-}
-
-.quick-actions-section .btn i {
-    font-size: 18px;
-}
-
-.quick-actions-section .btn-outline-primary:hover,
-.quick-actions-section .btn-outline-secondary:hover,
-.quick-actions-section .btn-outline-info:hover,
-.quick-actions-section .btn-outline-warning:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
-@media (max-width: 992px) {
-    .quick-actions-section .card-body .row > div {
-        max-width: calc(50% - 12px);
-    }
-}
-
-@media (max-width: 576px) {
-    .quick-actions-section .card-body .row > div {
-        max-width: 100%;
-    }
-}
-
-/* Sync Animation */
-.sync-status {
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.7; }
-    100% { opacity: 1; }
-}
-
-/* Cards General Styling */
-.card-header h5 {
-    font-weight: 600;
-    color: #1a1a2e;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.card-header h5 i {
-    color: #1890ff;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .stats-section .col-lg-3 {
-        margin-bottom: 15px;
-    }
-
-    .welcome-section .card-body {
-        padding: 20px;
-    }
-
-    .welcome-section h3 {
-        font-size: 1.25rem;
-    }
-
-    .quick-actions-section .btn {
-        margin-bottom: 10px;
-    }
-}
-
-/* Telegram link card (web-to-Telegram link) */
-#telegram-link-card {
-    border-radius: 16px;
-}
-
-#telegram-link-card ul {
-    padding-left: 1.25rem;
-}
-</style>
-{% endblock %}
-
 {% block cabinet_content %}
-{% from "frontend/macros/order_status.html" import order_status_label %}
+{% from "frontend/macros/order_status.html" import order_status_pill %}
+{% from "frontend/macros/ui.html" import telegram_panel, empty_state %}
 {% set telegram_connected = telegram_link_state in ('connected', 'connected_blocked') %}
-{% if telegram_link_state == 'available' %}
-<div class="card mb-4" id="telegram-link-card">
-    <div class="card-body">
-        <h5>{{ 'Get delivery updates in Telegram'|t(current_language) }}</h5>
-        <p>{{ 'Know when your order is confirmed, when the courier is on the way and when they arrive.'|t(current_language) }}</p>
-        <ul>
-            <li>{{ 'Order again in a few taps'|t(current_language) }}</li>
-            <li>{{ 'Chat with us right in Telegram'|t(current_language) }}</li>
-        </ul>
-        <button type="button" class="btn btn-primary" data-action="connect-telegram">{{ 'Open in Telegram'|t(current_language) }}</button>
-    </div>
-</div>
-{% elif telegram_connected %}
-<div class="alert {{ 'alert-success' if telegram_link_state == 'connected' else 'alert-warning' }}" id="telegram-link-note">
-    {% if telegram_link_state == 'connected' %}✅ {{ 'Telegram connected. Delivery updates now come to Telegram instead of email.'|t(current_language) }}{% else %}{{ 'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.'|t(current_language) }}{% endif %}
-    <a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'Open the bot'|t(current_language) }}</a>
-</div>
-{% endif %}
-<!-- Welcome Section -->
-<div class="welcome-section mb-4">
-    <div class="card bg-gradient-primary text-white">
-        <div class="card-body">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h3>{{ 'Welcome back'|t }}{% if user.greeting_name %}, {{ user.greeting_name }}{% endif %}!</h3>
-                    <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|t }}</p>
-                    <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if telegram_connected %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
-                </div>
-                <div class="col-md-4 text-center">
-                    <div class="sync-status">
-                        <i class="far fa-sync-alt" style="font-size: 2rem;"></i>
-                        <div class="mt-2">
-                            <small id="syncStatus">{{ 'Synchronized'|t }}</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
+{#- Counts group thousands with the money labels' no-break space (display_labels.NBSP), so '1 250' never wraps. -#}
+{%- macro count(value) -%}{{ '{:,}'.format(value or 0)|replace(',', ' ') }}{%- endmacro %}
+<div class="ae-dash">
+    <header class="ae-page-head ae-dash__head welcome-section">
+        <div class="ae-dash__hello">
+            <h2 class="ae-page-head__title">{{ 'Welcome back'|t }}{% if user.greeting_name %}, {{ user.greeting_name }}{% endif %}!</h2>
+            <p class="ae-page-head__sub">{{ 'web.cabinet.dashboard.lead'|t }}</p>
         </div>
-    </div>
-</div>
-
-<!-- Quick Stats -->
-<div class="stats-section mb-4">
-    <div class="row">
-        <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_orders') }}">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2" id="totalOrdersCount">{{ recent_orders|length }}</h4>
-                        <p class="text-muted">{{ 'Total Orders'|t }}</p>
-                        <small class="text-primary">{{ 'landing.button.view_all'|t }}</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_subscriptions') }}">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
-                        <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
-                        <small class="text-success">{{ 'cabinet.account.manage'|t }}</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_loyalty') }}">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
-                        <p class="text-muted">{{ 'AquaCoins'|t }}</p>
-                        <small class="text-warning">{{ 'cabinet.account.tier'|t }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.addresses') }}">
-                <div class="card text-center">
-                    <div class="card-body">
-                        <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2" id="addressesCount">0</h4>
-                        <p class="text-muted">{{ 'Saved Addresses'|t }}</p>
-                        <small class="text-info">{{ 'cabinet.account.manage'|t }}</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Recent Orders -->
-<div class="recent-orders-section mb-4">
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5>{{ 'cabinet.account.recent_orders'|t }}</h5>
-            <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'landing.button.view_all'|t }}</a>
-        </div>
-        <div class="card-body">
-            {% if recent_orders %}
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>{{ 'cabinet.account.order_number'|t }}</th>
-                            <th>{{ 'cabinet.account.date'|t }}</th>
-                            <th>{{ 'cabinet.account.status'|t }}</th>
-                            <th>{{ 'cabinet.account.total'|t }}</th>
-                            <th>{{ 'cabinet.account.actions'|t }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for order in recent_orders %}
-                        {# The view that publishes display_statuses may still be the old one for a
-                           moment after `git pull` (spec §9); the order's own status then stands in. #}
-                        {% set display_status = display_statuses[order.id] if display_statuses is defined else order.status.value %}
-                        <tr>
-                            <td><strong>#{{ order.order_number }}</strong></td>
-                            <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
-                            <td>
-                                <span class="badge badge-{{ 'success' if display_status == 'delivered' else 'primary' if display_status == 'confirmed' else 'warning' }}">
-                                    {{ order_status_label(display_status) }}
-                                </span>
-                            </td>
-                            <td>{{ "{:,.0f}".format(order.total_amount)|replace(",", " ") }} UZS</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-primary" data-action="show-order" data-order-id="{{ order.id }}">{{ 'cabinet.account.view'|t }}</button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="text-center py-4">
-                <i class="far fa-shopping-bag" style="font-size: 3rem; color: #ccc;"></i>
-                <h5 class="mt-3">{{ 'No orders yet'|t }}</h5>
-                <p class="text-muted">{{ 'Start shopping to see your orders here'|t }}</p>
-                <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|t }}</a>
-            </div>
+        <div class="ae-page-head__actions">
+            <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.shop') }}"><i class="far fa-shopping-cart" aria-hidden="true"></i>{{ 'web.cabinet.dashboard.order_water'|t }}</a>
+            {#- The bot button only when no Telegram panel below already offers it (one way to the bot per screen). -#}
+            {% if telegram_link_state != 'available' and not telegram_connected %}
+            <a class="ae-btn ae-btn--secondary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
             {% endif %}
         </div>
-    </div>
-</div>
+    </header>
 
-<!-- Active Subscriptions -->
-{% if active_subscriptions %}
-<div class="subscriptions-section mb-4">
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5>{{ 'Active Subscriptions'|t }}</h5>
-            <a href="{{ url_for('frontend.my_subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|t }}</a>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                {% for subscription in active_subscriptions %}
-                <div class="col-md-6">
-                    <div class="subscription-card">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6>{{ subscription.name }}</h6>
-                                <p class="text-muted">{{ subscription.description }}</p>
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ ('cabinet.subs.frequency.' ~ subscription.frequency.value)|t }}</span>
-                                    <span class="badge badge-success">{{ 'cabinet.account.active'|t }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
+    {% if email_verify_needed %}
+    <div class="ae-alert ae-alert--warn ae-dash__notice" role="note">
+        <i class="far fa-envelope ae-alert__icon" aria-hidden="true"></i>
+        <div>
+            <p>{{ 'web.cabinet.dashboard.verify_email'|t }}</p>
+            <a class="ae-link" href="{{ url_for('frontend.verify_email') }}">{{ 'web.cabinet.dashboard.verify_email_action'|t }}</a>
         </div>
     </div>
-</div>
-{% endif %}
+    {% endif %}
 
-<!-- Account Activity Summary -->
-<div class="activity-summary-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|t }}</h5>
+    <ul class="ae-dash__stats" aria-label="{{ 'web.cabinet.dashboard.summary'|t }}">
+        <li>
+            <a class="ae-stat ae-dash__stat" href="{{ url_for('frontend.my_orders') }}">
+                <span class="ae-icon-tile ae-icon-tile--sm ae-stat__icon" aria-hidden="true"><i class="far fa-shopping-bag"></i></span>
+                <span class="ae-stat__value" id="totalOrdersCount">{{ count(total_orders) }}</span>
+                <span class="ae-stat__label">{{ 'web.cabinet.dashboard.stat_orders'|t }}</span>
+            </a>
+        </li>
+        <li>
+            <a class="ae-stat ae-dash__stat" href="{{ url_for('frontend.my_subscriptions') }}">
+                <span class="ae-icon-tile ae-icon-tile--sm ae-stat__icon" aria-hidden="true"><i class="far fa-sync-alt"></i></span>
+                <span class="ae-stat__value">{{ count(active_subscriptions_count) }}</span>
+                <span class="ae-stat__label">{{ 'web.cabinet.dashboard.stat_subscriptions'|t }}</span>
+            </a>
+        </li>
+        {% if loyalty_account %}
+        <li>
+            <a class="ae-stat ae-dash__stat" href="{{ url_for('frontend.my_loyalty') }}">
+                <span class="ae-icon-tile ae-icon-tile--sm ae-icon-tile--gold ae-stat__icon" aria-hidden="true"><i class="far fa-gem"></i></span>
+                <span class="ae-stat__value">{{ count(loyalty_account.current_balance) }}</span>
+                <span class="ae-stat__label">{{ 'AquaCoins'|t }}{% if tier_label %} <span class="ae-badge ae-badge--gold">{{ tier_label }}</span>{% endif %}</span>
+            </a>
+        </li>
+        {% endif %}
+        <li>
+            <a class="ae-stat ae-dash__stat" href="{{ url_for('frontend.addresses') }}">
+                <span class="ae-icon-tile ae-icon-tile--sm ae-stat__icon" aria-hidden="true"><i class="far fa-map-marker-alt"></i></span>
+                <span class="ae-stat__value" id="addressesCount">{{ count(addresses_count) }}</span>
+                <span class="ae-stat__label">{{ 'web.cabinet.dashboard.stat_addresses'|t }}</span>
+            </a>
+        </li>
+    </ul>
+
+    {% if telegram_link_state == 'available' %}
+    {#- The connect flow asks the backend for a one-time link (my-account.js), so its control is a button, not the
+        bot link telegram_panel() draws; the panel's look is the same. -#}
+    <section class="ae-panel ae-tg-panel ae-dash__tg" id="telegram-link-card" aria-labelledby="telegram-link-title">
+        <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+        <div class="ae-dash__tg-body">
+            <h3 class="ae-dash__tg-title" id="telegram-link-title">{{ 'Get delivery updates in Telegram'|t(current_language) }}</h3>
+            <p class="ae-dash__tg-text">{{ 'Know when your order is confirmed, when the courier is on the way and when they arrive.'|t(current_language) }}</p>
+            <ul class="ae-dash__perks">
+                <li><i class="far fa-check" aria-hidden="true"></i>{{ 'Order again in a few taps'|t(current_language) }}</li>
+                <li><i class="far fa-check" aria-hidden="true"></i>{{ 'Chat with us right in Telegram'|t(current_language) }}</li>
+            </ul>
         </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="activity-item">
-                        <h6>{{ 'Platform Usage'|t }}</h6>
-                        <div class="platform-usage">
-                            <div class="platform-item">
-                                <span class="platform-name">{{ 'Web App'|t }}</span>
-                                <span class="badge badge-success">{{ 'cabinet.account.active'|t }}</span>
-                            </div>
-                            {% if telegram_connected %}
-                            <div class="platform-item">
-                                <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                <span class="badge badge-success">{{ 'Connected'|t }}</span>
-                            </div>
-                            {% elif telegram_link_state == 'available' %}
-                            <div class="platform-item">
-                                <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-action="connect-telegram">{{ 'Connect'|t }}</button>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="activity-item">
-                        <h6>{{ 'Recent Activity'|t }}</h6>
-                        <ul class="recent-activity-list">
-                            <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|t }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
-                            <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|t }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
-                            <li><i class="far fa-shopping-bag text-primary"></i> {{ 'cabinet.account.last_order'|t }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <button type="button" class="ae-btn ae-btn--secondary ae-dash__tg-action" data-action="connect-telegram"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'Open in Telegram'|t(current_language) }}</button>
+    </section>
+    {% elif telegram_connected %}
+    {#- A stopped bot: updates come by email only when the customer has a mailbox (updates_channel, the backend's own
+        choice); with none, the note says updates cannot reach them, as Profile settings does. -#}
+    <div class="ae-dash__tg-note ae-dash__tg-note--{{ 'ok' if telegram_link_state == 'connected' else 'warn' }}" id="telegram-link-note">
+        {{ telegram_panel(
+            ('Telegram connected. Delivery updates now come to Telegram instead of email.'|t(current_language))
+                if telegram_link_state == 'connected'
+                else (('Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.'|t(current_language))
+                    if updates_channel == 'email'
+                    else ('web.account.profile.updates_blocked'|t(current_language))),
+            company_telegram_bot_url) }}
     </div>
-</div>
+    {% endif %}
 
-<!-- Quick Actions -->
-<div class="quick-actions-section">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|t }}</h5>
+    {% if active_subscriptions %}
+    {#- The active subscriptions as GET /subscriptions/?status=active publishes them: what comes (the items, in the
+        page language), the next delivery (its published date label, else the schedule sentence) and the
+        amount per delivery with its frequency. -#}
+    <section class="ae-dash__section active-subscriptions-section" aria-labelledby="active-subscriptions-title">
+        <div class="ae-dash__section-head">
+            <h2 class="ae-dash__section-title" id="active-subscriptions-title">{{ 'web.cabinet.dashboard.stat_subscriptions'|t }}</h2>
+            <a class="ae-link ae-dash__more" href="{{ url_for('frontend.my_subscriptions') }}">{{ 'web.cabinet.dashboard.all_subscriptions'|t }}</a>
         </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-3">
-                    <a href="{{ url_for('frontend.shop') }}" class="btn btn-outline-primary btn-block action-btn">
-                        <i class="far fa-shopping-cart"></i>
-                        {{ 'Shop Products'|t }}
-                    </a>
-                </div>
-                <div class="col-md-3">
-                    <a href="{{ url_for('frontend.profile_settings') }}" class="btn btn-outline-secondary btn-block action-btn">
-                        <i class="far fa-user-edit"></i>
-                        {{ 'Edit Profile'|t }}
-                    </a>
-                </div>
-                <div class="col-md-3">
-                    <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
-                        <i class="far fa-map-marker-alt"></i>
-                        {{ 'cabinet.account.manage_addresses'|t }}
-                    </a>
-                </div>
-                <div class="col-md-3">
-                    <button class="btn btn-outline-warning btn-block action-btn" data-action="download-account-data">
-                        <i class="far fa-download"></i>
-                        {{ 'Export Data'|t }}
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+        <ul class="ae-orows">
+            {% for sub in active_subscriptions %}
+            {%- set lines = [] %}
+            {%- for item in sub.subscription_items or [] if item.product_name %}{% set _ = lines.append(item.quantity ~ ' × ' ~ item.product_name) %}{% endfor %}
+            <li>
+                <a class="ae-orow ae-srow" href="{{ url_for('frontend.my_subscriptions') }}">
+                    <span class="ae-orow__id">
+                        <strong class="ae-orow__num">{{ lines|join(', ') if lines else sub.name }}</strong>
+                        {%- set next = sub.upcoming_delivery %}
+                        <span class="ae-orow__date">{% if next and next.label_long %}{{ 'cabinet.subs.strip.next'|t(date=next.label_long) }}{% else %}{{ sub.schedule_sentence }}{% endif %}</span>
+                    </span>
+                    <span class="ae-orow__state">
+                        <span class="ae-orow__sum">{{ sub.estimated_per_delivery_label }}<span class="ae-srow__per"> / {{ ('cabinet.subs.frequency.' ~ sub.frequency)|t }}</span></span>
+                    </span>
+                    <i class="far fa-chevron-right ae-orow__go" aria-hidden="true"></i>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
 
+    <section class="ae-dash__section recent-orders-section" aria-labelledby="recent-orders-title">
+        <div class="ae-dash__section-head">
+            <h2 class="ae-dash__section-title" id="recent-orders-title">{{ 'web.cabinet.dashboard.recent_orders'|t }}</h2>
+            {% if recent_orders %}<a class="ae-link ae-dash__more" href="{{ url_for('frontend.my_orders') }}">{{ 'web.cabinet.dashboard.all_orders'|t }}</a>{% endif %}
+        </div>
+        {% if recent_orders %}
+        <ul class="ae-orows">
+            {% for order in recent_orders %}
+            {# The view that publishes display_statuses may still be the old one for a
+               moment after `git pull` (spec §9); the order's own status then stands in. #}
+            {% set display_status = display_statuses[order.id] if display_statuses is defined else order.status.value %}
+            <li>
+                <button type="button" class="ae-orow" data-action="show-order" data-order-id="{{ order.id }}">
+                    <span class="ae-orow__id">
+                        <strong class="ae-orow__num">{{ 'web.cabinet.order_number'|t(number=order.order_number) }}</strong>
+                        <time class="ae-orow__date" datetime="{{ order.created_at_utc.isoformat() }}" data-ae-date>{{ order.created_at|user_datetime('%d.%m.%Y') }}</time>
+                    </span>
+                    <span class="ae-orow__state">
+                        {{ order_status_pill(display_status) }}
+                        <span class="ae-orow__sum">{{ order.total_amount|format_price }}</span>
+                    </span>
+                    <i class="far fa-chevron-right ae-orow__go" aria-hidden="true"></i>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        {{ empty_state('far fa-shopping-bag', 'web.cabinet.orders.empty_title'|t, 'web.cabinet.orders.empty_text'|t,
+                       {'label': 'web.cabinet.dashboard.order_water'|t, 'url': url_for('frontend.shop')}, heading_tag='h3') }}
+        {% endif %}
+    </section>
+
+    <p class="ae-dash__export">
+        <button type="button" class="ae-btn ae-btn--ghost" data-action="download-account-data"><i class="far fa-download" aria-hidden="true"></i>{{ 'web.cabinet.dashboard.export'|t }}</button>
+    </p>
+</div>
 {% endblock %}
 
 {% block cabinet_extra_js %}
@@ -625,21 +180,13 @@
 {% include 'frontend/partials/order_detail_modal.html' %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'email_verified': true if user.email_verified_at else false,
-    'phone_verified': true if user.phone_verified_at else false,
-    'recent_orders_count': recent_orders|length,
     'language': current_language,
     'i18n': {
-        'verify_email_prompt': 'Please verify your email address to access all features' | t,
-        'verify_phone_prompt': 'Please verify your phone number for enhanced security' | t,
-        'synchronized': 'Synchronized' | t,
-        'syncing': 'Syncing...' | t,
-        'sync_error': 'Sync Error' | t,
         'telegram_link_failed': 'Something went wrong. Please try again in a minute.' | t(current_language),
-        'preparing_download': 'Preparing your account data for download...' | t,
-        'download_success': 'Account data downloaded successfully!' | t,
-        'download_failed': 'Failed to download account data. Please try again.' | t,
+        'preparing_download': 'web.cabinet.dashboard.export_preparing' | t,
+        'download_success': 'web.cabinet.dashboard.export_done' | t,
+        'download_failed': 'web.cabinet.dashboard.export_failed' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/my-account.js', v='20261019') }}"></script>
+<script src="{{ asset_url('js/pages/my-account.js') }}"></script>
 {% endblock %}

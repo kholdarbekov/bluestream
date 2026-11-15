@@ -36,5 +36,6 @@ def test_the_register_page_has_no_fake_telegram_link_flow():
 
 def test_the_account_page_loads_the_script_with_a_version_query():
     html = (STATIC / "templates" / "frontend" / "my_account.html").read_text(encoding="utf-8")
-    # A cached older script would show an empty toast for the new error (controller ruling C13).
-    assert "filename='js/pages/my-account.js', v=" in html
+    # A cached older script would show an empty toast for the new error (controller ruling C13). asset_url appends
+    # ?v=<file mtime>, so every change to the script gets a new URL.
+    assert "asset_url('js/pages/my-account.js')" in html

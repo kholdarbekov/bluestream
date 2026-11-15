@@ -1,5 +1,14 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'addresses' %}
+{% from 'frontend/partials/address_wizard.html' import address_wizard, address_wizard_styles, address_wizard_scripts with context %}
+{% from "frontend/macros/page_data.html" import render_page_data %}
+
+{#
+  My addresses (/addresses). The list loads from GET /auth/addresses (static/js/pages/addresses.js); adding and
+  editing go through the address wizard (partials/address_wizard.html). Hooks: #addressesList, #noAddressesMessage,
+  [data-action=show-add-address], card buttons [data-action=edit-address|set-default|delete-address][data-id].
+  Styles: static/css/pages/checkout.css (.ae-addr) and static/css/address-wizard.css.
+#}
 
 {% block cabinet_title %}{{ 'landing.account.addresses'|t }}{% endblock %}
 
@@ -8,565 +17,79 @@
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<!-- Leaflet CSS for map -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-<!-- Address Wizard CSS -->
-<link rel="stylesheet" href="{{ url_for('static', filename='css/address-wizard.css') }}">
-<!-- Critical Leaflet tile fix - must override global img styles -->
-<style>
-/*
- * Fix for Leaflet tiles not displaying properly due to global img styles.
- */
-
-/* High specificity reset for ALL Leaflet tile images */
-#addressWizardMap img,
-#addressWizardMap img.leaflet-tile,
-#addressWizardMap .leaflet-tile-pane img,
-#addressWizardMap .leaflet-tile-container img,
-.leaflet-container img,
-.leaflet-container img.leaflet-tile,
-.leaflet-pane img,
-.leaflet-tile-pane img {
-    max-width: none !important;
-    max-height: none !important;
-    -webkit-transition: none !important;
-    -moz-transition: none !important;
-    -o-transition: none !important;
-    transition: none !important;
-    -webkit-transition-property: none !important;
-    transition-property: none !important;
-    -webkit-transition-duration: 0s !important;
-    transition-duration: 0s !important;
-    -webkit-transition-delay: 0s !important;
-    transition-delay: 0s !important;
-    -webkit-transition-timing-function: initial !important;
-    transition-timing-function: initial !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    display: block !important;
-}
-
-/* Specific tile element overrides */
-#addressWizardMap .leaflet-tile,
-.leaflet-container .leaflet-tile,
-.leaflet-tile {
-    width: 256px !important;
-    height: 256px !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    filter: none !important;
-    -webkit-transition: none !important;
-    transition: none !important;
-}
-
-/* Loaded tiles - force visible state */
-#addressWizardMap .leaflet-tile-loaded,
-.leaflet-container .leaflet-tile-loaded,
-.leaflet-tile-loaded {
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-
-/* Disable Leaflet fade animation entirely */
-#addressWizardMap.leaflet-fade-anim .leaflet-tile,
-.leaflet-fade-anim .leaflet-tile,
-.leaflet-fade-anim .leaflet-map-pane .leaflet-tile {
-    -webkit-transition: none !important;
-    transition: none !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-}
-
-/* Markers and shadows */
-#addressWizardMap .leaflet-marker-icon,
-#addressWizardMap .leaflet-marker-shadow,
-.leaflet-marker-icon,
-.leaflet-marker-shadow {
-    max-width: none !important;
-    max-height: none !important;
-    -webkit-transition: none !important;
-    transition: none !important;
-}
-
-/* Ensure all Leaflet panes are visible */
-#addressWizardMap .leaflet-pane,
-#addressWizardMap .leaflet-map-pane,
-#addressWizardMap .leaflet-tile-pane,
-#addressWizardMap .leaflet-tile-container {
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-
-/* Address card styles */
-.address-card {
-    background: #fff;
-    border: 1px solid #e8e8e8;
-    border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 20px;
-    transition: all 0.3s ease;
-    position: relative;
-    overflow: hidden;
-}
-
-.address-card::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: linear-gradient(180deg, #1890ff 0%, #0d6efd 100%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.address-card:hover {
-    box-shadow: 0 8px 24px rgba(24, 144, 255, 0.12);
-    border-color: #d0e3ff;
-    transform: translateY(-2px);
-}
-
-.address-card:hover::before {
-    opacity: 1;
-}
-
-.address-card.default {
-    border-color: #1890ff;
-    background: linear-gradient(135deg, #f6f9ff 0%, #e6f4ff 100%);
-}
-
-.address-card.default::before {
-    opacity: 1;
-    background: linear-gradient(180deg, #52c41a 0%, #389e0d 100%);
-}
-
-.address-card-content {
-    display: flex;
-    gap: 20px;
-}
-
-.address-icon {
-    flex-shrink: 0;
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #e6f4ff 0%, #bae0ff 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #1890ff;
-    font-size: 20px;
-}
-
-.address-card.default .address-icon {
-    background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
-    color: #52c41a;
-}
-
-.address-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.address-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.address-title-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.address-title {
-    font-weight: 600;
-    color: #1a1a2e;
-    margin: 0;
-    font-size: 1.1rem;
-}
-
-.address-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.address-actions .btn {
-    padding: 6px 14px;
-    font-size: 13px;
-    border-radius: 20px;
-    transition: all 0.2s ease;
-    font-weight: 500;
-}
-
-.address-actions .btn-outline-primary {
-    border-color: #1890ff;
-    color: #1890ff;
-}
-
-.address-actions .btn-outline-primary:hover {
-    background: #1890ff;
-    color: #fff;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
-}
-
-.address-actions .btn-outline-success {
-    border-color: #52c41a;
-    color: #52c41a;
-}
-
-.address-actions .btn-outline-success:hover {
-    background: #52c41a;
-    color: #fff;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(82, 196, 26, 0.3);
-}
-
-.address-actions .btn-outline-danger {
-    border-color: #ff4d4f;
-    color: #ff4d4f;
-}
-
-.address-actions .btn-outline-danger:hover {
-    background: #ff4d4f;
-    color: #fff;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(255, 77, 79, 0.3);
-}
-
-.address-details {
-    color: #666;
-    line-height: 1.7;
-    font-size: 14px;
-}
-
-.address-details p {
-    margin-bottom: 6px;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-}
-
-.address-details p:last-child {
-    margin-bottom: 0;
-}
-
-.address-details strong {
-    color: #8c8c8c;
-    font-weight: 500;
-    min-width: 100px;
-    flex-shrink: 0;
-}
-
-.default-badge {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    box-shadow: 0 2px 8px rgba(82, 196, 26, 0.3);
-}
-
-.business-badge {
-    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    box-shadow: 0 2px 8px rgba(114, 46, 209, 0.3);
-}
-
-.modal-content {
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.modal-header {
-    background: linear-gradient(135deg, #1890ff 0%, #0d6efd 100%);
-    border-bottom: none;
-    color: white;
-    padding: 20px 24px;
-}
-
-.modal-header .modal-title {
-    font-weight: 600;
-}
-
-.modal-header .close {
-    color: white;
-    opacity: 0.8;
-    text-shadow: none;
-}
-
-.modal-header .close:hover {
-    opacity: 1;
-}
-
-@media (max-width: 768px) {
-    .address-card-content {
-        flex-direction: column;
-        gap: 15px;
-    }
-
-    .address-icon {
-        width: 40px;
-        height: 40px;
-        font-size: 18px;
-    }
-
-    .address-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .address-actions {
-        margin-top: 10px;
-        width: 100%;
-    }
-
-    .address-actions .btn {
-        flex: 1;
-        text-align: center;
-    }
-
-    .address-details strong {
-        min-width: auto;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
+{{ address_wizard_styles() }}
 {% endblock %}
 
 {% block cabinet_content %}
-<!-- Add New Address Button -->
-<div class="add-address-section mb-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h3>{{ 'landing.account.addresses'|t }}</h3>
-        <button class="btn btn-primary" data-action="show-add-address">
-            <i class="far fa-plus"></i> {{ 'Add New Address'|t }}
-        </button>
+<div class="ae-addr" id="addressesPage">
+    <header class="ae-page-head ae-addr__head" id="addressesHead" hidden>
+        <p class="ae-page-head__sub ae-addr__lead">{{ 'web.checkout.addr.lead'|t }}</p>
+        <div class="ae-page-head__actions">
+            <button type="button" class="ae-btn ae-btn--primary" data-action="show-add-address">
+                <i class="far fa-plus" aria-hidden="true"></i><span>{{ 'web.checkout.addr.add'|t }}</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="ae-addr__list" id="addressesList" role="list" aria-label="{{ 'web.checkout.addr.list_label'|t }}" aria-busy="true">
+        {%- for _ in range(2) %}
+        <div class="ae-addr-card ae-addr-card--skeleton" aria-hidden="true">
+            <span class="ae-skeleton ae-skeleton--circle"></span>
+            <div class="ae-addr-card__body">
+                <span class="ae-skeleton ae-skeleton--title"></span>
+                <span class="ae-skeleton ae-skeleton--text"></span>
+                <span class="ae-skeleton ae-skeleton--text"></span>
+            </div>
+        </div>
+        {%- endfor %}
+    </div>
+
+    <div class="ae-panel ae-addr__empty" id="noAddressesMessage" hidden>
+        <div class="ae-empty">
+            <span class="ae-empty__icon" aria-hidden="true"><i class="far fa-map-marker-alt"></i></span>
+            <h2 class="ae-empty__title">{{ 'web.checkout.addr.empty_title'|t }}</h2>
+            <p class="ae-empty__text">{{ 'web.checkout.addr.empty_text'|t }}</p>
+            <div class="ae-empty__actions">
+                <button type="button" class="ae-btn ae-btn--primary" data-action="show-add-address">
+                    <i class="far fa-plus" aria-hidden="true"></i><span>{{ 'web.checkout.addr.add'|t }}</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="ae-alert ae-alert--danger ae-addr__error" id="addressesError" role="alert" hidden>
+        <i class="far fa-exclamation-circle ae-alert__icon" aria-hidden="true"></i>
+        <div>
+            <strong class="ae-alert__title">{{ 'web.checkout.addr.load_failed_title'|t }}</strong>
+            <p>{{ 'web.checkout.addr.load_failed_text'|t }}</p>
+            <button type="button" class="ae-btn ae-btn--secondary ae-btn--sm ae-addr__retry" data-action="reload-addresses">
+                <i class="far fa-redo" aria-hidden="true"></i><span>{{ 'web.checkout.addr.retry'|t }}</span>
+            </button>
+        </div>
     </div>
 </div>
 
-<!-- Addresses List -->
-<div class="addresses-list" id="addressesList">
-    <!-- This will be populated by JavaScript -->
-</div>
+{{ address_wizard() }}
 
-<!-- Address Wizard Modal -->
-<div class="modal fade" id="addressWizardModal" tabindex="-1" role="dialog" data-backdrop="static">
-    <div class="modal-dialog modal-lg" role="document">
+<div class="modal fade ae-modal ae-addr-confirm" id="addressDeleteModal" tabindex="-1" role="dialog" aria-modal="true"
+     aria-labelledby="addressDeleteTitle" aria-describedby="addressDeleteText">
+    <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="addressWizardModalTitle">{{ 'Add New Address'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal">
-                    <span>&times;</span>
+                <h2 class="modal-title" id="addressDeleteTitle">{{ 'web.checkout.addr.delete_title'|t }}</h2>
+                <button type="button" class="close" data-dismiss="modal" aria-label="{{ 'web.checkout.addr.close'|t }}">
+                    <span aria-hidden="true">&times;</span>
                 </button>
             </div>
             <div class="modal-body">
-                <!-- Step Indicators -->
-                <div class="wizard-steps">
-                    <div class="step-indicator active">
-                        <span class="step-number">1</span>
-                        <span class="step-label">{{ 'Select Location'|t }}</span>
-                    </div>
-                    <div class="step-connector"></div>
-                    <div class="step-indicator">
-                        <span class="step-number">2</span>
-                        <span class="step-label">{{ 'Address Details'|t }}</span>
-                    </div>
-                    <div class="step-connector"></div>
-                    <div class="step-indicator">
-                        <span class="step-number">3</span>
-                        <span class="step-label">{{ 'cabinet.addresses.confirm'|t }}</span>
-                    </div>
-                </div>
-
-                <form id="addressWizardForm">
-                    <!-- Hidden fields for coordinates -->
-                    <input type="hidden" id="selectedLatitude" name="latitude">
-                    <input type="hidden" id="selectedLongitude" name="longitude">
-
-                    <!-- Step 1: Select Location on Map -->
-                    <div class="wizard-step active" id="wizardStep1">
-                        <h5><i class="fas fa-map-marked-alt"></i> {{ 'Select Your Location'|t }}</h5>
-
-                        <!-- Map Controls -->
-                        <div class="map-controls">
-                            <input type="text" id="addressSearchInput" class="form-control"
-                                   placeholder="{{ 'Search for an address...'|t }}">
-                            <button type="button" id="searchAddressBtn" class="btn btn-outline-primary">
-                                <i class="fas fa-search"></i>
-                            </button>
-                            <button type="button" id="useMyLocationBtn" class="btn btn-outline-secondary">
-                                <i class="fas fa-location-arrow"></i> {{ 'Use My Location'|t }}
-                            </button>
-                        </div>
-
-                        <!-- Map Container -->
-                        <div class="map-container">
-                            <div id="addressWizardMap"></div>
-                        </div>
-
-                        <!-- Hint -->
-                        <div class="map-hint">
-                            <i class="fas fa-info-circle"></i>
-                            <p>{{ 'Click on the map to select your delivery location. You can drag the marker to adjust the position.'|t }}</p>
-                        </div>
-
-                        <!-- Location Status -->
-                        <div id="locationStatus" class="d-none">
-                            <i class="fas fa-check-circle"></i>
-                            <span id="locationStatusText"></span>
-                        </div>
-                    </div>
-
-                    <!-- Step 2: Address Details -->
-                    <div class="wizard-step" id="wizardStep2">
-                        <h5><i class="fas fa-edit"></i> {{ 'Address Details'|t }}</h5>
-
-                        <!-- Quick Title Selection -->
-                        <div class="form-group">
-                            <label>{{ 'Quick Select Title'|t }}</label>
-                            <div class="quick-titles">
-                                <button type="button" class="quick-title-btn" data-title="{{ 'cabinet.addresses.home'|t }}">
-                                    <i class="fas fa-home"></i> {{ 'cabinet.addresses.home'|t }}
-                                </button>
-                                <button type="button" class="quick-title-btn" data-title="{{ 'Work'|t }}">
-                                    <i class="fas fa-briefcase"></i> {{ 'Work'|t }}
-                                </button>
-                                <button type="button" class="quick-title-btn" data-title="{{ 'cabinet.addresses.other'|t }}">
-                                    <i class="fas fa-map-pin"></i> {{ 'cabinet.addresses.other'|t }}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-12 form-group">
-                                <label for="addressTitle">{{ 'Address Title'|t }} <span class="text-danger">*</span></label>
-                                <input type="text" id="addressTitle" class="form-control"
-                                       placeholder="{{ 'e.g., Home, Office, etc.'|t }}" required>
-                            </div>
-
-                            <div class="col-md-12 form-group">
-                                <label for="fullAddress">{{ 'cabinet.addresses.full_address'|t }}</label>
-                                <textarea id="fullAddress" class="form-control" rows="2"
-                                          placeholder="{{ 'Auto-filled from map selection'|t }}"></textarea>
-                            </div>
-
-                            <div class="col-md-6 form-group">
-                                <label for="districtSelect">{{ 'cabinet.addresses.district'|t }}</label>
-                                <select id="districtSelect" class="form-control">
-                                    <option value="">-- {{ 'Select District'|t }} --</option>
-                                </select>
-                            </div>
-
-                            <div class="col-md-6 form-group">
-                                <label for="streetAddress">{{ 'Street'|t }}</label>
-                                <input type="text" id="streetAddress" class="form-control"
-                                       placeholder="{{ 'Street name'|t }}">
-                            </div>
-
-                            <div class="col-md-4 form-group">
-                                <label for="buildingNumber">{{ 'Building'|t }}</label>
-                                <input type="text" id="buildingNumber" class="form-control"
-                                       placeholder="{{ 'Building #'|t }}">
-                            </div>
-
-                            <div class="col-md-4 form-group">
-                                <label for="entranceNumber">{{ 'Entrance'|t }}</label>
-                                <input type="text" id="entranceNumber" class="form-control"
-                                       placeholder="{{ 'Entrance #'|t }}">
-                            </div>
-
-                            <div class="col-md-4 form-group">
-                                <label for="floorNumber">{{ 'cabinet.addresses.floor'|t }}</label>
-                                <input type="text" id="floorNumber" class="form-control"
-                                       placeholder="{{ 'Floor #'|t }}">
-                            </div>
-
-                            <div class="col-md-6 form-group">
-                                <label for="apartmentNumber">{{ 'Apartment'|t }}</label>
-                                <input type="text" id="apartmentNumber" class="form-control"
-                                       placeholder="{{ 'Apartment #'|t }}">
-                            </div>
-
-                            <div class="col-md-6 form-group">
-                                <label for="landmark">{{ 'Landmark'|t }}</label>
-                                <input type="text" id="landmark" class="form-control"
-                                       placeholder="{{ 'Nearby landmark'|t }}">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Step 3: Confirmation & Options -->
-                    <div class="wizard-step" id="wizardStep3">
-                        <h5><i class="fas fa-check-circle"></i> {{ 'Confirm & Save'|t }}</h5>
-
-                        <div class="form-group">
-                            <label for="deliveryInstructions">{{ 'Delivery Instructions'|t }}</label>
-                            <textarea id="deliveryInstructions" class="form-control" rows="3"
-                                      placeholder="{{ 'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)'|t }}"></textarea>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6 form-group">
-                                <div class="custom-control custom-checkbox">
-                                    <input type="checkbox" class="custom-control-input" id="isDefault">
-                                    <label class="custom-control-label" for="isDefault">
-                                        {{ 'Set as default address'|t }}
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-6 form-group">
-                                <div class="custom-control custom-checkbox">
-                                    <input type="checkbox" class="custom-control-input" id="isBusiness">
-                                    <label class="custom-control-label" for="isBusiness">
-                                        {{ 'This is a business address'|t }}
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Summary -->
-                        <div class="confirmation-card">
-                            <h6><i class="fas fa-info-circle"></i> {{ 'Address Summary'|t }}</h6>
-                            <p class="text-muted small mb-0">
-                                {{ 'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.'|t }}
-                            </p>
-                        </div>
-                    </div>
-                </form>
+                <p class="ae-addr-confirm__text" id="addressDeleteText"></p>
             </div>
-            <div class="modal-footer wizard-navigation">
-                <button type="button" id="wizardPrevBtn" class="btn btn-secondary" style="display: none;">
-                    <i class="fas fa-arrow-left"></i> {{ 'cabinet.addresses.back'|t }}
+            <div class="modal-footer">
+                <button type="button" class="ae-btn ae-btn--secondary" data-dismiss="modal">{{ 'web.checkout.addr.delete_cancel'|t }}</button>
+                <button type="button" class="ae-btn ae-btn--danger" id="addressDeleteConfirm">
+                    <i class="far fa-trash-alt" aria-hidden="true"></i><span>{{ 'web.checkout.addr.delete'|t }}</span>
                 </button>
-                <div>
-                    <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">
-                        {{ 'cabinet.addresses.cancel'|t }}
-                    </button>
-                    <button type="button" id="wizardNextBtn" class="btn btn-primary" disabled>
-                        {{ 'cabinet.addresses.next'|t }} <i class="fas fa-arrow-right"></i>
-                    </button>
-                    <button type="button" id="wizardSaveBtn" class="btn btn-success" style="display: none;">
-                        <i class="fas fa-check"></i> {{ 'Save Address'|t }}
-                    </button>
-                </div>
             </div>
         </div>
     </div>
@@ -574,34 +97,27 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<!-- Leaflet JS for map -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<!-- Address Wizard -->
-<script src="{{ url_for('static', filename='js/address-wizard.js') }}"></script>
-{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ address_wizard_scripts() }}
 {{ render_page_data({
     'i18n': {
-        'no_addresses': 'No addresses saved yet' | t,
-        'add_first_hint': 'Add your delivery addresses to make ordering easier' | t,
-        'add_first_button': 'Add Your First Address' | t,
-        'default_badge': 'Default' | t,
-        'business_badge': 'Business' | t,
-        'edit': 'cabinet.addresses.edit' | t,
-        'set_default': 'Set Default' | t,
-        'delete': 'cabinet.addresses.delete' | t,
-        'address_label': 'landing.contact.info.address' | t,
-        'city': 'cabinet.addresses.city' | t,
-        'apartment': 'Apartment/Floor' | t,
-        'landmark': 'Landmark' | t,
-        'instructions': 'Instructions' | t,
-        'default_updated': 'Default address updated!' | t,
-        'set_default_failed': 'Failed to set default address' | t,
-        'delete_confirm': 'Are you sure you want to delete this address?' | t,
-        'delete_success': 'Address deleted successfully!' | t,
-        'delete_failed': 'Failed to delete address' | t,
-        'network_error': 'Network error. Please try again.' | t,
+        'default_badge': 'web.checkout.addr.default_badge'|t,
+        'business_badge': 'web.checkout.addr.business_badge'|t,
+        'district': 'web.checkout.addr.district'|t,
+        'street': 'web.checkout.wizard.f_street'|t,
+        'floor': 'web.checkout.addr.floor'|t,
+        'apartment': 'web.checkout.addr.apartment'|t,
+        'landmark': 'web.checkout.wizard.f_landmark'|t,
+        'instructions': 'web.checkout.addr.instructions'|t,
+        'edit': 'web.checkout.addr.edit'|t,
+        'make_default': 'web.checkout.addr.make_default'|t,
+        'delete': 'web.checkout.addr.delete'|t,
+        'delete_text': 'web.checkout.addr.delete_text'|t,
+        'deleted': 'web.checkout.addr.deleted'|t,
+        'delete_failed': 'web.checkout.addr.delete_failed'|t,
+        'default_updated': 'web.checkout.addr.default_updated'|t,
+        'default_failed': 'web.checkout.addr.default_failed'|t,
+        'network_error': 'web.checkout.addr.network_error'|t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/addresses.js') }}"></script>
+<script src="{{ asset_url('js/pages/addresses.js') }}"></script>
 {% endblock %}

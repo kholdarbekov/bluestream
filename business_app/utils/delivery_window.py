@@ -153,6 +153,39 @@ _SCHEDULE_ERROR_MESSAGES = {
 }
 
 
+def describe_schedule_errors(codes: List[str]) -> List[str]:
+    """`schedule_error_codes`' answer as `validate_schedule`'s English sentences, one per code."""
+    return [_SCHEDULE_ERROR_MESSAGES[code] for code in codes]
+
+
+# The windows the website's checkout offers, as `(key, start, end)`. The page names each by its key and draws the
+# bounds published here; it holds no table of its own (`checkout_windows`).
+CHECKOUT_WINDOWS: Tuple[Tuple[str, Optional[time], Optional[time]], ...] = (
+    ("anytime", None, None),
+    ("morning", time(9, 0), time(12, 0)),
+    ("afternoon", time(12, 0), time(18, 0)),
+    ("evening", time(18, 0), time(21, 0)),
+)
+
+
+def checkout_windows(now_local: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """The checkout's windows, each with `open_today`: whether the schedule rule (`schedule_error_codes`) still takes it
+    for today's date. The page offers a closed one only for a later day, so it never offers what the order refuses;
+    the quote and the order still judge every request themselves."""
+    if now_local is None:
+        now_local = local_now()
+    today = now_local.date()
+    return [
+        {
+            "key": key,
+            "start": _hhmm(start),
+            "end": _hhmm(end),
+            "open_today": not schedule_error_codes(today, start, end, now_local=now_local),
+        }
+        for key, start, end in CHECKOUT_WINDOWS
+    ]
+
+
 def validate_schedule(
     delivery_date: Optional[date],
     window_start: Optional[time],
@@ -168,10 +201,7 @@ def validate_schedule(
     (F10). `now_local` is injected rather than read so the caller owns the
     clock and tests can freeze it.
     """
-    return [
-        _SCHEDULE_ERROR_MESSAGES[code]
-        for code in schedule_error_codes(delivery_date, window_start, window_end, now_local=now_local)
-    ]
+    return describe_schedule_errors(schedule_error_codes(delivery_date, window_start, window_end, now_local=now_local))
 
 
 def local_now() -> datetime:

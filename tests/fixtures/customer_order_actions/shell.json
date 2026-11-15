@@ -1,34 +1,49 @@
 {
  "en": {
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade ae-modal ae-od\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-lg modal-dialog-scrollable\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"ae-od__actions\" id=\"orderDetailActions\"></div>\n<div class=\"ae-od__buttons\">\n<a class=\"ae-btn ae-btn--ghost\" href=\"/order-tracking\" id=\"orderTrackLink\">\n<i aria-hidden=\"true\" class=\"far fa-route\"></i><span>web.checkout.order.track</span>\n</a>\n<button class=\"ae-btn ae-btn--secondary\" data-dismiss=\"modal\" type=\"button\">Close</button>\n<button class=\"ae-btn ae-btn--primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i aria-hidden=\"true\" class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
      "delivery_address": "Delivery Address",
      "delivery_fee": "Delivery Fee",
      "delivery_location": "Delivery Location",
-     "details_failed": "Failed to load order details",
-     "no_address": "No delivery address provided",
+     "details_failed": "We couldn’t open this order just now. Please try again.",
+     "district": "web.checkout.addr.district",
+     "no_address": "No delivery address on this order",
      "order": "Order",
      "order_items": "Order Items",
+     "order_number": "Order {number}",
      "order_summary": "Order Summary",
-     "order_tracking": "Order Tracking",
-     "placed_on": "Placed on",
+     "placed_on": "Placed on {date}",
      "price": "Price",
+     "qty_price": "{quantity} × {price}",
      "quantity": "Quantity",
+     "reward": "Reward",
      "reward_discount": "Reward discount",
-     "sku": "SKU",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Cancelled",
+      "confirmed": "Confirmed",
+      "delivered": "Delivered",
+      "out_for_delivery": "On the way",
+      "pending": "Awaiting confirmation",
+      "preparing": "Being prepared",
+      "returned": "Returned"
      },
      "subscription_discount": "Subscription discount",
      "subtotal": "Subtotal",
      "tax": "Tax",
      "tier_discount": "Tier discount (bot & website perk)",
      "total": "Total",
-     "track_package": "Track Package",
-     "tracking_number": "Tracking Number"
+     "zoom_in": "Zoom in",
+     "zoom_out": "Zoom out"
+    },
+    "image_placeholder": "/static/images/product-placeholder.svg",
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "order_actions": {
      "confirmed": "Thanks! Your order is confirmed.",
@@ -43,29 +58,46 @@
      "try_again": "Try again",
      "working": "One moment…"
     },
-    "subscriptions_url": "/my-subscriptions"
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
+    },
+    "subscriptions_url": "/my-subscriptions",
+    "track_url": "/order-tracking?order_id=ORDER_ID"
    }
   },
   "orders": {
-   "html": "<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div><div class=\"orders-list\" id=\"ordersList\">\n<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div>\n</div><div class=\"empty-state text-center py-5\" id=\"emptyState\" style=\"display: none;\">\n<i class=\"far fa-shopping-bag\" style=\"font-size: 4rem; color: #ccc;\"></i>\n<h4 class=\"mt-3\">No orders found</h4>\n<p class=\"text-muted\">You havent placed any orders yet or no orders match your filters</p>\n<a class=\"btn btn-primary\" href=\"/shop\">\n<i class=\"far fa-shopping-cart\"></i> Start Shopping\n    </a>\n</div><div class=\"pagination-section\" id=\"paginationSection\" style=\"display: none;\">\n<nav aria-label=\"Orders pagination\">\n<ul class=\"pagination justify-content-center\" id=\"ordersPagination\">\n</ul>\n</nav>\n</div>",
+   "html": "<select class=\"ae-input ignore\" id=\"statusFilter\">\n<option value=\"\">All statuses</option>\n<option value=\"pending\">Awaiting confirmation</option>\n<option value=\"confirmed\">Confirmed</option>\n<option value=\"preparing\">Being prepared</option>\n<option value=\"out_for_delivery\">On the way</option>\n<option value=\"delivered\">Delivered</option>\n<option value=\"cancelled\">Cancelled</option>\n<option value=\"returned\">Returned</option>\n</select><select class=\"ae-input ignore\" id=\"dateFilter\">\n<option value=\"\">All time</option>\n<option value=\"7\">Last 7 days</option>\n<option value=\"30\">Last 30 days</option>\n<option value=\"90\">Last 3 months</option>\n<option value=\"365\">Last 12 months</option>\n</select><div aria-hidden=\"true\" class=\"ae-orders__loading\" id=\"loadingOrders\">\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<span class=\"visually-hidden\">Loading your orders</span>\n</div><div class=\"orders-list ae-orders__list\" id=\"ordersList\"></div><div class=\"ae-orders__empty\" hidden=\"\" id=\"emptyState\">\n<div data-empty=\"first\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-shopping-bag\"></i></span>\n<h3 class=\"ae-empty__title\">No orders yet</h3>\n<p class=\"ae-empty__text\">Order water here on the site or in our Telegram bot, and your orders will show up here.</p>\n<div class=\"ae-empty__actions\"><a class=\"ae-btn ae-btn--primary\" href=\"/shop\">Order water</a>\n</div>\n</div>\n</div>\n<div data-empty=\"filtered\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-filter\"></i></span>\n<h3 class=\"ae-empty__title\">No orders match these filters</h3>\n<p class=\"ae-empty__text\">Try another status or period.</p>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"reset-filters\" type=\"button\">Show all orders</button>\n</div>\n</div>\n</div>\n<div data-empty=\"failed\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-exclamation-triangle\"></i></span>\n<h3 class=\"ae-empty__title\">We couldn’t load your orders just now.</h3>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"retry-orders\" type=\"button\">Try again</button>\n</div>\n</div>\n</div>\n</div><nav aria-label=\"Order pages\" class=\"pagination-section ae-orders__pager\" hidden=\"\" id=\"paginationSection\">\n<ul class=\"ae-pagination\" id=\"ordersPagination\"></ul>\n<p class=\"ae-pagination__info\" id=\"ordersPageInfo\"></p>\n</nav>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "and": "and",
-     "delivery_address": "Delivery Address",
-     "est_delivery": "Est. delivery",
-     "load_failed": "Failed to load orders",
-     "load_failed_retry": "Failed to load orders. Please try again.",
-     "more_items": "more items",
-     "order": "Order",
-     "order_date": "Order Date",
-     "quantity": "Quantity",
+     "more_items": "+{count} more",
+     "next": "Next page",
+     "order_number": "Order {number}",
+     "page": "Page {page}",
+     "prev": "Previous page",
+     "qty_price": "{quantity} × {price}",
+     "reward": "Reward",
+     "showing": "Showing {from}–{to} of {total}",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Cancelled",
+      "confirmed": "Confirmed",
+      "delivered": "Delivered",
+      "out_for_delivery": "On the way",
+      "pending": "Awaiting confirmation",
+      "preparing": "Being prepared",
+      "returned": "Returned"
      },
-     "tracking": "Tracking",
-     "view_details": "View Details"
+     "view_details": "Details"
     },
+    "image_placeholder": "/static/images/product-placeholder.svg",
     "order_actions": {
      "confirmed": "Thanks! Your order is confirmed.",
      "failed": "That didn't go through. Please try again.",
@@ -78,22 +110,33 @@
      "switch_to_cash": "Pay with cash",
      "try_again": "Try again",
      "working": "One moment…"
+    },
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
     },
     "subscriptions_url": "/my-subscriptions"
    }
   },
   "tracking": {
-   "html": "<div class=\"action-buttons\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> All Orders\n                        </a>\n</div>",
+   "html": "<div class=\"action-buttons ae-track__actions\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"ae-btn ae-btn--secondary ae-btn--block\" href=\"/my-orders\">web.checkout.pay.my_orders</a>\n</div>",
    "island": {
     "auto_refresh": true,
-    "i18n": {
-     "delivery_location": "Delivery Location"
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "map": {
-     "address": "",
-     "enabled": false,
-     "lat": null,
-     "lng": null
+     "label": "1 Matrix street",
+     "lat": 41.3111,
+     "lng": 69.2797
     },
     "order": {
      "customer_actions": {
@@ -145,34 +188,49 @@
  },
  "ru": {
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Закрыть</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade ae-modal ae-od\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-lg modal-dialog-scrollable\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Закрыть\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"ae-od__actions\" id=\"orderDetailActions\"></div>\n<div class=\"ae-od__buttons\">\n<a class=\"ae-btn ae-btn--ghost\" href=\"/order-tracking\" id=\"orderTrackLink\">\n<i aria-hidden=\"true\" class=\"far fa-route\"></i><span>web.checkout.order.track</span>\n</a>\n<button class=\"ae-btn ae-btn--secondary\" data-dismiss=\"modal\" type=\"button\">Закрыть</button>\n<button class=\"ae-btn ae-btn--primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i aria-hidden=\"true\" class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
      "delivery_address": "Delivery Address",
      "delivery_fee": "Плата за доставку",
      "delivery_location": "Delivery Location",
-     "details_failed": "Failed to load order details",
-     "no_address": "No delivery address provided",
+     "details_failed": "Не получилось открыть заказ. Попробуйте ещё раз.",
+     "district": "web.checkout.addr.district",
+     "no_address": "В заказе нет адреса доставки",
      "order": "Заказ",
      "order_items": "Order Items",
+     "order_number": "Заказ № {number}",
      "order_summary": "Order Summary",
-     "order_tracking": "Order Tracking",
-     "placed_on": "Placed on",
+     "placed_on": "Оформлен: {date}",
      "price": "Цена",
+     "qty_price": "{quantity} × {price}",
      "quantity": "Количество",
+     "reward": "Подарок",
      "reward_discount": "Reward discount",
-     "sku": "SKU",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Отменён",
+      "confirmed": "Подтверждён",
+      "delivered": "Доставлен",
+      "out_for_delivery": "В пути",
+      "pending": "Ждёт подтверждения",
+      "preparing": "Готовится",
+      "returned": "Возвращён"
      },
      "subscription_discount": "Subscription discount",
      "subtotal": "Промежуточный итог",
      "tax": "Tax",
      "tier_discount": "Tier discount (bot & website perk)",
      "total": "Итого",
-     "track_package": "Track Package",
-     "tracking_number": "Tracking Number"
+     "zoom_in": "Приблизить",
+     "zoom_out": "Отдалить"
+    },
+    "image_placeholder": "/static/images/product-placeholder.svg",
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "order_actions": {
      "confirmed": "Спасибо! Заказ подтверждён.",
@@ -187,29 +245,46 @@
      "try_again": "Попробовать снова",
      "working": "Секунду…"
     },
-    "subscriptions_url": "/my-subscriptions"
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
+    },
+    "subscriptions_url": "/my-subscriptions",
+    "track_url": "/order-tracking?order_id=ORDER_ID"
    }
   },
   "orders": {
-   "html": "<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div><div class=\"orders-list\" id=\"ordersList\">\n<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div>\n</div><div class=\"empty-state text-center py-5\" id=\"emptyState\" style=\"display: none;\">\n<i class=\"far fa-shopping-bag\" style=\"font-size: 4rem; color: #ccc;\"></i>\n<h4 class=\"mt-3\">No orders found</h4>\n<p class=\"text-muted\">You havent placed any orders yet or no orders match your filters</p>\n<a class=\"btn btn-primary\" href=\"/shop\">\n<i class=\"far fa-shopping-cart\"></i> Start Shopping\n    </a>\n</div><div class=\"pagination-section\" id=\"paginationSection\" style=\"display: none;\">\n<nav aria-label=\"Orders pagination\">\n<ul class=\"pagination justify-content-center\" id=\"ordersPagination\">\n</ul>\n</nav>\n</div>",
+   "html": "<select class=\"ae-input ignore\" id=\"statusFilter\">\n<option value=\"\">Все статусы</option>\n<option value=\"pending\">Ждёт подтверждения</option>\n<option value=\"confirmed\">Подтверждён</option>\n<option value=\"preparing\">Готовится</option>\n<option value=\"out_for_delivery\">В пути</option>\n<option value=\"delivered\">Доставлен</option>\n<option value=\"cancelled\">Отменён</option>\n<option value=\"returned\">Возвращён</option>\n</select><select class=\"ae-input ignore\" id=\"dateFilter\">\n<option value=\"\">За всё время</option>\n<option value=\"7\">За 7 дней</option>\n<option value=\"30\">За 30 дней</option>\n<option value=\"90\">За 3 месяца</option>\n<option value=\"365\">За 12 месяцев</option>\n</select><div aria-hidden=\"true\" class=\"ae-orders__loading\" id=\"loadingOrders\">\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<span class=\"visually-hidden\">Загружаем ваши заказы</span>\n</div><div class=\"orders-list ae-orders__list\" id=\"ordersList\"></div><div class=\"ae-orders__empty\" hidden=\"\" id=\"emptyState\">\n<div data-empty=\"first\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-shopping-bag\"></i></span>\n<h3 class=\"ae-empty__title\">Заказов пока нет</h3>\n<p class=\"ae-empty__text\">Закажите воду на сайте или в нашем Telegram-боте — заказы появятся здесь.</p>\n<div class=\"ae-empty__actions\"><a class=\"ae-btn ae-btn--primary\" href=\"/shop\">Заказать воду</a>\n</div>\n</div>\n</div>\n<div data-empty=\"filtered\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-filter\"></i></span>\n<h3 class=\"ae-empty__title\">По этим фильтрам заказов нет</h3>\n<p class=\"ae-empty__text\">Попробуйте другой статус или период.</p>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"reset-filters\" type=\"button\">Показать все заказы</button>\n</div>\n</div>\n</div>\n<div data-empty=\"failed\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-exclamation-triangle\"></i></span>\n<h3 class=\"ae-empty__title\">Сейчас не удалось загрузить заказы.</h3>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"retry-orders\" type=\"button\">Попробовать снова</button>\n</div>\n</div>\n</div>\n</div><nav aria-label=\"Страницы заказов\" class=\"pagination-section ae-orders__pager\" hidden=\"\" id=\"paginationSection\">\n<ul class=\"ae-pagination\" id=\"ordersPagination\"></ul>\n<p class=\"ae-pagination__info\" id=\"ordersPageInfo\"></p>\n</nav>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "and": "and",
-     "delivery_address": "Delivery Address",
-     "est_delivery": "Est. delivery",
-     "load_failed": "Failed to load orders",
-     "load_failed_retry": "Failed to load orders. Please try again.",
-     "more_items": "more items",
-     "order": "Заказ",
-     "order_date": "Order Date",
-     "quantity": "Количество",
+     "more_items": "и ещё {count}",
+     "next": "Следующая страница",
+     "order_number": "Заказ № {number}",
+     "page": "Страница {page}",
+     "prev": "Предыдущая страница",
+     "qty_price": "{quantity} × {price}",
+     "reward": "Подарок",
+     "showing": "Показаны {from}–{to} из {total}",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Отменён",
+      "confirmed": "Подтверждён",
+      "delivered": "Доставлен",
+      "out_for_delivery": "В пути",
+      "pending": "Ждёт подтверждения",
+      "preparing": "Готовится",
+      "returned": "Возвращён"
      },
-     "tracking": "Отслеживание",
-     "view_details": "Посмотреть детали"
+     "view_details": "Подробнее"
     },
+    "image_placeholder": "/static/images/product-placeholder.svg",
     "order_actions": {
      "confirmed": "Спасибо! Заказ подтверждён.",
      "failed": "Не получилось. Попробуйте ещё раз.",
@@ -222,22 +297,33 @@
      "switch_to_cash": "Оплатить наличными",
      "try_again": "Попробовать снова",
      "working": "Секунду…"
+    },
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
     },
     "subscriptions_url": "/my-subscriptions"
    }
   },
   "tracking": {
-   "html": "<div class=\"action-buttons\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> All Orders\n                        </a>\n</div>",
+   "html": "<div class=\"action-buttons ae-track__actions\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"ae-btn ae-btn--secondary ae-btn--block\" href=\"/my-orders\">web.checkout.pay.my_orders</a>\n</div>",
    "island": {
     "auto_refresh": true,
-    "i18n": {
-     "delivery_location": "Delivery Location"
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "map": {
-     "address": "",
-     "enabled": false,
-     "lat": null,
-     "lng": null
+     "label": "1 Matrix street",
+     "lat": 41.3111,
+     "lng": 69.2797
     },
     "order": {
      "customer_actions": {
@@ -289,99 +375,142 @@
  },
  "uz": {
   "modal": {
-   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-xl\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Close\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"w-100\" id=\"orderDetailActions\"></div>\n<button class=\"btn btn-secondary\" data-dismiss=\"modal\" type=\"button\">Yopish</button>\n<button class=\"btn btn-primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>",
+   "html": "<div aria-hidden=\"true\" aria-labelledby=\"orderDetailModalLabel\" class=\"modal fade ae-modal ae-od\" id=\"orderDetailModal\" role=\"dialog\" tabindex=\"-1\">\n<div class=\"modal-dialog modal-lg modal-dialog-scrollable\" role=\"document\">\n<div class=\"modal-content\">\n<div class=\"modal-header\">\n<h5 class=\"modal-title\" id=\"orderDetailModalLabel\">Order Details</h5>\n<button aria-label=\"Yopish\" class=\"close\" data-dismiss=\"modal\" type=\"button\">\n<span aria-hidden=\"true\">×</span>\n</button>\n</div>\n<div class=\"modal-body\" id=\"orderDetailContent\">\n<!-- Order details will be loaded dynamically -->\n</div>\n<div class=\"modal-footer\">\n<div class=\"ae-od__actions\" id=\"orderDetailActions\"></div>\n<div class=\"ae-od__buttons\">\n<a class=\"ae-btn ae-btn--ghost\" href=\"/order-tracking\" id=\"orderTrackLink\">\n<i aria-hidden=\"true\" class=\"far fa-route\"></i><span>web.checkout.order.track</span>\n</a>\n<button class=\"ae-btn ae-btn--secondary\" data-dismiss=\"modal\" type=\"button\">Yopish</button>\n<button class=\"ae-btn ae-btn--primary\" id=\"reorderBtn\" style=\"display: none;\" type=\"button\">\n<i aria-hidden=\"true\" class=\"far fa-redo\"></i> <span data-reorder-label=\"\"></span>\n</button>\n</div>\n</div>\n</div>\n</div>\n</div>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
      "delivery_address": "Delivery Address",
      "delivery_fee": "Yetkazib berish narxi",
      "delivery_location": "Delivery Location",
-     "details_failed": "Failed to load order details",
-     "no_address": "No delivery address provided",
+     "details_failed": "Buyurtmani hozir ochib bo‘lmadi. Qayta urinib ko‘ring.",
+     "district": "web.checkout.addr.district",
+     "no_address": "Buyurtmada yetkazib berish manzili yo‘q",
      "order": "Buyurtma",
      "order_items": "Order Items",
+     "order_number": "Buyurtma № {number}",
      "order_summary": "Order Summary",
-     "order_tracking": "Order Tracking",
-     "placed_on": "Placed on",
+     "placed_on": "Rasmiylashtirilgan: {date}",
      "price": "Narx",
+     "qty_price": "{quantity} × {price}",
      "quantity": "Miqdor",
+     "reward": "Sovg‘a",
      "reward_discount": "Reward discount",
-     "sku": "SKU",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Bekor qilindi",
+      "confirmed": "Tasdiqlandi",
+      "delivered": "Yetkazildi",
+      "out_for_delivery": "Yo‘lda",
+      "pending": "Tasdiq kutilmoqda",
+      "preparing": "Tayyorlanmoqda",
+      "returned": "Qaytarildi"
      },
      "subscription_discount": "Subscription discount",
      "subtotal": "Oraliq summa",
      "tax": "Tax",
      "tier_discount": "Tier discount (bot & website perk)",
      "total": "Jami",
-     "track_package": "Track Package",
-     "tracking_number": "Tracking Number"
+     "zoom_in": "Yaqinlashtirish",
+     "zoom_out": "Uzoqlashtirish"
+    },
+    "image_placeholder": "/static/images/product-placeholder.svg",
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "order_actions": {
      "confirmed": "Rahmat! Buyurtmangiz tasdiqlandi.",
-     "failed": "Amalga oshmadi. Qaytadan urinib ko'ring.",
+     "failed": "Amalga oshmadi. Qaytadan urinib ko‘ring.",
      "keep": "Qolsin",
      "open_subscription": "Obunani ochish",
-     "preparing_payment": "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",
+     "preparing_payment": "To‘lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro‘yxatdan o‘tkazilmoqda; Click birozdan so‘ng ochiladi.",
      "reason_prompt": "Sababini aytasizmi? (ixtiyoriy)",
-     "reason_text": "Bir necha so'z bilan (ixtiyoriy)",
-     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",
-     "switch_to_cash": "Naqd pul bilan to'lash",
+     "reason_text": "Bir necha so‘z bilan (ixtiyoriy)",
+     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo‘shilmadi.",
+     "switch_to_cash": "Naqd pul bilan to‘lash",
      "try_again": "Qayta urinish",
      "working": "Bir lahza…"
     },
-    "subscriptions_url": "/my-subscriptions"
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
+    },
+    "subscriptions_url": "/my-subscriptions",
+    "track_url": "/order-tracking?order_id=ORDER_ID"
    }
   },
   "orders": {
-   "html": "<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div><div class=\"orders-list\" id=\"ordersList\">\n<div class=\"loading-container text-center py-5\" id=\"loadingOrders\">\n<i class=\"far fa-spinner fa-spin fa-2x\"></i>\n<p class=\"mt-2\">Loading your orders...</p>\n</div>\n</div><div class=\"empty-state text-center py-5\" id=\"emptyState\" style=\"display: none;\">\n<i class=\"far fa-shopping-bag\" style=\"font-size: 4rem; color: #ccc;\"></i>\n<h4 class=\"mt-3\">No orders found</h4>\n<p class=\"text-muted\">You havent placed any orders yet or no orders match your filters</p>\n<a class=\"btn btn-primary\" href=\"/shop\">\n<i class=\"far fa-shopping-cart\"></i> Start Shopping\n    </a>\n</div><div class=\"pagination-section\" id=\"paginationSection\" style=\"display: none;\">\n<nav aria-label=\"Orders pagination\">\n<ul class=\"pagination justify-content-center\" id=\"ordersPagination\">\n</ul>\n</nav>\n</div>",
+   "html": "<select class=\"ae-input ignore\" id=\"statusFilter\">\n<option value=\"\">Barcha holatlar</option>\n<option value=\"pending\">Tasdiq kutilmoqda</option>\n<option value=\"confirmed\">Tasdiqlandi</option>\n<option value=\"preparing\">Tayyorlanmoqda</option>\n<option value=\"out_for_delivery\">Yo‘lda</option>\n<option value=\"delivered\">Yetkazildi</option>\n<option value=\"cancelled\">Bekor qilindi</option>\n<option value=\"returned\">Qaytarildi</option>\n</select><select class=\"ae-input ignore\" id=\"dateFilter\">\n<option value=\"\">Butun davr</option>\n<option value=\"7\">Oxirgi 7 kun</option>\n<option value=\"30\">Oxirgi 30 kun</option>\n<option value=\"90\">Oxirgi 3 oy</option>\n<option value=\"365\">Oxirgi 12 oy</option>\n</select><div aria-hidden=\"true\" class=\"ae-orders__loading\" id=\"loadingOrders\">\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<div class=\"ae-order ae-order--skeleton\">\n<span class=\"ae-skeleton ae-skeleton--title\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\"></span>\n<span class=\"ae-skeleton ae-skeleton--text\" style=\"width: 70%\"></span>\n</div>\n<span class=\"visually-hidden\">Buyurtmalaringiz yuklanmoqda</span>\n</div><div class=\"orders-list ae-orders__list\" id=\"ordersList\"></div><div class=\"ae-orders__empty\" hidden=\"\" id=\"emptyState\">\n<div data-empty=\"first\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-shopping-bag\"></i></span>\n<h3 class=\"ae-empty__title\">Hali buyurtmalar yo‘q</h3>\n<p class=\"ae-empty__text\">Saytda yoki Telegram botimizda suv buyurtma qiling — buyurtmalaringiz shu yerda ko‘rinadi.</p>\n<div class=\"ae-empty__actions\"><a class=\"ae-btn ae-btn--primary\" href=\"/shop\">Suv buyurtma qilish</a>\n</div>\n</div>\n</div>\n<div data-empty=\"filtered\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-filter\"></i></span>\n<h3 class=\"ae-empty__title\">Bu filtrlar bo‘yicha buyurtma yo‘q</h3>\n<p class=\"ae-empty__text\">Boshqa holat yoki davrni tanlab ko‘ring.</p>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"reset-filters\" type=\"button\">Barcha buyurtmalarni ko‘rsatish</button>\n</div>\n</div>\n</div>\n<div data-empty=\"failed\" hidden=\"\">\n<div class=\"ae-empty\">\n<span aria-hidden=\"true\" class=\"ae-empty__icon\"><i class=\"far fa-exclamation-triangle\"></i></span>\n<h3 class=\"ae-empty__title\">Buyurtmalarni hozir yuklab bo‘lmadi.</h3>\n<div class=\"ae-empty__actions\"><button class=\"ae-btn ae-btn--primary\" data-action=\"retry-orders\" type=\"button\">Qayta urinish</button>\n</div>\n</div>\n</div>\n</div><nav aria-label=\"Buyurtmalar sahifalari\" class=\"pagination-section ae-orders__pager\" hidden=\"\" id=\"paginationSection\">\n<ul class=\"ae-pagination\" id=\"ordersPagination\"></ul>\n<p class=\"ae-pagination__info\" id=\"ordersPageInfo\"></p>\n</nav>",
    "island": {
     "cart_url": "/cart",
     "i18n": {
-     "and": "and",
-     "delivery_address": "Delivery Address",
-     "est_delivery": "Est. delivery",
-     "load_failed": "Failed to load orders",
-     "load_failed_retry": "Failed to load orders. Please try again.",
-     "more_items": "more items",
-     "order": "Buyurtma",
-     "order_date": "Order Date",
-     "quantity": "Miqdor",
+     "more_items": "yana {count} ta",
+     "next": "Keyingi sahifa",
+     "order_number": "Buyurtma № {number}",
+     "page": "{page}-sahifa",
+     "prev": "Oldingi sahifa",
+     "qty_price": "{quantity} × {price}",
+     "reward": "Sovg‘a",
+     "showing": "{total} tadan {from}–{to}",
      "status_labels": {
-      "awaiting_new_date": "Awaiting a new delivery date"
+      "awaiting_new_date": "Awaiting a new delivery date",
+      "cancelled": "Bekor qilindi",
+      "confirmed": "Tasdiqlandi",
+      "delivered": "Yetkazildi",
+      "out_for_delivery": "Yo‘lda",
+      "pending": "Tasdiq kutilmoqda",
+      "preparing": "Tayyorlanmoqda",
+      "returned": "Qaytarildi"
      },
-     "tracking": "Kuzatuv",
-     "view_details": "Batafsil ko'rish"
+     "view_details": "Batafsil"
     },
+    "image_placeholder": "/static/images/product-placeholder.svg",
     "order_actions": {
      "confirmed": "Rahmat! Buyurtmangiz tasdiqlandi.",
-     "failed": "Amalga oshmadi. Qaytadan urinib ko'ring.",
+     "failed": "Amalga oshmadi. Qaytadan urinib ko‘ring.",
      "keep": "Qolsin",
      "open_subscription": "Obunani ochish",
-     "preparing_payment": "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",
+     "preparing_payment": "To‘lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro‘yxatdan o‘tkazilmoqda; Click birozdan so‘ng ochiladi.",
      "reason_prompt": "Sababini aytasizmi? (ixtiyoriy)",
-     "reason_text": "Bir necha so'z bilan (ixtiyoriy)",
-     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",
-     "switch_to_cash": "Naqd pul bilan to'lash",
+     "reason_text": "Bir necha so‘z bilan (ixtiyoriy)",
+     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo‘shilmadi.",
+     "switch_to_cash": "Naqd pul bilan to‘lash",
      "try_again": "Qayta urinish",
      "working": "Bir lahza…"
+    },
+    "status_tones": {
+     "awaiting_new_date": "warn",
+     "cancelled": "muted",
+     "confirmed": "info",
+     "delivered": "ok",
+     "out_for_delivery": "progress",
+     "pending": "info",
+     "preparing": "info",
+     "returned": "muted"
     },
     "subscriptions_url": "/my-subscriptions"
    }
   },
   "tracking": {
-   "html": "<div class=\"action-buttons\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"theme-btn btn-two\" href=\"/my-orders\">\n<i class=\"far fa-list\"></i> All Orders\n                        </a>\n</div>",
+   "html": "<div class=\"action-buttons ae-track__actions\">\n<div class=\"order-actions\" data-order-id=\"1\" id=\"orderActions\"></div>\n<a class=\"ae-btn ae-btn--secondary ae-btn--block\" href=\"/my-orders\">web.checkout.pay.my_orders</a>\n</div>",
    "island": {
     "auto_refresh": true,
-    "i18n": {
-     "delivery_location": "Delivery Location"
+    "leaflet": {
+     "css": "/static/vendor/leaflet/leaflet.css",
+     "images": "/static/vendor/leaflet/images/",
+     "js": "/static/vendor/leaflet/leaflet.js"
     },
     "map": {
-     "address": "",
-     "enabled": false,
-     "lat": null,
-     "lng": null
+     "label": "1 Matrix street",
+     "lat": 41.3111,
+     "lng": 69.2797
     },
     "order": {
      "customer_actions": {
@@ -416,14 +545,14 @@
     },
     "order_actions": {
      "confirmed": "Rahmat! Buyurtmangiz tasdiqlandi.",
-     "failed": "Amalga oshmadi. Qaytadan urinib ko'ring.",
+     "failed": "Amalga oshmadi. Qaytadan urinib ko‘ring.",
      "keep": "Qolsin",
      "open_subscription": "Obunani ochish",
-     "preparing_payment": "To'lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro'yxatdan o'tkazilmoqda; Click birozdan so'ng ochiladi.",
+     "preparing_payment": "To‘lovingiz tayyorlanmoqda. Mahsulotlaringiz soliq tizimida («Asl belgisi») ro‘yxatdan o‘tkazilmoqda; Click birozdan so‘ng ochiladi.",
      "reason_prompt": "Sababini aytasizmi? (ixtiyoriy)",
-     "reason_text": "Bir necha so'z bilan (ixtiyoriy)",
-     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo'shilmadi.",
-     "switch_to_cash": "Naqd pul bilan to'lash",
+     "reason_text": "Bir necha so‘z bilan (ixtiyoriy)",
+     "reorder_dropped": "Bu buyurtmadagi ayrim mahsulotlar endi mavjud emas, ular qo‘shilmadi.",
+     "switch_to_cash": "Naqd pul bilan to‘lash",
      "try_again": "Qayta urinish",
      "working": "Bir lahza…"
     },

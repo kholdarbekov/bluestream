@@ -11,12 +11,43 @@ from pathlib import Path
 import pytest
 
 from scripts.seed_backend_translations import _DOTTED_KEY, BACKEND_TRANSLATIONS
+from scripts.seed_web_ui_account_translations import TRANSLATIONS as ACCOUNT_TRANSLATIONS
+from scripts.seed_web_ui_auth_translations import TRANSLATIONS as AUTH_TRANSLATIONS
+from scripts.seed_web_ui_cabinet_translations import TRANSLATIONS as CABINET_TRANSLATIONS
+from scripts.seed_web_ui_checkout_translations import TRANSLATIONS as CHECKOUT_TRANSLATIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "business_app" / "templates"
 FRONTEND = TEMPLATES / "frontend"
 SCRIPTS = ROOT / "scripts"
 OWNING_SEED = SCRIPTS / "seed_backend_translations.py"
+# The website redesign's cabinet copy (2026-11-14) lives in its group seed, under its own `web.cabinet.` namespace.
+CABINET_PREFIX = "web.cabinet."
+CABINET_ROWS = {
+    key: {language: rows[key] for language, rows in CABINET_TRANSLATIONS.items() if key in rows}
+    for key in set().union(*CABINET_TRANSLATIONS.values())
+}
+# The account group's pages (Aqua Club, profile, security) keep theirs under `web.account.` in their group seed.
+ACCOUNT_PREFIX = "web.account."
+ACCOUNT_ROWS = {
+    key: {language: rows[key] for language, rows in ACCOUNT_TRANSLATIONS.items() if key in rows}
+    for key in set().union(*ACCOUNT_TRANSLATIONS.values())
+}
+# The checkout group's pages (My addresses and its address wizard) keep theirs under `web.checkout.`.
+CHECKOUT_PREFIX = "web.checkout."
+CHECKOUT_ROWS = {
+    key: {language: rows[key] for language, rows in CHECKOUT_TRANSLATIONS.items() if key in rows}
+    for key in set().union(*CHECKOUT_TRANSLATIONS.values())
+}
+
+# The auth group's building blocks (macros/auth.html: password fields, the checklist, the one-time code) and their
+# shared copy are `web.auth.` keys in the auth seed; the cabinet's verify-phone page and the account security page
+# use them.
+AUTH_PREFIX = "web.auth."
+AUTH_ROWS = {
+    key: {language: rows[key] for language, rows in AUTH_TRANSLATIONS.items() if key in rows}
+    for key in set().union(*AUTH_TRANSLATIONS.values())
+}
 
 _KEY_RE = re.compile(r"""(['"])((?:\\.|(?!\1).)+?)\1\s*\|\s*(?:t|translate)\b""")
 _EXTENDS_RE = re.compile(r"""\{%-?\s*extends\s+['"]frontend/cabinet_base\.html['"]""")
@@ -32,6 +63,7 @@ KNOWN_CABINET_TEMPLATES = {
     "my_account.html",
     "my_subscriptions.html",
     "partials/order_detail_modal.html",
+    "partials/address_wizard.html",
     "macros/page_data.html",
     "macros/order_status.html",
 }
@@ -73,7 +105,16 @@ def test_the_cabinet_template_set_is_the_cabinet():
 
 @pytest.mark.parametrize("key", sorted(cabinet_template_keys()))
 def test_every_cabinet_key_has_a_seed_row_in_all_three_languages(key):
-    row = BACKEND_TRANSLATIONS.get(key)
+    if key.startswith(CABINET_PREFIX):
+        row = CABINET_ROWS.get(key)
+    elif key.startswith(ACCOUNT_PREFIX):
+        row = ACCOUNT_ROWS.get(key)
+    elif key.startswith(CHECKOUT_PREFIX):
+        row = CHECKOUT_ROWS.get(key)
+    elif key.startswith(AUTH_PREFIX):
+        row = AUTH_ROWS.get(key)
+    else:
+        row = BACKEND_TRANSLATIONS.get(key)
     assert row is not None, f"{key!r} is rendered at {cabinet_template_keys()[key]} but no seed row exists"
     for language in ("en", "uz", "ru"):
         assert row.get(language), f"{key!r} has no {language} value"
@@ -103,14 +144,15 @@ def test_no_other_seed_writes_a_bare_cabinet_key(key):
 
 
 def test_the_requalification_line_is_one_sentence_with_the_count_in_it():
-    """loyalty.js fills `{count}` into ONE translated sentence; no prefix + number + suffix glue."""
-    row = BACKEND_TRANSLATIONS["cabinet.loyalty.earn_more_to_keep"]
-    script = (ROOT / "business_app" / "static" / "js" / "pages" / "loyalty.js").read_text(encoding="utf-8")
-    assert "PAGE_DATA.i18n.earn_more_to_keep.replace('{count}', needed)" in script
-    assert row["en"].replace("{count}", "120") == "Earn 120 more AquaCoins to keep your status"
+    """/my-loyalty fills `{pts}` into ONE translated sentence; no prefix + number + suffix glue. Since the
+    2026-11-14 redesign the server renders the line (loyalty.html) from the account group's key."""
+    row = ACCOUNT_ROWS["web.account.loyalty.keep_level"]
+    template = (FRONTEND / "loyalty.html").read_text(encoding="utf-8")
+    assert "'web.account.loyalty.keep_level'|t(pts=pts(summary.points_needed_to_keep))" in template
+    assert row["en"].replace("{pts}", "120") == "Earn 120 more AquaCoins to keep your level"
     for language in ("uz", "ru"):
-        rendered = row[language].replace("{count}", "120")
-        assert row[language].count("{count}") == 1 and "120" in rendered and "{" not in rendered
+        rendered = row[language].replace("{pts}", "120")
+        assert row[language].count("{pts}") == 1 and "120" in rendered and "{" not in rendered
 
 
 def test_the_home_chip_is_not_the_navigation_word():

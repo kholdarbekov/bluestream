@@ -1,878 +1,254 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/address_wizard.html' import address_wizard, address_wizard_styles, address_wizard_scripts with context %}
 
-{% block title %}{{ 'landing.button.checkout'|t }} - {{ company_name }}{% endblock %}
+{#-
+  Checkout (/checkout). Website redesign 2026-11-14, group "checkout", unit "checkout-flow".
+  static/js/pages/checkout.js drives it; styles: static/css/pages/checkout.css (.ae-co) on ae-ui.css components.
+  - Money: every figure is the backend's quote (POST /api/v1/orders/cart/estimate); the page prices nothing.
+  - Hooks checkout.js and the tests read: #address-section, #address-grid, .address-card[data-action=select-address]
+    [data-address-id] (+ .selected, inner radio), [data-action=show-add-address], #delivery-time-section
+    [data-delivery-statement], #delivery-date, #time-slots-container, #payment-methods-container,
+    #selected-payment-method, #order-notes, #agree-terms, #summary-* rows, #min-order-warning/-title/-text,
+    #checkoutPaymentState, #place-order-btn[data-action=place-order], #loading-overlay.
+  - "Add address" opens the shared address wizard (partials/address_wizard.html); a saved address joins the list
+    selected.
+-#}
+
+{%- macro address_card(address, selected=false) -%}
+<label class="ae-radio-card address-card{% if selected %} selected{% endif %}" data-action="select-address" data-address-id="{{ address.id if address else '' }}">
+    <input class="ae-co-radio" type="radio" name="delivery_address" value="{{ address.id if address else '' }}"{% if selected %} checked{% endif %}>
+    <span class="ae-radio-card__title ae-co-addr__title">
+        <span class="ae-co-addr__name">{% if address %}{{ address.title or address.full_address }}{% endif %}</span>
+        <span class="ae-badge ae-co-addr__main"{% if not (address and address.is_default) %} hidden{% endif %}>{{ 'web.checkout.addr.default_badge'|t }}</span>
+    </span>
+    <span class="ae-radio-card__text ae-co-addr__line"{% if not (address and address.title) %} hidden{% endif %}>{% if address and address.title %}{{ address.full_address }}{% endif %}</span>
+    <span class="ae-co-addr__note"{% if not (address and address.delivery_instructions) %} hidden{% endif %}><i class="far fa-comment-alt" aria-hidden="true"></i><span>{% if address %}{{ address.delivery_instructions or '' }}{% endif %}</span></span>
+</label>
+{%- endmacro -%}
+
+{% block title %}{{ 'web.checkout.co.title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-/* Checkout-specific styles */
-.checkout-section {
-    padding: 100px 0;
-}
-
-/* Progress Steps */
-.checkout-steps {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 50px;
-    padding: 0 20px;
-}
-
-.step {
-    flex: 1;
-    max-width: 200px;
-    text-align: center;
-    position: relative;
-}
-
-.step:not(:last-child)::after {
-    content: '';
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    width: 100%;
-    height: 2px;
-    background: #e5e5e5;
-    z-index: -1;
-}
-
-.step.active:not(:last-child)::after {
-    background: #00d1f9;
-}
-
-.step-number {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: #f0f0f0;
-    color: #999;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    margin-bottom: 10px;
-    transition: all 0.3s ease;
-}
-
-.step.active .step-number {
-    background: #00d1f9;
-    color: #fff;
-}
-
-.step.completed .step-number {
-    background: #28a745;
-    color: #fff;
-}
-
-.step-label {
-    font-size: 14px;
-    color: #666;
-    font-weight: 500;
-}
-
-.step.active .step-label {
-    color: #00d1f9;
-}
-
-/* Checkout Form */
-.checkout-form {
-    background: #fff;
-    padding: 40px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-}
-
-.form-section {
-    margin-bottom: 40px;
-}
-
-.form-section h4 {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #00d1f9;
-    color: #222;
-}
-
-/* Address Selection */
-.address-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 15px;
-    margin-bottom: 20px;
-}
-
-.address-card {
-    border: 2px solid #e5e5e5;
-    border-radius: 8px;
-    padding: 20px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    position: relative;
-}
-
-.address-card:hover {
-    border-color: #00d1f9;
-    box-shadow: 0 4px 12px rgba(0, 209, 249, 0.1);
-}
-
-.address-card.selected {
-    border-color: #00d1f9;
-    background: #f0fbff;
-}
-
-.address-card input[type="radio"] {
-    position: absolute;
-    top: 15px;
-    right: 15px;
-    width: 20px;
-    height: 20px;
-    cursor: pointer;
-}
-
-.address-card .address-name {
-    font-weight: 600;
-    font-size: 16px;
-    margin-bottom: 8px;
-    color: #222;
-}
-
-.address-card .address-details {
-    font-size: 14px;
-    color: #666;
-    line-height: 1.6;
-}
-
-.address-card .address-phone {
-    font-size: 14px;
-    color: #00d1f9;
-    margin-top: 8px;
-}
-
-.add-address-card {
-    border: 2px dashed #00d1f9;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 140px;
-    color: #00d1f9;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.add-address-card:hover {
-    background: #f0fbff;
-    border-style: solid;
-}
-
-.add-address-card i {
-    font-size: 32px;
-    margin-bottom: 10px;
-}
-
-/* Delivery Time Selection */
-.delivery-time-grid {
-    display: grid;
-    gap: 20px;
-    margin-top: 20px;
-}
-
-.date-selector {
-    margin-bottom: 20px;
-}
-
-.date-selector input {
-    width: 100%;
-    padding: 12px 15px;
-    border: 2px solid #e5e5e5;
-    border-radius: 5px;
-    font-size: 15px;
-}
-
-.time-slots {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
-}
-
-.time-slot {
-    padding: 15px;
-    border: 2px solid #e5e5e5;
-    border-radius: 5px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.time-slot:hover {
-    border-color: #00d1f9;
-    background: #f0fbff;
-}
-
-.time-slot.selected {
-    border-color: #00d1f9;
-    background: #00d1f9;
-    color: #fff;
-}
-
-.time-slot.unavailable {
-    opacity: 0.5;
-    cursor: not-allowed;
-    background: #f5f5f5;
-}
-
-.time-slot-time {
-    font-weight: 600;
-    font-size: 16px;
-}
-
-.time-slot-info {
-    font-size: 12px;
-    margin-top: 5px;
-}
-
-/* Payment Methods */
-.payment-methods {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 15px;
-}
-
-.payment-method {
-    border: 2px solid #e5e5e5;
-    border-radius: 8px;
-    padding: 20px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-align: center;
-}
-
-.payment-method:hover {
-    border-color: #00d1f9;
-    box-shadow: 0 4px 12px rgba(0, 209, 249, 0.1);
-}
-
-.payment-method.selected {
-    border-color: #00d1f9;
-    background: #f0fbff;
-}
-
-.payment-method i {
-    font-size: 36px;
-    margin-bottom: 12px;
-    color: #00d1f9;
-}
-
-.payment-method-name {
-    font-weight: 600;
-    font-size: 16px;
-    margin-bottom: 5px;
-}
-
-.payment-method-desc {
-    font-size: 13px;
-    color: #666;
-}
-
-/* Order Notes */
-.order-notes textarea {
-    width: 100%;
-    min-height: 100px;
-    padding: 15px;
-    border: 2px solid #e5e5e5;
-    border-radius: 5px;
-    font-size: 15px;
-    resize: vertical;
-}
-
-/* Order Summary */
-.order-summary {
-    background: #fff;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-    position: sticky;
-    top: 120px;
-}
-
-.order-summary h4 {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #00d1f9;
-}
-
-.summary-items {
-    max-height: 300px;
-    overflow-y: auto;
-    margin-bottom: 20px;
-}
-
-.summary-item {
-    display: flex;
-    align-items: center;
-    padding: 12px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.summary-item-image {
-    width: 50px;
-    height: 50px;
-    border-radius: 5px;
-    object-fit: cover;
-    margin-right: 12px;
-}
-
-.summary-item-details {
-    flex: 1;
-}
-
-.summary-item-name {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 3px;
-}
-
-.summary-item-qty {
-    font-size: 13px;
-    color: #666;
-}
-
-.summary-item-price {
-    font-weight: 600;
-    color: #00d1f9;
-}
-
-.summary-totals {
-    list-style: none;
-    padding: 0;
-    margin: 20px 0;
-}
-
-.summary-totals li {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-    font-size: 15px;
-    color: #666;
-}
-
-.summary-totals li.total {
-    border-top: 2px solid #e5e5e5;
-    margin-top: 10px;
-    padding-top: 15px;
-    font-size: 20px;
-    font-weight: 700;
-    color: #222;
-}
-
-.summary-totals li.total span {
-    color: #00d1f9;
-}
-
-/* Action Buttons */
-.checkout-actions {
-    display: flex;
-    gap: 15px;
-    margin-top: 30px;
-}
-
-.checkout-actions .theme-btn {
-    flex: 1;
-    text-align: center;
-}
-
-/* Loading State */
-.loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-}
-
-.loading-content {
-    background: #fff;
-    padding: 40px;
-    border-radius: 10px;
-    text-align: center;
-}
-
-.loading-spinner {
-    width: 60px;
-    height: 60px;
-    border: 4px solid #f3f3f3;
-    border-top: 4px solid #00d1f9;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 20px;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-/* Modal Styles */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-    padding: 20px;
-}
-
-.modal-content {
-    background: #fff;
-    border-radius: 10px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
-    animation: modalSlideIn 0.3s ease;
-}
-
-@keyframes modalSlideIn {
-    from {
-        transform: translateY(-50px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
-
-/* Responsive */
-@media (max-width: 991px) {
-    .order-summary {
-        position: static;
-        margin-top: 30px;
-    }
-
-    .checkout-steps {
-        flex-wrap: wrap;
-    }
-
-    .step {
-        margin-bottom: 20px;
-    }
-}
-
-@media (max-width: 767px) {
-    .checkout-form {
-        padding: 20px;
-    }
-
-    .address-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .payment-methods {
-        grid-template-columns: 1fr;
-    }
-
-    .time-slots {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .checkout-actions {
-        flex-direction: column;
-    }
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px;
-    border-bottom: 2px solid #f0f0f0;
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
+{{ address_wizard_styles() }}
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.button.checkout'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li><a href="{{ url_for('frontend.cart') }}">{{ 'Cart'|t }}</a></li>
-                        <li>{{ 'landing.button.checkout'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
+{{ page_hero('web.checkout.co.title'|t, crumbs=[('web.shop.cart.title'|t, url_for('frontend.cart')), ('web.checkout.co.title'|t, None)], variant='soft') }}
 
-        <!-- checkout-section -->
-        <section class="checkout-section">
-            <div class="auto-container">
-                <!-- Progress Steps -->
-                <div class="checkout-steps">
-                    <div class="step completed">
-                        <div class="step-number">
-                            <i class="far fa-check"></i>
+<div class="ae-flow ae-co">
+    <section class="ae-section ae-co__section">
+        <div class="ae-container">
+            <div class="ae-co__layout">
+                <form class="ae-card ae-co__form" id="checkout-form" novalidate>
+                    {# 1. Where #}
+                    <fieldset class="ae-co__step" id="address-section">
+                        <legend class="ae-co__step-title"><span class="ae-co__num" aria-hidden="true">1</span>{{ 'web.checkout.co.address_title'|t }}</legend>
+
+                        <div class="ae-co__addresses" id="address-grid"{% if not addresses %} hidden{% endif %}>
+                            {%- for address in addresses %}
+                            {{ address_card(address, selected=loop.first) }}
+                            {%- endfor %}
+                            <button type="button" class="ae-co-add" data-action="show-add-address">
+                                <span class="ae-co-add__icon" aria-hidden="true"><i class="far fa-plus"></i></span>
+                                <span>{{ 'web.checkout.addr.add'|t }}</span>
+                            </button>
                         </div>
-                        <div class="step-label">{{ 'Cart'|t }}</div>
-                    </div>
-                    <div class="step active">
-                        <div class="step-number">2</div>
-                        <div class="step-label">{{ 'landing.button.checkout'|t }}</div>
-                    </div>
-                    <div class="step">
-                        <div class="step-number">3</div>
-                        <div class="step-label">{{ 'Payment'|t }}</div>
-                    </div>
-                    <div class="step">
-                        <div class="step-number">4</div>
-                        <div class="step-label">{{ 'Confirmation'|t }}</div>
-                    </div>
-                </div>
 
-                <div class="row">
-                    <!-- Left Column - Checkout Form -->
-                    <div class="col-lg-8 col-md-12">
-                        <div class="checkout-form">
-                            <!-- Delivery Address Section -->
-                            <div class="form-section" id="address-section">
-                                <h4>
-                                    <i class="far fa-map-marker-alt"></i>
-                                    {{ 'Delivery Address'|t }}
-                                </h4>
-
-                                <div class="address-grid" id="address-grid">
-                                    {% if addresses %}
-                                        {% for address in addresses %}
-                                        <div class="address-card {% if loop.first %}selected{% endif %}"
-                                             data-action="select-address" data-address-id="{{ address.id }}"
-                                             data-address-id="{{ address.id }}">
-                                            <input type="radio"
-                                                   name="delivery_address"
-                                                   value="{{ address.id }}"
-                                                   {% if loop.first %}checked{% endif %}>
-                                            <div class="address-name">
-                                                {% if address.title %}{{ address.title }}{% else %}{{ address.full_address }}{% endif %}
-                                            </div>
-                                            <div class="address-details">
-                                                {{ address.full_address }}
-                                            </div>
-                                            {% if address.delivery_instructions %}
-                                            <div class="address-note" style="font-size: 13px; color: #888; font-style: italic; margin-top: 6px;">
-                                                <i class="far fa-sticky-note"></i> {{ address.delivery_instructions }}
-                                            </div>
-                                            {% endif %}
-                                        </div>
-                                        {% endfor %}
-                                    {% endif %}
-
-                                    <!-- Add New Address -->
-                                    <div class="address-card add-address-card" data-action="show-add-address">
-                                        <i class="far fa-plus-circle"></i>
-                                        <div>{{ 'Add New Address'|t }}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Delivery Window Section -->
-                            <div class="form-section" id="delivery-time-section">
-                                <h4>
-                                    <i class="far fa-clock"></i>
-                                    {{ 'Delivery Window'|t }}
-                                </h4>
-                                <p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>
-
-                                <div class="delivery-time-grid">
-                                    <div class="date-selector">
-                                        <label>{{ 'Select Delivery Date'|t }}:</label>
-                                        <input type="date"
-                                               id="delivery-date"
-                                               name="delivery_date"
-                                               min="{{ today }}">
-                                    </div>
-
-                                    <div>
-                                        <label>{{ 'Select Delivery Window'|t }}:</label>
-                                        <div class="time-slots" id="time-slots-container">
-                                            <!-- Delivery window presets are rendered dynamically -->
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Payment Method Section -->
-                            <div class="form-section" id="payment-section">
-                                <h4>
-                                    <i class="far fa-credit-card"></i>
-                                    {{ 'Payment Method'|t }}
-                                </h4>
-
-                                <div class="payment-methods" id="payment-methods-container">
-                                    <!-- Populated from GET /payments/methods by checkout.js -->
-                                </div>
-
-                                <!-- Legacy card form kept hidden for fallback compatibility. -->
-                                <div id="card-input-container" style="display: none; margin-top: 25px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
-                                    <h5 style="margin-bottom: 15px; font-weight: 600;">{{ 'Online Card Payment'|t }}</h5>
-
-                                    <div class="form-group" style="margin-bottom: 15px;">
-                                        <label style="display: block; margin-bottom: 5px;">{{ 'Card Number'|t }}</label>
-                                        <input type="text" id="card-number" placeholder="8600 0000 0000 0000" maxlength="19"
-                                               style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                                    </div>
-
-                                    <div class="row" style="display: flex; gap: 15px;">
-                                        <div class="form-group" style="flex: 1;">
-                                            <label style="display: block; margin-bottom: 5px;">{{ 'Expiry Date'|t }}</label>
-                                            <input type="text" id="card-expiry" placeholder="MM/YY" maxlength="5"
-                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                                        </div>
-                                        <div class="form-group" style="flex: 1;">
-                                            <label style="display: block; margin-bottom: 5px;">{{ 'Cardholder Name'|t }}</label>
-                                            <input type="text" id="card-holder" placeholder="{{ 'Name on card'|t }}"
-                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                                        </div>
-                                    </div>
-                                    <div style="margin-top: 15px; font-size: 12px; color: #666;">
-                                        <i class="fas fa-lock"></i> {{ 'Card payments are handled through integrated payment providers.'|t }}
-                                    </div>
-                                </div>
-
-                                <input type="hidden" id="selected-payment-method" value="cash">
-                            </div>
-
-                            <!-- Order Notes Section -->
-                            <div class="form-section" id="notes-section">
-                                <h4>
-                                    <i class="far fa-comment-alt"></i>
-                                    {{ 'Order Notes'|t }} ({{ 'Optional'|t }})
-                                </h4>
-
-                                <div class="order-notes">
-                                    <textarea id="order-notes"
-                                              name="order_notes"
-                                              placeholder="{{ 'Special instructions for delivery...'|t }}"></textarea>
-                                </div>
-                            </div>
-
-                            <!-- Terms and Conditions -->
-                            <div class="form-section">
-                                <label style="display: flex; align-items: center; cursor: pointer;">
-                                    <input type="checkbox"
-                                           id="agree-terms"
-                                           style="width: 20px; height: 20px; margin-right: 10px;">
-                                    <span>
-                                        {{ 'I agree to the'|t }}
-                                        <a href="{{ url_for('frontend.terms') }}" target="_blank" style="color: #00d1f9;">
-                                            {{ 'Terms and Conditions'|t }}
-                                        </a>
-                                    </span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Right Column - Order Summary -->
-                    <div class="col-lg-4 col-md-12">
-                        <div class="order-summary">
-                            <h4>{{ 'Order Summary'|t }}</h4>
-
-                            <div class="summary-items" id="summary-items">
-                                <!-- Items will be loaded from cart -->
-                            </div>
-
-                            <ul class="summary-totals">
-                                <li>
-                                    {{ 'Subtotal'|t }}:
-                                    <span id="summary-subtotal">0 UZS</span>
-                                </li>
-                                <li id="summary-discount-row" style="display: none;">
-                                    <span id="summary-discount-label"></span>:
-                                    <span id="summary-discount">0 UZS</span>
-                                </li>
-                                <li id="summary-reward-row" style="display: none;">
-                                    <span id="summary-reward-label"></span>:
-                                    <span id="summary-reward">0 UZS</span>
-                                </li>
-                                <li id="summary-tier-row" style="display: none;">
-                                    <span id="summary-tier-label"></span>:
-                                    <span id="summary-tier">0 UZS</span>
-                                </li>
-                                <li>
-                                    {{ 'Delivery Fee'|t }}:
-                                    <span id="summary-delivery">0 UZS</span>
-                                </li>
-                                <li class="total">
-                                    {{ 'Total'|t }}:
-                                    <span id="summary-total">0 UZS</span>
-                                </li>
-                                <li id="summary-cod-savings-row" style="display: none;">
-                                    <span id="summary-cod-savings"></span>
-                                </li>
-                            </ul>
-
-                            <!-- Minimum Order Warning -->
-                            <div id="min-order-warning" class="min-order-warning" style="display: none; background: linear-gradient(135deg, #f8d7da 0%, #f5c2c7 100%); border: 2px solid #dc3545; border-radius: 10px; padding: 15px 20px; margin: 20px 0; align-items: center; gap: 12px;">
-                                <i class="far fa-exclamation-triangle" style="font-size: 24px; color: #dc3545; flex-shrink: 0;"></i>
-                                <div style="flex: 1;">
-                                    <div style="font-weight: 700; font-size: 14px; color: #721c24; margin-bottom: 2px;" id="min-order-title">{{ 'Minimum order amount not met'|t }}</div>
-                                    <div style="font-size: 13px; color: #666;" id="min-order-text"></div>
-                                </div>
-                            </div>
-
-                            {# The wait for Click, or the cash rescue: drawn by order-actions.js from the backend's answers. #}
-                            <div id="checkoutPaymentState" class="mb-3" role="status" aria-live="polite" hidden></div>
-
-                            <div class="checkout-actions">
-                                <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-two">
-                                    <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|t }}
-                                </a>
-                                <button data-action="place-order" class="theme-btn btn-one" id="place-order-btn">
-                                    {{ 'Place Order'|t }}
-                                    <i class="far fa-arrow-right"></i>
+                        <div class="ae-co-empty" id="address-empty"{% if addresses %} hidden{% endif %}>
+                            <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-map-marker-alt"></i></span>
+                            <div class="ae-co-empty__body">
+                                <p class="ae-co-empty__title">{{ 'web.checkout.co.address_empty_title'|t }}</p>
+                                <p class="ae-co-empty__text">{{ 'web.checkout.co.address_empty_text'|t }}</p>
+                                <button type="button" class="ae-btn ae-btn--primary" data-action="show-add-address">
+                                    <i class="far fa-plus" aria-hidden="true"></i>{{ 'web.checkout.addr.add'|t }}
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- checkout-section end -->
+                        <p class="ae-field__error ae-co__error" id="address-error" role="alert"></p>
 
-        <!-- Address Management Modal -->
-        <div id="address-modal" class="modal-overlay" style="display: none;">
-            <div class="modal-content" style="max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
-                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 2px solid #f0f0f0;">
-                    <h3 id="modal-title" style="margin: 0;">{{ 'Add New Address'|t }}</h3>
-                    <button data-action="close-address-modal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">
-                        <i class="far fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body" style="padding: 30px;">
-                    <form id="address-form">
-                        <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Label'|t }} ({{ 'Optional'|t }})</label>
-                            <input type="text" id="address-label" placeholder="{{ 'e.g., Home, Office'|t }}"
-                                   style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
+                        <template id="address-card-template">{{ address_card(none) }}</template>
+                    </fieldset>
+
+                    {# 2. When #}
+                    <fieldset class="ae-co__step" id="delivery-time-section">
+                        <legend class="ae-co__step-title"><span class="ae-co__num" aria-hidden="true">2</span>{{ 'web.checkout.co.when_title'|t }}</legend>
+
+                        <div class="ae-alert ae-co__statement">
+                            <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-clock"></i></span>
+                            <p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 1'|t }} *</label>
-                            <input type="text" id="address-line1" required placeholder="{{ 'Street address'|t }}"
-                                   style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
-                        </div>
-
-                        <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 2'|t }} ({{ 'Optional'|t }})</label>
-                            <input type="text" id="address-line2" placeholder="{{ 'Apartment, suite, etc.'|t }}"
-                                   style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
-                        </div>
-
-                        <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                            <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'City'|t }} *</label>
-                                <input type="text" id="address-city" required placeholder="{{ 'City'|t }}"
-                                       style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
+                        <div class="ae-co__when">
+                            <div class="ae-field ae-co__date" id="delivery-date-field">
+                                <label for="delivery-date">{{ 'web.checkout.co.date_label'|t }}</label>
+                                {#- The days the schedule rule takes (schedule_date_bounds, Tashkent); checkout.js keeps them. -#}
+                                <input type="date" id="delivery-date" name="delivery_date" min="{{ schedule.today }}" max="{{ schedule.max_date }}" value="{{ schedule.today }}" required aria-describedby="delivery-date-error">
+                                <p class="ae-field__error" id="delivery-date-error" role="alert"></p>
                             </div>
-
-                            <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'State/Region'|t }} ({{ 'Optional'|t }})</label>
-                                <input type="text" id="address-state" placeholder="{{ 'State'|t }}"
-                                       style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
+                            <div class="ae-co__windows-field">
+                                <span class="ae-field__label" id="windows-label">{{ 'web.checkout.co.window_label'|t }}</span>
+                                <div class="ae-co__windows" id="time-slots-container" role="radiogroup" aria-labelledby="windows-label" aria-describedby="delivery-window-error">
+                                    {# Drawn by checkout.js from the published windows (page data `schedule.windows`). #}
+                                </div>
+                                <p class="ae-field__error" id="delivery-window-error" role="alert"></p>
                             </div>
                         </div>
+                    </fieldset>
 
-                        <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                            <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Postal Code'|t }} ({{ 'Optional'|t }})</label>
-                                <input type="text" id="address-postal-code" placeholder="{{ 'Postal code'|t }}"
-                                       style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
-                            </div>
-
-                            <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Phone Number'|t }}</label>
-                                <input type="tel" id="address-phone" placeholder="+998901234567"
-                                       style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
-                            </div>
+                    {# 3. How to pay #}
+                    <fieldset class="ae-co__step" id="payment-section">
+                        <legend class="ae-co__step-title"><span class="ae-co__num" aria-hidden="true">3</span>{{ 'web.checkout.co.pay_title'|t }}</legend>
+                        <div class="ae-co__methods" id="payment-methods-container" role="radiogroup" aria-label="{{ 'web.checkout.co.pay_title'|t }}" aria-busy="true">
+                            {# Drawn by checkout.js from GET /payments/methods?context=order. #}
+                            <span class="ae-skeleton ae-co__method-skeleton"></span>
+                            <span class="ae-skeleton ae-co__method-skeleton"></span>
                         </div>
+                        <input type="hidden" id="selected-payment-method" value="cash">
+                    </fieldset>
 
-                        <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Delivery Instructions'|t }} ({{ 'Optional'|t }})</label>
-                            <textarea id="delivery-instructions" rows="3" placeholder="{{ 'Any special instructions for delivery'|t }}"
-                                      style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px; resize: vertical;"></textarea>
+                    {# 4. Comment and terms #}
+                    <fieldset class="ae-co__step" id="notes-section">
+                        <legend class="ae-co__step-title"><span class="ae-co__num" aria-hidden="true">4</span>{{ 'web.checkout.co.notes_title'|t }}</legend>
+                        <div class="ae-field">
+                            <label for="order-notes">{{ 'web.checkout.co.notes_label'|t }} <span class="ae-field__optional">({{ 'web.checkout.co.optional'|t }})</span></label>
+                            <textarea id="order-notes" name="order_notes" rows="3" maxlength="500" placeholder="{{ 'web.checkout.co.notes_ph'|t }}"></textarea>
                         </div>
-
-                        <div class="form-group" style="margin-bottom: 25px;">
-                            <label style="display: flex; align-items: center; cursor: pointer;">
-                                <input type="checkbox" id="is-default" style="width: 20px; height: 20px; margin-right: 10px;">
-                                <span>{{ 'Set as default address'|t }}</span>
+                        <div class="ae-co__terms" id="terms-field">
+                            <label class="ae-check">
+                                <input type="checkbox" id="agree-terms" aria-describedby="agree-terms-error">
+                                {{ 'web.checkout.co.terms_before'|t }} <a class="ae-co__terms-link" href="{{ url_for('frontend.terms') }}" target="_blank" rel="noopener">{{ 'web.checkout.co.terms_link'|t }}</a>{{ 'web.checkout.co.terms_after'|t }}
                             </label>
+                            <p class="ae-field__error" id="agree-terms-error" role="alert"></p>
                         </div>
+                    </fieldset>
+                </form>
 
-                        <div style="display: flex; gap: 15px;">
-                            <button type="button" data-action="close-address-modal" class="theme-btn btn-three" style="flex: 1;">
-                                {{ 'Cancel'|t }}
-                            </button>
-                            <button type="submit" class="theme-btn btn-one" style="flex: 1;">
-                                <i class="far fa-save"></i> {{ 'Save Address'|t }}
-                            </button>
+                <aside class="ae-card ae-co__summary" id="order-summary" aria-labelledby="summary-title">
+                    <h2 class="ae-co__summary-title" id="summary-title">{{ 'web.shop.cart.summary_title'|t }}</h2>
+
+                    <ul class="ae-co-lines" id="summary-items" aria-busy="true">
+                        <li class="ae-co-line ae-co-line--skeleton" aria-hidden="true">
+                            <span class="ae-skeleton ae-co-line__thumb"></span>
+                            <span class="ae-co-line__body"><span class="ae-skeleton ae-skeleton--text"></span><span class="ae-skeleton ae-skeleton--text"></span></span>
+                        </li>
+                    </ul>
+
+                    <dl class="ae-dl ae-dl--end ae-co__totals" aria-live="polite">
+                        <div class="ae-dl__row">
+                            <dt>{{ 'web.checkout.co.subtotal'|t }}</dt>
+                            <dd id="summary-subtotal">—</dd>
                         </div>
-                    </form>
-                </div>
+                        <div class="ae-dl__row ae-co__discount" id="summary-discount-row" style="display: none;">
+                            <dt id="summary-discount-label"></dt>
+                            <dd id="summary-discount"></dd>
+                        </div>
+                        <div class="ae-dl__row ae-co__discount" id="summary-reward-row" style="display: none;">
+                            <dt id="summary-reward-label"></dt>
+                            <dd id="summary-reward"></dd>
+                        </div>
+                        <div class="ae-dl__row ae-co__discount" id="summary-tier-row" style="display: none;">
+                            <dt id="summary-tier-label"></dt>
+                            <dd id="summary-tier"></dd>
+                        </div>
+                        <div class="ae-dl__row">
+                            <dt>{{ 'web.checkout.co.delivery'|t }}</dt>
+                            <dd id="summary-delivery">—</dd>
+                        </div>
+                        <div class="ae-dl__row ae-dl__total">
+                            <dt>{{ 'web.checkout.co.total'|t }}</dt>
+                            <dd id="summary-total">—</dd>
+                        </div>
+                    </dl>
+
+                    <p class="ae-co__perk" id="summary-cod-savings-row" style="display: none;">
+                        <i class="far fa-badge-percent" aria-hidden="true"></i><span id="summary-cod-savings"></span>
+                    </p>
+
+                    <div class="ae-alert ae-alert--warn ae-co__notice" id="min-order-warning" role="status" style="display: none;">
+                        <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-info-circle"></i></span>
+                        <div>
+                            <strong class="ae-alert__title" id="min-order-title"></strong>
+                            <p id="min-order-text"></p>
+                        </div>
+                    </div>
+
+                    {# The wait for Click, or the cash rescue: drawn by order-actions.js from the backend's answers. #}
+                    <div id="checkoutPaymentState" class="ae-co__state" role="status" aria-live="polite" hidden></div>
+
+                    <div class="ae-co__actions">
+                        <button type="button" data-action="place-order" class="ae-btn ae-btn--primary ae-btn--lg ae-btn--block" id="place-order-btn">{{ 'web.checkout.co.place'|t }}</button>
+                        <a class="ae-link ae-co__back" href="{{ url_for('frontend.cart') }}"><i class="far fa-arrow-left" aria-hidden="true"></i>{{ 'web.checkout.co.back_to_cart'|t }}</a>
+                    </div>
+                </aside>
             </div>
         </div>
+    </section>
 
-        <!-- Loading Overlay -->
-        <div id="loading-overlay" class="loading-overlay" style="display: none;">
-            <div class="loading-content">
-                <div class="loading-spinner"></div>
-                <h4>{{ 'Processing your order...'|t }}</h4>
-                <p>{{ 'Please wait'|t }}</p>
-            </div>
+    {# Phones: the total and the button stay in reach while the form scrolls. #}
+    <div class="ae-sticky-bar ae-co__bar" id="checkout-bar">
+        <div class="ae-sticky-bar__summary">
+            <span class="ae-sticky-bar__label">{{ 'web.checkout.co.total'|t }}</span>
+            <span class="ae-sticky-bar__value" id="checkout-bar-total">—</span>
         </div>
+        <button type="button" class="ae-btn ae-btn--primary" data-action="place-order">{{ 'web.checkout.co.place'|t }}</button>
+    </div>
+
+    <div id="loading-overlay" class="ae-co-overlay" role="alertdialog" aria-modal="true" aria-labelledby="loading-title" style="display: none;">
+        <div class="ae-co-overlay__card">
+            <span class="ae-co-overlay__spinner" aria-hidden="true"></span>
+            <p class="ae-co-overlay__title" id="loading-title">{{ 'web.checkout.co.placing_title'|t }}</p>
+            <p class="ae-co-overlay__text">{{ 'web.checkout.co.placing_text'|t }}</p>
+        </div>
+    </div>
+</div>
+
+{{ address_wizard() }}
 {% endblock %}
 
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
+{#- Ways to pay: the SET and its order come from GET /payments/methods; the words are the website's
+    (`web.display_labels.payment_method.*`, the label every order page shows, plus one line under each), as the
+    subscription builder does. -#}
+{%- set method_labels = {} -%}
+{%- set method_notes = {} -%}
+{%- for method in checkout_payment_methods %}
+{%- set _ = method_labels.update({method: ('web.display_labels.payment_method.' ~ method)|t}) %}
+{%- set _ = method_notes.update({method: ('web.checkout.co.method_note.' ~ method)|t}) %}
+{%- endfor %}
 {{ render_page_data({
     'login_url': url_for('frontend.login'),
     'checkout_url': url_for('frontend.checkout'),
     'cart_url': url_for('frontend.cart'),
-    'default_image': url_for('static', filename='images/resource/shop/shop-1.jpg'),
+    'addresses_url': url_for('frontend.addresses'),
+    'default_image': url_for('static', filename='images/product-placeholder.svg'),
     'current_language': current_language,
     'min_order_amount': config['MIN_ORDER_AMOUNT'],
     'order_actions': order_actions_words(),
+    'method_labels': method_labels,
+    'method_notes': method_notes,
+    'schedule': schedule,
     'i18n': {
-        'qty': 'Qty' | t,
-        'select_address': 'Select address' | t,
-        'free': 'Free' | t,
-        'min_not_met': 'Minimum order amount not met' | t,
-        'add': 'Add' | t,
-        'more_to_place': 'more to place order' | t,
-        'min_order_amount': 'Minimum order amount' | t,
-        'min_warning': 'Minimum order amount is' | t,
-        'min_qty_warning_line': '{name}: minimum {min}, add {remaining} more' | t,
-        'min_qty_warning_short': 'Some items are below their minimum order quantity' | t,
-        'calculating': 'Calculating...' | t,
-        'address_coming_soon': 'Address management feature coming soon! For now, please add addresses through your account settings.' | t,
-        'payment_failed': 'Payment failed. Please try again.' | t,
-        'select_delivery_address': 'Please select a delivery address' | t,
-        'select_delivery_date': 'Please select a delivery date' | t,
-        'agree_terms': 'Please agree to the terms and conditions' | t,
-        'place_order_failed': 'Failed to place order' | t,
+        'free': 'web.checkout.co.free' | t,
+        'calculating': 'web.checkout.co.calculating' | t,
+        'untitled_address': 'web.checkout.co.untitled_address' | t,
+        'min_amount_title': 'web.checkout.co.min_amount_title' | t,
+        'min_amount_text': 'web.checkout.co.min_amount_text' | t,
+        'min_qty_title': 'web.checkout.co.min_qty_title' | t,
+        'min_qty_line': 'web.checkout.co.min_qty_line' | t,
+        'quote_failed_title': 'web.checkout.co.quote_failed_title' | t,
+        'quote_failed_text': 'web.checkout.co.quote_failed_text' | t,
+        'select_delivery_address': 'web.checkout.co.address_error' | t,
+        'select_delivery_date': 'web.checkout.co.date_error' | t,
+        'schedule_title': 'web.checkout.co.schedule_title' | t,
+        'schedule_date_past': 'web.checkout.co.schedule_date_past' | t,
+        'schedule_date_far': 'web.checkout.co.schedule_date_far' | t,
+        'schedule_window_passed': 'web.checkout.co.schedule_window_passed' | t,
+        'schedule_other': 'web.checkout.co.schedule_other' | t,
+        'agree_terms': 'web.checkout.co.terms_error' | t,
+        'place_order_failed': 'web.checkout.co.place_failed' | t,
         'window_anytime': 'api.subscriptions.time.any_time' | t,
         'window_morning': 'web.checkout.window_morning' | t,
         'window_afternoon': 'web.checkout.window_afternoon' | t,
@@ -883,6 +259,7 @@
         'cod_savings': 'Pay cash on delivery and save {amount}' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-actions.js') }}"></script>
+{{ address_wizard_scripts() }}
+<script src="{{ asset_url('js/pages/checkout.js') }}"></script>
 {% endblock %}

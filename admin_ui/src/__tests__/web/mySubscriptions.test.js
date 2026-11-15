@@ -32,6 +32,8 @@ const BASE_SCRIPTS = [
 const MODAL_SCRIPT = read('business_app/static/js/pages/order-detail-modal.js');
 const PAGE_SCRIPT = read('business_app/static/js/pages/my-subscriptions.js');
 const CSS = read('business_app/static/css/pages/my-subscriptions.css');
+// The site's shared stylesheet (design system): it owns the page wrapper's overflow for every page.
+const SHARED_CSS = read('business_app/static/css/ae-ui.css');
 const FIXTURES = path.join(REPO, 'tests/fixtures/web_subscription_management');
 const SHELL = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'shell.json'), 'utf8'));
 // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -74,11 +76,12 @@ const canonical = (value) => JSON.stringify(value, (key, item) => (
     : item
 ));
 
-async function boot(name, { search, answers = {}, modal = false } = {}) {
+async function boot(name, { search, answers = {}, modal = false, islandPatch = {} } = {}) {
   const fixture = loadCase(name);
   const shell = SHELL[fixture.language];
-  const base = { api_base_url: '/api/v1', current_user: null, is_authenticated: false, login_url: '/login', i18n: {} };
-  const island = JSON.stringify(shell.island).replace(/</g, '\\u003c');
+  // base.html's island, with the money and date words the page renders (shell.base, from the real page).
+  const base = { api_base_url: '/api/v1', current_user: null, is_authenticated: false, login_url: '/login', i18n: {}, ...shell.base };
+  const island = JSON.stringify({ ...shell.island, ...islandPatch }).replace(/</g, '\\u003c');
   const modalMarkup = modal
     ? `${shell.modal.html}<script type="application/json" id="order-detail-modal-data">` +
       `${JSON.stringify(shell.modal.island).replace(/</g, '\\u003c')}</script>`
@@ -135,8 +138,8 @@ async function boot(name, { search, answers = {}, modal = false } = {}) {
 
 const keys = (requests) => requests.map((r) => r.key);
 const hero = (page) => page.$1('#subscription .subs-hero');
-const primaries = (page) => page.$$('.subs-btn--primary', hero(page));
-const heroButtons = (page) => page.$$('.subs-hero__actions button.subs-btn', hero(page)).map((b) => b.textContent);
+const primaries = (page) => page.$$('.ae-btn--primary', hero(page));
+const heroButtons = (page) => page.$$('.subs-hero__actions button.ae-btn', hero(page)).map((b) => b.textContent);
 const sectionText = (page, name) => squash(page.$1(`#subs-sec-${name} .subs-sec__value`).textContent);
 const changeButton = (page, name) => page.$1(`#subs-sec-${name} [data-action="change"]`);
 
@@ -171,9 +174,9 @@ describe('active with an unpaid Click order', () => {
     expect(page.$1('.subs-hero__win', card).textContent).toBe('10:00–12:00, tomorrow');
     expect(page.$1('.subs-hero__order [data-action="open-order"]', card).textContent).toBe('Order TG_000001_26');
     expect(page.$1('.subs-hero__order .subs-money', card).textContent).toBe(money('30 000'));
-    const chip = page.$1('.subs-hero__order .subs-chip', card);
+    const chip = page.$1('.subs-hero__order .ae-status', card);
     expect(chip.textContent).toBe('Waiting for payment');
-    expect(chip.className).toContain('subs-chip--warning');
+    expect(chip.className).toContain('ae-status--warning');
     expect(chip.querySelector('i[aria-hidden="true"]')).not.toBeNull();
 
     const [pay] = primaries(page);
@@ -217,7 +220,7 @@ describe('active with an unpaid Click order', () => {
 
     expect(page.$1('#sub-h').textContent).toBe('Home water');
     expect(page.$1('#sub-h').getAttribute('tabindex')).toBe('-1');
-    expect(page.$1('.subs-bh .subs-chip')).toBeNull(); // no "Active" chip
+    expect(page.$1('.subs-bh .ae-status')).toBeNull(); // no "Active" chip
     expect(page.$1('.subs-bh p').textContent).toBe('Every Thursday, 10:00–12:00. Since 26 October.');
     expect(page.$$('.subs-jump a').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
       ['Items', '#subs-sec-items'], ['Schedule', '#subs-sec-schedule'], ['Delivery address', '#subs-sec-address'],
@@ -236,8 +239,10 @@ describe('active with an unpaid Click order', () => {
       'Per delivery', money('30 000'), 'About a month', money('130 000'),
     ]);
     const benefit = page.$1('#subs-sec-items .subs-benefit');
-    expect(benefit.textContent).toBe("Delivery is always free, and every order earns AquaCoins at your tier's rate.");
-    expect(benefit.querySelector('b').textContent).toBe('Delivery is always free');
+    expect(page.shell.island.loyalty_eligible).toBe(true); // the fixture's customer is an individual
+    expect(page.shell.island.delivery_free).toBe(true); // no delivery fee configured where the fixture was made
+    expect(benefit.textContent).toBe("Delivery is free, and every order earns AquaCoins at your tier's rate.");
+    expect(benefit.querySelector('b').textContent).toBe('Delivery is free');
 
     expect(sectionText(page, 'schedule')).toBe('Every Thursday, 10:00–12:00');
     expect(page.$1('#subs-sec-payment .subs-val').firstChild.textContent).toBe('Click');
@@ -293,8 +298,8 @@ describe('active with an unpaid Click order', () => {
 describe('the other active states', () => {
   it('paid: the Paid chip and note, and no Pay anywhere', async () => {
     const page = await boot('paid');
-    const chip = page.$1('.subs-hero__order .subs-chip', hero(page));
-    expect([chip.textContent, chip.className]).toEqual(['Paid', 'subs-chip subs-chip--success']);
+    const chip = page.$1('.subs-hero__order .ae-status', hero(page));
+    expect([chip.textContent, chip.className]).toEqual(['Paid', 'ae-status ae-status--icon ae-status--success']);
     expect(primaries(page)).toHaveLength(0);
     expect(heroButtons(page)).toEqual(['Skip this delivery', 'Pause']);
     expect(page.$$('.subs-hint', hero(page)).map((p) => p.textContent)).toEqual(['Paid. This delivery will arrive as planned.']);
@@ -303,8 +308,8 @@ describe('the other active states', () => {
 
   it('cash: pay on delivery, at the door', async () => {
     const page = await boot('cash');
-    const chip = page.$1('.subs-hero__order .subs-chip', hero(page));
-    expect([chip.textContent, chip.className]).toEqual(['Pay on delivery', 'subs-chip subs-chip--info']);
+    const chip = page.$1('.subs-hero__order .ae-status', hero(page));
+    expect([chip.textContent, chip.className]).toEqual(['Pay on delivery', 'ae-status ae-status--icon ae-status--info']);
     expect(primaries(page)).toHaveLength(0);
     expect(page.$$('.subs-hint', hero(page)).map((p) => p.textContent)).toEqual(['Pay the driver at the door.']);
     expect(page.$1('#subs-sec-payment .subs-val').firstChild.textContent).toBe('Cash');
@@ -313,8 +318,8 @@ describe('the other active states', () => {
 
   it('with the driver: "On the way" on the card and the first bottle, Skip still offered', async () => {
     const page = await boot('on_the_way');
-    const chips = page.$$('.subs-hero__order .subs-chip', hero(page)).map((c) => [c.textContent, c.className]);
-    expect(chips).toEqual([['On the way', 'subs-chip subs-chip--info'], ['Waiting for payment', 'subs-chip subs-chip--warning']]);
+    const chips = page.$$('.subs-hero__order .ae-status', hero(page)).map((c) => [c.textContent, c.className]);
+    expect(chips).toEqual([['On the way', 'ae-status ae-status--icon ae-status--info'], ['Waiting for payment', 'ae-status ae-status--icon ae-status--warning']]);
     expect(page.$$('.subs-hero__note', hero(page)).map((p) => p.textContent))
       .toContain('Your driver has this order and is on the way.');
     const [first] = page.$$('.subs-wl > li', hero(page));
@@ -327,8 +332,8 @@ describe('the other active states', () => {
 
   it('the last Click attempt failed: Pay is still the primary action, with the retry sentence (Review Focus 3)', async () => {
     const page = await boot('payment_failed');
-    const chip = page.$1('.subs-hero__order .subs-chip', hero(page));
-    expect([chip.textContent, chip.className]).toEqual(['Payment failed', 'subs-chip subs-chip--danger']);
+    const chip = page.$1('.subs-hero__order .ae-status', hero(page));
+    expect([chip.textContent, chip.className]).toEqual(['Payment failed', 'ae-status ae-status--icon ae-status--danger']);
     expect(primaries(page).map((b) => b.textContent)).toEqual([`Pay ${money('30 000')}`]);
     expect(page.$$('.subs-hint', hero(page)).map((p) => p.textContent)).toEqual([
       "That payment didn't go through. Your order is still waiting, and you can try again until 12:00 tomorrow.",
@@ -382,8 +387,8 @@ describe('paused', () => {
     // Items, schedule and payment stay editable; cancel stays offered.
     ['items', 'schedule', 'payment'].forEach((name) => expect(changeButton(page, name)).not.toBeNull());
     expect(page.$1('.subs-foot [data-action="cancel"]')).not.toBeNull();
-    const chip = page.$1('.subs-bh .subs-chip');
-    expect([chip.textContent, chip.className]).toEqual(['Paused', 'subs-chip subs-chip--warning']);
+    const chip = page.$1('.subs-bh .ae-status');
+    expect([chip.textContent, chip.className]).toEqual(['Paused', 'ae-status ae-status--icon ae-status--warning']);
     expect(seen(page.$1('#subs-strip a.subs-card'))).toBe('Home water Paused');
     expect(page.$1('#subs-strip a.subs-card svg').getAttribute('class')).toBe('subs-bottle subs-bottle--muted');
   });
@@ -416,7 +421,7 @@ describe('paused', () => {
     expect(heroButtons(page)).toEqual([`Pay ${money('30 000')}`, 'Resume deliveries']);
     expect(primaries(page).map((b) => [b.dataset.action, b.dataset.orderId])).toEqual([['pay', '1']]);
     const resume = page.$1('.subs-hero__row [data-action="resume"]', card);
-    expect([resume.className, resume.textContent]).toEqual(['subs-btn subs-btn--secondary', 'Resume deliveries']);
+    expect([resume.className, resume.textContent]).toEqual(['ae-btn ae-btn--secondary', 'Resume deliveries']);
     // The driver has it, so Pay has no deadline (spec 2026-10-27 §4.4).
     expect(page.$$('.subs-hint', card).map((p) => p.textContent)).toEqual(["Pay online whenever you're ready."]);
     expect(page.$1('.subs-wl__caption', card).textContent).toBe('If you resume today: Thu 29 Oct');
@@ -450,13 +455,13 @@ describe('cancelled', () => {
     expect(page.$$('#subscription [data-action="change"]')).toHaveLength(0);
     expect(page.$1('#subscription [data-action="cancel"]')).toBeNull();
     expect(page.$1('#subscription').classList.contains('is-readonly')).toBe(true);
-    const chip = page.$1('.subs-bh .subs-chip');
-    expect([chip.textContent, chip.className]).toEqual(['Cancelled', 'subs-chip subs-chip--neutral']);
+    const chip = page.$1('.subs-bh .ae-status');
+    expect([chip.textContent, chip.className]).toEqual(['Cancelled', 'ae-status ae-status--icon ae-status--neutral']);
 
     const [row] = page.$$('#subs-orders > li');
     expect(row.className).toBe('subs-orow subs-orow--skipped');
     expect(row.querySelector('.subs-orow__open').tagName).toBe('DIV'); // no order to open
-    expect(row.querySelector('.subs-chip').textContent).toBe('Skipped');
+    expect(row.querySelector('.ae-status').textContent).toBe('Skipped');
     expect(row.querySelector('.subs-orow__why').textContent).toBe("I'll be away");
     expect(row.querySelector('.subs-orow__amt').textContent).toBe('');
   });
@@ -649,15 +654,17 @@ describe('no subscriptions', () => {
     const page = await boot('empty');
     expect(page.$1('#subs-strip-nav').hidden).toBe(true);
     expect(page.$1('#sub-h').textContent).toBe('Water that arrives on its own');
-    expect(page.$1('.subs-empty p').textContent).toBe(
-      "Pick your bottles and a day, and we'll place the order for you every time, so you never forget and never run out. " +
-      'Delivery is always free.',
+    // No delivery-fee claim in the empty state (review SITE-02: the fee is the public offer's fact).
+    expect(page.$1('.subs-empty .ae-empty__text').textContent).toBe(
+      "Pick your bottles and a day, and we'll place the order for you every time, so you never forget and never run out.",
     );
-    const cta = page.$1('.subs-empty a.subs-btn--primary');
+    expect(page.$1('.subs-empty').classList.contains('ae-empty')).toBe(true);
+    const cta = page.$1('.subs-empty a.ae-btn--primary');
     expect([cta.textContent, cta.getAttribute('href')]).toEqual(['Set up a subscription', '/#subscription-constructor']);
-    // A link styled as the primary button keeps white text on the aqua-deep fill: its rule must outrank the
-    // page's link colour `.subs a` (0,1,1). jsdom's cascade ignores specificity, so the rule itself is checked.
-    expect(CSS).toMatch(/\.subs \.subs-btn--primary \{[^}]*color: #fff;/);
+    // A link styled as the site's primary button (ae-ui.css .ae-btn--primary) keeps its ink text: the page restates
+    // it above its link colour `.subs a` (0,1,1). jsdom's cascade ignores specificity, so the rule itself is checked.
+    expect(CSS).toMatch(/\.subs a\.ae-btn--primary,\s*\.subs a\.ae-btn--secondary \{ color: var\(--ae-ink\); \}/);
+    expect(CSS).not.toMatch(/\.subs-btn|\.subs-chip/);
     expect(CSS).toMatch(/\.subs a \{ color: var\(--subs-aqua-deep\)/);
   });
 
@@ -714,7 +721,7 @@ describe('long Russian and Uzbek labels at 360px (Review Focus 5)', () => {
     const row = page.$1('.subs-hero__row');
     expect(style(row).display).toBe('flex');
     expect(style(row).flexWrap).toBe('wrap');
-    page.$$('#subscription .subs-btn, #subscription .subs-change, #subscription .subs-danger').forEach((button) => {
+    page.$$('#subscription .ae-btn, #subscription .subs-change, #subscription .subs-danger').forEach((button) => {
       expect(style(button).whiteSpace).not.toBe('nowrap');
     });
     expect(style(page.$1('.subs-hero__order')).flexWrap).toBe('wrap');
@@ -815,7 +822,7 @@ describe('Pay', () => {
 
   it('still pays when the last Click attempt failed (Review Focus 3)', async () => {
     const page = await boot('write_pay_after_failed_attempt');
-    expect(page.$1('.subs-hero__order .subs-chip').textContent).toBe('Payment failed');
+    expect(page.$1('.subs-hero__order .ae-status').textContent).toBe('Payment failed');
     await press(page, primaries(page)[0]);
     sentExactlyTheContract(page);
     expect(page.window.location.hash).toBe('#click-checkout');
@@ -938,7 +945,7 @@ describe('Skip, the inline two-step', () => {
     expect(heroStatus(page).textContent).toBe('This changed. Refresh to see the latest.');
     expect(heroStatus(page).getAttribute('role')).toBe('alert');
     // The fresh answer: the order was paid meanwhile, so there is nothing to pay and Skip now names 5 November.
-    expect(page.$1('.subs-hero__order .subs-chip').textContent).toBe('Paid');
+    expect(page.$1('.subs-hero__order .ae-status').textContent).toBe('Paid');
     expect(primaries(page)).toHaveLength(0);
     await press(page, page.$1('[data-action="skip"]'));
     expect(confirmButtons(page)).toEqual(['Skip 5 November', 'Keep both']);
@@ -1024,8 +1031,8 @@ describe('the Cancel modal', () => {
     expect(seen(page.$1('.subs-modal__alt', modal))).toBe('Running low on space or still have water? Pause instead Deliver less often');
     expect(page.$1('label[for="subs-cancel-reason"]').textContent).toBe('Anything we could do better? (optional)');
     expect(page.$$('.modal-footer button', modal).map((b) => [b.textContent, b.className])).toEqual([
-      ['Keep subscription', 'subs-btn subs-btn--secondary'],
-      ['Cancel subscription', 'subs-btn subs-btn--danger'],
+      ['Keep subscription', 'ae-btn ae-btn--secondary'],
+      ['Cancel subscription', 'ae-btn ae-btn--danger-solid'],
     ]);
     isFocused(page, page.$1('[data-action="cancel-keep"]', modal));
     expect(page.window.confirm).not.toHaveBeenCalled();
@@ -1359,7 +1366,8 @@ describe('one section at a time', () => {
     expect(rule).toMatch(/bottom: 0;/);
     expect(rule).toMatch(/env\(safe-area-inset-bottom\)/);
     expect(CSS).not.toMatch(/position:\s*fixed/);
-    expect(CSS).toMatch(/body\.subs-editing \.social-float-links,\s*body\.subs-editing \.scroll-top \{ display: none !important; \}/);
+    // Every floating control is hidden while a section is edited: the theme's and the redesign's (.ae-rail, .ae-to-top).
+    expect(CSS).toMatch(/body\.subs-editing \.social-float-links,\s*body\.subs-editing \.scroll-top,\s*body\.subs-editing \.ae-rail,\s*body\.subs-editing \.ae-to-top \{ display: none !important; \}/);
   });
 
   // jsdom lays nothing out, so this pins the two conditions sticky needs; the fix-round report scrolls the
@@ -1374,7 +1382,9 @@ describe('one section at a time', () => {
       expect(page.window.getComputedStyle(el).display).toBe('contents');
     }
     // The theme's .boxed_wrapper{overflow:hidden} would be the bar's scrollport; clip clips without being one.
-    expect(CSS).toMatch(/\.boxed_wrapper:has\(\.subs\) \{ overflow: clip !important; \}/);
+    // The shared stylesheet sets it for every page (it also lets the sticky header stick), so no page copy.
+    expect(SHARED_CSS).toMatch(/\.boxed_wrapper \{ overflow: clip !important; \}/);
+    expect(CSS).not.toMatch(/\.boxed_wrapper[^{]*\{[^}]*overflow:\s*hidden/);
   });
 });
 
@@ -1445,7 +1455,7 @@ describe('Schedule, read then edit', () => {
     await pick(page, page.$1('input[name="subs-frequency"][value="monthly"]'));
     expect(page.$$('.subs-day')).toHaveLength(0);
     const select = page.$1('#subs-dom');
-    expect([select.className, select.value]).toEqual(['form-control ignore subs-select', '']);
+    expect([select.className, select.value]).toEqual(['ae-input subs-select', '']);
     expect(page.$1('label[for="subs-dom"]').textContent).toBe('Day of the month');
     expect(select.options).toHaveLength(32);
     expect(page.$1('#subs-dom-note').textContent)
@@ -1748,7 +1758,7 @@ describe('Payment, read then edit', () => {
     );
     expect(page.$1('#subs-sec-payment .subs-val').firstChild.textContent).toBe('Cash');
     // The order itself still waits for its Click payment, and the card still offers Pay for it.
-    expect(page.$$('.subs-btn--primary', hero(page)).map((b) => b.textContent)).toEqual([`Pay ${money('30 000')}`]);
+    expect(page.$$('.ae-btn--primary', hero(page)).map((b) => b.textContent)).toEqual([`Pay ${money('30 000')}`]);
   });
 
   it('says nothing about a kept order when none is placed yet', async () => {
@@ -1777,8 +1787,8 @@ describe('Payment, read then edit', () => {
     const page = await boot('method_not_offered', { search: '?sub=1' });
     const cash = page.listed.find((sub) => sub.id === 1);
     expect(cash.payment_method).toBe('cash');
-    const chip = page.$1('#subs-sec-payment .subs-val__chip .subs-chip');
-    expect([chip.textContent, chip.className]).toEqual([cash.payment_method_warning, 'subs-chip subs-chip--warning']);
+    const chip = page.$1('#subs-sec-payment .subs-val__chip .ae-status');
+    expect([chip.textContent, chip.className]).toEqual([cash.payment_method_warning, 'ae-status ae-status--icon ae-status--warning']);
     expect(cash.payment_method_warning).toBe('Not available right now. Choose another method.');
     expect(changeButton(page, 'payment').className).toBe('subs-change subs-change--emphasis');
 
@@ -1870,7 +1880,7 @@ const STALE_CARD = {
       await press(page, page.$1('#subs-confirm [data-action="pause-confirm"]'));
     },
     latest: (page) => {
-      expect(page.$1('.subs-hero__order .subs-chip').textContent).toBe('Paid');
+      expect(page.$1('.subs-hero__order .ae-status').textContent).toBe('Paid');
       expect(primaries(page)).toHaveLength(0);
     },
   },
@@ -1883,7 +1893,7 @@ const STALE_CARD = {
     latest: (page) => {
       expect(page.$1('#subs-cancel-modal').classList.contains('show')).toBe(false);
       expect(hero(page).className).toBe('subs-hero');
-      expect(page.$1('.subs-hero__order .subs-chip').textContent).toBe('Paid');
+      expect(page.$1('.subs-hero__order .ae-status').textContent).toBe('Paid');
     },
   },
 };
@@ -2035,7 +2045,7 @@ describe("Orders rows: Skip or Cancel from the order's own answer", () => {
     const { cancel } = shown.customer_actions;
     expect(cancel.via).toBe('skip');
     const button = rowRemove(page);
-    expect([button.textContent, button.className]).toEqual([cancel.label, 'subs-btn subs-btn--secondary subs-orow__act']);
+    expect([button.textContent, button.className]).toEqual([cancel.label, 'ae-btn ae-btn--secondary subs-orow__act']);
     expect([button.dataset.orderId, button.getAttribute('aria-controls'), button.getAttribute('aria-expanded'),
       button.getAttribute('aria-describedby')]).toEqual(['1', 'subs-orow-confirm-1', 'false', 'subs-orow-1-when']);
     expect(page.$1('#subs-orow-1-when').textContent).toBe(shown.date_label);
@@ -2155,7 +2165,7 @@ describe('the order modal changed an order', () => {
 // ------------------------------------------------------------------ the shared order modal (spec §12)
 
 describe('the shared order modal', () => {
-  it('shows the backend\'s labels, no zero rows, no .btn-sm, and draws the published Skip and the subscription link', async () => {
+  it('shows the backend\'s labels, no zero rows, no small buttons, and draws the published Skip and the subscription link', async () => {
     // The backend's answer: the customer may pay this unpaid order, and its removal is a Skip on its subscription.
     const published = loadCase('write_order_modal').exchanges[3].response.data.order;
     expect([published.customer_actions.cancel.via, published.customer_actions.cancel.subscription_id]).toEqual(['skip', 1]);
@@ -2172,7 +2182,7 @@ describe('the shared order modal', () => {
     ]);
     expect(seen(page.$1('.order-summary-total', modal))).toBe(`Total ${money('30 000')}`);
     expect(content).not.toMatch(/UZS|Subscription discount|Tax/);
-    expect(page.$$('.btn-sm', modal)).toHaveLength(0);
+    expect(page.$$('.ae-btn--sm', modal)).toHaveLength(0);
     // Pay and Skip, drawn by order-actions.js from the order's customer_actions (Task 10a's orderSurfaces.test.js
     // drives their writes); the old Cancel button and subscription note are gone.
     const actions = page.$1('#orderDetailActions');
@@ -2232,5 +2242,36 @@ describe('the write side stays free of business rules and native dialogs', () =>
     expect(PAGE_SCRIPT).toMatch(/OrderActions\.pay\(/);
     expect(PAGE_SCRIPT).toMatch(/OrderActions\.remove\(/);
     expect(PAGE_SCRIPT).not.toMatch(/retry-payment|'\/orders\/'/);
+  });
+});
+
+
+// ------------------------------------------------------------------ review CAB-R09 (2026-11-14)
+
+describe('AquaCoins are promised only to a customer the loyalty program serves', () => {
+  it('an account the program does not serve reads free delivery alone', async () => {
+    const page = await boot('needs_payment', { islandPatch: { loyalty_eligible: false } });
+    const benefit = page.$1('#subs-sec-items .subs-benefit');
+    expect(benefit.textContent).toBe('Delivery is free.');
+    expect(benefit.querySelector('b').textContent).toBe('Delivery is free');
+    expect(benefit.textContent).not.toMatch(/AquaCoins/);
+  });
+});
+
+// Review SITE-02 (2026-11-14): free delivery is the public offer's one fact (island `delivery_free`), as on
+// /subscriptions, /services and /delivery-policy. With a delivery fee the line names no free delivery.
+describe('free delivery is named only while the public offer says delivery is free', () => {
+  it('with a fee, a member reads the AquaCoins line alone', async () => {
+    const page = await boot('needs_payment', { islandPatch: { delivery_free: false } });
+    const benefit = page.$1('#subs-sec-items .subs-benefit');
+    expect(benefit.textContent).toBe(page.shell.island.benefit_coins);
+    expect(benefit.textContent).toMatch(/AquaCoins/);
+    expect(page.$1('#subs-sec-items').textContent).not.toMatch(/free/i);
+  });
+
+  it('with a fee, an account the program does not serve gets no benefit line at all', async () => {
+    const page = await boot('needs_payment', { islandPatch: { delivery_free: false, loyalty_eligible: false } });
+    expect(page.$1('#subs-sec-items .subs-benefit')).toBeNull();
+    expect(page.$1('#subs-sec-items').textContent).not.toMatch(/free/i);
   });
 });

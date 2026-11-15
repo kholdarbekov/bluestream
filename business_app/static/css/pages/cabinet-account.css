@@ -1,0 +1,317 @@
+/* ==========================================================================
+   Account pages (design-system v1, group "account"): Aqua Club (/my-loyalty), and the group's other pages
+   (profile settings, account security) as their units add them. They sit in the cabinet frame (cabinet.css).
+   Components and tokens are ae-ui.css's (.ae-progress, .ae-badge, .ae-chips, .ae-table, .ae-empty, .ae-skeleton,
+   .ae-icon-tile, .ae-btn); this file only lays them out. Every rule is scoped under its page root (.ae-acl …).
+   ========================================================================== */
+
+/* 1. Aqua Club (/my-loyalty, templates/frontend/loyalty.html) ============== */
+
+.ae-acl { display: grid; gap: 48px; min-width: 0; }
+.ae-acl p { font-family: var(--ae-font); }
+/* The page's lists: no bullets or theme indents (item padding stays with each item's own class). */
+.ae-acl__rules,
+.ae-acl__history,
+.ae-acl__ways,
+.ae-acl__filter { margin: 0; padding: 0; list-style: none; }
+.ae-acl__rules > li,
+.ae-acl__history > li,
+.ae-acl__ways > li,
+.ae-acl__filter > li { margin: 0; list-style: none; }
+.ae-acl__rules > li::before,
+.ae-acl__history > li::before,
+.ae-acl__ways > li::before,
+.ae-acl__filter > li::before { content: none; }
+.ae-acl h2,
+.ae-acl h3 { font-family: var(--ae-font); }
+
+.ae-acl__section { display: grid; gap: 16px; min-width: 0; }
+.ae-acl__head { display: grid; gap: 4px; }
+.ae-acl__lead { margin: 0; max-width: 70ch; font-size: 15px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acl__note { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ae-ink-soft); }
+
+/* Not covered: the empty state fills the column in a quiet bordered frame (no auto margins: a grid item would shrink). */
+.ae-acl--unavailable .ae-empty { max-width: none; margin: 0; padding: 48px 24px; border: 1px solid var(--ae-line); border-radius: var(--ae-r); }
+.ae-acl--unavailable .ae-empty__text { max-width: 52ch; margin-left: auto; margin-right: auto; }
+
+/* 1.1 Summary: the balance on the tint, the level beside it. */
+.ae-acl__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r-lg);
+  background: var(--ae-surface);
+  overflow: hidden;
+}
+.ae-acl__balance,
+.ae-acl__tier { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 28px; }
+.ae-acl__balance { background: var(--ae-pale); }
+.ae-acl__label { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--ae-ink-soft); }
+.ae-acl__coins { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; color: var(--ae-ink); }
+.ae-acl__coins-value {
+  font-size: clamp(40px, 2.4vw + 22px, 56px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+/* Navy, not aqua-deep: 18px/700 is not large text, and aqua-deep on the pale panel is 4.43:1 (AA needs 4.5). */
+.ae-acl__coins-unit { font-size: 18px; font-weight: 700; color: var(--ae-navy); }
+.ae-acl__delta { margin: 0; font-size: 14px; font-weight: 700; color: var(--ae-ok); font-variant-numeric: tabular-nums; }
+.ae-acl__summary-actions { margin-top: auto; padding-top: 12px; }
+
+.ae-acl__tier-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--ae-ink);
+  overflow-wrap: anywhere;
+}
+.ae-acl__next { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: var(--ae-ink); font-variant-numeric: tabular-nums; }
+.ae-acl__keep { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.ae-acl__keep i { margin-top: 3px; }
+.ae-acl__keep--ok { color: var(--ae-ok); }
+.ae-acl__keep--warn { color: var(--ae-warn); }
+.ae-acl__fine { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ae-ink-soft); }
+
+/* A level's medal: its colour is decoration only, the name beside it carries the meaning. */
+.ae-acl__medal {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #B9C7D3 0%, #6F8193 100%);
+  color: #fff;
+  font-size: 17px;
+}
+.ae-acl__medal--bronze { background: linear-gradient(140deg, #E0A877 0%, #9C5C2C 100%); }
+.ae-acl__medal--silver { background: linear-gradient(140deg, #D9E0E7 0%, #8695A4 100%); }
+.ae-acl__medal--gold { background: linear-gradient(140deg, var(--ae-gold) 0%, var(--ae-gold-deep) 100%); }
+.ae-acl__medal--platinum { background: linear-gradient(140deg, #A9BCDD 0%, #44587F 100%); }
+
+/* 1.2 Streak bonuses: information, so flat tinted panels. */
+.ae-acl__rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.ae-acl__rule { display: grid; align-content: start; gap: 8px; padding: 18px 20px; border-radius: var(--ae-r); background: var(--ae-bg); }
+.ae-acl__rule-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ae-acl__rule-name { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.4; color: var(--ae-ink); }
+.ae-acl__bonus { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ae-acl__rule-meta { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ae-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* 1.3 Rewards: bordered cards (you act on them in the bot). */
+.ae-acl__rewards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.ae-acl__rewards > .ae-acl__note { grid-column: 1 / -1; }
+.ae-acl__reward-skeleton { height: 104px; margin: 0; }
+.ae-acl__reward {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+}
+.ae-acl__reward.is-ready { border-color: #BCE3CF; }
+.ae-acl__reward-media { position: relative; flex: none; width: 56px; height: 56px; }
+.ae-acl__reward-icon { width: 56px; height: 56px; border-radius: 14px; background: #FFF6D6; color: #9A6A00; font-size: 22px; }
+.ae-acl__reward-img { position: absolute; inset: 0; z-index: 1; width: 56px; height: 56px; border-radius: 14px; object-fit: cover; background: var(--ae-surface); }
+.ae-acl__reward-body { display: grid; gap: 4px; min-width: 0; }
+.ae-acl__reward-type { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ae-ink-soft); }
+.ae-acl__reward-name { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.35; color: var(--ae-ink); overflow-wrap: anywhere; }
+.ae-acl__reward-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ae-ink-soft); }
+.ae-acl__reward-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; }
+.ae-acl__reward-cost { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ae-acl__reward-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ae-ink-soft); font-variant-numeric: tabular-nums; }
+.ae-acl__reward-state.is-ready { color: var(--ae-ok); }
+
+/* 1.4 History: chips, then one bordered list of rows (amount on the right, date under the title). */
+.ae-acl__filter { margin: 0; }
+.ae-acl__filter .ae-chip { min-height: 44px; }
+.ae-acl__history-box { border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-surface); overflow: hidden; }
+.ae-acl__history:empty { display: none; }
+.ae-acl__history[aria-busy="true"] { opacity: .6; }
+.ae-acl__txn {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--ae-line);
+}
+.ae-acl__history > .ae-acl__txn:last-child { border-bottom: 0; }
+.ae-acl__txn .ae-skeleton--circle { width: 40px; height: 40px; margin: 0; }
+.ae-acl__txn .ae-skeleton--text { width: 60%; margin: 0; }
+.ae-acl__txn-icon.is-plus { background: var(--ae-ok-bg); color: var(--ae-ok); }
+.ae-acl__txn-icon.is-minus { background: var(--ae-neutral-bg); color: var(--ae-neutral); }
+.ae-acl__txn-title { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.4; color: var(--ae-ink); }
+.ae-acl__txn-meta { display: flex; flex-wrap: wrap; gap: 0 12px; margin: 2px 0 0; font-size: 13px; line-height: 1.4; color: var(--ae-ink-soft); }
+.ae-acl__txn-order { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ae-acl__txn-amount { font-size: 16px; font-weight: 800; color: var(--ae-ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ae-acl__txn-amount.is-plus { color: var(--ae-ok); }
+.ae-acl__history-state { display: grid; justify-items: center; gap: 12px; padding: 28px 18px; text-align: center; }
+.ae-acl__history-state[hidden] { display: none; }
+.ae-acl__more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.ae-acl__more[hidden] { display: none; }
+.ae-acl__more-info { margin: 0; font-size: 14px; color: var(--ae-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* 1.5 Ways to earn: rows divided by rules, not cards. */
+.ae-acl__ways { border-top: 1px solid var(--ae-line); }
+.ae-acl__way { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; padding: 20px 0; border-bottom: 1px solid var(--ae-line); }
+.ae-acl__way-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; line-height: 1.4; color: var(--ae-ink); }
+.ae-acl__way-text { margin: 0; max-width: 70ch; font-size: 15px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acl__way-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; }
+.ae-acl__referral { margin-top: 12px; }
+.ae-acl__referral-card { display: grid; gap: 12px; max-width: 480px; padding: 16px 18px; border-radius: var(--ae-r); background: var(--ae-pale); }
+.ae-acl__referral-card[hidden] { display: none; }
+.ae-acl__referral-label { margin: 0; font-size: 13px; font-weight: 700; color: var(--ae-ink-soft); }
+.ae-acl__referral-code {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: .08em;
+  color: var(--ae-navy);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.ae-acl__referral-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ae-acl__referral-stats { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; }
+.ae-acl__referral-stats > div { display: flex; align-items: baseline; gap: 6px; }
+.ae-acl__referral-stats dt { font-size: 14px; font-weight: 600; color: var(--ae-ink-soft); }
+.ae-acl__referral-stats dd { margin: 0; font-weight: 800; color: var(--ae-ink); font-variant-numeric: tabular-nums; }
+
+/* 1.6 Levels: a comparison table; the member's row outlined in navy; the discount's condition once, beneath. */
+.ae-acl__levels { border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-surface); overflow: hidden; }
+.ae-acl__levels-table { margin: 0; }
+.ae-acl__levels-table thead th { background: var(--ae-bg); }
+.ae-acl__levels-table tbody th { padding: 14px; border-bottom: 1px solid var(--ae-line); font-size: 15px; font-weight: 700; color: var(--ae-ink); white-space: normal; }
+.ae-acl__levels-table tbody tr:last-child > th { border-bottom: 0; }
+.ae-acl__levels-table sup { top: -0.4em; margin-left: 1px; color: var(--ae-ink-soft); }
+.ae-acl__level.is-current > th:first-child { box-shadow: inset 3px 0 0 var(--ae-navy); }
+.ae-acl__level-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ae-acl__level-name .ae-acl__medal { width: 28px; height: 28px; font-size: 13px; }
+.ae-acl__none { color: var(--ae-ink-soft); }
+.ae-acl__val { white-space: nowrap; }
+.ae-acl__footnote { margin: 0; padding: 14px 18px; border-top: 1px solid var(--ae-line); background: var(--ae-bg); font-size: 13px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acl__guide { margin: 0; }
+.ae-acl__guide .ae-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; }
+
+@media (max-width: 767px) {
+  .ae-acl { gap: 40px; }
+  .ae-acl__summary { grid-template-columns: minmax(0, 1fr); border-radius: var(--ae-r); }
+  .ae-acl__balance,
+  .ae-acl__tier { padding: 20px; }
+  .ae-acl__summary-actions .ae-btn { width: 100%; }
+  .ae-acl__tier-name { font-size: 22px; }
+  .ae-acl .ae-btn--sm { min-height: 44px; }
+  .ae-acl__txn { gap: 12px; padding: 12px 14px; }
+  .ae-acl__way { gap: 12px; }
+  .ae-acl__more .ae-btn { width: 100%; }
+
+  /* The table stacks into one card per level (ae-ui); the level's name heads its card. */
+  .ae-acl__levels { border: 0; border-radius: 0; background: none; overflow: visible; }
+  .ae-acl__levels-table tbody th { display: block; width: 100%; padding: 10px 0; border-bottom: 1px solid var(--ae-line); }
+  .ae-acl__level.is-current { border: 1.5px solid var(--ae-navy) !important; }
+  .ae-acl__level.is-current > th:first-child { box-shadow: none; }
+  .ae-acl__footnote { border: 0; border-radius: var(--ae-r); }
+}
+
+
+/* 2. Profile settings and account security (/profile-settings, /account-security) =========================
+   templates/frontend/profile_settings.html (.ae-acp) and account_security.html (.ae-acs); both also carry .ae-acx,
+   the shared settings layout: sections with one heading each, a bordered card per section, read-only key/value rows.
+   The forms are ae-fields from macros/auth.html (styles in pages/auth.css, scoped under .ae-auth). */
+
+.ae-acx { display: grid; gap: 40px; min-width: 0; }
+.ae-acx p { font-family: var(--ae-font); }
+.ae-acx__section { display: grid; gap: 16px; min-width: 0; }
+.ae-acx__card {
+  min-width: 0;
+  margin: 0;
+  padding: 28px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+}
+.ae-acx__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+.ae-acx__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+
+/* Read-only rows: label, then the value with its badge, and one action at the end of the row. */
+.ae-acx__rows { padding-top: 6px; padding-bottom: 6px; }
+.ae-acx__rows .ae-dl__row { align-items: center; padding: 14px 0; }
+.ae-acx__rows dt { font-size: 15px; }
+.ae-acx__rows dd { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; }
+.ae-acx__value { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 16px; }
+.ae-acx__value .ae-num { font-variant-numeric: tabular-nums; }
+.ae-acx__email { overflow-wrap: anywhere; }
+.ae-acx__none { color: var(--ae-ink-soft); font-weight: 500; }
+.ae-acx__action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ae-navy);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ae-acx__action:hover { color: var(--ae-navy); text-decoration: underline; text-underline-offset: 3px; }
+.ae-acx__note { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-size: 14px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acx__note > i { flex: none; margin-top: 4px; color: var(--ae-aqua-deep); }
+.ae-acx__note .ae-link { font-weight: 700; white-space: nowrap; }
+
+/* 2.1 Profile: the date of birth is day / month / year in one row. */
+.ae-acp__dob { min-width: 0; margin: 0 0 var(--ae-s4); padding: 0; border: 0; }
+.ae-acp__dob > legend { float: left; width: 100%; margin: 0 0 6px; padding: 0; }
+.ae-acp__dob-row { clear: both; display: grid; grid-template-columns: 84px minmax(0, 1fr) 104px; gap: 12px; max-width: calc(50% - 8px); }
+.ae-acp__dob-part { display: grid; gap: 4px; min-width: 0; }
+.ae-acp__dob-label { margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--ae-ink-soft); }
+
+/* 2.2 Profile: notifications. The whole row is the switch's label; where updates go sits under a rule. */
+.ae-acp__notify { display: grid; gap: 16px; }
+.ae-acp__toggle { display: flex; justify-content: space-between; gap: 16px; width: 100%; min-height: 44px; font-size: 16px; line-height: 1.5; }
+.ae-acp__toggle-text { min-width: 0; }
+.ae-acp__toggle:has(input:disabled) { cursor: default; }
+.ae-acp__channel { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding-top: 16px; border-top: 1px solid var(--ae-line); font-size: 15px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acp__channel > i { flex: none; margin-top: 4px; color: var(--ae-aqua-deep); }
+.ae-acp__channel .ae-link { font-weight: 700; white-space: nowrap; }
+.ae-acp__since { margin: -16px 0 0; font-size: 14px; color: var(--ae-ink-soft); }
+
+/* 2.3 Security: the password form, and the panel for an account that signs in through Telegram. */
+.ae-acs__current { max-width: calc(50% - 8px); }
+.ae-acs__done { margin: 0 0 20px; }
+.ae-acs__done:focus { outline: none; }
+.ae-acs__form .ae-auth__rules { margin-top: -4px; }
+.ae-acs__form .ae-auth__rules ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ae-acs__nopass { display: flex; align-items: flex-start; gap: 16px; padding: 24px; }
+.ae-acs__nopass-body { display: grid; justify-items: start; gap: 12px; min-width: 0; }
+.ae-acs__nopass-title { margin: 0; font: 800 18px/1.35 var(--ae-font); color: var(--ae-ink); }
+.ae-acs__nopass-body p { margin: 0; max-width: 62ch; font-size: 15px; line-height: 1.6; color: var(--ae-ink-soft); }
+.ae-acs__link { display: grid; justify-items: start; gap: 12px; width: 100%; margin: 0; }
+.ae-acs__link .ae-auth__alert { width: 100%; margin: 0; }
+.ae-acs__sent { width: 100%; margin: 0; }
+.ae-acs__sent:focus { outline: none; }
+
+@media (max-width: 767px) {
+  .ae-acx { gap: 32px; }
+  .ae-acx__card { padding: 20px; }
+  .ae-acx__rows { padding-top: 2px; padding-bottom: 2px; }
+  .ae-acx__grid { grid-template-columns: minmax(0, 1fr); }
+  .ae-acx__actions .ae-btn { width: 100%; }
+  .ae-acs__current { max-width: none; }
+  .ae-acp__dob-row { max-width: none; }
+  .ae-acs__form .ae-auth__rules ul { grid-template-columns: minmax(0, 1fr); }
+  .ae-acs__nopass { flex-direction: column; padding: 20px; }
+  .ae-acs__nopass-body .ae-btn { width: 100%; }
+}
+@media (max-width: 479px) {
+  .ae-acx__rows .ae-dl__row { gap: 2px; padding: 12px 0; }
+  .ae-acp__dob-row { grid-template-columns: 72px minmax(0, 1fr) 92px; gap: 8px; }
+}

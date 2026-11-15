@@ -1,152 +1,136 @@
+/* Account security (templates/frontend/account_security.html), loaded when the account has a website password, or
+   when a bot signup with a real email gets the set-a-password panel.
+   - The panel's #passwordLinkForm posts {identifier: <the account's email>} to /api/v1/auth/forgot-password (the
+     emailed set-a-password link, the same request the forgot-password page sends) and, on the server's 200, swaps
+     the button for "check your email". The email is the server's (page data `link_email`), never typed.
+   - The change form posts {current_password, new_password} to /api/v1/auth/change-password with apiRequest, which sends the login
+   cookies and their CSRF header. The checklist under "New password" is the server's rule, read from the markup; the server is
+   still the judge: a 400 about the password goes under the field ("too easy to guess" when every listed rule is met),
+   a 401 means the current password is not the one on the account. Success is shown only on the server's 200. */
 (function () {
     var PAGE_DATA = getPageData();
-
-    function checkPasswordStrength(password) {
-        var strength = 0;
-        if (password.length >= 8) strength++;
-        if (/[a-z]/.test(password)) strength++;
-        if (/[A-Z]/.test(password)) strength++;
-        if (/[0-9]/.test(password)) strength++;
-        if (/[^a-zA-Z0-9]/.test(password)) strength++;
-        return strength;
-    }
-
-    function updatePasswordStrengthUI(strength) {
-        var strengthFill = document.getElementById('strengthFill');
-        var strengthText = document.getElementById('strengthText');
-
-        strengthFill.className = 'strength-fill';
-
-        switch (strength) {
-            case 0:
-            case 1:
-                strengthFill.classList.add('weak');
-                strengthFill.style.width = '20%';
-                strengthText.textContent = PAGE_DATA.i18n.weak;
-                break;
-            case 2:
-                strengthFill.classList.add('fair');
-                strengthFill.style.width = '40%';
-                strengthText.textContent = PAGE_DATA.i18n.fair;
-                break;
-            case 3:
-                strengthFill.classList.add('good');
-                strengthFill.style.width = '60%';
-                strengthText.textContent = PAGE_DATA.i18n.good;
-                break;
-            case 4:
-                strengthFill.classList.add('good');
-                strengthFill.style.width = '80%';
-                strengthText.textContent = PAGE_DATA.i18n.strong;
-                break;
-            case 5:
-                strengthFill.classList.add('strong');
-                strengthFill.style.width = '100%';
-                strengthText.textContent = PAGE_DATA.i18n.very_strong;
-                break;
+    var I18N = PAGE_DATA.i18n || {};
+    function wireLinkForm(linkForm) {
+        var sent = document.getElementById('passwordLinkSent');
+        function linkFail(message) {
+            AEAuth.showAlert('linkAlert', message);
+            var alert = document.getElementById('linkAlert');
+            if (alert) alert.focus();
         }
-    }
-
-    function setup2FA() {
-        showNotification(PAGE_DATA.i18n.twofa_coming_soon, 'info');
-    }
-
-    function verifyPhoneFirst() {
-        if (confirm(PAGE_DATA.i18n.verify_phone_confirm)) {
-            window.location.href = PAGE_DATA.verify_phone_url;
-        }
-    }
-
-    var passwordForm = document.getElementById('changePasswordForm');
-    if (passwordForm) {
-        passwordForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            var formData = new FormData(this);
-            var currentPassword = formData.get('current_password');
-            var newPassword = formData.get('new_password');
-            var confirmPassword = formData.get('confirm_password');
-
-            if (newPassword !== confirmPassword) {
-                showNotification(PAGE_DATA.i18n.mismatch, 'error');
-                return;
-            }
-
-            var strength = checkPasswordStrength(newPassword);
-            if (strength < 2) {
-                showNotification(PAGE_DATA.i18n.too_weak, 'error');
-                return;
-            }
-
+        linkForm.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            var button = linkForm.querySelector('button[type="submit"]');
+            if (AEAuth.isBusy(button) || !PAGE_DATA.link_email) return;
+            AEAuth.hideAlert('linkAlert');
+            AEAuth.setBusy(button, true);
             try {
-                var response = await apiRequest('/auth/change-password', {
+                var response = await apiRequest('/auth/forgot-password', {
                     method: 'POST',
-                    body: JSON.stringify({
-                        current_password: currentPassword,
-                        new_password: newPassword
-                    })
+                    body: JSON.stringify({ identifier: PAGE_DATA.link_email })
                 });
-
-                var result = await response.json();
-
+                var result = await AEAuth.readJson(response);
                 if (response.ok) {
-                    showNotification(PAGE_DATA.i18n.changed_success, 'success');
-                    this.reset();
-                    document.getElementById('strengthFill').style.width = '0%';
-                    document.getElementById('strengthText').textContent = PAGE_DATA.i18n.strength_label;
+                    linkForm.hidden = true;
+                    if (sent) {
+                        sent.hidden = false;
+                        sent.focus();
+                    }
+                } else if (response.status === 429) {
+                    linkFail(I18N.rate_limited);
                 } else {
-                    showNotification(result.message || PAGE_DATA.i18n.change_failed, 'error');
+                    linkFail(AEAuth.serverMessage(result, I18N.link_failed));
                 }
             } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
+                linkFail(I18N.network_error);
+            } finally {
+                AEAuth.setBusy(button, false);
             }
         });
     }
 
-    var settingsForm = document.getElementById('securitySettingsForm');
-    if (settingsForm) {
-        settingsForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            showNotification(PAGE_DATA.i18n.settings_saved, 'success');
-        });
+    var linkForm = document.getElementById('passwordLinkForm');
+    if (linkForm) wireLinkForm(linkForm);
+
+    var form = document.getElementById('changePasswordForm');
+    if (!form) return;
+
+    var done = document.getElementById('passwordDone');
+    var rules = AEAuth.wirePasswordRules(document.getElementById('passwordRules'), { met: I18N.rule_met, unmet: I18N.rule_unmet });
+    AEAuth.wirePasswordToggles(form);
+    AEAuth.clearOnInput(form);
+    form.addEventListener('input', function () {
+        if (done) done.hidden = true;
+    });
+
+    function fail(message) {
+        AEAuth.showAlert('passwordAlert', message);
+        var alert = document.getElementById('passwordAlert');
+        if (alert) alert.focus();
     }
 
-    var newPasswordInput = document.querySelector('input[name="new_password"]');
-    if (newPasswordInput) {
-        newPasswordInput.addEventListener('input', function () {
-            var strength = checkPasswordStrength(this.value);
-            updatePasswordStrengthUI(strength);
-        });
-    }
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var button = form.querySelector('button[type="submit"]');
+        if (AEAuth.isBusy(button)) return;
+        AEAuth.clearErrors(form);
+        AEAuth.hideAlert('passwordAlert');
+        if (done) done.hidden = true;
 
-    var showPasswordsToggle = document.getElementById('show_passwords');
-    if (showPasswordsToggle) {
-        showPasswordsToggle.addEventListener('change', function () {
-            var passwordFields = document.querySelectorAll('#changePasswordForm input[type="password"], #changePasswordForm input[type="text"][data-pwd="1"]');
-            var type = this.checked ? 'text' : 'password';
-            document.querySelectorAll('#changePasswordForm input[name="current_password"], #changePasswordForm input[name="new_password"], #changePasswordForm input[name="confirm_password"]').forEach(function (field) {
-                field.type = type;
+        var current = form.elements.current_password.value;
+        var password = form.elements.new_password.value;
+        var confirmPassword = form.elements.confirm_password.value;
+
+        var ok = AEAuth.requireFields(form, I18N.required);
+        if (password && !rules.allMet()) {
+            ok = false;
+            AEAuth.setFieldError(form, 'new_password', I18N.password_rules);
+        }
+        if (password && confirmPassword && password !== confirmPassword) {
+            ok = false;
+            AEAuth.setFieldError(form, 'confirm_password', I18N.passwords_mismatch);
+        }
+        if (!ok) {
+            AEAuth.focusFirstInvalid(form);
+            return;
+        }
+
+        AEAuth.setBusy(button, true);
+        try {
+            var response = await apiRequest('/auth/change-password', {
+                method: 'POST',
+                body: JSON.stringify({ current_password: current, new_password: password })
             });
-        });
-    }
+            var result = await AEAuth.readJson(response);
 
-    var confirmInput = document.querySelector('input[name="confirm_password"]');
-    if (confirmInput) {
-        confirmInput.addEventListener('input', function () {
-            var password = document.querySelector('input[name="new_password"]').value;
-            if (this.value && password !== this.value) {
-                this.setCustomValidity(PAGE_DATA.i18n.mismatch);
-                this.style.borderColor = '#dc3545';
+            if (response.ok) {
+                form.reset();
+                // Hide any password the customer chose to show.
+                form.querySelectorAll('.password-toggle[aria-pressed="true"]').forEach(function (toggle) {
+                    toggle.click();
+                });
+                // The checklist redraws on input: untick it for the emptied field (before the note is shown, since
+                // any input hides the note).
+                form.elements.new_password.dispatchEvent(new Event('input', { bubbles: true }));
+                if (done) {
+                    done.hidden = false;
+                    done.focus();
+                }
+                showNotification(I18N.changed, 'success');
+            } else if (response.status === 401) {
+                AEAuth.setFieldError(form, 'current_password', I18N.wrong_current);
+                AEAuth.focusFirstInvalid(form);
+            } else if (response.status === 400 && AEAuth.fieldErrors(result).password) {
+                AEAuth.setFieldError(form, 'new_password', rules.allMet() ? I18N.password_too_common : I18N.password_rules);
+                AEAuth.focusFirstInvalid(form);
+            } else if (response.status === 429) {
+                fail(I18N.rate_limited);
             } else {
-                this.setCustomValidity('');
-                this.style.borderColor = '';
+                fail(AEAuth.serverMessage(result, I18N.change_failed));
             }
-        });
-    }
-
-    var setup2FABtn = document.querySelector('[data-action="setup-2fa"]');
-    if (setup2FABtn) setup2FABtn.addEventListener('click', setup2FA);
-
-    var verifyPhoneBtn = document.querySelector('[data-action="verify-phone-first"]');
-    if (verifyPhoneBtn) verifyPhoneBtn.addEventListener('click', verifyPhoneFirst);
+        } catch (error) {
+            fail(I18N.network_error);
+        } finally {
+            AEAuth.setBusy(button, false);
+        }
+    });
 })();

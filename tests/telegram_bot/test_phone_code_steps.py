@@ -15,7 +15,7 @@ from business_app.services.notification_service import OTP_SMS_TEMPLATES
 from shared.business_config import PHONE_OTP_EXPIRY
 
 from tests.telegram_bot.menu_keyboard_helpers import expected_labels, menu_sends
-from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, build_bot_harness
+from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure, build_bot_harness
 from tests.telegram_bot.test_menu_label_routing import MENU_LABELS, MENU_LABEL_TRANSLATIONS
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -31,6 +31,7 @@ HELP_LABEL = MENU_LABELS["telegram.menu.support"]["uz"]
 TRANSLATIONS = {
     **MENU_LABEL_TRANSLATIONS,
     "telegram.phone.verification_sms_sent": "Kod {phone} raqamiga yuborildi",
+    "telegram.phone.code_still_valid_prompt": "{phone_masked} raqamiga yuborilgan kod hali amal qiladi",
     "telegram.bot.otp.success_message": "TELEFON-TASDIQLANDI",
     "telegram.support.menu_intro": "YORDAM-EKRANI",
     "telegram.help.command_hint": "PASTDAGI-TUGMALAR",
@@ -105,6 +106,40 @@ async def test_arming_the_code_prompt_records_when_and_offers_cancel(bot, user):
     prompt = bot.telegram.last_shown()
     assert prompt.callback_data() == ["phone_otp_cancel"]
     assert prompt.button_labels() == ["❌ Bekor qilish"]
+
+
+async def test_a_second_tap_while_the_code_is_valid_points_to_that_code_and_it_verifies(bot, user):
+    """/send-otp sends no new code while the number's last one is valid (owner 2026-11-14): its 429
+    RESEND_COOLDOWN re-shows the code prompt for the code already sent, not "could not send"."""
+    await arm_the_profile_code(bot, user)
+    bot.backend.route(
+        "POST", SEND_OTP,
+        lambda _c: backend_failure(
+            "Hali amal qiladi",
+            status_code=429,
+            data={
+                "success": False,
+                "data": {"error_code": "RESEND_COOLDOWN", "expires_in": 200, "resend_available_in": 200},
+            },
+        ),
+    )
+    from handlers import callback_dedup
+
+    callback_dedup._in_memory_locks.clear()  # the second tap comes later than the 2 s double-tap guard
+
+    await bot.send(user.tap("verify_phone_number"))
+
+    assert [c.data for c in calls(bot, SEND_OTP)] == [{"phone": PROFILE_PHONE}]
+    prompt = bot.telegram.last_shown()
+    assert prompt.text == f"{PROFILE_PHONE} raqamiga yuborilgan kod hali amal qiladi"
+    assert prompt.callback_data() == ["phone_otp_cancel"]
+    assert bot_state(bot)["awaiting_input"] == "phone_otp"
+
+    await bot.send(user.text(CODE))
+
+    assert [c.data for c in calls(bot, VERIFY_OTP)] == [{"otp": CODE}]
+    assert bot.telegram.last_shown().text == "TELEFON-TASDIQLANDI"
+    assert support_posts(bot) == []
 
 
 async def test_a_label_tap_leaves_the_code_armed_and_a_code_typed_afterwards_verifies(bot, user):

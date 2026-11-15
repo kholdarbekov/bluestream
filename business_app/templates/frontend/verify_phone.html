@@ -1,110 +1,107 @@
-{% extends "frontend/base.html" %}
+{#- Confirm a phone number with an SMS code, inside the account (view `verify_phone`, customer only; script
+    verify-phone.js). Step 1 asks for the number and posts it to /api/v1/auth/send-otp; step 2 is the shared six-cell
+    code (macros/auth.html otp_field) with the server's expires_in countdown ("send a new code" shows at the server's
+    resend_available_in, when the code expires), and posts the code to
+    /api/v1/auth/verify-phone, which saves the number to the account only when the code matches. Success replaces the
+    step. Linked from profile settings as plain /verify-phone: it confirms the current number and changes it. -#}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'profile' %}
+{% from 'frontend/macros/auth.html' import field, otp_field, form_alert with context %}
 
-{% block title %}{{ 'Verify Phone Number'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'web.auth.verify_phone.page_title'|t }}{% endblock %}
 
-{% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'Verify Phone Number'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'Verify Phone'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
-
-        <!-- phone-verification-section -->
-        <section class="contact-section">
-            <div class="auto-container">
-                <div class="row clearfix">
-                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
-                        <div class="form-inner">
-                            <div class="sec-title centred">
-                                <h2>{{ 'Verify Your Phone Number'|t }}</h2>
-                                <p>{{ 'Please enter your phone number to receive a verification code'|t }}</p>
-                            </div>
-
-                            <!-- Phone Number Form -->
-                            <form id="phoneForm" class="default-form" style="display: block;">
-                                <div class="row clearfix">
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number (+998XXXXXXXXX)'|t }}" required>
-                                        <small class="text-muted">{{ 'Enter your phone number with country code'|t }}</small>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Verification Code'|t }}</button>
-                                    </div>
-                                </div>
-                            </form>
-
-                            <!-- OTP Verification Form -->
-                            <form id="otpForm" class="default-form" style="display: none;">
-                                <div class="row clearfix">
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="alert alert-info">
-                                            <i class="far fa-info-circle"></i>
-                                            {{ 'We sent a verification code to'|t }} <strong id="sentToPhone"></strong>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="otp" placeholder="{{ 'Enter 6-digit verification code'|t }}" maxlength="6" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="timer-display">
-                                            <small class="text-muted">{{ 'Code expires in'|t }}: <span id="timer">05:00</span></small>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Code'|t }}</button>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="other-option centred">
-                                            <p><a href="#" id="resendCode">{{ 'Resend Code'|t }}</a></p>
-                                            <p><a href="#" id="changePhone">{{ 'Change Phone Number'|t }}</a></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
-
-                            <!-- Success Message -->
-                            <div id="successMessage" class="alert alert-success" style="display: none;">
-                                <i class="far fa-check-circle"></i>
-                                {{ 'Phone number verified successfully! You can now use all features.'|t }}
-                                <div class="mt-3">
-                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- phone-verification-section end -->
+{% block cabinet_breadcrumb_items %}
+<li><a href="{{ url_for('frontend.profile_settings') }}">{{ 'landing.account.profile'|t }}</a></li>
+<li><span aria-current="page">{{ 'web.auth.verify_phone.page_title'|t }}</span></li>
 {% endblock %}
 
-{% block extra_js %}
+{% block cabinet_extra_head %}
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
+{% endblock %}
+
+{% block cabinet_content %}
+{#- Laid out like the other cabinet pages (profile settings): a section title over one flat bordered panel that fills the
+    column, the form kept to a readable width inside it. Each step and the result replace the one before. -#}
+<div class="ae-auth ae-auth--cabinet">
+    <section id="phoneStep" class="ae-auth__section" aria-labelledby="phoneStepTitle">
+        <h2 class="ae-auth__section-title" id="phoneStepTitle">{{ 'web.auth.verify_phone.title'|t }}</h2>
+        <div class="ae-auth__panel">
+            <p class="ae-auth__panel-lead">{{ 'web.auth.verify_phone.lead'|t }}</p>
+
+            {%- if user.phone and user.phone_verified_at %}
+            <div class="ae-auth__current" id="currentPhone">
+                <i class="fas fa-check-circle" aria-hidden="true"></i>
+                <p>{{ 'web.auth.verify_phone.current_verified'|t|replace('{phone}', user.phone) }}</p>
+            </div>
+            {%- endif %}
+
+            {{ form_alert('phoneAlert') }}
+
+            <form id="phoneForm" class="ae-auth__form" novalidate>
+                {{ field('phone', 'web.auth.register.phone'|t, type='tel', autocomplete='tel', inputmode='tel', placeholder='+998 90 123 45 67',
+                    help='web.auth.register.phone_help'|t, value=prefill_phone) }}
+                <button type="submit" class="ae-btn ae-btn--primary ae-btn--lg" id="sendCodeBtn"><span>{{ 'web.auth.verify_phone.send'|t }}</span></button>
+            </form>
+        </div>
+    </section>
+
+    {#- Step 2: the SMS code. -#}
+    <section id="otpStep" class="ae-auth__section" aria-labelledby="otpTitle" hidden>
+        <h2 class="ae-auth__section-title" id="otpTitle" tabindex="-1">{{ 'web.auth.otp.title'|t }}</h2>
+        <div class="ae-auth__panel">
+            <p class="ae-auth__panel-lead">{{ 'web.auth.otp.sent_to'|t }} <strong class="ae-num" id="sentToPhone"></strong></p>
+
+            {#- send-otp's 429 RESEND_COOLDOWN: the code this number already holds is still the one to enter, and the
+                countdown below runs from the server's resend_available_in. -#}
+            <div class="ae-alert ae-auth__alert" id="codeStillValid" role="status" hidden>
+                <i class="ae-alert__icon fas fa-info-circle" aria-hidden="true"></i>
+                <p>{{ 'web.auth.verify_phone.code_still_valid'|t }}</p>
+            </div>
+
+            {{ form_alert('otpAlert') }}
+
+            <form id="otpForm" class="ae-auth__form" novalidate>
+                {{ otp_field(id='otpCode', name='otp', timer_id='timer', resend_id='resendCode') }}
+                <button type="submit" class="ae-btn ae-btn--primary ae-btn--lg" id="verifyCodeBtn"><span>{{ 'web.auth.otp.submit'|t }}</span></button>
+            </form>
+
+            <p class="ae-auth__panel-foot">
+                <button type="button" id="changePhone" class="ae-auth__link-btn"><i class="fas fa-arrow-left" aria-hidden="true"></i>{{ 'web.auth.otp.change_phone'|t }}</button>
+            </p>
+        </div>
+    </section>
+
+    <div id="successMessage" class="ae-auth__panel ae-empty ae-auth__result" hidden>
+        <span class="ae-empty__icon ae-auth__result-icon--ok" aria-hidden="true"><i class="fas fa-check"></i></span>
+        <h2 class="ae-empty__title" id="phoneDoneTitle" tabindex="-1">{{ 'web.auth.verify_phone.done_title'|t }}</h2>
+        <p class="ae-empty__text" id="phoneDoneText" data-template="{{ 'web.auth.verify_phone.done_text'|t }}"></p>
+        <div class="ae-empty__actions">
+            <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.profile_settings') }}">{{ 'web.auth.verify_phone.to_profile'|t }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block cabinet_extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'login_url': url_for('frontend.login'),
     'i18n': {
-        'invalid_phone': 'Please enter a valid phone number' | t,
-        'please_login': 'Please log in first' | t,
-        'code_sent': 'Verification code sent successfully!' | t,
-        'send_failed': 'Failed to send verification code' | t,
-        'network_error': 'Network error. Please try again.' | t,
-        'invalid_otp': 'Please enter a valid 6-digit code' | t,
-        'verified': 'Phone number verified successfully!' | t,
-        'invalid_code': 'Invalid verification code' | t,
-        'no_phone': 'No phone number available' | t,
-        'code_resent': 'Verification code resent successfully!' | t,
-        'resend_failed': 'Failed to resend code' | t,
-        'code_expired': 'Verification code expired. Please request a new one.' | t,
+        'need_phone': 'web.auth.register.need_phone' | t,
+        'invalid_phone': 'web.auth.register.invalid_phone' | t,
+        'taken': 'web.auth.verify_phone.taken' | t,
+        'send_failed': 'web.auth.register.send_failed' | t,
+        'new_code_sent': 'web.auth.otp.new_code_sent' | t,
+        'resend_failed': 'web.auth.otp.resend_failed' | t,
+        'incomplete_otp': 'web.auth.otp.incomplete' | t,
+        'wrong_code': 'web.auth.otp.wrong' | t,
+        'too_many_codes': 'web.auth.otp.too_many' | t,
+        'code_expired': 'web.auth.otp.expired' | t,
+        'request_expired': 'web.auth.verify_phone.request_expired' | t,
+        'verification_failed': 'web.auth.otp.failed' | t,
+        'rate_limited': 'web.auth.common.rate_limited' | t,
+        'network_error': 'web.auth.common.network_error' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/verify-phone.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/verify-phone.js') }}"></script>
 {% endblock %}

@@ -1,42 +1,49 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Ценовая политика Aqua Element: отображение цен, скидки, промоусловия и правила обновления стоимости." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Pricing policy for Aqua Element: displayed prices, discounts, taxes, promotional terms, and update rules." %}
-{% else %}
-{% set meta_description = "Aqua Element narx siyosati: korsatiladigan narxlar, chegirmalar, aksiya shartlari va yangilash qoidalari." %}
-{% endif %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import policy_nav with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_facts_block %}
 
-{% block title %}{{ 'landing.pricing_policy.title'|t }} - {{ company_name }}{% endblock %}
+{% set doc_title = 'landing.pricing_policy.title'|t %}
+{% set meta_description = 'web.content.pricing.meta'|t %}
+
+{% block title %}{{ doc_title }} — {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'landing.pricing_policy.title'|t }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>{{ 'landing.pricing_policy.title'|t }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
+{{ page_hero(doc_title, [(doc_title, None)]) }}
 
-<section class="service-details">
-    <div class="auto-container">
-        <div class="content-box">
-            {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+<section class="service-details ae-section ct ct--info">
+    <div class="ae-container">
+        {{ policy_nav('pricing') }}
+        {#- The live prices come first (tests read the first child); the policy text follows. -#}
+        <div class="content-box ct-info">
             {{ offer_facts_block(offer_facts, current_language) }}
+            <div class="ae-prose ct-info__prose">
+                <h2>{{ 'web.content.pricing.displayed_h'|t }}</h2>
+                <p>{{ 'web.content.pricing.displayed_p'|t }}</p>
+                <h2>{{ 'web.content.pricing.discounts_h'|t }}</h2>
+                <p>{{ 'web.content.pricing.discounts_p'|t }}</p>
+                <h2>{{ 'web.content.pricing.updates_h'|t }}</h2>
+                <p>{{ 'web.content.pricing.updates_p'|t }}</p>
+            </div>
 
-            <h2>Displayed Prices</h2>
-            <p>Product prices shown on Aqua Element channels are listed in UZS and reflect the current effective selling price at the time of order placement.</p>
-
-            <h2>Discounts and Promotions</h2>
-            <p>Where applicable, promotional pricing or discount pricing is displayed alongside the standard product price. Promotions may be time-limited or quantity-limited.</p>
-
-            <h2>Price Updates</h2>
-            <p>Aqua Element reserves the right to adjust prices in response to product, supply, or operational changes. Changes apply to new orders and do not retroactively alter completed purchases.</p>
+            <div class="ct-info__pair">
+                <a class="ae-card ae-card--link ct-linkcard" href="{{ external_url_for_lang('frontend.loyalty_guide') }}">
+                    <span class="ae-icon-tile ae-icon-tile--gold" aria-hidden="true"><i class="fas fa-medal"></i></span>
+                    <span class="ct-linkcard__body">
+                        <span class="ct-linkcard__title">{{ 'web.content.pricing.club_title'|t }}</span>
+                        <span class="ct-linkcard__text">{{ 'web.content.pricing.club_text'|t }}</span>
+                        <span class="ct-linkcard__cta">{{ 'web.content.pricing.club_cta'|t }}</span>
+                    </span>
+                </a>
+                <div class="ae-panel ct-help">
+                    <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+                    <a class="ct-help__link" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'web.content.pricing.help'|t }}</a>
+                </div>
+            </div>
         </div>
     </div>
 </section>

@@ -1,0 +1,353 @@
+/* Sign-in pages: login, register, forgot and reset password, verify email, verify phone (in the cabinet) and the
+   reorder-reminder unsubscribe page (templates/frontend/{login,register,forgot_password,reset_password,verify_email,
+   verify_phone,reminders_unsubscribe}.html, building blocks in macros/auth.html, behaviour in js/pages/auth-form.js).
+   One calm centred card on white under the soft banner: the stacked logo is the page's brand moment, labelled
+   ae-fields, one primary action, the Telegram option for bot customers, and result states that replace the card body.
+   Inside the cabinet (verify phone) the page follows the cabinet instead: a section title over a flat panel.
+   Every rule is scoped under .ae-auth. */
+
+.ae-auth.ae-section { padding-block: 56px 80px; background: var(--ae-surface); } /* white: the footer wave starts on white */
+.ae-auth [hidden] { display: none !important; } /* .ae-alert and the grids set display, which would beat [hidden] */
+
+.ae-auth .ae-container { display: flex; justify-content: center; }
+.ae-auth__card {
+  width: 100%;
+  max-width: 460px;
+  padding: 40px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r-lg);
+  background: var(--ae-surface);
+  box-shadow: var(--ae-shadow);
+}
+.ae-auth__card--wide { max-width: 600px; }
+
+/* Head: logo, title, one line */
+.ae-auth__head { margin: 0 0 28px; text-align: center; }
+.ae-auth__logo { display: block; width: 68px; margin: 0 auto 16px; }
+.ae-auth__logo img { display: block; width: 100%; height: auto; }
+.ae-auth__title {
+  margin: 0 0 8px;
+  color: var(--ae-ink);
+  font: 800 26px/1.25 var(--ae-font);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.ae-auth__title:focus { outline: none; }
+.ae-auth__lead { max-width: 40ch; margin: 0 auto; color: var(--ae-ink-soft); font-size: 15px; line-height: 1.55; text-wrap: pretty; }
+.ae-auth__step-icon { margin: 0 0 16px; }
+
+/* Form */
+.ae-auth__alert { margin: 0 0 20px; }
+.ae-auth__alert:focus { outline: none; }
+.ae-auth__form > .ae-btn { margin-top: 8px; }
+.ae-auth__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+
+.ae-auth__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ae-navy);
+  font-weight: 700;
+  text-decoration: none;
+}
+.ae-auth__link:hover { color: var(--ae-navy); text-decoration: underline; text-underline-offset: 3px; }
+.ae-auth__link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--ae-r-sm);
+  background: none;
+  color: var(--ae-navy);
+  font: 700 15px/1.3 var(--ae-font);
+  cursor: pointer;
+}
+.ae-auth__link-btn:hover { background: var(--ae-pale); }
+
+/* Checkboxes: a 44px row; the box follows the first line of the label. */
+.ae-auth .ae-check { padding-top: 10px; padding-bottom: 10px; font-size: 15px; }
+.ae-auth .ae-check input[type="checkbox"] { top: 12px; }
+.ae-auth .ae-check a { color: var(--ae-navy); }
+.ae-auth__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0 16px;
+  margin: -12px 0 8px;
+}
+.ae-auth__consent { margin: 0 0 12px; }
+.ae-auth__consent .ae-check { font-size: 14px; line-height: 1.55; color: var(--ae-ink-soft); }
+.ae-auth__consent .ae-field__error { padding-left: 30px; }
+
+/* Sign-up method: phone or email */
+.ae-auth__method { display: grid; gap: 6px; margin: 0 0 16px; }
+.ae-auth__method .ae-field__label { margin: 0; }
+.ae-auth__segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ae-auth__segmented > button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; font-size: 15px; font-weight: 700; }
+.ae-auth__segmented > button:focus-visible { outline: 3px solid var(--ae-navy); outline-offset: 2px; }
+
+/* Password checklist (the server's rule, ticked as the customer types) */
+.ae-auth__rules {
+  margin: -6px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-bg);
+}
+.ae-auth__rules-title { margin: 0 0 6px; color: var(--ae-ink); font-size: 13px; font-weight: 700; line-height: 1.4; }
+.ae-auth__rules ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.ae-auth__card--wide .ae-auth__rules ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ae-auth__rule { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ae-ink-soft); font-size: 13px; line-height: 1.45; }
+.ae-auth__rule > i { flex: none; width: 16px; color: var(--ae-muted); font-size: 14px; text-align: center; }
+.ae-auth__rule.is-met { color: var(--ae-ok); }
+.ae-auth__rule.is-met > i { color: var(--ae-ok); }
+.ae-auth__rules.is-invalid { border-color: #F2C3C9; background: var(--ae-danger-bg); }
+.ae-auth__rules.is-invalid .ae-auth__rule:not(.is-met),
+.ae-auth__rules.is-invalid .ae-auth__rule:not(.is-met) > i { color: var(--ae-danger); }
+
+/* A number or address that already has an account (register 409): the way in, right under the field */
+.ae-auth__taken {
+  display: grid;
+  gap: 12px;
+  margin: -8px 0 16px;
+  padding: 14px 16px;
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-pale);
+  color: var(--ae-ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.ae-auth__taken p { margin: 0; }
+.ae-auth__taken-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ae-auth__taken-actions .ae-btn { min-height: 44px; }
+
+/* "Have an invitation code?" */
+.ae-auth__more { margin: -4px 0 8px; }
+.ae-auth__more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--ae-navy);
+  font-size: 15px;
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+.ae-auth__more > summary::-webkit-details-marker { display: none; }
+.ae-auth__more > summary::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform .15s ease;
+}
+.ae-auth__more[open] > summary::before { margin-top: 3px; transform: rotate(-135deg); }
+.ae-auth__more > summary:focus-visible { outline: 3px solid var(--ae-navy); outline-offset: 2px; border-radius: 4px; }
+.ae-auth__more[open] > .ae-field { margin-top: 4px; }
+
+/* "or" and the Telegram option */
+.ae-auth__or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 16px;
+  color: var(--ae-ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ae-auth__or::before,
+.ae-auth__or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--ae-line); }
+.ae-auth__telegram .ae-tg-panel { align-items: flex-start; padding: 16px; }
+.ae-auth__telegram .ae-tg-panel__text { flex: 1 1 200px; font-size: 14px; }
+.ae-auth__telegram .ae-tg-panel .ae-btn { flex: 1 1 100%; }
+
+/* Foot: switch between sign-in and sign-up */
+.ae-auth__foot {
+  margin: 24px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--ae-line);
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+  text-align: center;
+}
+
+/* Result states (sent, saved, link not valid) replace the card body */
+.ae-auth__result { padding: 8px 0 0; }
+.ae-auth__result .ae-empty__title:focus { outline: none; }
+.ae-auth__result .ae-empty__text { color: var(--ae-ink-soft); }
+.ae-auth__result-icon--ok { background: var(--ae-ok-bg); color: var(--ae-ok); }
+.ae-auth__result-icon--danger { background: var(--ae-danger-bg); color: var(--ae-danger); }
+
+/* One-time code: one input (SMS autofill, paste) drawn as six cells */
+.ae-auth__otp-label { text-align: center; }
+.ae-otp { position: relative; width: 100%; max-width: 360px; margin: 0 auto; }
+.ae-otp__cells { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.ae-otp__cell {
+  display: grid;
+  place-items: center;
+  height: 56px;
+  border: 1.5px solid var(--ae-line);
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-surface);
+  color: var(--ae-ink);
+  font: 800 24px/1 var(--ae-font);
+  font-variant-numeric: tabular-nums;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ae-otp__cell.is-filled { border-color: var(--ae-line-strong); }
+/* Focus: a navy edge (11:1 on white) inside the aqua halo; the halo alone is about 1.5:1 (review AUTH-R6). */
+.ae-otp:focus-within .ae-otp__cell.is-current { border-color: var(--ae-navy); box-shadow: 0 0 0 1px var(--ae-navy), var(--ae-focus); }
+.ae-field--invalid .ae-otp__cell { border-color: var(--ae-danger); }
+.ae-auth .ae-field .ae-otp > input.ae-otp__input:not([type="checkbox"]) {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px; /* no zoom on iOS */
+  cursor: text;
+}
+.ae-auth [data-field="otp_code"] .ae-field__error { justify-content: center; text-align: center; }
+.ae-auth__otp-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  margin: 0 0 12px;
+  color: var(--ae-ink-soft);
+  font-size: 14px;
+  text-align: center;
+}
+.ae-auth__otp-timer p { margin: 0; font-variant-numeric: tabular-nums; }
+.ae-auth__otp-timer p.is-expired { color: var(--ae-danger); font-weight: 600; }
+
+/* Verify email: the link check, the code field and the "send the letter again" block */
+.ae-auth__checking {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 16px;
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-bg);
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+}
+.ae-auth__checking p { margin: 0; }
+.ae-auth__spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--ae-line);
+  border-top-color: var(--ae-aqua-deep);
+  border-radius: 50%;
+  animation: ae-auth-spin .8s linear infinite;
+}
+@keyframes ae-auth-spin { to { transform: rotate(360deg); } }
+.ae-auth .ae-field input.ae-auth__code { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.ae-auth__resend {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--ae-line);
+}
+.ae-auth__resend-text { margin: 0; color: var(--ae-ink-soft); font-size: 14px; line-height: 1.55; text-align: center; }
+.ae-auth__resend-text strong { color: var(--ae-ink); }
+.ae-auth__resend .ae-btn[disabled] { font-variant-numeric: tabular-nums; }
+.ae-auth__note { margin: 0; font-size: 14px; line-height: 1.5; text-align: center; }
+.ae-auth__note.is-ok { color: var(--ae-ok); }
+.ae-auth__note.is-error { color: var(--ae-danger); }
+
+/* Verify phone, inside the cabinet: like the other cabinet pages, a section title over one flat bordered panel that
+   fills the column (no floating card, no shadow); the form keeps a readable width inside it. */
+.ae-auth--cabinet { min-width: 0; }
+.ae-auth__section { display: grid; gap: 16px; min-width: 0; }
+.ae-auth__section-title {
+  margin: 0;
+  color: var(--ae-ink);
+  font: 800 var(--ae-text-h4, 19px)/1.3 var(--ae-font);
+}
+.ae-auth__section-title:focus { outline: none; }
+.ae-auth__panel {
+  min-width: 0;
+  padding: 28px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+}
+.ae-auth__panel-lead { max-width: 60ch; margin: 0 0 20px; color: var(--ae-ink-soft); font-size: 15px; line-height: 1.55; }
+.ae-auth__panel-lead strong { color: var(--ae-ink); }
+.ae-auth--cabinet .ae-auth__form,
+.ae-auth--cabinet .ae-auth__current,
+.ae-auth--cabinet .ae-auth__alert { max-width: 440px; }
+.ae-auth--cabinet .ae-auth__otp-label { text-align: left; }
+.ae-auth--cabinet .ae-otp { margin: 0; }
+.ae-auth--cabinet [data-field="otp"] .ae-field__error { text-align: left; }
+.ae-auth--cabinet .ae-auth__otp-timer { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 16px; max-width: 440px; text-align: left; }
+.ae-auth__panel-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--ae-line); }
+.ae-auth--cabinet .ae-auth__panel-foot .ae-auth__link-btn { margin-left: -8px; }
+.ae-auth__panel.ae-auth__result { max-width: none; margin: 0; padding: 40px 28px; }
+
+/* The note on an already confirmed number */
+.ae-auth__current {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -8px 0 20px;
+  padding: 12px 14px;
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-ok-bg);
+  color: var(--ae-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ae-auth__current i { flex: none; margin-top: 2px; color: var(--ae-ok); }
+.ae-auth__current p { margin: 0; }
+
+/* Reorder-reminder unsubscribe: one card per state */
+.ae-unsub__card { max-width: 520px; text-align: center; }
+.ae-unsub__card > .ae-empty__icon { margin-bottom: 20px; }
+.ae-unsub__icon--muted { background: var(--ae-bg); color: var(--ae-ink-soft); }
+.ae-unsub__text { margin: 0 auto 28px; max-width: 42ch; color: var(--ae-ink); font-size: 17px; line-height: 1.6; text-wrap: pretty; }
+.ae-unsub__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.ae-unsub__actions form { display: contents; }
+
+@media (max-width: 575px) {
+  .ae-auth.ae-section { padding-block: 24px 56px; }
+  .ae-auth__card { padding: 28px 20px; border-radius: var(--ae-r); }
+  .ae-auth__head { margin-bottom: 24px; }
+  .ae-auth__logo { width: 56px; margin-bottom: 12px; }
+  .ae-auth__title { font-size: 22px; }
+  .ae-auth__row { grid-template-columns: minmax(0, 1fr); }
+  .ae-otp__cells { gap: 6px; }
+  .ae-otp__cell { height: 52px; font-size: 22px; }
+  .ae-unsub__text { font-size: 16px; }
+  .ae-unsub__actions > .ae-btn,
+  .ae-unsub__actions form > .ae-btn { flex: 1 1 100%; }
+  .ae-auth__card--wide .ae-auth__rules ul { grid-template-columns: minmax(0, 1fr); }
+  .ae-auth__panel { padding: 20px; }
+  .ae-auth__panel.ae-auth__result { padding: 28px 20px; }
+  .ae-auth--cabinet .ae-auth__form > .ae-btn { width: 100%; }
+  .ae-auth__taken-actions .ae-btn { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-auth__more > summary::before,
+  .ae-otp__cell { transition: none; }
+  .ae-auth__spinner { animation-duration: 2.4s; }
+}

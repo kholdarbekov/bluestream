@@ -1,4 +1,12 @@
 {% extends "frontend/base.html" %}
+{#- /shop (website redesign step 3, group "shop"). Products from the shared product card, priced live from the offer
+    facts; "Add to cart" adds the smallest order the card publishes (data-qty, base.js add-to-cart-shop). No sort or price filter:
+    there are two products (owner decision 2026-11-13). Category chips show only when there is more than one
+    category. Words: web.shop.* (scripts/seed_web_ui_shop_translations.py) and the landing.* rows. -#}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/product_card.html' import product_card with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_facts_block %}
+{% from 'frontend/macros/ui.html' import empty_state %}
 {% set offer_q = {} %}{% for item in offer_faq %}{% set _ = offer_q.update({item.id: item}) %}{% endfor %}
 {% set same_day_faq = {'q': 'landing.offer.faq.same_day_q'|t, 'a': offer_facts.delivery.statement[current_language]|join(' ')} %}
 {% set selected_category = namespace(name='') %}
@@ -10,58 +18,22 @@
     {% endfor %}
 {% endif %}
 {% if selected_category.name %}
-    {% if current_language == 'ru' %}
-        {% set meta_description = "Товары категории " ~ selected_category.name ~ " доступны с доставкой от " ~ company_name ~ "." %}
-    {% elif current_language == 'en' %}
-        {% set meta_description = selected_category.name ~ " products available for delivery from " ~ company_name ~ "." %}
-    {% else %}
-        {% set meta_description = selected_category.name ~ " toifasidagi mahsulotlar " ~ company_name ~ " tomonidan yetkazib beriladi." %}
-    {% endif %}
+    {% set meta_description = 'web.shop.meta_category'|t(category=selected_category.name, company=company_name) %}
 {% else %}
-    {% if current_language == 'ru' %}
-        {% set meta_description = "Покупайте премиальную воду и варианты доставки от " ~ company_name ~ "." %}
-    {% elif current_language == 'en' %}
-        {% set meta_description = "Shop premium water products and delivery options from " ~ company_name ~ "." %}
-    {% else %}
-        {% set meta_description = company_name ~ " dan premium suv mahsulotlari va yetkazib berish variantlarini tanlang." %}
-    {% endif %}
+    {% set meta_description = 'web.shop.meta_description'|t(company=company_name) %}
 {% endif %}
-{% if current_language == 'ru' %}
-    {% set shop_faq_items = [
-        same_day_faq,
-        offer_q.get('price'),
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        offer_q.get('deposit'),
-        {'q': 'Что даёт подписка?', 'a': 'Подписка сама оформляет заказы по расписанию, поэтому вода не закончится в неподходящий момент. Доставка всегда бесплатная, а доставки по подписке оплачиваются по обычной цене.'}
-    ]|select|list %}
-{% elif current_language == 'en' %}
-    {% set shop_faq_items = [
-        same_day_faq,
-        offer_q.get('price'),
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        offer_q.get('deposit'),
-        {'q': 'What does a subscription give me?', 'a': 'A subscription places each order for you on schedule, so you never run out of water. Delivery is always free, and subscription deliveries are billed at the regular price.'}
-    ]|select|list %}
-{% else %}
-    {% set shop_faq_items = [
-        same_day_faq,
-        offer_q.get('price'),
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        offer_q.get('deposit'),
-        {'q': 'Obuna nima beradi?', 'a': 'Obuna buyurtmalarni jadval bo‘yicha o‘zi beradi, shuning uchun suv tugab qolmaydi. Yetkazib berish doim bepul, obuna bo‘yicha yetkazishlar esa oddiy narxda hisoblanadi.'}
-    ]|select|list %}
-{% endif %}
+{#- The visible FAQ and the FAQPage JSON-LD read this one list: the same-day statement, the offer answers (price,
+    sizes, smallest order, deposit) and the subscription answer. -#}
+{% set shop_faq_items = [
+    same_day_faq,
+    offer_q.get('price'),
+    offer_q.get('sizes'),
+    offer_q.get('minimum'),
+    offer_q.get('deposit'),
+    {'q': 'web.shop.faq.subscription_q'|t, 'a': 'web.shop.faq.subscription_a'|t}
+]|select|list %}
 
-{% block title %}
-{% if selected_category.name %}
-{{ selected_category.name }} - {{ 'landing.nav.shop'|t }}{% if products.page > 1 %} - Page {{ products.page }}{% endif %} - {{ company_name }}
-{% else %}
-{{ 'landing.nav.shop'|t }}{% if products.page > 1 %} - Page {{ products.page }}{% endif %} - {{ company_name }}
-{% endif %}
-{% endblock %}
+{% block title %}{% if selected_category.name %}{{ selected_category.name }} — {% endif %}{{ 'landing.nav.shop'|t }}{% if products.page > 1 %} — {{ 'web.shop.page_n'|t(n=products.page) }}{% endif %} — {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
 {% if prev_page_url %}
@@ -81,16 +53,16 @@
         "@type": "ListItem",
         "position": loop.index,
         "url": product_url,
-        "name": product.get('name', 'Product')
+        "name": product.name
     }) %}
 {% endfor %}
 {% set item_list_schema = {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    "name": "Shop Products",
+    "name": 'web.shop.itemlist_name'|t(company=company_name),
     "url": canonical_url if canonical_url is defined else request.url,
     "numberOfItems": products.items|length,
-    "itemListOrder": "https://schema.org/ItemListOrderAscending",
+    "itemListOrder": "https://schema.org/ItemListOrderDescending",
     "itemListElement": list_schema.items
 } %}
 <script type="application/ld+json">{{ item_list_schema | tojson }}</script>
@@ -114,303 +86,112 @@
 {% endblock %}
 
 {% block extra_head %}
-<style>
-/* Professional Page Title with Wavy Border */
-.page-title {
-    position: relative;
-    padding: 180px 0 120px 0 !important;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    overflow: hidden;
-}
-
-.page-title .shape {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    height: 200px;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    z-index: 1;
-}
-
-.page-title .auto-container {
-    position: relative;
-    z-index: 2;
-}
-
-.page-title h1 {
-    font-size: 48px;
-    font-weight: 700;
-    color: #222;
-    margin-bottom: 15px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.shop-seo-content {
-    padding: 80px 0 120px;
-}
-
-.shop-seo-content .seo-card {
-    background: #fff;
-    border-radius: 16px;
-    padding: 32px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
-}
-
-.shop-seo-content h2 {
-    font-size: 30px;
-    margin-bottom: 16px;
-}
-
-.shop-seo-content p {
-    margin-bottom: 18px;
-    color: #5b5b5b;
-}
-
-.shop-faq-list {
-    margin: 26px 0 0;
-    padding: 0;
-    list-style: none;
-}
-
-.shop-faq-list li + li {
-    margin-top: 18px;
-}
-
-.shop-faq-list h3 {
-    font-size: 19px;
-    margin-bottom: 8px;
-}
-
-.shop-faq-list p {
-    margin: 0;
-}
-</style>
+<link href="{{ asset_url('css/pages/shop.css') }}" rel="stylesheet">
 {% endblock %}
+
+{#- The product cards, each with the default cart button (base.js add-to-cart-shop adds the card's data-qty). -#}
+{% macro product_grid(items) -%}
+<div class="product-grid shop-grid{% if items|length <= 2 %} shop-grid--pair{% endif %}">
+    {% for product in items %}
+    {% set product_images = product.get('media', {}).get('images', product.get('images', [])) %}
+    {% set product_url = url_for('frontend.product_detail_slug', slug=product.get('slug')) if product.get('slug') else url_for('frontend.product_detail', product_id=product.id) %}
+    {{ product_card(
+        product,
+        offer_by_id.get(product.id),
+        current_language,
+        product_url,
+        image=product_images[0] if product_images else None,
+        heading_tag='h3'
+    ) }}
+    {% endfor %}
+</div>
+{%- endmacro %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.shop.page_title'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.nav.shop'|t }}</li>
-                    </ul>
-                </div>
+{{ page_hero('web.shop.title'|t, crumbs=[('landing.nav.shop'|t, None)], lead='web.shop.lead'|t) }}
+
+<div class="shop-page shop-catalog">
+    <section class="ae-section shop-catalog__products" aria-labelledby="shop-products-title">
+        <div class="ae-container">
+            <h2 class="visually-hidden" id="shop-products-title">{{ 'web.shop.products_title'|t }}</h2>
+
+            {% if search_query %}
+            <div class="shop-catalog__search" role="status">
+                <p class="shop-catalog__search-title">{{ 'web.shop.search_results'|t(query=search_query) }}</p>
+                <p class="shop-catalog__search-count">{{ 'web.shop.search_count'|t(n=products.total) }}</p>
+                {% if products.items %}
+                <a class="ae-link" href="{{ url_for('frontend.shop') }}">{{ 'web.shop.search_clear'|t }}</a>
+                {% endif %}
             </div>
-        </section>
-        <!-- page-title end -->
+            {% endif %}
 
-        <!-- shop-page-section -->
-        <section class="shop-page-section">
-            <div class="auto-container">
-                <div class="row clearfix">
-                    <div class="col-lg-3 col-md-12 col-sm-12 sidebar-side">
-                        <div class="shop-sidebar">
-                            <!-- Search Widget -->
-                            <div class="sidebar-widget search-widget">
-                                <div class="widget-title">
-                                    <h4>{{ 'landing.shop.search_widget_title'|t }}</h4>
-                                </div>
-                                <div class="search-form">
-                                    <form method="get" action="{{ url_for('frontend.shop') }}">
-                                        <div class="form-group">
-                                            <input type="search" name="search" placeholder="{{ 'landing.shop.search_placeholder'|t }}" value="{{ search_query or '' }}">
-                                            <button type="submit"><i class="far fa-search"></i></button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
+            {% if categories|length > 1 %}
+            <nav class="shop-catalog__filters" aria-label="{{ 'web.shop.categories'|t }}">
+                <ul class="ae-chips ae-chips--scroll">
+                    <li><a class="ae-chip" href="{{ url_for('frontend.shop') }}"{% if not current_category %} aria-current="page"{% endif %}>{{ 'web.shop.all_products'|t }}</a></li>
+                    {% for category in categories %}
+                    <li><a class="ae-chip" href="{{ url_for('frontend.shop', category=category.id) }}"{% if current_category == category.id %} aria-current="page"{% endif %}>{{ category.name }}</a></li>
+                    {% endfor %}
+                </ul>
+            </nav>
+            {% endif %}
 
-                            <!-- Category Widget -->
-                            <div class="sidebar-widget category-widget">
-                                <div class="widget-title">
-                                    <h4>{{ 'landing.shop.categories_title'|t }}</h4>
-                                </div>
-                                <div class="widget-content">
-                                    <ul class="category-list clearfix">
-                                        <li class="{% if not current_category %}active{% endif %}">
-                                            <a href="{{ url_for('frontend.shop') }}">{{ 'landing.shop.all_products'|t }}</a>
-                                        </li>
-                                        {% for category in categories %}
-                                        <li class="{% if current_category == category.id %}active{% endif %}">
-                                            <a href="{{ url_for('frontend.shop', category=category.id) }}">{{ category.name }}</a>
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                </div>
-                            </div>
+            {% if products.items %}
+            {{ product_grid(products.items) }}
+            {% elif search_query %}
+            {#- Nothing matched: say so plainly and show what there is right under it. -#}
+            {{ empty_state('far fa-search', 'web.shop.no_products'|t, 'web.shop.search_empty_text'|t, heading_tag='h3') }}
+            {% if search_fallback %}{{ product_grid(search_fallback) }}{% endif %}
+            {% else %}
+            {{ empty_state('far fa-search', 'web.shop.no_products'|t, 'web.shop.category_empty_text'|t,
+                           action={'label': 'web.shop.search_clear'|t, 'url': url_for('frontend.shop')}, heading_tag='h3') }}
+            {% endif %}
 
-                            <!-- Price Range Widget -->
-                            <div class="sidebar-widget price-widget">
-                                <div class="widget-title">
-                                    <h4>{{ 'landing.shop.price_range_title'|t }}</h4>
-                                </div>
-                                <div class="price-range-slider" id="slider-range"></div>
-                                <div class="price-inputs">
-                                    <div class="input-row">
-                                        <div class="input-wrapper">
-                                            <label>{{ 'landing.shop.price_min'|t }}</label>
-                                            <input type="text" id="price-min" class="price-input" placeholder="0" inputmode="numeric">
-                                            <span class="currency">UZS</span>
-                                        </div>
-                                        <div class="input-separator">-</div>
-                                        <div class="input-wrapper">
-                                            <label>{{ 'landing.shop.price_max'|t }}</label>
-                                            <input type="text" id="price-max" class="price-input" placeholder="500 000" inputmode="numeric">
-                                            <span class="currency">UZS</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-9 col-md-12 col-sm-12 content-side">
-                        <div class="shop-content">
-                            <div class="result-bar">
-                                <div class="left-column">
-                                    <p>{{ 'landing.shop.results_count'|t|format(
-                                        (products.page - 1) * products.per_page + 1 if products.items else 0,
-                                        min(products.page * products.per_page, products.total),
-                                        products.total
-                                    ) }}</p>
-                                </div>
-                                <div class="right-column">
-                                    <div class="short-box">
-                                        <select class="selectmenu" data-action="sort-products">
-                                            <option value="newest">{{ 'landing.shop.sort_latest'|t }}</option>
-                                            <option value="price_low">{{ 'landing.shop.sort_price_low'|t }}</option>
-                                            <option value="price_high">{{ 'landing.shop.sort_price_high'|t }}</option>
-                                            <option value="name">{{ 'landing.shop.sort_name'|t }}</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row clearfix product-grid">
-                                {% for product in products.items %}
-                                {% set offer = offer_by_id.get(product.id) %}
-                                <div class="col-lg-4 col-md-6 col-sm-12 shop-block">
-                                    <div class="shop-block-one">
-                                        <div class="inner-box">
-                                            <figure class="image-box">
-                                                {% set product_images = product.get('media', {}).get('images', product.get('images', [])) %}
-                                                {% if product_images and product_images|length > 0 %}
-                                                    <img src="{{ product_images[0] }}" alt="{{ product.get('name', 'Product') }}">
-                                                {% else %}
-                                                    <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.get('name', 'Product') }}">
-                                                {% endif %}
-                                                {% if offer and offer.discount_percent %}
-                                                <div class="sale-tag">-{{ offer.discount_percent }}%</div>
-                                                {% endif %}
-                                            </figure>
-                                            <div class="lower-content">
-                                                <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                                {% set category_name = product.get('category', {}).get('name', 'Water') if product.get('category') else 'Water' %}
-                                                <span>{% if offer %}{{ offer.size_text[current_language] }} - {% endif %}{{ category_name }}</span>
-                                                <h4><a href="{% if product.get('slug') %}{{ url_for('frontend.product_detail_slug', slug=product.get('slug')) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">{{ product.get('name', 'Product') }}</a></h4>
-                                                <div class="price">
-                                                    {% if offer and offer.list_price_text %}
-                                                    <span class="old-price">{{ offer.list_price_text[current_language] }}</span>
-                                                    <span class="new-price">{{ offer.price_text[current_language] }}</span>
-                                                    {% elif offer %}
-                                                    <h6>{{ offer.price_text[current_language] }}</h6>
-                                                    {% endif %}
-                                                </div>
-                                                {% set description = product.get('short_description', product.get('description', '')) %}
-                                                {% if description %}
-                                                    <p>{{ description[:80] }}{% if description|length > 80 %}...{% endif %}</p>
-                                                {% endif %}
-                                                <div class="btn-box">
-                                                    <button data-action="add-to-cart" data-product-id="{{ product.id }}" class="theme-btn btn-two">
-                                                        <i class="far fa-shopping-cart"></i> {{ 'landing.button.add_to_cart'|t }}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </div>
-
-                            <!-- Pagination -->
-                            {% if products.pages > 1 %}
-                            <div class="pagination-wrapper centred">
-                                <ul class="pagination clearfix">
-                                    {% if products.has_prev %}
-                                    <li><a href="{{ url_for('frontend.shop', page=products.prev_num, category=current_category, search=search_query) }}"><i class="far fa-angle-left"></i></a></li>
-                                    {% endif %}
-
-                                    {% for page_num in products.iter_pages() %}
-                                        {% if page_num %}
-                                            {% if page_num != products.page %}
-                                            <li><a href="{{ url_for('frontend.shop', page=page_num, category=current_category, search=search_query) }}">{{ page_num }}</a></li>
-                                            {% else %}
-                                            <li><a href="#" class="current">{{ page_num }}</a></li>
-                                            {% endif %}
-                                        {% else %}
-                                        <li><span>...</span></li>
-                                        {% endif %}
-                                    {% endfor %}
-
-                                    {% if products.has_next %}
-                                    <li><a href="{{ url_for('frontend.shop', page=products.next_num, category=current_category, search=search_query) }}"><i class="far fa-angle-right"></i></a></li>
-                                    {% endif %}
-                                </ul>
-                            </div>
+            {% if products.pages > 1 %}
+            <nav class="shop-catalog__pages" aria-label="{{ 'web.shop.pages'|t }}">
+                <ul class="ae-pagination">
+                    {% if products.has_prev %}
+                    <li><a href="{{ url_for('frontend.shop', page=products.prev_num, category=current_category, search=search_query or None) }}" aria-label="{{ 'web.shop.page_prev'|t }}"><i class="far fa-angle-left" aria-hidden="true"></i></a></li>
+                    {% endif %}
+                    {% for page_num in products.iter_pages() %}
+                        {% if page_num %}
+                            {% if page_num != products.page %}
+                    <li><a href="{{ url_for('frontend.shop', page=page_num, category=current_category, search=search_query or None) }}">{{ page_num }}</a></li>
+                            {% else %}
+                    <li><span aria-current="page">{{ page_num }}</span></li>
                             {% endif %}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- shop-page-section end -->
-
-        <section class="shop-seo-content">
-            <div class="auto-container">
-                <div class="seo-card">
-                    <h2>
-                        {% if selected_category.name %}
-                            {{ selected_category.name }} - {{ 'landing.shop.page_title'|t }}
                         {% else %}
-                            {{ 'landing.shop.page_title'|t }} - {{ company_name }}
+                    <li><span aria-hidden="true">…</span></li>
                         {% endif %}
-                    </h2>
-                    <p>
-                        {% if selected_category.name %}
-                            {{ selected_category.name }} {{ 'landing.shop.all_products'|t|lower }} {{ company_name }}.
-                        {% else %}
-                            {{ 'landing.shop.all_products'|t }} {{ company_name }}.
-                        {% endif %}
-                    </p>
-                    {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
-                    {{ offer_facts_block(offer_facts, current_language, heading_tag='h3') }}
-                    <ul class="shop-faq-list">
-                        {% for faq in shop_faq_items %}
-                        <li>
-                            <h3>{{ faq.q }}</h3>
-                            <p>{{ faq.a }}</p>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-        </section>
-{% endblock %}
+                    {% endfor %}
+                    {% if products.has_next %}
+                    <li><a href="{{ url_for('frontend.shop', page=products.next_num, category=current_category, search=search_query or None) }}" aria-label="{{ 'web.shop.page_next'|t }}"><i class="far fa-angle-right" aria-hidden="true"></i></a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </section>
 
-{% block extra_js %}
-{% from "frontend/macros/page_data.html" import render_page_data %}
-{{ render_page_data({
-    'min_price': 0,
-    'max_price': 10000000,
-}) }}
-<script src="{{ url_for('static', filename='js/pages/shop.js') }}"></script>
+    {#- The offer facts (SSOT wording) beside the FAQ. The block stays a direct child of .seo-card and the FAQ list
+        a following sibling (tests/integration/test_offer_block.py); the two columns are CSS grid, not DOM order. -#}
+    <section class="ae-section ae-section--tint shop-seo-content">
+        <div class="ae-container">
+            <div class="seo-card">
+                {{ offer_facts_block(offer_facts, current_language, heading_tag='h2') }}
+                <h2 class="shop-faq__title" id="shop-faq-title">{{ 'web.shop.faq_title'|t }}</h2>
+                <ul class="shop-faq-list ae-faq" aria-labelledby="shop-faq-title">
+                    {% for faq in shop_faq_items %}
+                    <li>
+                        <details class="ae-faq__item">
+                            <summary class="ae-faq__q"><h3>{{ faq.q }}</h3></summary>
+                            <div class="ae-faq__a"><p>{{ faq.a }}</p></div>
+                        </details>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </section>
+</div>
 {% endblock %}

@@ -5,7 +5,9 @@
     `target` has passed safe_next_path. It is written only into attributes (autoescaped), never into script:
     same-site-hop.js reads it from `data-hop-target` and reloads it with the #fragment. A browser whose script
     never runs (inline or all script blocked) continues through the plain meta refresh within a second, and one
-    with script turned off through the <noscript> refresh, placed first so it wins, or the Continue link. -#}
+    with script turned off through the <noscript> refresh, placed first so it wins, or the Continue link.
+    While it waits the visitor sees the brand on the page tint and a quiet spinner (inline style only: the page
+    keeps exactly one script, and loads nothing from another host). -#}
 <html lang="{{ current_language }}" data-hop-target="{{ target }}">
 <head>
     <meta charset="utf-8">
@@ -15,9 +17,27 @@
     <title>{{ company_name }}</title>
     <noscript><meta http-equiv="refresh" content="0; url={{ target }}"></noscript>
     <meta http-equiv="refresh" content="1; url={{ target }}">
-    <script src="{{ url_for('static', filename='js/pages/same-site-hop.js') }}"></script>
+    <script src="{{ asset_url('js/pages/same-site-hop.js') }}"></script>
+    <style>
+        body { display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; background: #F6FBFE; color: #061A3A; font: 400 16px/1.6 Manrope, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-align: center; }
+        main { display: grid; justify-items: center; gap: 20px; }
+        img { display: block; width: auto; height: 44px; }
+        .spinner { width: 28px; height: 28px; border: 3px solid #D7E9F3; border-top-color: #0077B6; border-radius: 50%; animation: spin .8s linear infinite; }
+        p { margin: 0; color: #41607C; font-size: 15px; }
+        a { display: inline-flex; align-items: center; min-height: 48px; padding: 12px 28px; border-radius: 999px; background: #00D1F9; color: #061A3A; font-weight: 700; text-decoration: none; }
+        a:focus-visible { outline: 3px solid #002C8F; outline-offset: 2px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+    </style>
 </head>
 <body>
-    <noscript><a href="{{ target }}">{{ 'web.page_auth.continue'|t }}</a></noscript>
+    <main>
+        <picture>
+            <source type="image/webp" srcset="{{ asset_url('images/brand/aqua-element-logo.webp') }}">
+            <img src="{{ asset_url('images/brand/aqua-element-logo.png') }}" width="534" height="180" alt="{{ company_name }}">
+        </picture>
+        <span class="spinner" role="status" aria-label="{{ 'web.auth.hop.wait'|t }}"></span>
+        <noscript><a href="{{ target }}">{{ 'web.page_auth.continue'|t }}</a></noscript>
+    </main>
 </body>
 </html>

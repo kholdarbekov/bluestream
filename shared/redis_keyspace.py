@@ -250,6 +250,27 @@ class RedisKeyspace:
     def telegram_login_attempts(telegram_id: int | str) -> str:
         return f"bs:telegram_login_rate:{telegram_id}"
 
+    # Tier: SECURITY. Password sign-in lockout (`AuthService.login_user`): the wrong passwords counted (`INCR`, expiring
+    # LOCKOUT_DURATION after the last) and the lock set when they reach MAX_LOGIN_ATTEMPTS. A typed identifier that
+    # names an account spends that ACCOUNT's budget, whichever of its address or number, in whatever format, was typed.
+    # One that names no account spends its own, under the legacy `login_attempts:` / `account_lockout:` keys, so an
+    # unknown identifier is refused like a known one. The prefixes differ, so nothing typed can name an account's key.
+    @staticmethod
+    def sign_in_attempts(user_id: int) -> str:
+        return f"bs:sign_in_attempts:{user_id}"
+
+    @staticmethod
+    def sign_in_lockout(user_id: int) -> str:
+        return f"bs:sign_in_lockout:{user_id}"
+
+    @staticmethod
+    def sign_in_attempts_unknown(identifier: str) -> str:
+        return f"login_attempts:{identifier}"
+
+    @staticmethod
+    def sign_in_lockout_unknown(identifier: str) -> str:
+        return f"account_lockout:{identifier}"
+
     # Tier: CACHE. The Google Routes calls made on one Tashkent day (`INCR`, expiring two days after the first), the
     # cap `GOOGLE_ROUTES_DAILY_CAP` is checked against (`google_routes.get_traffic_aware_leg`). A bill guard, never a
     # gate, like `sales_pay_fresh`: it fails OPEN, so without Redis the call goes ahead. An operator reads a day's count
@@ -332,6 +353,10 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'tokens_valid_after':                RedisUsageTier.TIER_SECURITY,
     'telegram_login_hash':               RedisUsageTier.TIER_SECURITY,
     'telegram_login_attempts':           RedisUsageTier.TIER_SECURITY,
+    'sign_in_attempts':                  RedisUsageTier.TIER_SECURITY,
+    'sign_in_lockout':                   RedisUsageTier.TIER_SECURITY,
+    'sign_in_attempts_unknown':          RedisUsageTier.TIER_SECURITY,
+    'sign_in_lockout_unknown':           RedisUsageTier.TIER_SECURITY,
     'google_routes_calls':               RedisUsageTier.TIER_CACHE,
     'eta_recompute_scheduled':           RedisUsageTier.TIER_CACHE,
     'eta_recompute_lock':                RedisUsageTier.TIER_RELIABILITY,

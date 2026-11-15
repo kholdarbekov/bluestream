@@ -33,7 +33,7 @@ from business_app.services.sales import notifications, pay_rules
 from business_app.services.staff_service import StaffService
 from business_app.utils.delivery_cadence import typical_interval_days
 from business_app.utils.delivery_window import local_now, parse_window_time, validate_schedule
-from business_app.utils.district_text import DISTRICT_SUFFIX_TOKENS, fold_district
+from business_app.utils.district_text import canonical_district
 from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from business_app.utils.geo_validation import ensure_within_delivery_zone, is_in_delivery_zone
 from business_app.utils.helpers import calculate_distance, format_phone_number
@@ -126,82 +126,6 @@ def user_display_name(user: User) -> str:
     the Lapsed customers worklist and the morning digest all name an account with this one rule.
     """
     return user.company_name or user.full_name or user.phone or f"#{user.id}"
-
-
-# Provider spellings that survive folding and still name no district. Kept as a
-# tiny explicit table rather than fuzzy matching: a wrong district is worse than
-# no district, and an entry here is a decision someone made on real evidence.
-_DISTRICT_ALIASES = {
-    # Live Nominatim, e.g. 41.32/69.24 -> county "Shayhontohur Tumani". Ours are
-    # "Shaykhontohur" (en) and "Shayxontohur" (uz); the provider drops the k/x.
-    "shayhontohur": "shaykhontohur",
-}
-
-
-def _district_display_names() -> Dict[str, str]:
-    """Every en/uz/ru display name, in comparison form, mapped to its canonical key."""
-    return {
-        fold_district(names.get(language)): key
-        for key, names in TASHKENT_DISTRICTS.items()
-        for language in ("en", "uz", "ru")
-        if names.get(language)
-    }
-
-
-def _canonical_district(raw: Optional[str]) -> Optional[str]:
-    """Map free text onto a TASHKENT_DISTRICTS key, or None when nothing matches.
-
-    `addresses.district` is free text, but every outlet write path (`_validate_common`,
-    `bulk_assign_by_district`, `SalesAgentProfile.districts`) speaks canonical KEYS. Copying an
-    address's district verbatim into an imported outlet therefore mints rows carrying "Chilonzor"
-    or "Алмазар" that no district filter and no bulk assignment can ever reach. The inverse of
-    `shared.constants.get_district_name`: accepts the key or any of its en/uz/ru display names.
-
-    It also has to accept what a GEOCODER says, because `POST /addresses/reverse-geocode` is what
-    the staff bot's "New outlet" pin step forwards: live Nominatim answers "Yashnobod Tumani",
-    "Mirzo Ulug‘bek Tumani", "Shayhontohur Tumani". So the text is FOLDED (lowercased, every
-    apostrophe variant removed), a trailing locale token is stripped, and the remainder matched --
-    exactly, then through `_DISTRICT_ALIASES`, then as a PREFIX, because Russian renders the name
-    adjectivally ("чиланзарский" for "чиланзар").
-
-    The prefix rule is reachable ONLY after a suffix strip, so ordinary free text ("Mirobod
-    street") still resolves to None, and no two folded district names are prefixes of one another
-    (asserted in tests/unit/test_outlet_district_canonical.py), so it cannot resolve one district
-    onto another. There is deliberately no fuzzy matching: the Russian adjectival stems that are
-    not simple prefixes ("Учтепинский" for "Учтепа") return None, and the caller stores NULL,
-    because a district guessed wrong is worse than a district left blank.
-
-    This is the outlet write path's single canonicaliser. It is NOT the only name->key matcher in
-    the codebase -- `admin_ui/src/pages/Users.js`, `Tryouts.js` and
-    `business_app/static/js/address-wizard.js` each carry their own `includes`-based matching for
-    their own pickers. Consolidating those is parked, not done.
-
-    Pure: no session, no config, no I/O.
-    """
-    text = fold_district(raw)
-    if not text:
-        return None
-    if text in TASHKENT_DISTRICTS:
-        return text
-    display = _district_display_names()
-    if text in display:
-        return display[text]
-    if text in _DISTRICT_ALIASES:
-        return _DISTRICT_ALIASES[text]
-
-    parts = text.split()
-    if len(parts) > 1 and parts[-1] in DISTRICT_SUFFIX_TOKENS:
-        stripped = " ".join(parts[:-1])
-        if stripped in TASHKENT_DISTRICTS:
-            return stripped
-        if stripped in display:
-            return display[stripped]
-        if stripped in _DISTRICT_ALIASES:
-            return _DISTRICT_ALIASES[stripped]
-        for name, key in display.items():
-            if stripped.startswith(name):
-                return key
-    return None
 
 
 def _import_outlet_name(
@@ -589,7 +513,7 @@ class OutletService:
         # (`bulk_assign_by_district` and `staff_service._validate_districts` still raise
         # SALES_DISTRICT_INVALID: there a human TYPED the district and a typo must be told.)
         raw_district = (payload.get("district") or "").strip()
-        district = _canonical_district(raw_district)
+        district = canonical_district(raw_district)
         if raw_district and district is None:
             current_app.logger.info(
                 "Outlet district %r matched no TASHKENT_DISTRICTS entry; storing NULL", raw_district
@@ -1364,7 +1288,7 @@ class OutletService:
             # NULLed district drops the outlet out of every district filter and out of
             # `bulk_assign_by_district`, which is exactly the state this edit exists to repair.
             raw_district = (payload["district"] or "").strip()
-            district = _canonical_district(raw_district)
+            district = canonical_district(raw_district)
             if raw_district and district is None:
                 raise ValidationError(f"Unknown district {raw_district}", error_code="SALES_DISTRICT_INVALID")
             outlet.district = district
@@ -1845,7 +1769,7 @@ class OutletService:
             latitude=latitude,
             longitude=longitude,
             address_text=address.full_address if address else None,
-            district=_canonical_district(address.district) if address else None,
+            district=canonical_district(address.district) if address else None,
             preferred_language=user.preferred_language or "uz",
             approved_at=datetime.now(UTC),
             approved_by_user_id=actor_id,

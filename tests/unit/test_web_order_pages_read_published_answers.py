@@ -81,14 +81,16 @@ def test_the_status_pill_labels_the_published_display_status(name):
 
 
 @pytest.mark.parametrize("name", ORDER_SCRIPTS)
-def test_the_label_survives_the_deploy_window(name):
-    """Spec §9, "Rolling safety": nginx serves the new script at `git pull`, while a worker may
-    still hold the old template (no `status_labels`) and the old API sends no `display_status`.
-    The label degrades to the order's own status instead of throwing and blanking the list.
-    Cancel gets no such fallback: hidden is the safe default, and the rule is the backend's."""
+def test_the_label_is_the_macros_and_a_missing_one_never_throws(name):
+    """Spec §9, "Rolling safety" (6062f02, 2026-09-28): while a worker could still hold a template without
+    `status_labels`, the label degraded to the order's own status, worded by the script. Every template has published
+    `status_labels` since that release, so the scripts word no status of their own any more: macros/order_status.html
+    is the one place that words a status (review CAB-R14, 2026-11-14). A missing label still never throws and never
+    blanks the list: the pill is drawn empty. Cancel gets no fallback: hidden is the safe default, the rule is the
+    backend's."""
     code = _code(name)
-    assert "(PAGE_DATA.i18n.status_labels || {})" in code, name
-    assert re.search(r"capitalize\w+\(order\.display_status \|\| order\.status\)", code), name
+    assert "(PAGE_DATA.i18n.status_labels || {})[order.display_status] || ''" in code, name
+    assert not re.search(r"capitalize\w*\(", code), name
 
 
 def test_the_tracking_page_writes_through_the_shared_request_helper():
@@ -134,7 +136,8 @@ def test_the_payment_return_routes_publish_answers_and_decide_nothing():
         Path(__file__).resolve().parents[2] / "business_app" / "templates" / "frontend" / "payment_cancelled.html"
     ).read_text("utf-8")
     assert "'Pending Payment'" not in html, "the cancel page names every order Pending Payment again"
-    assert "order_status_label(display_status)" in html
+    # The status in the one wording every order page uses: the pill macro prints order_status_label(display_status).
+    assert "order_status_pill(display_status)" in html or "order_status_label(display_status)" in html
 
 
 def test_checkout_keeps_the_published_wait_and_offers_the_cash_rescue_through_order_actions():

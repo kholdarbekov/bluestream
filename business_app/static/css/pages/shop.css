@@ -1,0 +1,368 @@
+/* ==========================================================================
+   Shop pages: /shop, /product/<id|slug>, /cart (website redesign step 3, group "shop").
+   Built on the shared components in ae-ui.css (product card, offer facts, FAQ, qty stepper, dl, alerts, empty state,
+   sticky bar). This file only lays them out. Every rule is scoped under .shop-page (the page root) so nothing leaks.
+   ========================================================================== */
+
+/* A shared component that sets its own display (.ae-sticky-bar on phones, the cart layout grid) would beat the
+   hidden attribute the page scripts toggle. */
+.shop-page [hidden] { display: none !important; }
+
+/* Product photos are shot on an off-white background: lifted to pure white and multiplied onto the tinted tile, the
+   background disappears and the bottle stays. */
+.shop-page .ae-product__media img,
+.shop-page .shop-pd__media img,
+.shop-page .shop-pd__thumb img,
+.shop-page .shop-cart__thumb img { mix-blend-mode: multiply; filter: brightness(1.012); }
+
+/* A missing photo falls back to the brand placeholder (base.js imgFallback). It fills its tile edge to edge, so it
+   reads as a deliberate tile rather than a small square floating in a larger one; the crop keeps its drop and its
+   wordmark (they sit between 24% and 85% of its height) in a wide tile too. */
+.shop-page img[data-fallback][data-ae-fallback="done"] {
+  object-fit: cover;
+  object-position: center 62%;
+  padding: 0;
+  mix-blend-mode: normal;
+  filter: none;
+}
+
+
+/* --- Product grid (shop, related sizes, empty-cart picks) ------------------------------------------------------ */
+
+.shop-page .shop-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s5);
+  margin: 0;
+}
+/* overflow + min-height: an aspect-ratio box in a flex column otherwise grows to its photo's natural height. */
+.shop-page .shop-grid .ae-product__media { aspect-ratio: 16 / 11; min-height: 0; overflow: hidden; }
+@media (min-width: 640px) {
+  .shop-page .shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .shop-page .shop-grid:not(.shop-grid--pair) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+/* Two products (today's catalogue): two wide cards side by side, photo beside the facts like a price list. */
+@media (min-width: 992px) {
+  .shop-page .shop-grid--pair .ae-product.shop-block { flex-direction: row; }
+  .shop-page .shop-grid--pair .ae-product__media { flex: 0 0 42%; aspect-ratio: auto; min-height: 300px; }
+  .shop-page .shop-grid--pair .ae-product__body { justify-content: center; gap: 10px; padding: 28px 28px 28px 24px; }
+  .shop-page .shop-grid--pair .ae-product__name { font-size: 22px; }
+  .shop-page .shop-grid--pair .ae-product__price .new-price { font-size: 28px; }
+  .shop-page .shop-grid--pair .ae-product__note { font-size: 14px; }
+  .shop-page .shop-grid--pair .ae-product__actions { margin-top: 8px; }
+}
+.shop-page .ae-product__actions .ae-btn { white-space: nowrap; }
+
+
+/* --- /shop ------------------------------------------------------------------------------------------------------ */
+
+.shop-page .shop-catalog__products { padding-top: var(--ae-s7); }
+
+.shop-page .shop-catalog__search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin: 0 0 var(--ae-s5);
+}
+.shop-page .shop-catalog__search-title { margin: 0; color: var(--ae-ink); font-size: var(--ae-text-h4); font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+.shop-page .shop-catalog__search-count { margin: 0; font-size: var(--ae-text-small); font-variant-numeric: tabular-nums; }
+
+.shop-page .shop-catalog__filters { margin: 0 0 var(--ae-s5); }
+
+.shop-page .shop-catalog__pages .ae-pagination i { font-size: 16px; }
+
+/* Offer facts beside the FAQ: two columns from 992px, DOM order unchanged (the facts block, then the FAQ). */
+.shop-page.shop-catalog .seo-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s5) var(--ae-s8); align-items: start; }
+.shop-page.shop-catalog .seo-card > [data-offer-facts] { max-width: none; margin: 0; }
+.shop-page.shop-catalog .shop-faq__title {
+  margin: var(--ae-s4) 0 0;
+  color: var(--ae-ink);
+  font-size: clamp(20px, .6vw + 17px, 24px);
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+}
+.shop-page.shop-catalog .shop-faq-list { margin: 0; padding: 0; list-style: none; }
+.shop-page.shop-catalog .shop-faq-list > li { margin: 0; list-style: none; }
+@media (min-width: 992px) {
+  .shop-page.shop-catalog .seo-card { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-rows: auto 1fr; }
+  .shop-page.shop-catalog .seo-card > [data-offer-facts] { grid-column: 1; grid-row: 1 / span 2; }
+  .shop-page.shop-catalog .shop-faq__title { grid-column: 2; grid-row: 1; margin: 0; }
+  .shop-page.shop-catalog .shop-faq-list { grid-column: 2; grid-row: 2; }
+}
+
+
+/* --- /product --------------------------------------------------------------------------------------------------- */
+
+.shop-page .shop-pd__buy { padding-top: var(--ae-s7); }
+.shop-page .shop-pd__grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s6); align-items: start; }
+@media (min-width: 992px) {
+  .shop-page .shop-pd__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--ae-s8); }
+  .shop-page .shop-pd__media-col { position: sticky; top: calc(var(--ae-header-h) + 24px); }
+}
+
+.shop-page .shop-pd__media {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--ae-r-lg);
+  background: linear-gradient(165deg, var(--ae-pale) 0%, var(--ae-bg) 70%);
+  overflow: hidden;
+}
+.shop-page .shop-pd__media img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 7%; object-fit: contain; }
+@media (max-width: 991px) {
+  /* width: an explicit 100% keeps the tile full width; with an auto width the max-height shrinks it through the ratio. */
+  .shop-page .shop-pd__media { width: 100%; aspect-ratio: 4 / 3; max-height: 320px; }
+}
+
+.shop-page .shop-pd__thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.shop-page .shop-pd__thumb {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 1.5px solid var(--ae-line);
+  border-radius: 12px;
+  background: var(--ae-bg);
+  overflow: hidden;
+  cursor: pointer;
+}
+.shop-page .shop-pd__thumb img { width: 100%; height: 100%; padding: 6px; object-fit: contain; mix-blend-mode: multiply; }
+.shop-page .shop-pd__thumb.active,
+.shop-page .shop-pd__thumb[aria-pressed="true"] { border-color: var(--ae-navy); }
+
+/* One column as wide as the grid gives: an implicit auto column would grow to the widest unbreakable label. */
+.shop-page .shop-pd__info { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s5); min-width: 0; }
+.shop-page .shop-pd__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.shop-page .shop-pd__price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.shop-page .shop-pd__price .price-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.shop-page .shop-pd__price .price-new {
+  color: var(--ae-ink);
+  font-size: clamp(34px, 1.6vw + 24px, 44px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.shop-page .shop-pd__price .price-old { color: var(--ae-ink-soft); font-size: 18px; text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.shop-page .shop-pd__price .save-tag { padding: 3px 9px; border-radius: var(--ae-r-pill); background: var(--ae-danger-bg); color: var(--ae-danger); font-size: 13px; font-weight: 800; }
+.shop-page .shop-pd__per { color: var(--ae-ink-soft); font-size: var(--ae-text-small); font-weight: 600; }
+.shop-page .shop-pd__summary { margin: 0; font-size: var(--ae-text-lead); line-height: 1.6; }
+
+/* Purchase: the one thing to act on, a bordered card. */
+.shop-page .shop-pd__purchase {
+  display: grid;
+  gap: var(--ae-s5);
+  padding: var(--ae-s5);
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+}
+.shop-page .shop-pd__qty-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--ae-s4) var(--ae-s5); }
+.shop-page .shop-pd__qty { display: grid; gap: 6px; }
+.shop-page .shop-pd__label { display: block; margin: 0; color: var(--ae-ink-soft); font-size: var(--ae-text-small); font-weight: 700; }
+.shop-page .shop-pd__qty .ae-qty__hint { margin: 0; }
+.shop-page .shop-pd__sum { display: grid; gap: 6px; text-align: right; }
+.shop-page .shop-pd__sum-value { color: var(--ae-ink); font-size: 24px; font-weight: 800; line-height: 44px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shop-page .shop-pd__actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.shop-page .shop-pd__actions .ae-btn { flex: 1 1 220px; white-space: nowrap; }
+/* Phones: a long label (uz "Telegram-botda buyurtma berish") wraps inside its button instead of widening the card. */
+@media (max-width: 575px) {
+  .shop-page .shop-pd__actions .ae-btn { min-width: 0; white-space: normal; text-align: center; }
+}
+
+/* Facts: size first (tests read the first strong), then the smallest order, deposit and delivery. Flat tiles. */
+.shop-page .shop-pd__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.shop-page .shop-pd__facts .feature-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: var(--ae-r);
+  background: var(--ae-bg);
+}
+.shop-page .shop-pd__facts .feature-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.shop-page .shop-pd__facts .feature-card > div { display: grid; gap: 2px; min-width: 0; }
+.shop-page .shop-pd__facts strong { color: var(--ae-ink); font-size: 16px; font-weight: 800; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.shop-page .shop-pd__facts span:not(.ae-icon-tile) { color: var(--ae-ink-soft); font-size: 13px; line-height: 1.45; }
+@media (max-width: 399px) {
+  .shop-page .shop-pd__facts { grid-template-columns: minmax(0, 1fr); }
+}
+
+.shop-page .shop-pd__assure { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: var(--ae-text-small); line-height: 1.55; }
+.shop-page .shop-pd__assure li { display: flex; align-items: baseline; gap: 10px; margin: 0; list-style: none; }
+.shop-page .shop-pd__assure li > i { flex: none; width: 16px; color: var(--ae-aqua-deep); text-align: center; }
+/* A 44px tap height around the one-line links without moving the text (padding in, the same margin out). */
+.shop-page .shop-pd__assure .ae-link { display: inline-block; padding: 12px 0; margin: -12px 0; font-weight: 700; }
+/* The refund question the FAQPage JSON-LD carries, above its answer. */
+.shop-page .shop-pd__assure-qa { display: grid; gap: 2px; min-width: 0; }
+.shop-page .shop-pd__assure-q { color: var(--ae-ink); font-weight: 700; }
+
+/* The offer block lines up with the buy box instead of floating in the middle; the other sizes sit beside it from
+   992px (a card column as wide as the buy box's media column), below it on smaller screens. */
+.shop-page .shop-pd__offer .ae-facts { margin: 0; }
+.shop-page .shop-pd__offer-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s7) var(--ae-s8); align-items: start; }
+@media (min-width: 992px) {
+  .shop-page .shop-pd__offer-grid--aside { grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); }
+  .shop-page .shop-pd__offer-grid--aside .ae-facts { max-width: none; }
+}
+/* Same size as the offer heading beside it: two headings of one band, one level. */
+.shop-page .shop-pd__related-title {
+  margin: 0 0 16px;
+  color: var(--ae-ink);
+  font-size: clamp(20px, .6vw + 17px, 24px);
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+}
+.shop-page .shop-grid.shop-grid--stack { grid-template-columns: minmax(0, 1fr); }
+/* Tablets: the stacked card turns sideways (photo beside the facts) so one card does not fill a whole screen. */
+@media (min-width: 640px) and (max-width: 991px) {
+  .shop-page .shop-grid--stack .ae-product.shop-block { flex-direction: row; }
+  .shop-page .shop-grid--stack .ae-product__media { flex: 0 0 40%; aspect-ratio: auto; min-height: 240px; }
+  .shop-page .shop-grid--stack .ae-product__body { justify-content: center; padding: 24px; }
+}
+
+
+/* --- /cart ------------------------------------------------------------------------------------------------------ */
+
+.shop-page .shop-cart__section { padding-top: var(--ae-s7); }
+.shop-page .shop-cart__layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s5); align-items: start; }
+@media (min-width: 992px) {
+  .shop-page .shop-cart__layout { grid-template-columns: minmax(0, 1fr) 360px; gap: var(--ae-s6); }
+  .shop-page .shop-cart__summary { position: sticky; top: calc(var(--ae-header-h) + 24px); }
+}
+
+.shop-page .shop-cart__title { margin: 0; color: var(--ae-ink); font-size: 20px; font-weight: 800; line-height: 1.3; }
+
+.shop-page .shop-cart__items.ae-card { padding: 0; overflow: hidden; }
+.shop-page .shop-cart__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 20px 24px; }
+.shop-page .shop-cart__list { margin: 0; padding: 0; list-style: none; }
+
+.shop-page .shop-cart__item {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto minmax(104px, auto) 44px;
+  grid-template-areas: "thumb info qty line remove";
+  align-items: center;
+  gap: 12px 20px;
+  margin: 0;
+  padding: 20px 24px;
+  border-top: 1px solid var(--ae-line);
+  list-style: none;
+}
+.shop-page .shop-cart__thumb { grid-area: thumb; display: grid; place-items: center; width: 88px; height: 88px; border-radius: 12px; background: var(--ae-bg); overflow: hidden; }
+.shop-page .shop-cart__thumb img { width: 100%; height: 100%; padding: 6px; object-fit: contain; }
+.shop-page .shop-cart__info { grid-area: info; display: grid; justify-items: start; gap: 4px; min-width: 0; }
+/* padding in, the same margin out: a 44px tap height around a one-line name without moving the text. */
+.shop-page .shop-cart__name { padding: 12px 0; margin: -12px 0; color: var(--ae-ink); font-size: 17px; font-weight: 800; line-height: 1.35; text-decoration: none; overflow-wrap: anywhere; }
+.shop-page .shop-cart__name:hover { color: var(--ae-navy); text-decoration: underline; text-underline-offset: 3px; }
+.shop-page .shop-cart__unit { color: var(--ae-ink-soft); font-size: var(--ae-text-small); font-variant-numeric: tabular-nums; }
+.shop-page .shop-cart__hint { color: var(--ae-warn); font-size: var(--ae-text-small); font-weight: 700; }
+.shop-page .shop-cart__qty { grid-area: qty; }
+.shop-page .shop-cart__qty .ae-qty__input { display: inline-block; }
+/* The quantity can be typed (numeric keypad on phones): its focus ring follows the pill instead of a square. */
+.shop-page .ae-qty__input { border-radius: var(--ae-r-sm); }
+.shop-page .shop-cart__line { grid-area: line; color: var(--ae-ink); font-size: 18px; font-weight: 800; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.shop-page .shop-cart__remove {
+  grid-area: remove;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ae-ink-soft);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.shop-page .shop-cart__remove:hover { background: var(--ae-danger-bg); color: var(--ae-danger); }
+
+.shop-page .shop-cart__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--ae-line);
+  background: var(--ae-bg);
+}
+.shop-page .shop-cart__foot .ae-link { min-height: 44px; font-size: 15px; text-decoration: none; }
+.shop-page .shop-cart__foot .ae-link:hover { text-decoration: underline; }
+.shop-page .shop-cart__clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ae-ink-soft);
+  font: 600 15px/1.3 var(--ae-font);
+  cursor: pointer;
+}
+.shop-page .shop-cart__clear-btn:hover { color: var(--ae-danger); }
+.shop-page .shop-cart__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.shop-page .shop-cart__confirm-text { color: var(--ae-ink); font-size: 15px; font-weight: 600; }
+
+.shop-page .shop-cart__summary { display: grid; gap: var(--ae-s4); }
+.shop-page .shop-cart__dl { margin: 0; }
+/* Price-list rows: the label takes the room the amount leaves ("Mahsulotlar (5 dona)" kept on one line). */
+.shop-page .shop-cart__dl .ae-dl__row { grid-template-columns: minmax(0, 1fr) auto; }
+.shop-page .shop-cart__dl dd { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shop-page .shop-cart__units { color: var(--ae-ink-soft); font-weight: 500; white-space: nowrap; }
+.shop-page .shop-cart__note { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--ae-text-small); line-height: 1.5; }
+.shop-page .shop-cart__note > i { flex: none; color: var(--ae-aqua-deep); }
+.shop-page .shop-cart__notice { margin: 0; }
+.shop-page .shop-cart__notice:focus-visible { outline: 3px solid var(--ae-navy); outline-offset: 2px; }
+.shop-page .shop-cart__violations { margin: 0; padding: 0; list-style: none; }
+.shop-page .shop-cart__violations li { margin: 2px 0 0; list-style: none; }
+.shop-page .shop-cart__progress { margin-top: 10px; background: rgba(138, 90, 0, .14); }
+.shop-page .shop-cart__progress .ae-progress__bar { background: var(--ae-gold-deep); }
+.shop-page .shop-cart__actions { display: grid; gap: 12px; }
+.shop-page .shop-cart__actions .ae-btn { padding-inline: 16px; }
+.shop-page .shop-cart__btn-label > i { margin-right: 8px; }
+.shop-page .shop-cart__actions .ae-btn[aria-disabled="true"],
+.shop-page .shop-cart__bar .ae-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; box-shadow: none; }
+
+.shop-page .shop-cart__undo { align-items: center; margin: 0 0 var(--ae-s5); }
+.shop-page .shop-cart__undo p { flex: 1 1 auto; }
+.shop-page .shop-cart__dropped,
+.shop-page .shop-cart__error { margin: 0 0 var(--ae-s5); }
+.shop-page .shop-cart__error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.shop-page .shop-cart__error-actions .ae-btn { min-height: 44px; }
+.shop-page .shop-cart__error-actions .ae-btn > i { margin-right: 8px; }
+
+.shop-page .shop-cart__skeleton { display: flex; align-items: center; gap: 20px; padding: 20px 24px; border-top: 1px solid var(--ae-line); }
+.shop-page .shop-cart__skeleton:first-of-type { border-top: 0; }
+.shop-page .shop-cart__skeleton-thumb { flex: none; width: 88px; height: 88px; border-radius: 12px; }
+.shop-page .shop-cart__skeleton-lines { flex: 1 1 auto; }
+.shop-page .shop-cart__skeleton-btn { height: 56px; border-radius: var(--ae-r-pill); }
+
+.shop-page .shop-cart__empty .ae-empty { padding-top: 8px; }
+.shop-page .shop-cart__picks { margin-top: var(--ae-s5); }
+
+@media (max-width: 767px) {
+  .shop-page .shop-cart__head { padding: 16px; }
+  .shop-page .shop-cart__item {
+    grid-template-columns: 64px minmax(0, 1fr) auto 44px;
+    grid-template-areas:
+      "thumb info info remove"
+      "qty qty line line";
+    gap: 12px;
+    padding: 16px;
+  }
+  .shop-page .shop-cart__thumb { width: 64px; height: 64px; border-radius: 10px; }
+  .shop-page .shop-cart__name { font-size: 16px; }
+  .shop-page .shop-cart__foot { padding: 8px 16px; }
+  .shop-page .shop-cart__skeleton { padding: 16px; }
+  .shop-page .shop-cart__skeleton-thumb { width: 64px; height: 64px; }
+}

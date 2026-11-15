@@ -59,8 +59,9 @@ class TimezoneMiddleware:
     def after_request(self, response):
         """Process response after handling"""
         try:
-            # Convert UTC datetimes in response to user timezone
-            if response.is_json:
+            # Convert UTC datetimes in response to user timezone. A file the browser saves (Content-Disposition:
+            # attachment, e.g. the account data download) is not a page's answer: it keeps the route's own bytes.
+            if response.is_json and not self._is_attachment(response):
                 body = response.get_data()
                 sent = json.loads(body)
                 if sent:
@@ -76,6 +77,12 @@ class TimezoneMiddleware:
             logger.warning(f"Error in timezone middleware after_request: {e}")
 
         return response
+
+    @staticmethod
+    def _is_attachment(response) -> bool:
+        """Content-Disposition names the type first, case-insensitively (RFC 6266)."""
+        disposition = response.headers.get("Content-Disposition", "")
+        return disposition.split(";", 1)[0].strip().lower() == "attachment"
 
     def _convert_request_datetimes(self, data, source_tz=None):
         """

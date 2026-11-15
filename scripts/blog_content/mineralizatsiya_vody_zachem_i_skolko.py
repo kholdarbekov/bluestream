@@ -9,7 +9,7 @@ ARTICLE = {
     "slug": "mineralizatsiya-vody-zachem-i-skolko",
     "category": "water_benefits",
     "tags": "mineralization,minerals,calcium,magnesium,TDS,water-quality,pH",
-    "featured_image": "/static/images/news/news-6.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "Glass of mineralised drinking water with calcium and magnesium icons (Ca, Mg) overlaid",
     "is_featured": False,
     "sort_order": 80,
@@ -166,57 +166,57 @@ ARTICLE = {
 """
         },
         "uz": {
-            "title": "Suvning minerallashishi: nima uchun va qancha TDS me'yor hisoblanadi",
-            "excerpt": "Ichimlik suvining umumiy minerallashishi va TDS nima, qaysi pH me'yor hisoblanadi, teskari osmosdan keyingi suv nega «bo'sh» ta'mga ega va Aqua Element profili qanday — raqamlar va qiyosiy jadval bilan ta'lim maqolasi.",
-            "meta_title": "Suvning minerallashishi va TDS: nima uchun kerak va qaysi daraja me'yor hisoblanadi",
+            "title": "Suvning minerallashishi: nima uchun va qancha TDS me’yor hisoblanadi",
+            "excerpt": "Ichimlik suvining umumiy minerallashishi va TDS nima, qaysi pH me’yor hisoblanadi, teskari osmosdan keyingi suv nega «bo‘sh» ta’mga ega va Aqua Element profili qanday — raqamlar va qiyosiy jadval bilan ta’lim maqolasi.",
+            "meta_title": "Suvning minerallashishi va TDS: nima uchun kerak va qaysi daraja me’yor hisoblanadi",
             "meta_description": "TDS, pH, kalsiy va magniy ichimlik suvida — bu raqamlar nimani anglatadi, RO dan keyin minerallashish nega muhim va Aqua Element profili.",
             "content": """
-<p class="lead">Ichimlik suvi shishasini qo'lga olganimizda, etiketkada ko'pincha raqamlarni ko'ramiz: «umumiy minerallashish», «TDS», «pH», kalsiy va magniy miqdori. Ba'zi xaridorlar uchun bu — texnik belgilar to'plami, boshqalar uchun esa — tanlovning asosiy mezoni. Ushbu maqolada biz xotirjam, marketing bo'rttirishlarisiz suvning minerallashishi nima ekanligini, nima uchun kerakligini, qancha TDS me'yor hisoblanishini va nega teskari osmosdan keyingi suv keyingi minerallashishsiz tatib ko'ruvchilar tomonidan ko'pincha «bo'sh» deb tasvirlanishini tahlil qilamiz. Maqola oxirida qiyosiy jadval, FAQ va Toshkent viloyatidagi artezian suvimiz Aqua Element profilini topasiz.</p>
+<p class="lead">Ichimlik suvi shishasini qo‘lga olganimizda, etiketkada ko‘pincha raqamlarni ko‘ramiz: «umumiy minerallashish», «TDS», «pH», kalsiy va magniy miqdori. Ba’zi xaridorlar uchun bu — texnik belgilar to‘plami, boshqalar uchun esa — tanlovning asosiy mezoni. Ushbu maqolada biz xotirjam, marketing bo‘rttirishlarisiz suvning minerallashishi nima ekanligini, nima uchun kerakligini, qancha TDS me’yor hisoblanishini va nega teskari osmosdan keyingi suv keyingi minerallashishsiz tatib ko‘ruvchilar tomonidan ko‘pincha «bo‘sh» deb tasvirlanishini tahlil qilamiz. Maqola oxirida qiyosiy jadval, FAQ va Toshkent viloyatidagi artezian suvimiz Aqua Element profilini topasiz.</p>
 
 <h2>Suv minerallashishi nimani anglatadi</h2>
-<p>Ichimlik suvi kontekstida minerallashish — bu suvning tog' jinslari va suv qatlamlari orqali o'tib, tabiiy ravishda o'ziga jalb qiladigan erigan minerallar yig'indisi. Tabiatda erigan moddalarsiz toza suv deyarli uchramaydi: yomg'ir tomchisi yerga tushganda atmosfera karbonat angidridining bir qismini eritib, kuchsiz karbonat kislota eritmasiga aylanadi va keyin tuproq va jinslar orqali sizib, kalsiy, magniy, natriy, kaliy, bikarbonatlar, sulfatlar, xloridlar, ftoridlar va mikroelementlarga ega bo'ladi.</p>
-<p>Artezian suvi — bunga muhim misol. U yuqoridan suv o'tkazmaydigan qatlamlar bilan himoyalangan bosimli gorizontda hosil bo'ladi va odatda barqaror mineral profilga ega. Aynan shunday gorizontdan Toshkent viloyati Quyichirchiq tumanida, taxminan 120 metr chuqurlikdan Aqua Element brendi ostida sizga tanish suv qazib olinadi.</p>
-<p>Minerallashish — «qo'shimcha» yoki «kimyo» emas. Bu suvning tabiiy xarakteristikasi bo'lib, birinchidan, uning ta'mini shakllantiradi, ikkinchidan, fiziologik foydaliligini belgilaydi.</p>
+<p>Ichimlik suvi kontekstida minerallashish — bu suvning tog' jinslari va suv qatlamlari orqali o‘tib, tabiiy ravishda o‘ziga jalb qiladigan erigan minerallar yig‘indisi. Tabiatda erigan moddalarsiz toza suv deyarli uchramaydi: yomg‘ir tomchisi yerga tushganda atmosfera karbonat angidridining bir qismini eritib, kuchsiz karbonat kislota eritmasiga aylanadi va keyin tuproq va jinslar orqali sizib, kalsiy, magniy, natriy, kaliy, bikarbonatlar, sulfatlar, xloridlar, ftoridlar va mikroelementlarga ega bo‘ladi.</p>
+<p>Artezian suvi — bunga muhim misol. U yuqoridan suv o‘tkazmaydigan qatlamlar bilan himoyalangan bosimli gorizontda hosil bo‘ladi va odatda barqaror mineral profilga ega. Aynan shunday gorizontdan Toshkent viloyati Quyichirchiq tumanida, taxminan 120 metr chuqurlikdan Aqua Element brendi ostida sizga tanish suv qazib olinadi.</p>
+<p>Minerallashish — «qo‘shimcha» yoki «kimyo» emas. Bu suvning tabiiy xarakteristikasi bo‘lib, birinchidan, uning ta’mini shakllantiradi, ikkinchidan, fiziologik foydaliligini belgilaydi.</p>
 
-<h2>TDS: bu nima va qanday o'lchanadi</h2>
-<p>TDS qisqartmasi Total Dissolved Solids — erigan qattiq moddalar umumiy miqdorini bildiradi. Aslida, bu suvda erigan barcha noorganik tuzlar va kichik miqdordagi organik moddalar yig'indisi bo'lib, milligramm/litrda (mg/L) yoki ekvivalent ppm birliklarida ifodalanadi.</p>
-<p>TDS ni o'lchashning ikki asosiy usuli mavjud:</p>
+<h2>TDS: bu nima va qanday o‘lchanadi</h2>
+<p>TDS qisqartmasi Total Dissolved Solids — erigan qattiq moddalar umumiy miqdorini bildiradi. Aslida, bu suvda erigan barcha noorganik tuzlar va kichik miqdordagi organik moddalar yig‘indisi bo‘lib, milligramm/litrda (mg/L) yoki ekvivalent ppm birliklarida ifodalanadi.</p>
+<p>TDS ni o‘lchashning ikki asosiy usuli mavjud:</p>
 <ul>
-<li><strong>Gravimetrik usul</strong> — suv namunasi bug'lantiriladi va quruq qoldiq tortiladi. Bu eng aniq laboratoriya usuli.</li>
-<li><strong>Konduktometrik usul</strong> — suvning elektr o'tkazuvchanligi o'lchanadi va empirik koeffitsient bo'yicha TDS ga aylantiriladi. Cho'ntak TDS-metrlari shunday ishlaydi. Bu usul qulay, lekin aniqligi pastroq va harorat hamda tuzlar tarkibiga bog'liq.</li>
+<li><strong>Gravimetrik usul</strong> — suv namunasi bug‘lantiriladi va quruq qoldiq tortiladi. Bu eng aniq laboratoriya usuli.</li>
+<li><strong>Konduktometrik usul</strong> — suvning elektr o‘tkazuvchanligi o‘lchanadi va empirik koeffitsient bo‘yicha TDS ga aylantiriladi. Cho‘ntak TDS-metrlari shunday ishlaydi. Bu usul qulay, lekin aniqligi pastroq va harorat hamda tuzlar tarkibiga bog‘liq.</li>
 </ul>
-<p>Suv gigienasi bo'yicha turli nashrlarda taxminiy toifalarni uchratish mumkin. Ular qat'iy me'yor emas, balki suv «xarakterini» tasvirlashning qulay usuli sifatida keltiriladi:</p>
+<p>Suv gigienasi bo‘yicha turli nashrlarda taxminiy toifalarni uchratish mumkin. Ular qat’iy me’yor emas, balki suv «xarakterini» tasvirlashning qulay usuli sifatida keltiriladi:</p>
 <ul>
 <li><strong>50 mg/L dan kam</strong> — juda past minerallashish (distillangan suvga yaqin).</li>
 <li><strong>50–150 mg/L</strong> — past minerallashish.</li>
-<li><strong>150–300 mg/L</strong> — o'rtacha minerallashish.</li>
+<li><strong>150–300 mg/L</strong> — o‘rtacha minerallashish.</li>
 <li><strong>300–500 mg/L</strong> — ovqat suvi uchun yuqori minerallashish.</li>
-<li><strong>500 mg/L va undan yuqori</strong> — ko'plab umumiy qo'llanmalardagi kunlik ichimlik suvi uchun yuqori chegaralarga yaqinlashish.</li>
+<li><strong>500 mg/L va undan yuqori</strong> — ko‘plab umumiy qo‘llanmalardagi kunlik ichimlik suvi uchun yuqori chegaralarga yaqinlashish.</li>
 </ul>
-<p>Jahon Sog'liqni saqlash tashkiloti tavsiyalarida va Sanepid hamda shunga o'xshash tartibga soluvchilarning bir qator hujjatlarida TDS uchun qat'iy quyi chegara odatda mavjud emas, lekin juda past minerallashishli suv subyektiv ravishda «ta'msiz» deb qabul qilinishi va doimiy iste'mol uchun unchalik mos emasligi ko'rsatiladi.</p>
+<p>Jahon Sog‘liqni saqlash tashkiloti tavsiyalarida va Sanepid hamda shunga o‘xshash tartibga soluvchilarning bir qator hujjatlarida TDS uchun qat’iy quyi chegara odatda mavjud emas, lekin juda past minerallashishli suv subyektiv ravishda «ta’msiz» deb qabul qilinishi va doimiy iste’mol uchun unchalik mos emasligi ko‘rsatiladi.</p>
 
 <h2>Suvdagi minerallar nima uchun muhim</h2>
-<p>Kundalik ichish uchun butunlay «mineralsizlangan» suv eng yaxshi tanlov bo'lmasligining uchta amaliy sababi bor.</p>
-<h3>1. Ta'm</h3>
-<p>Suvning ta'mi aynan erigan minerallar va gazlar tomonidan shakllantiriladi. Kalsiy va bikarbonatlar suvga «to'liqlik», magniy — yengil achchiqlik, natriy katta miqdorlarda — sho'rlik, karbonat angidrid — tetiklantiruvchi nordonlik beradi. To'liq mineralsizlangan suv tatib ko'ruvchilar tomonidan turli tillarda bir xil so'zlar bilan tasvirlanadi: «bo'sh», «yassi», «hech qanday». Bu xurofot emas, bu ta'm retseptorlari fiziologiyasi.</p>
+<p>Kundalik ichish uchun butunlay «mineralsizlangan» suv eng yaxshi tanlov bo‘lmasligining uchta amaliy sababi bor.</p>
+<h3>1. Ta’m</h3>
+<p>Suvning ta’mi aynan erigan minerallar va gazlar tomonidan shakllantiriladi. Kalsiy va bikarbonatlar suvga «to‘liqlik», magniy — yengil achchiqlik, natriy katta miqdorlarda — sho‘rlik, karbonat angidrid — tetiklantiruvchi nordonlik beradi. To‘liq mineralsizlangan suv tatib ko‘ruvchilar tomonidan turli tillarda bir xil so‘zlar bilan tasvirlanadi: «bo‘sh», «yassi», «hech qanday». Bu xurofot emas, bu ta’m retseptorlari fiziologiyasi.</p>
 <h3>2. Kalsiy va magniyning fiziologik hissasi</h3>
-<p>Ichimlik suvi — asosiy emas, lekin sezilarli kalsiy va magniy manbai. Turli umumiy baholashlarga ko'ra, agar inson kuniga 1,5–2 litr ichsa, u kunlik talabning bir necha foizini qoplashi mumkin. Kalsiy suyak to'qimasi va asab-mushak o'tkazuvchanligi uchun, magniy esa yurak-qon tomir tizimi va yuzlab fermentativ reaksiyalar uchun muhim. Ca va Mg ning oqilona darajasiga ega suv organizmni fon hissasidan mahrum qilmaslikka yordam beradi.</p>
+<p>Ichimlik suvi — asosiy emas, lekin sezilarli kalsiy va magniy manbai. Turli umumiy baholashlarga ko‘ra, agar inson kuniga 1,5–2 litr ichsa, u kunlik talabning bir necha foizini qoplashi mumkin. Kalsiy suyak to‘qimasi va asab-mushak o‘tkazuvchanligi uchun, magniy esa yurak-qon tomir tizimi va yuzlab fermentativ reaksiyalar uchun muhim. Ca va Mg ning oqilona darajasiga ega suv organizmni fon hissasidan mahrum qilmaslikka yordam beradi.</p>
 <h3>3. Natriy nazorati</h3>
-<p>Natriy esa, aksincha, ko'pchilik zamonaviy ratsionlarda ortiqcha iste'mol qilinadi. Shuning uchun ichimlik suvida past natriy miqdori — odatda 20 mg/L dan past, ideal holda esa bir necha mg/L — qadrlanadi. Bu ayniqsa gipertenziyali odamlar va kichik bolalar uchun muhim.</p>
+<p>Natriy esa, aksincha, ko‘pchilik zamonaviy ratsionlarda ortiqcha iste’mol qilinadi. Shuning uchun ichimlik suvida past natriy miqdori — odatda 20 mg/L dan past, ideal holda esa bir necha mg/L — qadrlanadi. Bu ayniqsa gipertenziyali odamlar va kichik bolalar uchun muhim.</p>
 
-<h2>Teskari osmosdan keyingi «bo'sh» suv</h2>
-<p>Teskari osmos (RO) — suvdan erigan moddalarning 95–99% gacha (tuzlar, og'ir metallar, nitratlar, pestitsid qoldiqlari, ko'plab organik ifloslantiruvchilar) olib tashlaydigan kuchli membrana texnologiyasi. Bu zamonaviy suv tayyorlashda juda foydali bosqich. Lekin uning teskari tomoni bor: noxush moddalar bilan birga teskari osmos kalsiy, magniy, bikarbonatlar kabi foydali minerallarni ham olib tashlaydi.</p>
-<p>Agar bunday suvni RO dan so'ng darhol shishaga quysangiz, uning TDS si 5–15 mg/L darajasida bo'ladi, pH ko'pincha biroz nordon, ta'mi esa o'ziga xos «yassi» bo'ladi. Aynan shuning uchun professional ichimlik suvi ishlab chiqaruvchilari RO dan keyin alohida minerallashish bosqichini qo'shadilar: kalsiy va magniyning hisoblangan miqdorlarini suvga nazorat ostida qaytarish. Bu «kimyolashtirish» emas, suvga ta'm va fiziologik adekvatlikni qaytaradigan tuzatish.</p>
+<h2>Teskari osmosdan keyingi «bo‘sh» suv</h2>
+<p>Teskari osmos (RO) — suvdan erigan moddalarning 95–99% gacha (tuzlar, og‘ir metallar, nitratlar, pestitsid qoldiqlari, ko‘plab organik ifloslantiruvchilar) olib tashlaydigan kuchli membrana texnologiyasi. Bu zamonaviy suv tayyorlashda juda foydali bosqich. Lekin uning teskari tomoni bor: noxush moddalar bilan birga teskari osmos kalsiy, magniy, bikarbonatlar kabi foydali minerallarni ham olib tashlaydi.</p>
+<p>Agar bunday suvni RO dan so‘ng darhol shishaga quysangiz, uning TDS si 5–15 mg/L darajasida bo‘ladi, pH ko‘pincha biroz nordon, ta’mi esa o‘ziga xos «yassi» bo‘ladi. Aynan shuning uchun professional ichimlik suvi ishlab chiqaruvchilari RO dan keyin alohida minerallashish bosqichini qo‘shadilar: kalsiy va magniyning hisoblangan miqdorlarini suvga nazorat ostida qaytarish. Bu «kimyolashtirish» emas, suvga ta’m va fiziologik adekvatlikni qaytaradigan tuzatish.</p>
 
-<h2>Ichimlik suvining pH qiymati: me'yor nima</h2>
-<p>pH — eritmaning kislotaliligi yoki ishqoriyligini o'lchovi. 0 dan 14 gacha bo'lgan shkala, bunda 7 — neytral muhit. Ichimlik suvi ko'pchilik xalqaro va milliy qo'llanmalarda odatda <strong>6,5–8,5</strong> diapazoniga to'g'ri keladi. Bu intervalda suv noqulaylik tug'dirmaydi va quvurlar bilan istalmagan reaksiyalarga kirishmaydi.</p>
-<p>Biroz ishqoriy pH (7,3–7,8) tabiiy artezian suvlarida tez-tez uchraydi va barqaror karbonat bufer bilan yaxshi mos keladi. «Ishqoriy suv davolaydi» yoki «organizmni kislotalashtiradi/ishqoriylashtiradi» degan da'volar — noto'g'ri soddalashtirish: qon pH si organizm bufer tizimlari tomonidan qat'iy tartibga solinadi va pH 7,5 li suv qonni ishqorga aylantirmaydi. Biroq biroz ishqoriy pH ning o'zi — tabiiy mineral fonga ega suvning tabiiy belgisi.</p>
+<h2>Ichimlik suvining pH qiymati: me’yor nima</h2>
+<p>pH — eritmaning kislotaliligi yoki ishqoriyligini o‘lchovi. 0 dan 14 gacha bo‘lgan shkala, bunda 7 — neytral muhit. Ichimlik suvi ko‘pchilik xalqaro va milliy qo‘llanmalarda odatda <strong>6,5–8,5</strong> diapazoniga to‘g‘ri keladi. Bu intervalda suv noqulaylik tug‘dirmaydi va quvurlar bilan istalmagan reaksiyalarga kirishmaydi.</p>
+<p>Biroz ishqoriy pH (7,3–7,8) tabiiy artezian suvlarida tez-tez uchraydi va barqaror karbonat bufer bilan yaxshi mos keladi. «Ishqoriy suv davolaydi» yoki «organizmni kislotalashtiradi/ishqoriylashtiradi» degan da’volar — noto‘g‘ri soddalashtirish: qon pH si organizm bufer tizimlari tomonidan qat’iy tartibga solinadi va pH 7,5 li suv qonni ishqorga aylantirmaydi. Biroq biroz ishqoriy pH ning o‘zi — tabiiy mineral fonga ega suvning tabiiy belgisi.</p>
 
 <h2>Aqua Element mineral profili</h2>
 <p>Biz Aqua Element suvining mineral profilini ochiq nashr qilamiz — chunki xaridor har kuni nima ichayotganini bilish huquqiga ega deb hisoblaymiz.</p>
 <ul>
 <li><strong>TDS:</strong> 30–50 mg/L — past minerallashgan toifa. Bu ongli tanlov: katta kunlik hajm uchun yengil, «ichilishi oson» suv.</li>
-<li><strong>pH:</strong> taxminan 7,5 — biroz ishqoriy, tipik ichimlik diapazonining o'rtasida.</li>
+<li><strong>pH:</strong> taxminan 7,5 — biroz ishqoriy, tipik ichimlik diapazonining o‘rtasida.</li>
 <li><strong>Kalsiy (Ca):</strong> 10–60 mg/L.</li>
 <li><strong>Magniy (Mg):</strong> 7–20 mg/L.</li>
 <li><strong>Natriy (Na):</strong> 5–15 mg/L — past miqdor, kundalik ichish uchun maqbul.</li>
@@ -225,29 +225,29 @@ ARTICLE = {
 <li><strong>Sulfatlar (SO₄):</strong> 10–30 mg/L.</li>
 <li><strong>Xloridlar (Cl):</strong> 5–10 mg/L.</li>
 </ul>
-<p>Bu raqamlar amalda nimani anglatadi? Bu — yengil, neytral ta'mli, aniq achchiq yoki sho'rliksiz, kalsiy va magniyning sezilarli, lekin mo''tadil mavjudligi, juda past natriy va barqaror ishqoriy pH ga ega suv. Bunday suv katta hajmda kundalik ichish va ovqat tayyorlash uchun yaxshi mos keladi, taomlar va ichimliklar ta'mini «to'sib qo'ymaydi».</p>
+<p>Bu raqamlar amalda nimani anglatadi? Bu — yengil, neytral ta’mli, aniq achchiq yoki sho‘rliksiz, kalsiy va magniyning sezilarli, lekin mo''tadil mavjudligi, juda past natriy va barqaror ishqoriy pH ga ega suv. Bunday suv katta hajmda kundalik ichish va ovqat tayyorlash uchun yaxshi mos keladi, taomlar va ichimliklar ta’mini «to‘sib qo‘ymaydi».</p>
 
-<h2>Qiyosiy jadval: profil bo'yicha qaysi suvlar bo'ladi</h2>
-<p>Aqua Element boshqa suv turlari bilan qanday bog'lanishini yaxshiroq ko'rsatish uchun biz taxminiy taqqoslashni jamladik. Bu aniq namunaning laboratoriya tahlilini almashtirmaydi, lekin umumiy tasavvur beradi.</p>
+<h2>Qiyosiy jadval: profil bo‘yicha qaysi suvlar bo‘ladi</h2>
+<p>Aqua Element boshqa suv turlari bilan qanday bog‘lanishini yaxshiroq ko‘rsatish uchun biz taxminiy taqqoslashni jamladik. Bu aniq namunaning laboratoriya tahlilini almashtirmaydi, lekin umumiy tasavvur beradi.</p>
 <table>
 <thead>
-<tr><th>Suv turi</th><th>TDS, mg/L</th><th>pH</th><th>Ca / Mg</th><th>Ta'm</th><th>Kundalik ichish</th></tr>
+<tr><th>Suv turi</th><th>TDS, mg/L</th><th>pH</th><th>Ca / Mg</th><th>Ta’m</th><th>Kundalik ichish</th></tr>
 </thead>
 <tbody>
 <tr><td>Aqua Element (artezian, 11 bosqich)</td><td>30–50</td><td>~7,5</td><td>bor, mo''tadil</td><td>yengil, muvozanatli</td><td>ha</td></tr>
-<tr><td>Faqat teskari osmos, minerallashishsiz</td><td>5–15</td><td>~6,5–7,0</td><td>deyarli yo'q</td><td>«bo'sh», yassi</td><td>maqbul emas</td></tr>
-<tr><td>Toshkent vodoprovodi (umumiy ko'rsatma)</td><td>—</td><td>—</td><td>bor, o'zgaruvchan</td><td>tuman va mavsumga bog'liq</td><td>qaynatishdan/filtrdan keyin</td></tr>
-<tr><td>Shishadagi buloq suvi (umumiy turi)</td><td>100–500</td><td>7,0–8,0</td><td>bor, har xil daraja</td><td>yengildan ifodali ta'mgacha</td><td>ha, mos profil bo'lsa</td></tr>
-<tr><td>Distillangan suv</td><td>&lt;5</td><td>~5,5–7,0</td><td>yo'q</td><td>«bo'sh»</td><td>doimiy ichish uchun emas</td></tr>
+<tr><td>Faqat teskari osmos, minerallashishsiz</td><td>5–15</td><td>~6,5–7,0</td><td>deyarli yo‘q</td><td>«bo‘sh», yassi</td><td>maqbul emas</td></tr>
+<tr><td>Toshkent vodoprovodi (umumiy ko‘rsatma)</td><td>—</td><td>—</td><td>bor, o‘zgaruvchan</td><td>tuman va mavsumga bog‘liq</td><td>qaynatishdan/filtrdan keyin</td></tr>
+<tr><td>Shishadagi buloq suvi (umumiy turi)</td><td>100–500</td><td>7,0–8,0</td><td>bor, har xil daraja</td><td>yengildan ifodali ta’mgacha</td><td>ha, mos profil bo‘lsa</td></tr>
+<tr><td>Distillangan suv</td><td>&lt;5</td><td>~5,5–7,0</td><td>yo‘q</td><td>«bo‘sh»</td><td>doimiy ichish uchun emas</td></tr>
 </tbody>
 </table>
-<p>«—» tire aniq qiymatlar tuman va mavsumga juda bog'liqligini va biz noto'g'ri o'rtachalar bermasligini bildiradi.</p>
+<p>«—» tire aniq qiymatlar tuman va mavsumga juda bog‘liqligini va biz noto‘g‘ri o‘rtachalar bermasligini bildiradi.</p>
 
 <h2>Aqua Element bu profilga qanday erishadi: 11 bosqich</h2>
-<p>Aynan shunday barqaror, past minerallashgan, lekin «bo'sh» bo'lmagan profilni olish uchun quduqdan olingan artezian suvi 11 ketma-ket tayyorlash bosqichidan o'tadi. Har bir bosqichning batafsil tavsifi <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifasida; bu yerda — qisqa sharh.</p>
+<p>Aynan shunday barqaror, past minerallashgan, lekin «bo‘sh» bo‘lmagan profilni olish uchun quduqdan olingan artezian suvi 11 ketma-ket tayyorlash bosqichidan o‘tadi. Har bir bosqichning batafsil tavsifi <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifasida; bu yerda — qisqa sharh.</p>
 <ol>
 <li>Kvarts filtri — yirik zarralardan mexanik tozalash.</li>
-<li>Faollashtirilgan ko'mir — xlor, organika, ta'm va hidlarni sorbsiya qilish.</li>
+<li>Faollashtirilgan ko‘mir — xlor, organika, ta’m va hidlarni sorbsiya qilish.</li>
 <li>Ion almashinuvchi / yumshatuvchi — qattiqlikni kamaytirish.</li>
 <li>Yumshatuvchini regeneratsiya qilish — sorbentni tiklash.</li>
 <li>Polipropilen 5 mkm — nozik mexanik filtratsiya.</li>
@@ -255,61 +255,61 @@ ARTICLE = {
 <li>Teskari osmos (RO) — erigan moddalarning 95–99% ni olib tashlash.</li>
 <li>Membranalarni CIP yuvish — RO ning resurs va barqarorligini saqlab qolish.</li>
 <li>UF dezinfeksiya — mikroorganizmlarni inaktivatsiya qilish.</li>
-<li><strong>Minerallashish</strong> — RO dan keyin Ca va Mg ni nazorat ostida suvga qaytarish. Aynan shu bosqich suvni ta'm bo'yicha «to'liq» va fiziologik adekvat qiladi.</li>
+<li><strong>Minerallashish</strong> — RO dan keyin Ca va Mg ni nazorat ostida suvga qaytarish. Aynan shu bosqich suvni ta’m bo‘yicha «to‘liq» va fiziologik adekvat qiladi.</li>
 <li>Ozonlash — quyishdan oldin yakuniy mikrobiologik himoya.</li>
 </ol>
-<p>O'ninchi bosqich bu yerda maqola mavzusi uchun kalit hisoblanadi. Usiz RO dan keyin suv texnik jihatdan juda toza, lekin ta'm bo'yicha «bo'sh» va kalsiy hamda magniydan deyarli mahrum bo'lar edi. Uning bilan biz 30–50 mg/L TDS, pH 7,5 va Ca hamda Mg ning sezilarli mavjudligi bo'lgan barqaror profilni olamiz.</p>
+<p>O‘ninchi bosqich bu yerda maqola mavzusi uchun kalit hisoblanadi. Usiz RO dan keyin suv texnik jihatdan juda toza, lekin ta’m bo‘yicha «bo‘sh» va kalsiy hamda magniydan deyarli mahrum bo‘lar edi. Uning bilan biz 30–50 mg/L TDS, pH 7,5 va Ca hamda Mg ning sezilarli mavjudligi bo‘lgan barqaror profilni olamiz.</p>
 
-<h2>Suv tanlashda bu ma'lumotdan qanday foydalanish kerak</h2>
+<h2>Suv tanlashda bu ma’lumotdan qanday foydalanish kerak</h2>
 <ul>
-<li>Agar siz katta kunlik hajm (kuniga 1,5–2 litr va undan ko'p) uchun suv izlasangiz, taxminan 50–300 mg/L TDS, past natriy va 7,0–8,0 diapazonidagi pH bilan variantlar oqilona.</li>
-<li>Kichik bolalar uchun ayniqsa past natriy va nazorat qilinadigan profil muhim; bu yerda ishlab chiqaruvchining shaffofligiga e'tibor berish kerak.</li>
-<li>«TDS qancha yuqori bo'lsa, shuncha yaxshi» — afsona. Minerallashgan suvlar (1000 mg/L dan ortiq) — davolovchi-ovqatli yoki davolovchi suvlar bo'lib, ularning ko'rsatma va kontrendikatsiyalari bor, har kuni va istalgan miqdorda ichish tavsiya etilmaydi.</li>
-<li>«TDS qancha past bo'lsa, shuncha toza» — bu ham afsona. Distillangan suv haqiqatan ham toza, lekin doimiy iste'mol uchun maqbul emas.</li>
+<li>Agar siz katta kunlik hajm (kuniga 1,5–2 litr va undan ko‘p) uchun suv izlasangiz, taxminan 50–300 mg/L TDS, past natriy va 7,0–8,0 diapazonidagi pH bilan variantlar oqilona.</li>
+<li>Kichik bolalar uchun ayniqsa past natriy va nazorat qilinadigan profil muhim; bu yerda ishlab chiqaruvchining shaffofligiga e’tibor berish kerak.</li>
+<li>«TDS qancha yuqori bo‘lsa, shuncha yaxshi» — afsona. Minerallashgan suvlar (1000 mg/L dan ortiq) — davolovchi-ovqatli yoki davolovchi suvlar bo‘lib, ularning ko‘rsatma va kontrendikatsiyalari bor, har kuni va istalgan miqdorda ichish tavsiya etilmaydi.</li>
+<li>«TDS qancha past bo‘lsa, shuncha toza» — bu ham afsona. Distillangan suv haqiqatan ham toza, lekin doimiy iste’mol uchun maqbul emas.</li>
 </ul>
 
 <h2>Aqua Element: shaffoflik va qulay yetkazib berish</h2>
-<p>Toshkent va Toshkent viloyatidagi har bir xaridor uchun tushunarli mineral profilli suvga oson kirish bo'lishini xohlaymiz. 18,9 litrlik qaytariladigan idishni yoki 10 litrlik qadoqni <a href="/shop">do'konimiz</a> orqali buyurtma qilishingiz mumkin, suvni muntazam ichadiganlar esa <a href="/subscriptions">obuna rasmiylashtirish</a> orqali jadval bo'yicha yetkazib berishni olishlari qulayroq. Logistika, idish va qaytarish shartlari bo'yicha savollar <a href="/water-delivery-faq">Suv yetkazib berish FAQ</a> bo'limida jamlangan.</p>
+<p>Toshkent va Toshkent viloyatidagi har bir xaridor uchun tushunarli mineral profilli suvga oson kirish bo‘lishini xohlaymiz. 18,9 litrlik qaytariladigan idishni yoki 10 litrlik qadoqni <a href="/shop">do‘konimiz</a> orqali buyurtma qilishingiz mumkin, suvni muntazam ichadiganlar esa <a href="/subscriptions">obuna rasmiylashtirish</a> orqali jadval bo‘yicha yetkazib berishni olishlari qulayroq. Logistika, idish va qaytarish shartlari bo‘yicha savollar <a href="/water-delivery-faq">Suv yetkazib berish FAQ</a> bo‘limida jamlangan.</p>
 <p>Sifat standartlari va biz mos keladigan tartibga soluvchi talablar haqida batafsil — <a href="/quality-standards">«Sifat standartlari»</a> sahifasida; Blue Stream Group kompaniyasi haqida — <a href="/about">«Biz haqimizda»</a> sahifasida.</p>
 
-<h2>Tez-tez so'raladigan savollar (FAQ)</h2>
+<h2>Tez-tez so‘raladigan savollar (FAQ)</h2>
 <h3>Kundalik ichimlik suvi uchun qaysi TDS mos?</h3>
-<p>Ko'plab umumiy qo'llanmalar va sharhlarda ommaviy iste'mol suvi uchun taxminan 50 dan 300 mg/L gacha bo'lgan diapazon qulay deb hisoblanadi. Aqua Element — taxminan 30–50 mg/L, ya'ni past minerallashgan toifada, bu uni katta hajmda kundalik iste'mol qilish uchun qulay qiladi.</p>
-<h3>Nega ba'zi suvlar ta'mga «bo'sh» tuyuladi?</h3>
-<p>Ko'pincha bu keyingi minerallashishsiz teskari osmosdan keyingi suv yoki distillat. Unda erigan minerallar juda kam va ta'm retseptorlari odatdagi «tayanch nuqtalarini» olmaydi. Aynan shuning uchun savodli ishlab chiqaruvchi minerallashish bosqichini qo'shadi.</p>
+<p>Ko‘plab umumiy qo‘llanmalar va sharhlarda ommaviy iste’mol suvi uchun taxminan 50 dan 300 mg/L gacha bo‘lgan diapazon qulay deb hisoblanadi. Aqua Element — taxminan 30–50 mg/L, ya’ni past minerallashgan toifada, bu uni katta hajmda kundalik iste’mol qilish uchun qulay qiladi.</p>
+<h3>Nega ba’zi suvlar ta’mga «bo‘sh» tuyuladi?</h3>
+<p>Ko‘pincha bu keyingi minerallashishsiz teskari osmosdan keyingi suv yoki distillat. Unda erigan minerallar juda kam va ta’m retseptorlari odatdagi «tayanch nuqtalarini» olmaydi. Aynan shuning uchun savodli ishlab chiqaruvchi minerallashish bosqichini qo‘shadi.</p>
 <h3>Yuqori pH li suv foydaliroqmi?</h3>
-<p>Sog'lom odamga, masalan, pH 9 yoki 10 bo'lgan suvning biror narsani «davolashi» haqida nufuzli manbalarda to'g'ridan-to'g'ri dalillar yo'q. Biroz ishqoriy pH 7,3–7,8 — bu ko'plab tabiiy mineral suvlarning tabiiy xususiyati va normal diapazon.</p>
+<p>Sog‘lom odamga, masalan, pH 9 yoki 10 bo‘lgan suvning biror narsani «davolashi» haqida nufuzli manbalarda to‘g‘ridan-to‘g‘ri dalillar yo‘q. Biroz ishqoriy pH 7,3–7,8 — bu ko‘plab tabiiy mineral suvlarning tabiiy xususiyati va normal diapazon.</p>
 <h3>Teskari osmosdan keyin minerallashish texnik jihatdan qanday qilinadi?</h3>
-<p>Ko'pincha RO dan keyin suv kalsiy va magniy minerallari bo'lgan kartrij/kolonna orqali o'tkaziladi yoki mineral kontsentrat bilan dozalashtirilgan aralashtiriladi. Natija yakuniy TDS, Ca, Mg va pH bo'yicha kalibrlanadi.</p>
+<p>Ko‘pincha RO dan keyin suv kalsiy va magniy minerallari bo‘lgan kartrij/kolonna orqali o‘tkaziladi yoki mineral kontsentrat bilan dozalashtirilgan aralashtiriladi. Natija yakuniy TDS, Ca, Mg va pH bo‘yicha kalibrlanadi.</p>
 <h3>Maishiy TDS-metr (qalam) bilan TDS ni tekshirish mumkinmi?</h3>
-<p>Mumkin — bu qulay ko'rsatma, lekin u elektr o'tkazuvchanlikni o'lchaydi va uni TDS ga taxminan aylantiradi. Aniq raqamlar laboratoriya tahlili tomonidan beriladi.</p>
+<p>Mumkin — bu qulay ko‘rsatma, lekin u elektr o‘tkazuvchanlikni o‘lchaydi va uni TDS ga taxminan aylantiradi. Aniq raqamlar laboratoriya tahlili tomonidan beriladi.</p>
 <h3>Sifatli ichimlik suvida tipik kalsiy darajasi qanday?</h3>
-<p>Aniq quyi chegara yo'q, lekin ko'plab sharhlarda «bo'sh» bo'lmagan suv belgisi sifatida bir necha o'nlab mg/L mavjudligiga e'tibor beriladi. Aqua Element da kalsiy 10–60 mg/L diapazonida, magniy 7–20 mg/L.</p>
+<p>Aniq quyi chegara yo‘q, lekin ko‘plab sharhlarda «bo‘sh» bo‘lmagan suv belgisi sifatida bir necha o‘nlab mg/L mavjudligiga e’tibor beriladi. Aqua Element da kalsiy 10–60 mg/L diapazonida, magniy 7–20 mg/L.</p>
 <h3>Past natriy miqdori muhimmi?</h3>
 <p>Ha, ayniqsa yuqori arterial bosimga ega odamlar va bolalar uchun. Aqua Element da natriy 5–15 mg/L.</p>
-<h3>Qaynatish suvning TDS sini o'zgartiradimi?</h3>
-<p>Qaynatishning o'zi erigan tuzlarning ko'pini «olib tashlamaydi». Kalsiy va magniyning bir qismi choynak devorlarida quyqa shaklida cho'kishi mumkin (ayniqsa qattiq suvda), lekin asosiy tuz massasi qoladi. Qaynatish birinchi navbatda mikrobiologiyaga qarshi yordam beradi.</p>
+<h3>Qaynatish suvning TDS sini o‘zgartiradimi?</h3>
+<p>Qaynatishning o‘zi erigan tuzlarning ko‘pini «olib tashlamaydi». Kalsiy va magniyning bir qismi choynak devorlarida quyqa shaklida cho‘kishi mumkin (ayniqsa qattiq suvda), lekin asosiy tuz massasi qoladi. Qaynatish birinchi navbatda mikrobiologiyaga qarshi yordam beradi.</p>
 <h3>Artezian suvi oddiy shishadagi suvdan qanday farq qiladi?</h3>
-<p>Artezian suvi suv o'tkazmaydigan qatlamlar bilan himoyalangan bosimli suv qatlamidan qazib olinadi va odatda barqaror, takrorlanadigan profilga ega. «Shishadagi» — bu qadoq toifasi bo'lib, unga artezian, buloq va boshqa manbalardan tayyorlangan suvlar ham kiradi.</p>
-<h3>Aqua Element suvi sifat parametrlarini qayerdan ko'rish mumkin?</h3>
-<p><a href="/quality-standards">«Sifat standartlari»</a> va <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifalarida. Savollaringiz qolsa — <a href="/contact">«Kontaktlar»</a> bo'limi orqali yoki Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> da yozing.</p>
+<p>Artezian suvi suv o‘tkazmaydigan qatlamlar bilan himoyalangan bosimli suv qatlamidan qazib olinadi va odatda barqaror, takrorlanadigan profilga ega. «Shishadagi» — bu qadoq toifasi bo‘lib, unga artezian, buloq va boshqa manbalardan tayyorlangan suvlar ham kiradi.</p>
+<h3>Aqua Element suvi sifat parametrlarini qayerdan ko‘rish mumkin?</h3>
+<p><a href="/quality-standards">«Sifat standartlari»</a> va <a href="/process/11-step-filtration">«11 bosqichli tozalash»</a> sahifalarida. Savollaringiz qolsa — <a href="/contact">«Kontaktlar»</a> bo‘limi orqali yoki Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> da yozing.</p>
 
-<h2>Sinab ko'rishga tayyormisiz?</h2>
-<p>Biz profilini taxmin qilish kerak bo'lmagan suvni ishlab chiqaramiz: raqamlar ochiq, texnologiya tasvirlangan, Toshkent va viloyat bo'ylab yetkazib berish yo'lga qo'yilgan. 18,9 litrlik qaytariladigan idishni yoki 10 litrlik qadoqni <a href="/shop">do'kon</a> sahifasida buyurtma qiling, muntazam yetkazib berish uchun <a href="/subscriptions">obuna</a> rasmiylashtiring yoki tanlov qilishdan oldin <a href="/process/11-step-filtration">11 bosqichli tozalash</a> haqida o'qing.</p>
+<h2>Sinab ko‘rishga tayyormisiz?</h2>
+<p>Biz profilini taxmin qilish kerak bo‘lmagan suvni ishlab chiqaramiz: raqamlar ochiq, texnologiya tasvirlangan, Toshkent va viloyat bo‘ylab yetkazib berish yo‘lga qo‘yilgan. 18,9 litrlik qaytariladigan idishni yoki 10 litrlik qadoqni <a href="/shop">do‘kon</a> sahifasida buyurtma qiling, muntazam yetkazib berish uchun <a href="/subscriptions">obuna</a> rasmiylashtiring yoki tanlov qilishdan oldin <a href="/process/11-step-filtration">11 bosqichli tozalash</a> haqida o‘qing.</p>
 
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "Kundalik ichimlik suvi uchun qaysi TDS mos?", "acceptedAnswer": {"@type": "Answer", "text": "Ko'plab qo'llanmalarda 50–300 mg/L diapazoni qulay deb hisoblanadi. Aqua Element — 30–50 mg/L, past minerallashgan toifa, kundalik katta hajmdagi iste'mol uchun qulay."}},
-    {"@type": "Question", "name": "Nega ba'zi suvlar bo'sh ta'mga ega?", "acceptedAnswer": {"@type": "Answer", "text": "Ko'pincha bu keyingi minerallashishsiz teskari osmosdan keyingi suv yoki distillat: undagi erigan minerallar juda kam, ta'm retseptorlari tayanch nuqtalarini olmaydi."}},
-    {"@type": "Question", "name": "Yuqori pH li suv foydaliroqmi?", "acceptedAnswer": {"@type": "Answer", "text": "Sog'lom odam uchun yuqori pH ning davolovchi ta'siri haqida nufuzli manbalarda dalillar yo'q. 7,3–7,8 — tabiiy mineral suvlar uchun normal diapazon."}},
-    {"@type": "Question", "name": "RO dan keyin minerallashish qanday qilinadi?", "acceptedAnswer": {"@type": "Answer", "text": "Odatda kalsiy va magniy minerallari bilan kartrij/kolonna orqali o'tkaziladi yoki mineral kontsentrat bilan dozalashtirilgan aralashtiriladi, yakuniy TDS, Ca, Mg va pH nazorat qilinadi."}},
-    {"@type": "Question", "name": "Maishiy TDS-metr bilan tekshirish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ko'rsatma sifatida mumkin: u elektr o'tkazuvchanlikni o'lchaydi va TDS ga taxminan aylantiradi. Aniq qiymatlar laboratoriya tahlili tomonidan beriladi."}},
-    {"@type": "Question", "name": "Sifatli suvda tipik kalsiy darajasi?", "acceptedAnswer": {"@type": "Answer", "text": "Aniq chegara yo'q, lekin bir necha o'nlab mg/L mavjudligi yaxshi belgi. Aqua Element da Ca 10–60, Mg 7–20 mg/L."}},
+    {"@type": "Question", "name": "Kundalik ichimlik suvi uchun qaysi TDS mos?", "acceptedAnswer": {"@type": "Answer", "text": "Ko‘plab qo‘llanmalarda 50–300 mg/L diapazoni qulay deb hisoblanadi. Aqua Element — 30–50 mg/L, past minerallashgan toifa, kundalik katta hajmdagi iste’mol uchun qulay."}},
+    {"@type": "Question", "name": "Nega ba’zi suvlar bo‘sh ta’mga ega?", "acceptedAnswer": {"@type": "Answer", "text": "Ko‘pincha bu keyingi minerallashishsiz teskari osmosdan keyingi suv yoki distillat: undagi erigan minerallar juda kam, ta’m retseptorlari tayanch nuqtalarini olmaydi."}},
+    {"@type": "Question", "name": "Yuqori pH li suv foydaliroqmi?", "acceptedAnswer": {"@type": "Answer", "text": "Sog‘lom odam uchun yuqori pH ning davolovchi ta’siri haqida nufuzli manbalarda dalillar yo‘q. 7,3–7,8 — tabiiy mineral suvlar uchun normal diapazon."}},
+    {"@type": "Question", "name": "RO dan keyin minerallashish qanday qilinadi?", "acceptedAnswer": {"@type": "Answer", "text": "Odatda kalsiy va magniy minerallari bilan kartrij/kolonna orqali o‘tkaziladi yoki mineral kontsentrat bilan dozalashtirilgan aralashtiriladi, yakuniy TDS, Ca, Mg va pH nazorat qilinadi."}},
+    {"@type": "Question", "name": "Maishiy TDS-metr bilan tekshirish mumkinmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ko‘rsatma sifatida mumkin: u elektr o‘tkazuvchanlikni o‘lchaydi va TDS ga taxminan aylantiradi. Aniq qiymatlar laboratoriya tahlili tomonidan beriladi."}},
+    {"@type": "Question", "name": "Sifatli suvda tipik kalsiy darajasi?", "acceptedAnswer": {"@type": "Answer", "text": "Aniq chegara yo‘q, lekin bir necha o‘nlab mg/L mavjudligi yaxshi belgi. Aqua Element da Ca 10–60, Mg 7–20 mg/L."}},
     {"@type": "Question", "name": "Past natriy muhimmi?", "acceptedAnswer": {"@type": "Answer", "text": "Ha, ayniqsa yuqori bosimli odamlar va bolalar uchun. Aqua Element da natriy 5–15 mg/L."}},
-    {"@type": "Question", "name": "Qaynatish TDS ni o'zgartiradimi?", "acceptedAnswer": {"@type": "Answer", "text": "O'zi erigan tuzlarning ko'pini olib tashlamaydi: bir qismi quyqa bo'lib cho'kishi mumkin, lekin asosiy massasi qoladi. Qaynatish mikrobiologiyaga qarshi ishlaydi."}}
+    {"@type": "Question", "name": "Qaynatish TDS ni o‘zgartiradimi?", "acceptedAnswer": {"@type": "Answer", "text": "O‘zi erigan tuzlarning ko‘pini olib tashlamaydi: bir qismi quyqa bo‘lib cho‘kishi mumkin, lekin asosiy massasi qoladi. Qaynatish mikrobiologiyaga qarshi ishlaydi."}}
   ]
 }
 </script>

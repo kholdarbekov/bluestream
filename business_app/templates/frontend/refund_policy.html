@@ -1,46 +1,30 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Политика возврата Aqua Element: условия, сроки обращения по проблемам и порядок обработки возврата." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Refund and return policy for Aqua Element: eligibility, issue reporting timelines, and refund processing details." %}
-{% else %}
-{% set meta_description = "Aqua Element refund siyosati: moslik talablari, murojaat muddatlari va qaytarimni korib chiqish tartibi." %}
-{% endif %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import policy_nav, legal_document with context %}
 
-{% block title %}Refund Policy - {{ company_name }}{% endblock %}
+{% set doc_title = 'web.shell.footer.refund_policy'|t %}
+{% set meta_description = 'web.content.refund.meta'|t %}
+
+{% block title %}{{ doc_title }} — {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>Refund Policy</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>Refund Policy</li>
-            </ul>
-        </div>
-    </div>
-</section>
+{% set sections = [
+    {'id': 'eligibility', 'h': 'web.content.refund.s1_h'|t, 'p': ['web.content.refund.s1_p'|t]},
+    {'id': 'report-an-issue', 'h': 'web.content.refund.s2_h'|t, 'p': ['web.content.refund.s2_p'|t]},
+    {'id': 'review', 'h': 'web.content.refund.s3_h'|t, 'p': ['web.content.refund.s3_p'|t]},
+    {'id': 'timing', 'h': 'web.content.refund.s4_h'|t, 'p': ['web.content.refund.s4_p'|t]},
+    {'id': 'contact', 'h': 'web.content.refund.s5_h'|t, 'p': ['web.content.refund.s5_p'|t]},
+] %}
+{{ page_hero(doc_title, [(doc_title, None)]) }}
 
-<section class="service-details">
-    <div class="auto-container">
-        <div class="content-box">
-            <h2>Eligibility</h2>
-            <p>Refund requests may be reviewed for confirmed fulfillment issues such as damaged items, incorrect items, or undelivered orders with valid order records.</p>
-
-            <h2>How to Report an Issue</h2>
-            <p>Customers should report issues as soon as possible after delivery attempt, including order ID, issue details, and supporting photos when relevant.</p>
-
-            <h2>Review and Resolution</h2>
-            <p>Our support and operations teams review each case. Depending on the case, resolution may include replacement, partial refund, or full refund.</p>
-
-            <h2>Refund Timing</h2>
-            <p>Approved refunds are processed through the original payment channel where available. Processing times depend on payment providers and bank settlement timelines.</p>
-
-            <h2>Support Contact</h2>
-            <p>For refund and order support, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or email <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
-        </div>
+<section class="ae-section ct ct--legal">
+    <div class="ae-container">
+        {{ policy_nav('refund') }}
+        {{ legal_document(sections, contact=True) }}
     </div>
 </section>
 {% endblock %}

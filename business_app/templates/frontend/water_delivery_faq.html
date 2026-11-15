@@ -1,57 +1,25 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import policy_nav with context %}
 
+{#- One list feeds the visible accordion, the FAQPage JSON-LD and the Speakable selectors. The offer answers (sizes,
+    minimum, price, deposit) come from build_offer_faq and the same-day answer is the whole delivery statement: both are
+    SSOT and printed as given. -#}
 {% set offer_q = {} %}{% for item in offer_faq %}{% set _ = offer_q.update({item.id: item}) %}{% endfor %}
-{% set same_day_faq = {'q': 'landing.offer.faq.same_day_q'|t, 'a': offer_facts.delivery.statement[current_language]|join(' ')} %}
-{% set empties_faq = {'q': 'landing.offer.faq.empties_q'|t, 'a': 'landing.offer.own_bottles'|t} %}
+{% set faq_items = [
+    {'q': 'landing.offer.faq.same_day_q'|t, 'a': offer_facts.delivery.statement[current_language]|join(' ')},
+    offer_q.get('sizes'),
+    offer_q.get('minimum'),
+    {'q': 'web.content.faq.recurring_q'|t, 'a': 'web.content.faq.recurring_a'|t},
+    offer_q.get('price'),
+    offer_q.get('deposit'),
+    {'q': 'landing.offer.faq.empties_q'|t, 'a': 'landing.offer.own_bottles'|t},
+    {'q': 'web.content.faq.delayed_q'|t, 'a': 'landing.faq.delayed_a'|t},
+]|select|list %}
+{% set faq_page_title = 'web.content.faq.title'|t %}
+{% set meta_description = 'web.content.faq.meta'|t %}
 
-{% if current_language == 'ru' %}
-    {% set meta_description = "FAQ по доставке воды Aqua Element: сроки, минимальный заказ, цены, подписки и поддержка." %}
-    {% set faq_page_title = "FAQ по доставке воды" %}
-    {% set faq_heading = "Частые вопросы о доставке и заказах" %}
-    {% set faq_intro = "Здесь собраны ответы на частые вопросы по доставке, ценам и подпискам перед оформлением заказа." %}
-    {% set faq_items = [
-        same_day_faq,
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        {'q': 'Можно ли оформить регулярную доставку?', 'a': 'Да, через страницу подписок можно настроить повторяющиеся поставки и изменить их в личном кабинете.'},
-        offer_q.get('price'),
-        offer_q.get('deposit'),
-        empties_faq,
-        {'q': 'Что делать, если заказ задерживается?', 'a': 'landing.faq.delayed_a'|t}
-    ]|select|list %}
-{% elif current_language == 'en' %}
-    {% set meta_description = "Water delivery FAQ from Aqua Element: delivery timing, order minimums, pricing, subscriptions, and support answers." %}
-    {% set faq_page_title = "Water Delivery FAQ" %}
-    {% set faq_heading = "Common Questions About Delivery and Orders" %}
-    {% set faq_intro = "These answers cover the most frequent delivery, pricing, and subscription questions customers ask before ordering." %}
-    {% set faq_items = [
-        same_day_faq,
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        {'q': 'Can I set recurring deliveries?', 'a': 'Yes. Use the subscriptions page to configure recurring deliveries and adjust them in your account.'},
-        offer_q.get('price'),
-        offer_q.get('deposit'),
-        empties_faq,
-        {'q': 'What if my order is delayed?', 'a': 'landing.faq.delayed_a'|t}
-    ]|select|list %}
-{% else %}
-    {% set meta_description = "Aqua Element suv yetkazib berish FAQ: muddatlar, minimal buyurtma, narxlar, obunalar va yordam javoblari." %}
-    {% set faq_page_title = "Suv Yetkazib Berish FAQ" %}
-    {% set faq_heading = "Yetkazib berish va buyurtmalar bo'yicha ko'p so'raladigan savollar" %}
-    {% set faq_intro = "Quyida buyurtma berishdan oldin mijozlar eng ko'p so'raydigan yetkazib berish, narx va obuna savollariga javoblar jamlangan." %}
-    {% set faq_items = [
-        same_day_faq,
-        offer_q.get('sizes'),
-        offer_q.get('minimum'),
-        {'q': 'Muntazam yetkazib berish buyurtmasini sozlash mumkinmi?', 'a': 'Ha, obuna sahifasi orqali muntazam yetkazib berishni sozlab, kabinetda boshqarish mumkin.'},
-        offer_q.get('price'),
-        offer_q.get('deposit'),
-        empties_faq,
-        {'q': 'Buyurtma kechiksa nima qilish kerak?', 'a': 'landing.faq.delayed_a'|t}
-    ]|select|list %}
-{% endif %}
-
-{% block title %}{{ faq_page_title }} - {{ company_name }}{% endblock %}
+{% block title %}{{ faq_page_title }} — {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
 {% set faq_schema = namespace(items=[]) %}
@@ -91,78 +59,51 @@
 {% endblock %}
 
 {% block extra_head %}
-<style>
-.shop-seo-content {
-    padding: 80px 0 120px;
-}
-
-.shop-seo-content .seo-card {
-    background: #fff;
-    border-radius: 16px;
-    padding: 32px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
-}
-
-.shop-seo-content h2 {
-    font-size: 30px;
-    margin-bottom: 16px;
-}
-
-.shop-seo-content p {
-    margin-bottom: 18px;
-    color: #5b5b5b;
-}
-
-.shop-faq-list {
-    margin: 26px 0 0;
-    padding: 0;
-    list-style: none;
-}
-
-.shop-faq-list li + li {
-    margin-top: 18px;
-}
-
-.shop-faq-list h3 {
-    font-size: 19px;
-    margin-bottom: 8px;
-}
-
-.shop-faq-list p {
-    margin: 0;
-}
-</style>
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ faq_page_title }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>{{ faq_page_title }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
+{{ page_hero(faq_page_title, [(faq_page_title, None)], 'web.content.faq.lead'|t) }}
 
-<section class="shop-seo-content">
-    <div class="auto-container">
-        <div class="seo-card">
-            <h2>{{ faq_heading }}</h2>
-            <p>{{ faq_intro }}</p>
-            <ul class="shop-faq-list">
-                {% for faq in faq_items %}
+<section class="ae-section ct ct--faq">
+    <div class="ae-container">
+    {#- The same policy row as the delivery, pricing, refund, terms and privacy pages, with the FAQ marked. -#}
+    {{ policy_nav('faq') }}
+    <div class="ct-faq">
+        <div class="ct-faq__main">
+            <h2 class="visually-hidden">{{ 'web.shell.nav.faq'|t }}</h2>
+            {#- Native <details>: no script, no theme accordion classes (the theme binds .accordion-box .acc-btn), so
+                nothing toggles an item twice. `name` keeps one answer open where the browser supports it. Each li
+                keeps h3 (question) then p (answer): the tests, Speakable and the JSON-LD read that pair. -#}
+            <ul class="shop-faq-list ae-faq">
+                {%- for faq in faq_items %}
                 <li>
-                    <h3>{{ faq.q }}</h3>
-                    <p>{{ faq.a }}</p>
+                    <details class="ae-faq__item" name="ct-faq"{% if loop.first %} open{% endif %}>
+                        <summary class="ae-faq__q"><h3>{{ faq.q }}</h3></summary>
+                        <div class="ae-faq__a"><p>{{ faq.a }}</p></div>
+                    </details>
                 </li>
-                {% endfor %}
+                {%- endfor %}
             </ul>
-            <p style="margin-top: 26px;"><a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.faq.help'|t }}</a></p>
         </div>
+
+        <aside class="ct-faq__aside" aria-labelledby="ct-faq-aside-title">
+            <div class="ae-panel ct-faq__panel">
+                <h2 class="ct-faq__aside-title" id="ct-faq-aside-title">{{ 'web.content.faq.aside_title'|t }}</h2>
+                <ul class="ct-faq__links">
+                    <li><a href="{{ external_url_for_lang('frontend.delivery_policy') }}"><i class="far fa-truck" aria-hidden="true"></i>{{ 'web.shell.footer.delivery_policy'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.coverage') }}"><i class="far fa-map-marked-alt" aria-hidden="true"></i>{{ 'landing.nav.coverage'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.pricing_policy') }}"><i class="far fa-tag" aria-hidden="true"></i>{{ 'landing.pricing_policy.title'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.subscriptions') }}"><i class="far fa-redo-alt" aria-hidden="true"></i>{{ 'landing.nav.subscriptions'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.loyalty_guide') }}"><i class="far fa-medal" aria-hidden="true"></i>{{ 'landing.nav.aqua_club'|t }}</a></li>
+                </ul>
+                <div class="ct-help ct-help--stack">
+                    <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+                    <a class="ct-help__link" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.faq.help'|t }}</a>
+                </div>
+            </div>
+        </aside>
+    </div>
     </div>
 </section>
 {% endblock %}

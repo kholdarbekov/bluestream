@@ -1,8 +1,9 @@
 {
  "_comment": "Written by tests/integration/test_web_subscription_builder_contract.py: the data island `#subscription-constructor-data` the home page renders per language. Regenerate with UPDATE_WEB_SUBSCRIPTION_FIXTURES=1.",
  "en": {
+  "addresses_url": "/addresses",
   "frequency_names": {
-   "biweekly": "Bi-Weekly",
+   "biweekly": "Every two weeks",
    "daily": "Daily",
    "monthly": "Monthly",
    "weekly": "Weekly"
@@ -51,6 +52,26 @@
    "select_day_of_month": "Please select a day of the month",
    "select_time_slot": "Select a time slot"
   },
+  "method_labels": {
+   "business_account": "Bank transfer",
+   "cash": "Cash",
+   "click": "Click"
+  },
+  "method_notes": {
+   "business_account": "From your company’s prepaid balance",
+   "cash": "Pay the courier on delivery",
+   "click": "Click wallet or a linked card"
+  },
+  "sign_in_url": "/login?next=/%23subscription-constructor",
+  "ui": {
+   "catalog_failed": "We couldn’t load the water list. Check your connection and try again.",
+   "fewer": "Fewer",
+   "min_quantity": "from {count} pcs",
+   "more": "More",
+   "quantity": "Quantity",
+   "retry": "Try again",
+   "step_of": "Step {current} of {total}"
+  },
   "weekday_names": [
    "Monday",
    "Tuesday",
@@ -62,6 +83,7 @@
   ]
  },
  "ru": {
+  "addresses_url": "/addresses",
   "frequency_names": {
    "biweekly": "Раз в две недели",
    "daily": "Ежедневно",
@@ -110,7 +132,27 @@
    "review_schedule_title": "График доставки",
    "review_time": "Время доставки",
    "select_day_of_month": "Пожалуйста, выберите день месяца",
-   "select_time_slot": "Выберите временной интервал"
+   "select_time_slot": "Выберите время"
+  },
+  "method_labels": {
+   "business_account": "Банковский перевод",
+   "cash": "Наличные",
+   "click": "Click"
+  },
+  "method_notes": {
+   "business_account": "С предоплаченного баланса компании",
+   "cash": "Курьеру при доставке",
+   "click": "Кошелёк Click или привязанная карта"
+  },
+  "sign_in_url": "/login?next=/%23subscription-constructor",
+  "ui": {
+   "catalog_failed": "Не удалось загрузить список воды. Проверьте подключение и попробуйте ещё раз.",
+   "fewer": "Меньше",
+   "min_quantity": "от {count} шт.",
+   "more": "Больше",
+   "quantity": "Количество",
+   "retry": "Попробовать ещё раз",
+   "step_of": "Шаг {current} из {total}"
   },
   "weekday_names": [
    "понедельник",
@@ -123,6 +165,7 @@
   ]
  },
  "uz": {
+  "addresses_url": "/addresses",
   "frequency_names": {
    "biweekly": "Ikki haftada bir marta",
    "daily": "Har kuni",
@@ -130,39 +173,39 @@
    "weekly": "Haftalik"
   },
   "i18n": {
-   "address_add": "Yangi manzil qo'shish",
-   "address_add_elsewhere": "Yangi manzilni «Manzillarim» bo'limida qo'shing, so'ng shu yerga qayting.",
+   "address_add": "Yangi manzil qo‘shish",
+   "address_add_elsewhere": "Yangi manzilni «Manzillarim» bo‘limida qo‘shing, so‘ng shu yerga qayting.",
    "address_apartment": "{number}-xonadon",
-   "address_none_body": "Davom etish uchun yetkazib berish manzilini qo'shing.",
-   "address_none_title": "Hozircha manzillar yo'q",
+   "address_none_body": "Davom etish uchun yetkazib berish manzilini qo‘shing.",
+   "address_none_title": "Hozircha manzillar yo‘q",
    "any_time": "Istalgan vaqtda",
    "created": "Obunangiz rasmiylashtirildi.",
    "day_of_month": "Oyning {day}-kuni",
    "error_address": "Yetkazib berish manzilini tanlang.",
-   "error_create_failed": "Obunangizni rasmiylashtirib bo'lmadi. Qayta urinib ko'ring.",
+   "error_create_failed": "Obunangizni rasmiylashtirib bo‘lmadi. Qayta urinib ko‘ring.",
    "error_day": "Yetkazib berish kunini tanlang.",
    "error_frequency": "Qanchalik tez-tez yetkazib berishimizni tanlang.",
-   "error_load_failed": "Obuna konstruktorini yuklab bo'lmadi. Sahifani yangilang.",
-   "error_methods_failed": "To'lov usullarini yuklab bo'lmadi. Qayta urinib ko'ring.",
-   "error_payment": "Qanday to'lashingizni tanlang.",
+   "error_load_failed": "Obuna konstruktorini yuklab bo‘lmadi. Sahifani yangilang.",
+   "error_methods_failed": "To‘lov usullarini yuklab bo‘lmadi. Qayta urinib ko‘ring.",
+   "error_payment": "Qanday to‘lashingizni tanlang.",
    "error_products": "Kamida bitta mahsulotni tanlang.",
    "error_sign_in": "Davom etish uchun tizimga kiring.",
-   "error_slots_failed": "Yetkazib berish vaqtlarini yuklab bo'lmadi. Qayta urinib ko'ring.",
+   "error_slots_failed": "Yetkazib berish vaqtlarini yuklab bo‘lmadi. Qayta urinib ko‘ring.",
    "error_time": "Yetkazib berish vaqtini yoki «Istalgan vaqtda»ni tanlang.",
    "name_default": "Mening obunam",
    "name_more": "va yana {count} ta",
    "name_to": "{place} manziliga",
-   "preview_after_sign_in": "Tizimga kirganingizdan so'ng ko'rsatiladi",
+   "preview_after_sign_in": "Tizimga kirganingizdan so‘ng ko‘rsatiladi",
    "review_address_title": "Yetkazib berish manzili",
    "review_cost_title": "Umumiy narx",
    "review_day": "Yetkazib berish kuni",
    "review_frequency": "Qanchalik tez-tez",
-   "review_name_hint": "Tanlovlaringiz asosida nom taklif qildik. Uni o'zgartirishingiz mumkin.",
+   "review_name_hint": "Tanlovlaringiz asosida nom taklif qildik. Uni o‘zgartirishingiz mumkin.",
    "review_name_label": "Obunangizga tanish nom bering",
    "review_name_placeholder": "Masalan: Uy uchun suv",
    "review_name_title": "Obuna nomi",
-   "review_note": "Obunangiz tasdiqlaganingizdan so'ng boshlanadi. Uni istalgan vaqtda «Obunalarim» bo'limida o'zgartirishingiz, to'xtatib turishingiz yoki bekor qilishingiz mumkin.",
-   "review_payment_title": "To'lov usuli",
+   "review_note": "Obunangiz tasdiqlaganingizdan so‘ng boshlanadi. Uni istalgan vaqtda «Obunalarim» bo‘limida o‘zgartirishingiz, to‘xtatib turishingiz yoki bekor qilishingiz mumkin.",
+   "review_payment_title": "To‘lov usuli",
    "review_per_delivery": "Har bir yetkazib berish uchun",
    "review_per_delivery_hint": "Bitta yetkazib berish",
    "review_per_month": "Taxminan bir oy uchun",
@@ -171,7 +214,27 @@
    "review_schedule_title": "Yetkazib berish jadvali",
    "review_time": "Yetkazib berish vaqti",
    "select_day_of_month": "Iltimos, oyning kunini tanlang",
-   "select_time_slot": "Vaqt oralig'ini tanlang"
+   "select_time_slot": "Vaqt oralig‘ini tanlang"
+  },
+  "method_labels": {
+   "business_account": "Bank o‘tkazmasi",
+   "cash": "Naqd pul",
+   "click": "Click"
+  },
+  "method_notes": {
+   "business_account": "Kompaniyaning oldindan to‘langan balansidan",
+   "cash": "Yetkazib berishda kuryerga",
+   "click": "Click hamyoni yoki ulangan karta"
+  },
+  "sign_in_url": "/login?next=/%23subscription-constructor",
+  "ui": {
+   "catalog_failed": "Suvlar ro‘yxatini yuklab bo‘lmadi. Internet aloqasini tekshirib, qaytadan urinib ko‘ring.",
+   "fewer": "Kamroq",
+   "min_quantity": "{count} donadan",
+   "more": "Ko‘proq",
+   "quantity": "Soni",
+   "retry": "Qaytadan urinish",
+   "step_of": "{total} qadamdan {current}-qadam"
   },
   "weekday_names": [
    "dushanba",

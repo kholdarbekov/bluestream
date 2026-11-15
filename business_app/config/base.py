@@ -517,8 +517,10 @@ class BaseConfig:
     COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "UZ")
     COMPANY_GEO_LATITUDE = os.environ.get("COMPANY_GEO_LATITUDE", "")  # e.g. "41.2995"
     COMPANY_GEO_LONGITUDE = os.environ.get("COMPANY_GEO_LONGITUDE", "")  # e.g. "69.2401"
-    # Opening hours in schema.org day-time spec format. Comma-separated for
-    # multiple specs. Example: "Mo-Sa 09:00-21:00,Su 10:00-18:00".
+    # The OFFICE's opening hours (owner, 2026-11-14: Mon–Sat 9–18), in schema.org openingHours text: specs
+    # "<Mo|Mo-Sa|Tu,Th> HH:MM-HH:MM", comma-separated, e.g. "Mo-Sa 09:00-18:00" or "Mo-Fr 09:00-18:00,Sa 10:00-16:00".
+    # ONE value: the Store JSON-LD publishes it and the footer and /contact print it localized
+    # (business_app/utils/opening_hours.py). Unset or unreadable: neither prints anything. Not the delivery hours.
     COMPANY_OPENING_HOURS = os.environ.get("COMPANY_OPENING_HOURS", "")
     # External brand-identity links — Wikidata is the single highest-leverage
     # GEO signal. Fill once Milestone 3 (off-site authority) is shipped.

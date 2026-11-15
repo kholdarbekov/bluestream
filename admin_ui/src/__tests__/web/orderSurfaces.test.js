@@ -25,6 +25,8 @@ const BASE_SCRIPTS = [
   'business_app/static/js/bootstrap.min.js',
   'business_app/static/js/pages/_page-data.js',
   'business_app/static/js/pages/base.js',
+  // partials/order_detail_modal.html loads map-helper.js (AEMap, the vendored Leaflet loader) before the modal script.
+  'business_app/static/js/map-helper.js',
   'business_app/static/js/pages/order-actions.js',
 ].map(read);
 const MODAL_SCRIPT = read('business_app/static/js/pages/order-detail-modal.js');
@@ -57,8 +59,12 @@ const escapeJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // The page the fixture's language renders, its fetch answering from the case, and the scripts loaded as the
 // page loads them. `writes` are the exchanges (by name) the script is allowed to send, in order.
-async function boot(kind, name, { writes = [], intervals = false, pending = false, holdReorderToast = false } = {}) {
+async function boot(kind, name, {
+  writes = [], intervals = false, pending = false, holdReorderToast = false, url = null, now = null, prepare = null,
+} = {}) {
   const fixture = loadCase(name);
+  // A test may add answers (or change recorded ones) before the scripts read anything.
+  if (prepare) prepare(fixture);
   const shell = SHELL[fixture.language];
   const base = { api_base_url: '/api/v1', current_user: null, is_authenticated: false, login_url: '/login', i18n: {} };
   let island = shell[kind === 'tracking' ? 'tracking' : 'orders'].island;
@@ -77,7 +83,7 @@ async function boot(kind, name, { writes = [], intervals = false, pending = fals
     `<script type="application/json" id="base-page-data">${escapeJson(base)}</script>${body}` +
     `<script type="application/json" id="page-data">${escapeJson(island)}</script></body></html>`,
     {
-      url: kind === 'tracking' ? 'http://localhost/order-tracking?order_id=1' : 'http://localhost/my-orders',
+      url: url || (kind === 'tracking' ? 'http://localhost/order-tracking?order_id=1' : 'http://localhost/my-orders'),
       runScripts: 'outside-only',
       pretendToBeVisual: true,
       virtualConsole,
@@ -109,7 +115,13 @@ async function boot(kind, name, { writes = [], intervals = false, pending = fals
     if (pending && method !== 'GET') return new Promise(() => {});
     return Promise.resolve({ ok: answer.status < 400, status: answer.status, json: async () => JSON.parse(JSON.stringify(answer.body)) });
   };
-  window.L = { map: () => ({ setView: () => ({}), remove() {}, invalidateSize() {} }), tileLayer: () => ({ addTo() {} }), marker: () => ({ addTo: () => ({ bindPopup: () => ({ openPopup() {} }) }) }) };
+  window.L = {
+    map: () => ({ setView: () => ({}), remove() {}, invalidateSize() {} }),
+    tileLayer: () => ({ addTo() {} }),
+    marker: () => ({ addTo: () => ({ bindPopup: () => ({ openPopup() {} }) }) }),
+    control: { zoom: () => ({ addTo() {} }) },
+  };
+  if (now !== null) window.Date.now = () => now;
   ['confirm', 'prompt', 'alert'].forEach((dialog) => {
     window[dialog] = () => { throw new Error(`native ${dialog}() is never used`); };
   });
@@ -427,7 +439,9 @@ describe('the other two surfaces draw the same answer', () => {
     expect(page.$1('#orderDetailModal').classList.contains('show')).toBe(true);
     const inModal = page.$1('#orderDetailActions');
     expect(labels(inModal)).toEqual(labels(actionsOf(page)));
-    expect(page.$$('.btn-sm', page.$1('#orderDetailModal'))).toHaveLength(0);
+    expect(page.$$('.ae-btn--sm', page.$1('#orderDetailModal'))).toHaveLength(0);
+    // Track order: the order's own page, on the route the server published (track_url).
+    expect(page.$1('#orderTrackLink').getAttribute('href')).toBe('/order-tracking?order_id=1');
     await press(page, page.$1('[data-order-action="pay"]', inModal));
     expect(page.mismatches).toEqual([]);
     expect(page.window.OrderActions.navigate).toHaveBeenCalledWith(CLICK_URL);
@@ -508,7 +522,7 @@ describe('Reorder fills the cart through POST /cart/fill-from-order/<id>, as the
     expect(squash(page.$1('[data-action="reorder"]', card(page)).textContent)).toBe(reorder.label);
     await press(page, page.$1('[data-action="show-order-detail"][data-stop-propagation="1"]'));
     const modalButton = page.$1('#reorderBtn');
-    expect(modalButton.style.display).toBe('inline-block');
+    expect(modalButton.style.display).toBe('inline-flex'); // shown (an .ae-btn is a flex row: icon + label)
     expect(squash(modalButton.textContent)).toBe(reorder.label);
   });
 
@@ -633,4 +647,274 @@ describe('the scripts hold no rule of their own', () => {
       expect(code(source)).not.toMatch(/status\s*===?\s*'delivered'/);
     },
   );
+});
+
+// ------------------------------------------------------------------ My orders: the pager and the filters
+// Owner decision 4 (2026-11-13): the pages after the tenth order are reachable and the filters work. GET /orders
+// publishes {page, pages, per_page, total} and honours `status` and `start_date` (the period); the endpoint side, with
+// these exact queries, is tests/integration/test_web_cabinet_orders.py. Here: the shipped orders.js sends exactly
+// those queries and draws what the answer says. The answers are the case's recorded list answer, with only the
+// paging numbers (and, for the filtered read, the rows) changed.
+
+describe('My orders pages and filters through GET /orders', () => {
+  const listAnswer = (page, { pageNo = 1, pages = 3, total = 23, orders } = {}) => {
+    const answer = JSON.parse(JSON.stringify(page.fixture.requests[LIST]));
+    answer.body.data.pagination = {
+      ...answer.body.data.pagination, page: pageNo, pages, total, has_prev: pageNo > 1, has_next: pageNo < pages,
+    };
+    if (orders) answer.body.data.orders = orders;
+    return answer;
+  };
+  const listReads = (page) => page.requests
+    .filter((r) => r.method === 'GET' && r.url.startsWith('/api/v1/orders?'))
+    .map((r) => r.url);
+  const choose = async (page, id, value) => {
+    const select = page.$1('#' + id);
+    select.value = value;
+    select.dispatchEvent(new page.window.Event('change', { bubbles: true }));
+    await settle(page.window);
+  };
+  const reload = async (page) => {
+    page.document.dispatchEvent(new page.window.CustomEvent('orders:changed'));
+    await settle(page.window);
+  };
+
+  it('draws the pager from pages/page/total and reads the page clicked', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    expect(page.$1('#paginationSection').hidden).toBe(true); // one page: no pager
+    page.fixture.requests[LIST] = listAnswer(page);
+    page.fixture.requests['GET /api/v1/orders?page=2&per_page=10'] = listAnswer(page, { pageNo: 2 });
+    await reload(page);
+
+    expect(page.$1('#paginationSection').hidden).toBe(false);
+    expect(page.$$('#ordersPagination [data-page]').map((a) => a.dataset.page)).toEqual(['2', '3', '2']); // 2, 3, next
+    expect(squash(page.$1('#ordersPagination [aria-current="page"]').textContent)).toBe('1');
+    expect(page.$1('#ordersPageInfo').textContent).toBe('Showing 1–10 of 23');
+
+    await press(page, page.$1('#ordersPagination a[data-page="2"]'));
+
+    expect(listReads(page).at(-1)).toBe('/api/v1/orders?page=2&per_page=10');
+    expect(squash(page.$1('#ordersPagination [aria-current="page"]').textContent)).toBe('2');
+    expect(page.$1('#ordersPageInfo').textContent).toBe('Showing 11–20 of 23');
+  });
+
+  it('sends the status and the period as status and start_date, and offers a reset when nothing matches', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    page.window.Date.now = () => Date.UTC(2026, 10, 14, 9, 30, 15, 250);
+    const status = '/api/v1/orders?page=1&per_page=10&status=delivered';
+    const both = status + '&start_date=2026-11-07T09%3A30%3A15%2B00%3A00';
+    page.fixture.requests['GET ' + status] = listAnswer(page, { pages: 1, total: 1 });
+    page.fixture.requests['GET ' + both] = listAnswer(page, { pages: 0, total: 0, orders: [] });
+
+    await choose(page, 'statusFilter', 'delivered');
+    expect(listReads(page).at(-1)).toBe(status);
+    expect(page.$$('.order-card')).toHaveLength(1);
+
+    await choose(page, 'dateFilter', '7');
+    expect(listReads(page).at(-1)).toBe(both);
+    expect(page.$$('.order-card')).toHaveLength(0);
+    expect(page.$1('#emptyState').hidden).toBe(false);
+    expect(page.$1('#emptyState [data-empty="filtered"]').hidden).toBe(false);
+    expect(page.$1('#emptyState [data-empty="first"]').hidden).toBe(true);
+    expect(page.$1('#paginationSection').hidden).toBe(true);
+
+    await press(page, page.$1('#emptyState [data-action="reset-filters"]'));
+    expect(listReads(page).at(-1)).toBe('/api/v1/orders?page=1&per_page=10');
+    expect([page.$1('#statusFilter').value, page.$1('#dateFilter').value]).toEqual(['', '']);
+    expect(page.$$('.order-card')).toHaveLength(1);
+  });
+
+  it('a failed read leaves only the failed state, and Try again asks for the same page again', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    page.fixture.requests[LIST] = listAnswer(page);
+    await reload(page);
+
+    await press(page, page.$1('#ordersPagination a[data-page="3"]')); // no answer recorded: the read fails
+    expect(page.$$('.order-card')).toHaveLength(0);
+    expect(page.$1('#paginationSection').hidden).toBe(true);
+    expect(page.$1('#emptyState [data-empty="failed"]').hidden).toBe(false);
+    expect(toasts(page)).toEqual([]); // the failed state says it; no toast on top
+
+    page.fixture.requests['GET /api/v1/orders?page=3&per_page=10'] = listAnswer(page, { pageNo: 3 });
+    await press(page, page.$1('#emptyState [data-action="retry-orders"]'));
+    expect(listReads(page).at(-1)).toBe('/api/v1/orders?page=3&per_page=10');
+    expect(page.$1('#ordersPageInfo').textContent).toBe('Showing 21–23 of 23');
+  });
+
+  it('a card names its address with the published delivery_address_label', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    const order = page.fixture.requests[LIST].body.data.orders[0];
+    expect(order.delivery_address_label).toBeTruthy();
+    expect(squash(page.$1('.ae-order__addr', card(page)).textContent)).toBe(order.delivery_address_label);
+  });
+});
+
+// ------------------------------------------------------------------ review CAB-R07/R20/R06/R05/R19/R04/R16 (2026-11-14)
+
+// eslint-disable-next-line security/detect-non-literal-fs-filename
+const PERIODS = JSON.parse(fs.readFileSync(path.join(REPO, 'tests/fixtures/web_cabinet_orders/period_queries.json'), 'utf8'));
+const PERIOD_NOW = Date.parse(PERIODS.now);
+const pagedAnswer = (fixture, { pageNo = 1, pages = 3, total = 23, orders } = {}) => {
+  const answer = JSON.parse(JSON.stringify(fixture.requests[LIST]));
+  answer.body.data.pagination = {
+    ...answer.body.data.pagination, page: pageNo, pages, total, has_prev: pageNo > 1, has_next: pageNo < pages,
+  };
+  if (orders) answer.body.data.orders = orders;
+  return answer;
+};
+const orderReads = (page) => page.requests
+  .filter((r) => r.method === 'GET' && r.url.startsWith('/api/v1/orders?'))
+  .map((r) => r.url);
+const pick = async (page, id, value) => {
+  const select = page.$1('#' + id);
+  select.value = value;
+  select.dispatchEvent(new page.window.Event('change', { bubbles: true }));
+  await settle(page.window);
+};
+const wait = (page, ms) => new Promise((resolve) => page.window.setTimeout(resolve, ms));
+
+describe('every period sends the query recorded in tests/fixtures/web_cabinet_orders (the endpoint test sends the same)', () => {
+  it.each(Object.keys(PERIODS.periods))('period %s', async (days) => {
+    const page = await boot('orders', 'click_unpaid', { now: PERIOD_NOW });
+    await pick(page, 'dateFilter', days);
+    expect(orderReads(page).at(-1)).toBe('/api/v1/orders?' + PERIODS.periods[days]);
+  });
+
+  it.each([['status_and_period'], ['status_and_period_empty']])('%s', async (name) => {
+    const { status, period, query } = PERIODS[name];
+    const page = await boot('orders', 'click_unpaid', { now: PERIOD_NOW });
+    await pick(page, 'statusFilter', status);
+    await pick(page, 'dateFilter', period);
+    expect(orderReads(page).at(-1)).toBe('/api/v1/orders?' + query);
+  });
+});
+
+describe('the list lives in the address: ?page, ?status and ?period (review CAB-R07)', () => {
+  const START = PERIODS.periods['7'].split('&').find((part) => part.startsWith('start_date='));
+  const PAGE2 = '/api/v1/orders?page=2&per_page=10&status=delivered&' + START;
+  const PAGE3 = '/api/v1/orders?page=3&per_page=10&status=delivered&' + START;
+  const open = () => boot('orders', 'click_unpaid', {
+    url: 'http://localhost/my-orders?status=delivered&period=7&page=2&lang=ru',
+    now: PERIOD_NOW,
+    prepare: (fixture) => {
+      fixture.requests['GET ' + PAGE2] = pagedAnswer(fixture, { pageNo: 2 });
+      fixture.requests['GET ' + PAGE3] = pagedAnswer(fixture, { pageNo: 3 });
+    },
+  });
+
+  it('a reload or a link opened in a new tab shows the page and the filters the address names', async () => {
+    const page = await open();
+    expect(orderReads(page)).toEqual([PAGE2]);
+    expect([page.$1('#statusFilter').value, page.$1('#dateFilter').value]).toEqual(['delivered', '7']);
+    expect(squash(page.$1('#ordersPagination [aria-current="page"]').textContent)).toBe('2');
+    // Each pager link is the true address of its page: the filters kept, page 1 without ?page.
+    expect(page.$$('#ordersPagination a[data-page]').map((a) => [a.dataset.page, a.getAttribute('href')])).toEqual([
+      ['1', '/my-orders?status=delivered&period=7&lang=ru'],
+      ['1', '/my-orders?status=delivered&period=7&lang=ru'],
+      ['3', '/my-orders?status=delivered&period=7&page=3&lang=ru'],
+      ['3', '/my-orders?status=delivered&period=7&page=3&lang=ru'],
+    ]);
+  });
+
+  it('a pager click and a filter change write the address; Back shows the page before', async () => {
+    const page = await open();
+    await press(page, page.$1('#ordersPagination a[data-page="3"]'));
+    expect(page.window.location.search).toBe('?status=delivered&period=7&page=3&lang=ru');
+    expect(orderReads(page).at(-1)).toBe(PAGE3);
+
+    page.window.history.back();
+    await wait(page, 20);
+    await settle(page.window);
+    expect(page.window.location.search).toBe('?status=delivered&period=7&page=2&lang=ru');
+    expect(orderReads(page).at(-1)).toBe(PAGE2);
+
+    await pick(page, 'statusFilter', '');
+    expect(page.window.location.search).toBe('?period=7&lang=ru'); // a new filter starts at page 1
+  });
+
+  it('a status the select does not offer is ignored', async () => {
+    const page = await boot('orders', 'click_unpaid', { url: 'http://localhost/my-orders?status=bogus' });
+    expect(page.$1('#statusFilter').value).toBe('');
+    expect(orderReads(page)).toEqual(['/api/v1/orders?page=1&per_page=10']);
+  });
+});
+
+describe('the order modal (review CAB-R06, R05, R19, R04, R16)', () => {
+  const details = (page) => page.$1('button[data-action="show-order-detail"][data-stop-propagation="1"]');
+  const close = async (page) => {
+    page.window.$('#orderDetailModal').modal('hide');
+    await wait(page, 20);
+    await settle(page.window);
+  };
+
+  it('closing it returns focus to the Details button that opened it', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    details(page).focus();
+    await press(page, details(page));
+    expect(page.$1('#orderDetailModal').classList.contains('show')).toBe(true);
+    await close(page);
+    expect(page.document.activeElement).toBe(details(page));
+  });
+
+  it('a card opened by a tap on its text gives focus to its Details button', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    await press(page, page.$1('.order-card .ae-order__items'));
+    expect(page.$1('#orderDetailModal').classList.contains('show')).toBe(true);
+    await close(page);
+    expect(page.document.activeElement).toBe(details(page));
+  });
+
+  it('prints the district by its published name, and an order from an earlier year with its year', async () => {
+    const page = await boot('orders', 'click_unpaid', {
+      prepare: (fixture) => {
+        const order = fixture.requests[detailKey(fixture.order_id)].body.data.order;
+        order.delivery_address.district = 'shaykhontohur';
+        order.delivery_address_district_label = 'Shaykhontohur';
+        order.created_at = '2025-09-30T07:15:00+00:00';
+      },
+    });
+    await press(page, details(page));
+    const address = squash(page.$1('.ae-od__address').textContent);
+    expect(address).toContain(page.shell.modal.island.i18n.district + ': Shaykhontohur');
+    expect(address).not.toContain('shaykhontohur');
+    const placed = squash(page.$1('.ae-od__placed').textContent);
+    expect(placed).toContain('2025');
+    expect(placed).toContain(page.window.AE.formatDate('2025-09-30T07:15:00+00:00'));
+  });
+
+  it('an order from this year keeps the backend label (weekday, day and month)', async () => {
+    const thisYear = new Date().toISOString();
+    const page = await boot('orders', 'click_unpaid', {
+      prepare: (fixture) => {
+        const answer = fixture.requests[detailKey(fixture.order_id)].body.data;
+        answer.order.created_at = thisYear;
+        answer.labels.placed_on = 'Wednesday, 28 October';
+      },
+    });
+    await press(page, details(page));
+    expect(squash(page.$1('.ae-od__placed').textContent))
+      .toBe(page.shell.modal.island.i18n.placed_on.replace('{date}', 'Wednesday, 28 October'));
+  });
+
+  it('draws the map with the vendored Leaflet (AEMap) and zoom buttons in the page language', async () => {
+    const page = await boot('orders', 'click_unpaid');
+    const seen = { load: [], zoom: [], popup: [] };
+    const L = {
+      map: (el, options) => ({ el, options, setView() {}, remove() {}, invalidateSize() {} }),
+      tileLayer: () => ({ addTo() {} }),
+      marker: () => ({ addTo: () => ({ bindPopup: (html, options) => { seen.popup.push(options); return { openPopup() {} }; } }) }),
+      control: { zoom: (options) => { seen.zoom.push(options); return { addTo() {} }; } },
+    };
+    page.window.AEMap = { load: (assets) => { seen.load.push(assets); return Promise.resolve(L); } };
+    page.window.L = L;
+    await press(page, details(page));
+    await wait(page, 350);
+    const island = page.shell.modal.island;
+    expect(seen.load).toEqual([island.leaflet]);
+    expect(island.leaflet.js).toBe('/static/vendor/leaflet/leaflet.js');
+    expect(seen.zoom).toEqual([{ zoomInTitle: island.i18n.zoom_in, zoomOutTitle: island.i18n.zoom_out }]);
+    expect(seen.popup).toEqual([{ closeButton: false }]);
+    expect(page.$1('#orderDeliveryMap').classList.contains('ae-map')).toBe(true);
+    expect(page.$1('#orderDeliveryMap').hidden).toBe(false);
+  });
 });

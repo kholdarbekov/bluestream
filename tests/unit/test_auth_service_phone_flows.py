@@ -254,7 +254,9 @@ class TestAuthServicePhoneFlows:
 
         with (
             app.app_context(),
-            patch("business_app.services.auth_service.send_verification_sms_task") as mock_send_sms_task,
+            patch(
+                "business_app.services.auth_service.send_verification_sms_task", return_value={"success": True}
+            ) as mock_send_sms_task,
         ):
             success = auth_service_with_stateful_redis.send_verification_sms(
                 user_id=sample_user.id,

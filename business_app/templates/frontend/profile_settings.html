@@ -1,489 +1,198 @@
 {% extends "frontend/cabinet_base.html" %}
+{% from 'frontend/macros/auth.html' import field, form_alert with context %}
+{#
+  Profile settings (/profile-settings, routes.profile_settings). Three calm sections in one column:
+  - Personal details: ONE form (#personalInfoForm) saved by profile-settings.js with PUT /api/v1/auth/profile. Selects
+    are native.
+  - Contacts: read-only rows. The phone is added, confirmed or changed on plain /verify-phone (the SMS-code flow that
+    saves the number only when the code matches); an unconfirmed email goes to /verify-email; Support changes the email.
+  - Notifications: the reorder-reminders switch (#reorderRemindersSwitch, outside every form, disabled until
+    GET /api/v1/notifications/preferences answers) and where order updates go (telegram_link_state: Telegram, else email).
+  Styles: css/pages/cabinet-account.css (.ae-acp); form helpers: css/pages/auth.css + js/pages/auth-form.js (AEAuth).
+#}
 {% set active_menu = 'profile' %}
 
 {% block cabinet_title %}{{ 'landing.account.profile'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'landing.account.profile'|t }}</li>
+<li><span aria-current="page">{{ 'landing.account.profile'|t }}</span></li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<style>
-/* Section Cards Styling */
-.settings-section .card {
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    overflow: visible;
-}
-
-.settings-section .card-header {
-    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-    border-bottom: 1px solid #f0f0f0;
-    padding: 18px 25px;
-}
-
-.settings-section .card-header h5 {
-    font-weight: 600;
-    color: #1a1a2e;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 1.1rem;
-}
-
-.settings-section .card-header h5 i {
-    color: #1890ff;
-    font-size: 1rem;
-    width: 32px;
-    height: 32px;
-    background: rgba(24, 144, 255, 0.1);
-    border-radius: 8px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.settings-section .card-body {
-    padding: 25px;
-}
-
-/* Form Styling */
-.settings-section .form-group {
-    margin-bottom: 24px;
-}
-
-.settings-section .form-group label {
-    font-weight: 600;
-    color: #1a1a2e;
-    margin-bottom: 10px;
-    font-size: 14px;
-    display: block;
-}
-
-.settings-section .form-group input,
-.settings-section .form-group select {
-    width: 100%;
-    padding: 14px 18px;
-    border: 1.5px solid #e8e8e8;
-    border-radius: 10px;
-    font-size: 14px;
-    transition: all 0.3s ease;
-    background: #fafafa;
-}
-
-.settings-section .form-group input:focus,
-.settings-section .form-group select:focus {
-    outline: none;
-    border-color: #1890ff;
-    background: #ffffff;
-    box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1);
-}
-
-.settings-section .form-group input[readonly] {
-    background: #f0f0f0;
-    color: #666;
-    cursor: not-allowed;
-}
-
-/* Input Group for Email/Phone with Verified Badge */
-.settings-section .input-group {
-    display: flex;
-    gap: 0;
-}
-
-.settings-section .input-group input {
-    border-radius: 10px 0 0 10px;
-    flex: 1;
-}
-
-.settings-section .input-group-append {
-    display: flex;
-}
-
-.settings-section .input-group-text {
-    padding: 14px 18px;
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: #ffffff !important;
-    border: none;
-    border-radius: 0 10px 10px 0;
-    font-weight: 600;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.settings-section .input-group-text i {
-    color: #ffffff !important;
-}
-
-.settings-section .input-group .btn {
-    border-radius: 0 10px 10px 0;
-}
-
-/* Save Button */
-.settings-section .theme-btn.btn-one {
-    padding: 14px 28px;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 14px;
-    transition: all 0.3s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.settings-section .theme-btn.btn-one:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(24, 144, 255, 0.35);
-}
-
-/* Account Status Section */
-.status-item {
-    padding: 16px;
-    background: #f8f9fa;
-    border-radius: 10px;
-    margin-bottom: 16px;
-    border: 1px solid #f0f0f0;
-}
-
-.status-item h6 {
-    font-size: 12px;
-    font-weight: 600;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-}
-
-.status-item p {
-    font-size: 15px;
-    color: #1a1a2e;
-    font-weight: 500;
-    margin: 0;
-}
-
-.status-item .badge {
-    font-size: 13px;
-    padding: 6px 14px;
-    font-weight: 500;
-    border-radius: 6px;
-}
-
-/* Preferences Toggle Switches */
-.check-box {
-    display: flex;
-    align-items: center;
-    padding: 16px;
-    background: #f8f9fa;
-    border-radius: 10px;
-    margin-bottom: 12px;
-    transition: all 0.3s ease;
-    border: 1px solid #f0f0f0;
-}
-
-.check-box:hover {
-    background: #f0f0f0;
-}
-
-.check-box input.check {
-    width: 20px;
-    height: 20px;
-    margin-right: 14px;
-    cursor: pointer;
-    accent-color: #1890ff;
-}
-
-.check-box label {
-    margin: 0;
-    font-weight: 500;
-    color: #333;
-    cursor: pointer;
-    flex: 1;
-}
-
-/* A disabled switch (the reorder-reminders switch until the API answers, and while it saves) offers
-   nothing to press: no pointer cursor, no hover highlight. */
-.check-box input.check:disabled,
-.check-box input.check:disabled + label {
-    cursor: default;
-}
-
-.check-box input.check:disabled + label {
-    color: #888;
-}
-
-.check-box:has(input.check:disabled):hover {
-    background: #f8f9fa;
-}
-
-/* Badges */
-.badge-success {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%) !important;
-    color: #fff !important;
-}
-
-.badge-warning {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%) !important;
-    color: #fff !important;
-}
-
-.badge-info {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%) !important;
-    color: #fff !important;
-}
-
-/* Help Text */
-.text-muted {
-    color: #888 !important;
-    font-size: 12px;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .settings-section .card-body {
-        padding: 20px;
-    }
-
-    .settings-section .form-group {
-        margin-bottom: 20px;
-    }
-
-    .status-item {
-        padding: 12px;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
+<link rel="stylesheet" href="{{ asset_url('css/pages/cabinet-account.css') }}">
 {% endblock %}
 
 {% block cabinet_content %}
-<!-- Personal Information -->
-<div class="settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-user"></i> {{ 'Personal Information'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <form id="personalInfoForm" class="default-form">
-                <div class="row clearfix">
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'cabinet.profile.first_name'|t }}</label>
-                        <input type="text" name="first_name" value="{{ user.first_name or '' }}" placeholder="{{ 'Enter first name'|t }}" required>
+{% set email = user.contact_email %}
+<div class="ae-acp ae-acx">
+
+    {#- 1. Personal details -#}
+    <section class="ae-acx__section" aria-labelledby="acp-personal-title">
+        <h2 class="ae-sec-title" id="acp-personal-title">{{ 'web.account.profile.personal_title'|t }}</h2>
+        <form id="personalInfoForm" class="ae-auth ae-acx__card ae-acp__form" novalidate>
+            {{ form_alert('personalAlert') }}
+            <div class="ae-acx__grid">
+                {{ field('first_name', 'web.account.profile.first_name'|t, autocomplete='given-name', value=first_name_value) }}
+                {{ field('last_name', 'web.account.profile.last_name'|t, autocomplete='family-name', required=False, optional=True, value=user.last_name or '') }}
+            </div>
+
+            <fieldset class="ae-field ae-acp__dob" data-field="date_of_birth">
+                <legend class="ae-field__label">{{ 'web.account.profile.dob'|t }} <span class="ae-field__optional">({{ 'web.auth.common.optional'|t }})</span></legend>
+                <div class="ae-acp__dob-row">
+                    <div class="ae-acp__dob-part">
+                        <label class="ae-acp__dob-label" for="dob_day">{{ 'web.account.profile.dob_day'|t }}</label>
+                        <input type="text" id="dob_day" name="dob_day" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="bday-day" aria-describedby="dob-error"
+                            value="{{ birth.day if birth else '' }}">
                     </div>
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'cabinet.profile.last_name'|t }}</label>
-                        <input type="text" name="last_name" value="{{ user.last_name or '' }}" placeholder="{{ 'Enter last name'|t }}" required>
-                    </div>
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Date of Birth'|t }}</label>
-                        <input type="date" name="date_of_birth" value="{{ user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else '' }}">
-                    </div>
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Gender'|t }}</label>
-                        <select name="gender">
-                            <option value="">{{ 'Select Gender'|t }}</option>
-                            <option value="male" {{ 'selected' if (user.gender.value if user.gender and user.gender is not string else user.gender) == 'male' else '' }}>{{ 'Male'|t }}</option>
-                            <option value="female" {{ 'selected' if (user.gender.value if user.gender and user.gender is not string else user.gender) == 'female' else '' }}>{{ 'Female'|t }}</option>
+                    <div class="ae-acp__dob-part ae-acp__dob-part--month">
+                        <label class="ae-acp__dob-label" for="dob_month">{{ 'web.account.profile.dob_month'|t }}</label>
+                        <select id="dob_month" name="dob_month" class="ignore" autocomplete="bday-month" aria-describedby="dob-error">
+                            <option value="">{{ 'web.account.profile.dob_month_unset'|t }}</option>
+                            {%- for number, name in months %}
+                            <option value="{{ number }}"{% if birth and birth.month == number %} selected{% endif %}>{{ name }}</option>
+                            {%- endfor %}
                         </select>
                     </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <label>{{ 'Preferred Language'|t }}</label>
-                        <select name="preferred_language">
-                            <option value="en" {{ 'selected' if user.preferred_language == 'en' else '' }}>English</option>
-                            <option value="uz" {{ 'selected' if user.preferred_language == 'uz' else '' }}>O'zbek</option>
-                            <option value="ru" {{ 'selected' if user.preferred_language == 'ru' else '' }}>Русский</option>
-                        </select>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <button type="submit" class="theme-btn btn-one">
-                            <i class="far fa-save"></i> {{ 'Save Changes'|t }}
-                        </button>
+                    <div class="ae-acp__dob-part ae-acp__dob-part--year">
+                        <label class="ae-acp__dob-label" for="dob_year">{{ 'web.account.profile.dob_year'|t }}</label>
+                        <input type="text" id="dob_year" name="dob_year" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="bday-year" aria-describedby="dob-error"
+                            value="{{ birth.year if birth else '' }}">
                     </div>
                 </div>
-            </form>
-        </div>
-    </div>
-</div>
+                <p class="ae-field__error" id="dob-error"></p>
+            </fieldset>
 
-<!-- Contact Information -->
-<div class="settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-envelope"></i> {{ 'Contact Information'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <form id="contactInfoForm" class="default-form">
-                <div class="row clearfix">
-                    {% if user.contact_email %}
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Email Address'|t }}</label>
-                        <div class="input-group">
-                            <input type="email" name="email" value="{{ user.contact_email }}" readonly>
-                            <div class="input-group-append">
-                                {% if user.email_verified_at %}
-                                <span class="input-group-text text-success">
-                                    <i class="far fa-check-circle"></i> {{ 'cabinet.profile.verified'|t }}
-                                </span>
-                                {% else %}
-                                <button type="button" class="btn btn-outline-warning btn-sm" data-action="resend-email-verification">
-                                    <i class="far fa-envelope"></i> {{ 'Verify'|t }}
-                                </button>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <small class="text-muted">{{ 'Email address cannot be changed. Contact support if needed.'|t }}</small>
-                    </div>
-                    {% endif %}
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Phone Number'|t }}</label>
-                        <div class="input-group">
-                            <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="+998901234567">
-                            <div class="input-group-append">
-                                {% if user.phone_verified_at %}
-                                <span class="input-group-text text-success">
-                                    <i class="far fa-check-circle"></i> {{ 'cabinet.profile.verified'|t }}
-                                </span>
-                                {% else %}
-                                <button type="button" class="btn btn-outline-warning btn-sm" data-action="verify-phone">
-                                    <i class="far fa-mobile"></i> {{ 'Verify'|t }}
-                                </button>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <button type="submit" class="theme-btn btn-one">
-                            <i class="far fa-save"></i> {{ 'Update Contact Info'|t }}
-                        </button>
-                    </div>
+            <div class="ae-acx__grid">
+                <div class="ae-field" data-field="gender">
+                    <label class="ae-field__label" for="gender">{{ 'web.account.profile.gender'|t }}</label>
+                    <select id="gender" name="gender" class="ignore">
+                        <option value="unknown"{% if gender_value not in ('male', 'female') %} selected{% endif %}>{{ 'web.account.profile.gender_unknown'|t }}</option>
+                        <option value="female"{% if gender_value == 'female' %} selected{% endif %}>{{ 'web.account.profile.gender_female'|t }}</option>
+                        <option value="male"{% if gender_value == 'male' %} selected{% endif %}>{{ 'web.account.profile.gender_male'|t }}</option>
+                    </select>
                 </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Account Status -->
-<div class="settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-info-circle"></i> {{ 'Account Status'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="status-item">
-                        <h6>{{ 'Account Status'|t }}</h6>
-                        {% set status_value = user.status.value if user.status is not string else user.status %}
-                        <span class="badge badge-{{ 'success' if status_value == 'active' else 'warning' }}">
-                            {{ status_value|title }}
-                        </span>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="status-item">
-                        <h6>{{ 'Member Since'|t }}</h6>
-                        <p class="text-muted">{{ user.created_at.strftime('%B %Y') if user.created_at else 'Unknown' }}</p>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="status-item">
-                        <h6>{{ 'Last Login'|t }}</h6>
-                        <p class="text-muted">{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}</p>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="status-item">
-                        <h6>{{ 'Registration Source'|t }}</h6>
-                        <span class="badge badge-info">
-                            {{ user.registration_source|title if user.registration_source else 'Web' }}
-                        </span>
-                    </div>
+                <div class="ae-field" data-field="preferred_language">
+                    <label class="ae-field__label" for="preferred_language">{{ 'web.account.profile.language'|t }}</label>
+                    <select id="preferred_language" name="preferred_language" class="ignore" aria-describedby="preferred_language-help">
+                        {%- for code, name in [('uz', 'O‘zbekcha'), ('ru', 'Русский'), ('en', 'English')] %}
+                        <option value="{{ code }}" lang="{{ code }}"{% if (user.preferred_language or '')[:2] == code %} selected{% endif %}>{{ name }}</option>
+                        {%- endfor %}
+                    </select>
+                    {#- preferred_language is one setting: the site's language for a signed-in visitor, the bot's and the
+                        emails'; the header's language switch writes it too (routes.set_language_route). -#}
+                    <p class="ae-field__help" id="preferred_language-help">{{ 'web.account.profile.language_help'|t }}</p>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
 
-<!-- Reorder reminders (spec 2026-10-09 §8): ONE switch over the effective value the preferences
-     API publishes. profile-settings.js reads `preferences.reorder_reminders.enabled` and saves
-     `reorder_reminders_enabled` from the switch's own change handler only. The server records the
-     route as web_settings from the X-Platform header base.js sends, never from this page. The
-     switch is outside #preferencesForm on purpose (that form stays inert, spec §18) and starts
-     disabled: it is enabled only once the published value arrives. -->
-<div class="settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-bell"></i> {{ 'Reorder reminders'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="check-box">
-                <input class="check" type="checkbox" id="reorderRemindersSwitch" name="reorder_reminders_enabled" autocomplete="off" disabled>
-                <label for="reorderRemindersSwitch">{{ 'Remind me when it is usually time to reorder water'|t }}</label>
+            <div class="ae-acx__actions">
+                <button type="submit" class="ae-btn ae-btn--primary"><span>{{ 'web.account.profile.save'|t }}</span></button>
             </div>
-        </div>
-    </div>
-</div>
+        </form>
+    </section>
 
-<!-- Preferences -->
-<div class="settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-cog"></i> {{ 'Preferences'|t }}</h5>
+    {#- 2. Contacts -#}
+    <section class="ae-acx__section" aria-labelledby="acp-contacts-title">
+        <h2 class="ae-sec-title" id="acp-contacts-title">{{ 'web.account.profile.contacts_title'|t }}</h2>
+        <dl class="ae-dl ae-acx__card ae-acx__rows">
+            <div class="ae-dl__row ae-acx__row" data-contact="phone">
+                <dt>{{ 'web.account.contact.phone'|t }}</dt>
+                <dd>
+                    <span class="ae-acx__value">
+                        {%- if user.phone %}
+                        <span class="ae-num">{{ user.phone }}</span>
+                        {%- if user.phone_verified_at %}
+                        <span class="ae-badge ae-badge--ok">{{ 'web.account.contact.phone_confirmed'|t }}</span>
+                        {%- else %}
+                        <span class="ae-badge ae-badge--warn">{{ 'web.account.contact.phone_unconfirmed'|t }}</span>
+                        {%- endif %}
+                        {%- else %}
+                        <span class="ae-acx__none">{{ 'web.account.contact.phone_none'|t }}</span>
+                        {%- endif %}
+                    </span>
+                    <a class="ae-acx__action" href="{{ url_for('frontend.verify_phone') }}" data-action="verify-phone">
+                        {%- if not user.phone %}{{ 'web.account.contact.phone_add'|t }}
+                        {%- elif not user.phone_verified_at %}{{ 'web.account.contact.phone_confirm'|t }}
+                        {%- else %}{{ 'web.account.contact.phone_change'|t }}{% endif -%}
+                    </a>
+                </dd>
+            </div>
+            <div class="ae-dl__row ae-acx__row" data-contact="email">
+                <dt>{{ 'web.account.contact.email'|t }}</dt>
+                <dd>
+                    <span class="ae-acx__value">
+                        {%- if email %}
+                        <span class="ae-acx__email">{{ email }}</span>
+                        {%- if user.email_verified_at %}
+                        <span class="ae-badge ae-badge--ok">{{ 'web.account.contact.email_confirmed'|t }}</span>
+                        {%- else %}
+                        <span class="ae-badge ae-badge--warn">{{ 'web.account.contact.email_unconfirmed'|t }}</span>
+                        {%- endif %}
+                        {%- else %}
+                        <span class="ae-acx__none">{{ 'web.account.contact.email_none'|t }}</span>
+                        {%- endif %}
+                    </span>
+                    {%- if email and not user.email_verified_at %}
+                    <a class="ae-acx__action" href="{{ url_for('frontend.verify_email') }}" data-action="verify-email">{{ 'web.account.contact.email_confirm'|t }}</a>
+                    {%- endif %}
+                </dd>
+            </div>
+        </dl>
+        <p class="ae-acx__note">
+            <i class="fab fa-telegram-plane" aria-hidden="true"></i>
+            <span>{{ 'web.account.profile.email_note'|t }} <a class="ae-link" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.footer.open_bot'|t }}</a></span>
+        </p>
+    </section>
+
+    {#- 3. Notifications -#}
+    <section class="ae-acx__section" aria-labelledby="acp-notifications-title">
+        <h2 class="ae-sec-title" id="acp-notifications-title">{{ 'web.account.profile.notifications_title'|t }}</h2>
+        <div class="ae-acx__card ae-acp__notify">
+            {#- The whole row is the switch's label, so the tap target is the row, not the 28px track. -#}
+            <label class="ae-switch ae-acp__toggle" for="reorderRemindersSwitch">
+                <span class="ae-acp__toggle-text">{{ 'Remind me when it is usually time to reorder water'|t }}</span>
+                <input type="checkbox" role="switch" id="reorderRemindersSwitch" name="reorder_reminders_enabled" autocomplete="off" disabled>
+            </label>
+            {#- updates_channel is the channel the backend would use (the view asks NotificationService); the link state
+                only words it: a stopped bot is named, and an unlinked account is offered the link. -#}
+            {%- if telegram_link_state != 'unavailable' %}
+            {%- set blocked = telegram_link_state == 'connected_blocked' %}
+            <p class="ae-acp__channel" data-updates-channel="{{ updates_channel }}">
+                <i class="{{ 'fab fa-telegram-plane' if updates_channel == 'telegram' or blocked else 'far fa-bell' }}" aria-hidden="true"></i>
+                <span>
+                    {%- if updates_channel == 'telegram' %}{{ 'web.account.profile.updates_telegram'|t }}
+                    {%- elif updates_channel == 'email' and blocked %}{{ 'Telegram is connected, but our bot is stopped in your Telegram, so updates come by email. Open the bot and press Start to get them in Telegram again.'|t }}
+                    {%- elif updates_channel == 'email' %}{{ 'web.account.profile.updates_email'|t(email=email) }}
+                    {%- elif blocked %}{{ 'web.account.profile.updates_blocked'|t }}
+                    {%- else %}{{ 'web.account.profile.updates_none'|t }}{% endif %}
+                    {%- if blocked %} <a class="ae-link" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer" data-action="open-bot">{{ 'landing.footer.open_bot'|t }}</a>
+                    {%- elif telegram_link_state == 'available' %} <a class="ae-link" href="{{ url_for('frontend.my_account') }}#telegram-link-title">{{ 'web.account.profile.connect_telegram'|t }}</a>{% endif -%}
+                </span>
+            </p>
+            {%- endif %}
         </div>
-        <div class="card-body">
-            <form id="preferencesForm" class="default-form">
-                <div class="row clearfix">
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="email_notifications" name="email_notifications" checked>
-                            <label for="email_notifications">{{ 'Receive email notifications about orders'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="sms_notifications" name="sms_notifications" checked>
-                            <label for="sms_notifications">{{ 'Receive SMS notifications about deliveries'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="marketing_emails" name="marketing_emails">
-                            <label for="marketing_emails">{{ 'Receive promotional emails and offers'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <button type="submit" class="theme-btn btn-one">
-                            <i class="far fa-save"></i> {{ 'Save Preferences'|t }}
-                        </button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
+    </section>
+
+    {%- if created_label %}
+    <p class="ae-acp__since">{{ 'web.account.profile.created'|t(date=created_label) }}</p>
+    {%- endif %}
 </div>
 {% endblock %}
 
 {% block cabinet_extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'verify_phone_url': url_for('frontend.verify_phone'),
-    'current_phone': user.phone or '',
     'i18n': {
-        'personal_updated': 'Personal information updated successfully!' | t,
-        'personal_failed': 'Failed to update personal information' | t,
-        'contact_updated': 'Contact information updated successfully!' | t,
-        'contact_failed': 'Failed to update contact information' | t,
-        'verify_new_phone': 'Would you like to verify your new phone number now?' | t,
-        'preferences_saved': 'Preferences saved successfully!' | t,
-        'reorder_reminders_saved': 'Reorder reminder setting saved' | t,
-        'reorder_reminders_failed': 'Failed to save the reorder reminder setting' | t,
-        'verification_sent': 'Verification email sent! Please check your inbox.' | t,
-        'verification_failed': 'Failed to send verification email' | t,
-        'network_error': 'Network error. Please try again.' | t,
+        'required': 'web.auth.common.required'|t,
+        'dob_incomplete': 'web.account.profile.dob_incomplete'|t,
+        'dob_invalid': 'web.account.profile.dob_invalid'|t,
+        'saved': 'web.account.profile.saved'|t,
+        'save_failed': 'web.account.profile.save_failed'|t,
+        'network_error': 'web.auth.common.network_error'|t,
+        'reorder_reminders_saved': 'Reorder reminder setting saved'|t,
+        'reorder_reminders_failed': 'Failed to save the reorder reminder setting'|t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/profile-settings.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/profile-settings.js') }}"></script>
 {% endblock %}

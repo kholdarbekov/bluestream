@@ -1,123 +1,108 @@
+/* Email confirmation page (templates/frontend/verify_email.html).
+   A link from the letter arrives with its token in the page data (`checking`): it is posted to /auth/verify-email
+   at once, and the code form shows only if that fails. A code typed from the letter goes the same way. Success
+   replaces the card body. A signed-in customer can ask for a new letter (/auth/resend-email-verification); the busy
+   button ignores a second tap while the request runs, and the server's own limit (429) is said in words. */
 (function () {
     var PAGE_DATA = getPageData();
+    var I18N = PAGE_DATA.i18n || {};
 
-    function showError(message) {
-        document.getElementById('errorText').textContent = message;
-        document.getElementById('errorMessage').style.display = 'flex';
-        document.getElementById('successMessage').style.display = 'none';
+    var form = document.getElementById('emailVerificationForm');
+    var input = document.getElementById('verificationCode');
+    var resendBtn = document.getElementById('resendEmail');
+    var resendNote = document.getElementById('resendNote');
+
+    function showDone() {
+        document.getElementById('verifyStep').hidden = true;
+        document.getElementById('successMessage').hidden = false;
+        var title = document.getElementById('verifyDoneTitle');
+        if (title) title.focus();
     }
 
-    async function verifyEmailToken(token, submitBtn) {
+    function showForm() {
+        var checking = document.getElementById('checkingNote');
+        if (checking) checking.hidden = true;
+        document.getElementById('verifyBody').hidden = false;
+    }
+
+    // `typed`: the code came from the field, so its error goes under the field; a link's goes above the form.
+    async function verify(token, button, typed) {
+        AEAuth.hideAlert('verifyAlert');
+        AEAuth.setBusy(button, true);
         try {
             var response = await apiRequest('/auth/verify-email', {
                 method: 'POST',
                 body: JSON.stringify({ token: token })
             });
-
-            var result = await response.json();
-
             if (response.ok) {
-                document.getElementById('emailVerificationForm').style.display = 'none';
-                document.getElementById('errorMessage').style.display = 'none';
-                document.querySelector('.auth-divider').style.display = 'none';
-                document.querySelector('.resend-section').style.display = 'none';
-                document.querySelector('.auth-info-box').style.display = 'none';
-                document.getElementById('successMessage').style.display = 'block';
-
-                showNotification(PAGE_DATA.i18n.verified_success, 'success');
-
-                setTimeout(function () {
-                    window.location.href = PAGE_DATA.my_account_url;
-                }, 3000);
-            } else {
-                if (submitBtn) submitBtn.classList.remove('loading');
-                showError(result.message || PAGE_DATA.i18n.invalid_code);
-            }
-        } catch (error) {
-            if (submitBtn) submitBtn.classList.remove('loading');
-            showError(PAGE_DATA.i18n.network_error);
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', function () {
-        var urlParams = new URLSearchParams(window.location.search);
-        var token = urlParams.get('token');
-
-        if (token) {
-            document.querySelector('input[name="token"]').value = token;
-            verifyEmailToken(token);
-        }
-    });
-
-    var form = document.getElementById('emailVerificationForm');
-    if (form) {
-        form.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            var formData = new FormData(this);
-            var token = formData.get('token');
-
-            if (!token) {
-                showError(PAGE_DATA.i18n.enter_code);
+                showDone();
                 return;
             }
-
-            var submitBtn = this.querySelector('.btn-auth');
-            submitBtn.classList.add('loading');
-
-            await verifyEmailToken(token, submitBtn);
-        });
-    }
-
-    var resendBtn = document.getElementById('resendEmail');
-    if (resendBtn) {
-        resendBtn.addEventListener('click', async function (e) {
-            e.preventDefault();
-
-            var button = this;
-            button.disabled = true;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + PAGE_DATA.i18n.sending;
-
-            try {
-                var response = await apiRequest('/auth/resend-email-verification', {
-                    method: 'POST'
-                });
-
-                var result = await response.json();
-
-                if (response.ok) {
-                    showNotification(PAGE_DATA.i18n.sent_success, 'success');
-
-                    var countdown = 60;
-                    button.innerHTML = '<i class="fas fa-clock"></i> ' + PAGE_DATA.i18n.resend_in + ' ' + countdown + 's';
-
-                    var timer = setInterval(function () {
-                        countdown--;
-                        button.innerHTML = '<i class="fas fa-clock"></i> ' + PAGE_DATA.i18n.resend_in + ' ' + countdown + 's';
-
-                        if (countdown <= 0) {
-                            clearInterval(timer);
-                            button.disabled = false;
-                            button.innerHTML = '<i class="fas fa-paper-plane"></i> ' + PAGE_DATA.i18n.resend_button;
-                        }
-                    }, 1000);
-                } else {
-                    button.disabled = false;
-                    button.innerHTML = '<i class="fas fa-paper-plane"></i> ' + PAGE_DATA.i18n.resend_button;
-                    showError(result.message || PAGE_DATA.i18n.send_failed);
-                }
-            } catch (error) {
-                button.disabled = false;
-                button.innerHTML = '<i class="fas fa-paper-plane"></i> ' + PAGE_DATA.i18n.resend_button;
-                showError(PAGE_DATA.i18n.network_error);
+            showForm();
+            if (response.status === 429) {
+                AEAuth.showAlert('verifyAlert', I18N.rate_limited);
+            } else if (typed) {
+                AEAuth.setFieldError(form, 'token', I18N.invalid);
+                input.focus();
+            } else {
+                AEAuth.showAlert('verifyAlert', I18N.invalid_link);
+                input.focus();
             }
+        } catch (error) {
+            showForm();
+            AEAuth.showAlert('verifyAlert', I18N.network_error);
+        } finally {
+            AEAuth.setBusy(button, false);
+        }
+    }
+
+    function note(message, ok) {
+        resendNote.textContent = message;
+        resendNote.classList.toggle('is-ok', ok);
+        resendNote.classList.toggle('is-error', !ok);
+        resendNote.hidden = false;
+    }
+
+    async function resend() {
+        if (AEAuth.isBusy(resendBtn)) return;
+        AEAuth.setBusy(resendBtn, true);
+        resendNote.hidden = true;
+        try {
+            var response = await apiRequest('/auth/resend-email-verification', { method: 'POST' });
+            if (response.ok) {
+                note(I18N.sent, true);
+            } else {
+                note(response.status === 429 ? I18N.rate_limited : I18N.send_failed, false);
+            }
+        } catch (error) {
+            note(I18N.network_error, false);
+        } finally {
+            AEAuth.setBusy(resendBtn, false);
+        }
+    }
+
+    if (form) {
+        AEAuth.clearOnInput(form);
+        input.addEventListener('input', function () {
+            var compact = input.value.replace(/\s/g, '');
+            if (compact !== input.value) input.value = compact;
+        });
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            var button = document.getElementById('verifyEmailBtn');
+            if (AEAuth.isBusy(button)) return;
+            AEAuth.clearErrors(form);
+            var token = input.value.trim();
+            if (!token) {
+                AEAuth.setFieldError(form, 'token', I18N.required);
+                input.focus();
+                return;
+            }
+            verify(token, button, true);
         });
     }
 
-    var tokenInput = document.querySelector('input[name="token"]');
-    if (tokenInput) {
-        tokenInput.addEventListener('input', function () {
-            this.value = this.value.replace(/\s/g, '');
-        });
-    }
+    if (resendBtn) resendBtn.addEventListener('click', resend);
+
+    if (PAGE_DATA.token) verify(PAGE_DATA.token, null, false);
 })();

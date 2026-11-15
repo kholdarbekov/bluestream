@@ -21,6 +21,7 @@ from flasgger import swag_from
 
 from business_app.utils.auth_cookies import set_login_cookies
 from business_app.utils.service_factory import get_auth_service
+from business_app.services.auth_service import SmsCodeStillValid
 from business_app.utils.decorators import (
     validate_json,
     handle_exceptions,
@@ -33,6 +34,7 @@ from business_app.middleware import jwt_required_with_refresh
 from business_app.utils.validators import phone_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.translations import get_translation
+from shared.i18n_rendering import supported_language
 from shared.enums import UserRole
 from business_app.models.user import User
 from business_app import db
@@ -109,6 +111,11 @@ def register():
             referral_code:
               type: string
               example: ABC123
+            preferred_language:
+              type: string
+              enum: [uz, ru, en]
+              description: The language the account's letters go out in (the sign-up page's language)
+              example: ru
     responses:
       201:
         description: User registered successfully
@@ -145,6 +152,11 @@ def register():
     if not data.get("last_name"):
         data["last_name"] = ""
 
+    # The sign-up page's language, which the account keeps for its letters (the verification email included). Only a
+    # supported code is taken; without one the account keeps the model default, as before.
+    language = supported_language(data.get("preferred_language"))
+    language_kwargs = {"preferred_language": language} if language else {}
+
     try:
         user, tokens = get_auth_service().register_user(
             email=data["email"],
@@ -156,6 +168,7 @@ def register():
             gender=data.get("gender"),
             referral_code=data.get("referral_code"),
             registration_method="email",  # Mark as email registration
+            **language_kwargs,
         )
 
         # Create response with standardized format
@@ -210,7 +223,7 @@ def login():
           properties:
             identifier:
               type: string
-              description: Email or phone number
+              description: Email (any case) or phone number in any common format (+998 90 123 45 67, 8 90 123 45 67)
               example: user@example.com
             password:
               type: string
@@ -240,7 +253,9 @@ def login():
                 permissions:
                   type: object
       401:
-        description: Invalid credentials
+        description: |
+          Not signed in. `data.error_code` says why, so a page can word it: INVALID_CREDENTIALS,
+          ACCOUNT_DISABLED or TELEGRAM_PASSWORD_REQUIRED.
       423:
         description: Account locked
     """
@@ -276,7 +291,9 @@ def login():
         return response_data, status_code
 
     except UnauthorizedError as e:
-        return unauthorized_response(message=e.message)
+        return error_response(
+            message=e.message, status_code=401, data={"error_code": e.error_code} if e.error_code else None
+        )
     except ValidationError as e:
         return error_response(message=e.message, errors=e.details, status_code=423)
 
@@ -620,6 +637,23 @@ def phone_resend_otp():
 # =============================================================================
 
 
+def _mask_phone(phone: str) -> str:
+    return phone[:3] + "***" + phone[-4:] if len(phone) > 7 else "***"
+
+
+def _code_still_valid_response(still_valid: SmsCodeStillValid, phone_masked: Optional[str] = None):
+    """429 RESEND_COOLDOWN: no new code went out, as the one this number holds is still valid and stays the code to
+    enter. Its time left is both its expires_in and the wait before a new one (resend_available_in)."""
+    data = {
+        "error_code": "RESEND_COOLDOWN",
+        "expires_in": still_valid.seconds_left,
+        "resend_available_in": still_valid.seconds_left,
+    }
+    if phone_masked:
+        data["phone_masked"] = phone_masked
+    return error_response(message=get_translation("api.auth.otp_resend_wait"), status_code=429, data=data)
+
+
 @auth_bp.route("/send-otp", methods=["POST"])
 @validate_json(["phone"])
 @jwt_required()
@@ -649,10 +683,31 @@ def send_otp():
     responses:
       200:
         description: OTP sent successfully
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                phone_masked:
+                  type: string
+                expires_in:
+                  type: integer
+                  description: Seconds the code stays valid
+                resend_available_in:
+                  type: integer
+                  description: Seconds before a new code may be asked for this number (the code's whole life)
       400:
         description: Invalid phone number
       409:
         description: Phone number already in use
+      429:
+        description: >
+          The code already sent to this number is still valid (data.error_code RESEND_COOLDOWN, data.phone_masked;
+          data.expires_in and data.resend_available_in are its seconds left; it stays the code to enter), or the
+          per-address rate limit
+      500:
+        description: The SMS provider did not take the code; no code is kept, so asking again sends a new one
     """
     data = request.get_json()
     phone = data.get("phone")
@@ -676,11 +731,20 @@ def send_otp():
             f"User {user_id} attempted to verify phone {phone} already in use by user {existing_user.id}",
             additional_data={"target_phone": phone, "existing_user_id": existing_user.id},
         )
-        return error_response(message=get_translation("api.auth.email_already_exists"), status_code=409)
+        return error_response(message=get_translation("api.auth.phone_already_registered"), status_code=409)
 
     # Store pending phone number in Redis for verification
     pending_phone_key = f"pending_phone:{user_id}"
     auth_service.redis_client.setex(pending_phone_key, 1800, phone)  # 30 minutes expiry
+
+    phone_masked = _mask_phone(phone)
+
+    # A number whose code is still valid gets no new one (the number stays pending above, so /verify-phone still takes
+    # that code); another number gets its code at once
+    try:
+        success = auth_service.send_phone_verification_code(user_id, phone)
+    except SmsCodeStillValid as still_valid:
+        return _code_still_valid_response(still_valid, phone_masked)
 
     # Log phone verification attempt
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
@@ -695,13 +759,17 @@ def send_otp():
         additional_data={"new_phone": phone},
     )
 
-    # Generate and send OTP to the new phone number
-    success = auth_service.send_verification_sms(user_id, phone)
-
     if success:
+        # expires_in: the life of the code just stored (send_verification_sms keeps it for otp_expiry), so a page's
+        # countdown reads it instead of keeping its own copy. The next code to this number waits for all of it
+        # (sms_code_resend_wait), so resend_available_in is that same life.
         return success_response(
-            data={"phone_masked": phone[:3] + "***" + phone[-4:] if len(phone) > 7 else "***"},
-            message=get_translation("api.auth.phone_verified"),
+            data={
+                "phone_masked": phone_masked,
+                "expires_in": auth_service.otp_expiry,
+                "resend_available_in": auth_service.otp_expiry,
+            },
+            message=get_translation("api.auth.otp_sent"),
         )
     else:
         return internal_error_response(message=get_translation("error.server_error"))
@@ -1020,6 +1088,12 @@ def resend_sms_verification():
     responses:
       200:
         description: Verification SMS sent
+      429:
+        description: >
+          The code already sent to that number is still valid (data.error_code RESEND_COOLDOWN; data.expires_in and
+          data.resend_available_in are its seconds left; it stays the code to enter), or the per-address rate limit
+      500:
+        description: No code could be sent
     """
     user_id = get_jwt_identity()
     auth_service = get_auth_service()
@@ -1027,8 +1101,15 @@ def resend_sms_verification():
     # While a number change is pending the account still holds the old number, and only
     # a code sent to the new one can verify it, so the resend goes there
     pending_phone = auth_service.redis_client.get(f"pending_phone:{user_id}")
-    auth_service.send_verification_sms(user_id, pending_phone.decode("utf-8") if pending_phone else None)
+    try:
+        sent = auth_service.send_phone_verification_code(
+            user_id, pending_phone.decode("utf-8") if pending_phone else None
+        )
+    except SmsCodeStillValid as still_valid:
+        return _code_still_valid_response(still_valid)
 
+    if not sent:
+        return internal_error_response(message=get_translation("error.server_error"))
     return success_response(message=get_translation("success.sent"))
 
 
@@ -1054,7 +1135,7 @@ def forgot_password():
           properties:
             identifier:
               type: string
-              description: Email or phone number
+              description: Email (any case) or phone number in any common format (+998 90 123 45 67, 8 90 123 45 67)
               example: user@example.com
     responses:
       200:
@@ -1581,7 +1662,9 @@ def change_phone():
       409:
         description: Phone number already in use
       429:
-        description: Too many phone change requests
+        description: >
+          The code already sent to this number is still valid (data.error_code RESEND_COOLDOWN, as /auth/send-otp),
+          or too many phone change requests
     """
     data = request.get_json()
     new_phone = data.get("new_phone")
@@ -1619,6 +1702,12 @@ def change_phone():
     pending_phone_key = f"pending_phone:{user_id}"
     auth_service.redis_client.setex(pending_phone_key, 1800, new_phone)  # 30 minutes expiry
 
+    # As /send-otp: a number whose code is still valid gets no new one, and that code stays the one to enter
+    try:
+        success = auth_service.send_phone_verification_code(user_id, new_phone)
+    except SmsCodeStillValid as still_valid:
+        return _code_still_valid_response(still_valid, _mask_phone(new_phone))
+
     # Log phone change request with audit
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 
@@ -1634,14 +1723,11 @@ def change_phone():
         additional_data={"current_phone": user.phone, "requested_phone": new_phone, "request_ip": request.remote_addr},
     )
 
-    # Generate and send OTP to the new phone number
-    success = auth_service.send_verification_sms(user_id, new_phone)
-
     if success:
         return success_response(
             data={
                 "current_phone": user.phone,
-                "new_phone_masked": new_phone[:3] + "***" + new_phone[-4:] if len(new_phone) > 7 else "***",
+                "new_phone_masked": _mask_phone(new_phone),
                 "expires_in": 1800,  # 30 minutes
             },
             message=get_translation("success.sent"),
@@ -2499,7 +2585,14 @@ def sync_platform_data():
 @rate_limit(max_requests=2, window_seconds=3600, per="user")  # 2 data exports per hour per user
 @handle_exceptions
 def export_account_data():
-    """Export user account data for download"""
+    """The customer's own account data as a JSON download (the cabinet's "Download my account data"); the document
+    is AccountExportService's."""
+    import json
+
+    from flask import Response
+
+    from business_app.services.account_export_service import AccountExportService
+
     user_id = get_jwt_identity()
 
     try:
@@ -2507,58 +2600,7 @@ def export_account_data():
         if not user:
             return not_found_response(message=get_translation("error.not_found"))
 
-        # Collect user data
-        from business_app.models.order import Order
-        from business_app.models.user import UserAddress
-
-        orders = Order.query.filter_by(user_id=user_id).all()
-        addresses = UserAddress.query.filter_by(user_id=user_id).all()
-
-        export_data = {
-            "user_profile": {
-                "id": user.id,
-                "email": user.email,
-                "phone": user.phone,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
-                "gender": user.gender,
-                "preferred_language": user.preferred_language,
-                "status": user.status.value if hasattr(user.status, "value") else user.status,
-                "registration_source": user.registration_source,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
-                "phone_verified_at": user.phone_verified_at.isoformat() if user.phone_verified_at else None,
-            },
-            "orders": [
-                {
-                    "id": order.id,
-                    "order_number": order.order_number,
-                    "status": order.status,
-                    "platform": order.order_source,
-                    "total_amount": float(order.total_amount),
-                    "created_at": order.created_at.isoformat(),
-                }
-                for order in orders
-            ],
-            "addresses": [
-                {
-                    "id": addr.id,
-                    "title": addr.title,
-                    "full_address": addr.full_address,
-                    "city": addr.city,
-                    "is_default": addr.is_default,
-                    "is_business": addr.is_business,
-                }
-                for addr in addresses
-            ],
-            "export_date": db.func.now().isoformat(),
-        }
-
-        import json
-        from flask import Response
-
-        json_data = json.dumps(export_data, indent=2, ensure_ascii=False)
+        json_data = json.dumps(AccountExportService.export_for_user(user), indent=2, ensure_ascii=False)
 
         return Response(
             json_data,

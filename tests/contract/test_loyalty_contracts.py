@@ -400,30 +400,15 @@ class TestLoyaltyCustomerContracts:
         assert isinstance(body["data"]["programs"], list)
         assert len(body["data"]["programs"]) >= 1
 
-    def test_post_earn_points_success_contract(self, client, auth_headers, loyalty_account):
+    def test_post_earn_points_route_is_gone(self, client, auth_headers, loyalty_account):
+        """The customer-callable /earn-points route let a customer award themselves any amount
+        (owner decision 2026-11-13: removed). It must stay unrouted."""
         response = client.post(
             "/api/v1/loyalty/earn-points",
             headers=auth_headers,
-            json={"action": "review_submitted"},
+            json={"action": "review_submitted", "points_amount": 1000000},
         )
-        assert response.status_code == 201
-        body = response.get_json()
-        _assert_success_envelope(body)
-        assert "message" in body
-        assert "transaction" in body["data"]
-        assert isinstance(body["data"]["transaction"], dict)
-
-    def test_post_earn_points_invalid_action_error_contract(
-        self, client, auth_headers, loyalty_account
-    ):
-        response = client.post(
-            "/api/v1/loyalty/earn-points",
-            headers=auth_headers,
-            json={"action": "not_a_real_action"},
-        )
-        assert response.status_code == 400
-        body = response.get_json()
-        _assert_error_envelope(body)
+        assert response.status_code == 404
 
     def test_post_gift_points_success_contract(
         self, client, auth_headers, loyalty_account, recipient_user

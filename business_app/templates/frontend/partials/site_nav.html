@@ -1,0 +1,91 @@
+{#- The site navigation: ONE list of items, rendered as the desktop header bar (variant 'bar') and as the
+    mobile drawer (variant 'drawer'). Import it `with context`: it reads external_url_for_lang and
+    nav_categories from the storefront context processor.
+    The Home item is not listed: the logo links home. Shop opens its categories only when there are two or
+    more (one category is not a choice). -#}
+{% macro site_nav(variant='bar') -%}
+{%- set endpoint = request.endpoint -%}
+{%- set categories = (nav_categories or [])[:6] -%}
+{%- set shop_current = endpoint in ['frontend.shop', 'frontend.product_detail', 'frontend.product_detail_slug'] -%}
+{%- set primary = [
+    ('frontend.subscriptions', 'landing.nav.subscriptions'|t, ['frontend.subscriptions']),
+    ('frontend.services', 'landing.nav.services'|t, ['frontend.services']),
+    ('frontend.coverage', 'landing.nav.coverage'|t, ['frontend.coverage']),
+] -%}
+{%- set more = [
+    ('frontend.about', 'landing.nav.about'|t, ['frontend.about', 'frontend.about_sources', 'frontend.process_filtration']),
+    ('frontend.gallery', 'landing.nav.gallery'|t, ['frontend.gallery']),
+    ('frontend.blog_list', 'web.shell.nav.blog'|t, ['frontend.blog_list', 'frontend.blog_detail']),
+    ('frontend.water_delivery_faq', 'web.shell.nav.faq'|t, ['frontend.water_delivery_faq']),
+    ('frontend.contact', 'landing.nav.contact'|t, ['frontend.contact']),
+] -%}
+{%- set more_current = endpoint in more | map(attribute=2) | sum(start=[]) -%}
+{%- set club_current = endpoint == 'frontend.loyalty_guide' -%}
+
+{%- if variant == 'bar' %}
+<ul class="ae-nav__list">
+    <li class="ae-nav__item{% if categories|length > 1 %} ae-menu{% endif %}{% if shop_current %} is-current{% endif %}">
+        <a class="ae-nav__link" href="{{ external_url_for_lang('frontend.shop') }}"{% if endpoint == 'frontend.shop' %} aria-current="page"{% endif %}>{{ 'landing.nav.shop'|t }}</a>
+        {%- if categories|length > 1 %}
+        <button type="button" class="ae-nav__caret" aria-expanded="false" aria-controls="ae-nav-shop" data-ae-menu-toggle>
+            <span class="visually-hidden">{{ 'web.shell.nav.categories'|t }}</span>
+        </button>
+        <div class="ae-menu__panel" id="ae-nav-shop">
+            {%- for category in categories %}
+            <a class="ae-menu__item" href="{{ external_url_for_lang('frontend.shop', category=category.id) }}">{{ category.name }}</a>
+            {%- endfor %}
+        </div>
+        {%- endif %}
+    </li>
+    {%- for item_endpoint, label, current_endpoints in primary %}
+    <li class="ae-nav__item{% if endpoint in current_endpoints %} is-current{% endif %}">
+        <a class="ae-nav__link" href="{{ external_url_for_lang(item_endpoint) }}"{% if endpoint in current_endpoints %} aria-current="page"{% endif %}>{{ label }}</a>
+    </li>
+    {%- endfor %}
+    <li class="ae-nav__item{% if club_current %} is-current{% endif %}">
+        <a class="ae-nav__link" href="{{ external_url_for_lang('frontend.loyalty_guide') }}"{% if club_current %} aria-current="page"{% endif %}>{{ 'landing.nav.aqua_club'|t }}<span class="nav-badge">{{ 'landing.nav.aqua_club_badge'|t }}</span></a>
+    </li>
+    <li class="ae-nav__item ae-menu{% if more_current %} is-current{% endif %}">
+        <button type="button" class="ae-nav__link ae-nav__more" aria-expanded="false" aria-controls="ae-nav-more" data-ae-menu-toggle>{{ 'web.shell.nav.more'|t }}<i class="far fa-angle-down" aria-hidden="true"></i></button>
+        <div class="ae-menu__panel ae-menu__panel--end" id="ae-nav-more">
+            {%- for item_endpoint, label, current_endpoints in more %}
+            <a class="ae-menu__item" href="{{ external_url_for_lang(item_endpoint) }}"{% if endpoint in current_endpoints %} aria-current="page"{% endif %}>{{ label }}</a>
+            {%- endfor %}
+        </div>
+    </li>
+</ul>
+
+{%- else %}
+<ul class="ae-dnav">
+    <li>
+        {%- if categories|length > 1 %}
+        <details class="ae-dnav__group"{% if shop_current %} open{% endif %}>
+            <summary class="ae-dnav__link{% if shop_current %} is-current{% endif %}">{{ 'landing.nav.shop'|t }}<i class="far fa-angle-down" aria-hidden="true"></i></summary>
+            <ul class="ae-dnav__sub">
+                <li><a href="{{ external_url_for_lang('frontend.shop') }}">{{ 'landing.shop.view_all_products'|t }}</a></li>
+                {%- for category in categories %}
+                <li><a href="{{ external_url_for_lang('frontend.shop', category=category.id) }}">{{ category.name }}</a></li>
+                {%- endfor %}
+            </ul>
+        </details>
+        {%- else %}
+        <a class="ae-dnav__link{% if shop_current %} is-current{% endif %}" href="{{ external_url_for_lang('frontend.shop') }}"{% if endpoint == 'frontend.shop' %} aria-current="page"{% endif %}>{{ 'landing.nav.shop'|t }}</a>
+        {%- endif %}
+    </li>
+    {%- for item_endpoint, label, current_endpoints in primary %}
+    <li><a class="ae-dnav__link{% if endpoint in current_endpoints %} is-current{% endif %}" href="{{ external_url_for_lang(item_endpoint) }}"{% if endpoint in current_endpoints %} aria-current="page"{% endif %}>{{ label }}</a></li>
+    {%- endfor %}
+    <li><a class="ae-dnav__link{% if club_current %} is-current{% endif %}" href="{{ external_url_for_lang('frontend.loyalty_guide') }}"{% if club_current %} aria-current="page"{% endif %}><span>{{ 'landing.nav.aqua_club'|t }}<span class="nav-badge">{{ 'landing.nav.aqua_club_badge'|t }}</span></span></a></li>
+    <li>
+        <details class="ae-dnav__group"{% if more_current %} open{% endif %}>
+            <summary class="ae-dnav__link{% if more_current %} is-current{% endif %}">{{ 'web.shell.nav.more'|t }}<i class="far fa-angle-down" aria-hidden="true"></i></summary>
+            <ul class="ae-dnav__sub">
+                {%- for item_endpoint, label, current_endpoints in more %}
+                <li><a href="{{ external_url_for_lang(item_endpoint) }}"{% if endpoint in current_endpoints %} aria-current="page"{% endif %}>{{ label }}</a></li>
+                {%- endfor %}
+            </ul>
+        </details>
+    </li>
+</ul>
+{%- endif %}
+{%- endmacro %}

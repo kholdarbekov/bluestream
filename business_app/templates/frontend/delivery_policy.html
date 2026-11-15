@@ -1,39 +1,51 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import policy_nav with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_facts_block %}
+
+{#- The H1 is the delivery page's own SSOT title (plus "free" while delivery is free) and the meta description is the
+    delivery statement: neither is edited here. page_hero gives the long title its smaller size; the crumb is short. -#}
 {% set delivery_title = ('landing.delivery_page.title'|t) ~ (('landing.delivery_page.title_free_suffix'|t) if offer_facts.delivery.free else '') %}
 {% set meta_description = offer_facts.delivery.statement[current_language][0] %}
 
-{% block title %}{{ delivery_title }} - {{ company_name }}{% endblock %}
+{% block title %}{{ delivery_title }} — {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ delivery_title }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>{{ delivery_title }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
+{{ page_hero(delivery_title, [('web.shell.footer.delivery_policy'|t, None)]) }}
 
-<section class="service-details">
-    <div class="auto-container">
-        <div class="content-box">
-            {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+<section class="service-details ae-section ct ct--info">
+    <div class="ae-container">
+        {{ policy_nav('delivery') }}
+        <div class="content-box ct-info">
             {{ offer_facts_block(offer_facts, current_language) }}
 
-            <h2>{{ 'landing.delivery_page.heading_how'|t }}</h2>
-            <ul>
-                <li>{{ 'landing.delivery_page.order_anytime'|t }}</li>
-                <li>{{ 'landing.delivery_page.live_arrival'|t }}</li>
-                <li>{{ 'landing.delivery_page.choose_date'|t(days=schedule_horizon_days) }}</li>
-                <li>{{ 'landing.offer.own_bottles'|t }} <a href="{{ external_url_for_lang('frontend.terms') }}#returnable-bottles">{{ 'landing.delivery_page.bottle_terms'|t }}</a></li>
-                <li>{{ 'landing.delivery_page.payment'|t }}</li>
+            <h2 class="ct-info__title">{{ 'landing.delivery_page.heading_how'|t }}</h2>
+            <ul class="ct-checklist">
+                <li><span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-mobile-alt"></i></span><p>{{ 'landing.delivery_page.order_anytime'|t }}</p></li>
+                <li><span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-route"></i></span><p>{{ 'landing.delivery_page.live_arrival'|t }}</p></li>
+                <li><span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-calendar-alt"></i></span><p>{{ 'landing.delivery_page.choose_date'|t(days=schedule_horizon_days) }}</p></li>
+                <li><span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-sync-alt"></i></span><p>{{ 'landing.offer.own_bottles'|t }} <a class="ae-link" href="{{ external_url_for_lang('frontend.terms') }}#returnable-bottles">{{ 'landing.delivery_page.bottle_terms'|t }}</a></p></li>
+                <li><span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-wallet"></i></span><p>{{ 'landing.delivery_page.payment'|t }}</p></li>
             </ul>
 
-            <p><a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.delivery_page.support'|t }}</a></p>
+            <div class="ct-info__pair">
+                <a class="ae-card ae-card--link ct-linkcard" href="{{ external_url_for_lang('frontend.coverage') }}">
+                    <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-map-marked-alt"></i></span>
+                    <span class="ct-linkcard__body">
+                        <span class="ct-linkcard__title">{{ 'web.content.delivery.coverage_title'|t }}</span>
+                        <span class="ct-linkcard__text">{{ 'web.content.delivery.coverage_text'|t }}</span>
+                        <span class="ct-linkcard__cta">{{ 'web.content.delivery.coverage_cta'|t }}</span>
+                    </span>
+                </a>
+                <div class="ae-panel ct-help">
+                    <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+                    <a class="ct-help__link" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">{{ 'landing.delivery_page.support'|t }}</a>
+                </div>
+            </div>
         </div>
     </div>
 </section>

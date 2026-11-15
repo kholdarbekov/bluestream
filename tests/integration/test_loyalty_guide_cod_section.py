@@ -27,6 +27,7 @@ dev hold different percentages and neither may leak into an assertion.
 import re
 
 import pytest
+from bs4 import BeautifulSoup
 
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyTierConfig
 from business_app.models.translation import Translation
@@ -82,9 +83,9 @@ def _seed(db, key: str, value: str, lang: str | None = None) -> None:
 @pytest.mark.integration
 @pytest.mark.api
 def test_tier_card_presents_the_discount_as_a_bot_and_website_perk(client, db, program, tiers):
-    """The stat and the perk bullet are the two places the card publishes the
-    rate. Both must name the channel (bot / website), and neither may embed the
-    rate itself."""
+    """The stat is the one place the card publishes the rate (review C-16, 2026-11-14: the perk bullet that repeated
+    it beside the stat is gone). Its label names the channel (bot / website) and never embeds the rate itself; the
+    footnote under the grid carries the rest of the rule. A `perk_discount` row left in the database prints nothing."""
     _seed(db, "loyalty_guide.tier.label_discount", "bot & website discount")
     _seed(db, "loyalty_guide.tier.perk_discount", "{pct}% off orders you place in our bot or on our website, paid on delivery")
 
@@ -101,13 +102,17 @@ def test_tier_card_presents_the_discount_as_a_bot_and_website_perk(client, db, p
     # convention), which would render this page in the wrong language.
     html = client.application.test_client().get("/loyalty-guide?lang=en").get_data(as_text=True)
 
-    assert "20% off orders you place in our bot or on our website, paid on delivery" in html
-    assert "bot &amp; website discount" in html
-    # The 0% tier still shows no perk bullet. A plain substring check for
-    # "0% off..." is a false negative here: it also matches inside the
-    # Summit tier's "20% off..." bullet. Anchor on the digit boundary so the
-    # standalone "0%" bullet is what's actually being ruled out.
-    assert re.search(r"(?<!\d)0% off orders you place in our bot", html) is None
+    # The Summit card states 20% once, in its stat, labelled with the channel.
+    assert (
+        '<strong>20%<sup class="lg-stat__sup" aria-describedby="lg-tier-discount-note">*</sup></strong>'
+        '<span>bot &amp; website discount</span>' in html
+    )
+    grid = BeautifulSoup(html, "html.parser").select_one(".lg-tiers")
+    cards = {card.select_one(".lg-tier__name").get_text(strip=True): card.get_text(" ") for card in grid.select("article")}
+    assert cards["Summit"].count("20%") == 1
+    assert "off orders you place in our bot" not in html
+    # The 0% tier states no rate at all. Anchored on the digit boundary so "20%" is not read as "0%".
+    assert re.search(r"(?<!\d)0\s*%", cards["Base"]) is None
     assert "{pct}" not in html
 
 

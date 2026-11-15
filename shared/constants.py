@@ -256,7 +256,7 @@ TASHKENT_DISTRICTS = {
     },
     "mirzo_ulugbek": {
         "en": "Mirzo Ulugbek",
-        "uz": "Mirzo Ulug'bek",
+        "uz": "Mirzo Ulug‘bek",
         "ru": "Мирзо Улугбек",
         "center": (41.3439, 69.3269),
     },
@@ -370,12 +370,12 @@ def get_geo_config(language: str = "en") -> dict:
 # use richer DB-backed marketing copy on top of this.
 DELIVERY_COVERAGE_SUMMARY = {
     "en": "All of Tashkent city plus neighbouring areas of the Tashkent Region.",
-    "uz": "Butun Toshkent shahri va Toshkent viloyatining qo'shni hududlari.",
+    "uz": "Butun Toshkent shahri va Toshkent viloyatining qo‘shni hududlari.",
     "ru": "Весь город Ташкент и прилегающие районы Ташкентской области.",
 }
 DELIVERY_COVERAGE_REGION_NOTE = {
     "en": "neighbouring areas of the Tashkent Region",
-    "uz": "Toshkent viloyatining qo'shni hududlari",
+    "uz": "Toshkent viloyatining qo‘shni hududlari",
     "ru": "прилегающие районы Ташкентской области",
 }
 

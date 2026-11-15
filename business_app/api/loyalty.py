@@ -13,7 +13,6 @@ from business_app.serializers.loyalty_serializers import (
     serialize_loyalty_program,
 )
 from business_app.utils.decorators import validate_json, cache_response, require_loyalty_eligible
-from business_app.utils.constants import LoyaltyActionType
 from business_app.utils.api_responses import (
     success_response,
     error_response,
@@ -30,7 +29,7 @@ loyalty_bp = Blueprint("loyalty", __name__)
 
 def _validation_error_key_for_points_history(message: str) -> str:
     lower = message.lower()
-    if "transaction type" in lower:
+    if "transaction type" in lower or "history group" in lower:
         return "api.loyalty.error.invalid_transaction_type"
     if "start date" in lower:
         return "api.loyalty.error.invalid_start_date_format"
@@ -166,6 +165,8 @@ def get_points_history():
         transaction_type = request.args.get("type")
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
+        # A display-category group (loyalty_serializers.HISTORY_GROUPS), the filter /my-loyalty's chips send.
+        group = request.args.get("group")
 
         payload = get_loyalty_service().get_filtered_points_history_for_user(
             user_id=current_user_id,
@@ -174,6 +175,7 @@ def get_points_history():
             transaction_type=transaction_type,
             start_date=start_date,
             end_date=end_date,
+            group=group,
         )
         return paginated_response(
             items=[serialize_loyalty_transaction(item) for item in payload["items"]],
@@ -311,65 +313,6 @@ def get_loyalty_programs():
     except Exception as exc:
         current_app.logger.error(f"Get loyalty programs error: {exc}")
         return internal_error_response(get_translation("api.loyalty.error.get_programs_failed"))
-
-
-@loyalty_bp.route("/earn-points", methods=["POST"])
-@jwt_required()
-@require_loyalty_eligible
-@validate_json(["action"])
-def earn_points():
-    """Manually award points for specific actions."""
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json()
-        loyalty_service = get_loyalty_service()
-
-        action = data.get("action")
-        reference_id = data.get("reference_id")
-        points_amount = data.get("points_amount")
-
-        valid_actions = [
-            "referral_signup",
-            "social_share",
-            "review_submitted",
-            "birthday_bonus",
-            "survey_completed",
-            "app_install",
-            "newsletter_signup",
-        ]
-        if action not in valid_actions:
-            return error_response(get_translation("api.loyalty.error.invalid_action_type"))
-
-        action_type_map = {
-            "referral_signup": LoyaltyActionType.REFERRAL,
-            "social_share": LoyaltyActionType.SOCIAL_SHARE,
-            "review_submitted": LoyaltyActionType.REVIEW,
-            "birthday_bonus": LoyaltyActionType.BIRTHDAY_BONUS,
-            "survey_completed": LoyaltyActionType.WELCOME_BONUS,
-            "app_install": LoyaltyActionType.WELCOME_BONUS,
-            "newsletter_signup": LoyaltyActionType.WELCOME_BONUS,
-        }
-
-        transaction = loyalty_service.award_points(
-            user_id=current_user_id,
-            points=points_amount or loyalty_service.get_action_points(action),
-            description=f"AquaCoins earned for {action.replace('_', ' ')}",
-            action_type=action_type_map.get(action, LoyaltyActionType.WELCOME_BONUS),
-            reference_id=reference_id,
-        )
-
-        return created_response(
-            data={
-                "transaction": serialize_loyalty_transaction(transaction),
-            },
-            message=get_translation("api.loyalty.points_awarded_successfully"),
-        )
-    except ValidationError as exc:
-        current_app.logger.warning(f"Earn points validation error: {exc}")
-        return error_response(get_translation("api.loyalty.error.validation_failed"))
-    except Exception as exc:
-        current_app.logger.error(f"Earn points error: {exc}")
-        return internal_error_response(get_translation("api.loyalty.error.earn_points_failed"))
 
 
 @loyalty_bp.route("/referral", methods=["GET"])

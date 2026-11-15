@@ -1,124 +1,118 @@
+{#- Confirm an email address (verify-email.js posts the link's token, or the code typed from the letter, to
+    /api/v1/auth/verify-email). The view decides the state: `checking` (a link was opened; the script verifies it),
+    `form` (type the code), `already` (a signed-in customer whose address is confirmed) or `no_email` (a signed-in
+    customer with no real address). A new letter is offered only to a signed-in customer with an address, because the
+    resend route needs the session; a signed-out visitor is offered sign-in instead. Results replace the card body. -#}
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/macros/auth.html' import auth_head, field, form_alert with context %}
 
-{% block title %}{{ 'Verify Email Address'|t }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'web.auth.verify_email.page_title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'Verify Email Address'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'Verify Email'|t }}</li>
-                    </ul>
+{%- set can_resend = signed_in and email %}
+{#- After a confirmed address: a signed-in customer goes on to `continue_url` (the safe `next` an email sign-up from
+    checkout carried here) or the account; a signed-out visitor signs in. -#}
+{%- if signed_in and continue_url %}
+{%- set account_action = continue_url %}
+{%- set account_label = 'web.auth.verify_email.continue'|t %}
+{%- elif signed_in %}
+{%- set account_action = url_for('frontend.my_account') %}
+{%- set account_label = 'web.auth.verify_email.to_account'|t %}
+{%- else %}
+{%- set account_action = url_for('frontend.login') %}
+{%- set account_label = 'web.auth.verify_email.sign_in'|t %}
+{%- endif %}
+{{ page_hero('web.auth.verify_email.hero'|t, [('web.auth.verify_email.hero'|t, None)], variant='soft') }}
+
+<section class="ae-section ae-auth">
+    <div class="ae-container">
+        <div class="ae-auth__card" data-verify-state="{{ state }}">
+            {%- if state == 'already' %}
+            <div class="ae-empty ae-auth__result">
+                <span class="ae-empty__icon ae-auth__result-icon--ok" aria-hidden="true"><i class="fas fa-check"></i></span>
+                <h2 class="ae-empty__title">{{ 'web.auth.verify_email.already_title'|t }}</h2>
+                <p class="ae-empty__text">{{ 'web.auth.verify_email.already_text'|t|replace('{email}', email) }}</p>
+                <div class="ae-empty__actions">
+                    <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.my_account') }}">{{ 'web.auth.verify_email.to_account'|t }}</a>
                 </div>
             </div>
-        </section>
-        <!-- page-title end -->
+            {%- elif state == 'no_email' %}
+            <div class="ae-empty ae-auth__result">
+                <span class="ae-empty__icon" aria-hidden="true"><i class="far fa-envelope"></i></span>
+                <h2 class="ae-empty__title">{{ 'web.auth.verify_email.no_email_title'|t }}</h2>
+                <p class="ae-empty__text">{{ 'web.auth.verify_email.no_email_text'|t }}</p>
+                <div class="ae-empty__actions">
+                    <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.my_account') }}">{{ 'web.auth.verify_email.to_account'|t }}</a>
+                </div>
+            </div>
+            {%- else %}
+            <div id="verifyStep">
+                {{ auth_head('web.auth.verify_email.title'|t,
+                    ('web.auth.verify_email.lead_to'|t|replace('{email}', email)) if email else 'web.auth.verify_email.lead'|t) }}
 
-        <!-- email-verification-section -->
-        <section class="auth-section">
-            <div class="auto-container">
-                <div class="auth-card">
-                    <!-- Card Header -->
-                    <div class="auth-card-header">
-                        <div class="logo-icon">
-                            <i class="fas fa-envelope-open-text"></i>
-                        </div>
-                        <h2>{{ 'Verify Your Email'|t }}</h2>
-                        <p>{{ 'Please check your email and enter the verification code'|t }}</p>
-                    </div>
+                {%- if state == 'checking' %}
+                <div class="ae-auth__checking" id="checkingNote" role="status">
+                    <span class="ae-auth__spinner" aria-hidden="true"></span>
+                    <p>{{ 'web.auth.verify_email.checking'|t }}</p>
+                </div>
+                {%- endif %}
 
-                    <!-- Info Alert -->
-                    <div class="auth-info-box">
-                        <div class="info-icon">
-                            <i class="fas fa-info-circle"></i>
-                        </div>
-                        <p>{{ 'We sent a verification link to your email address. You can either click the link in your email or enter the verification code below.'|t }}</p>
-                    </div>
+                {{ form_alert('verifyAlert') }}
 
-                    <!-- Verification Form -->
-                    <form id="emailVerificationForm" class="auth-form">
-                        <!-- Verification Code Input -->
-                        <div class="form-group">
-                            <div class="input-wrapper">
-                                <input type="text" name="token" class="form-control verification-code-input" placeholder="{{ 'Enter verification code'|t }}" required autocomplete="off" maxlength="32">
-                                <i class="fas fa-key input-icon"></i>
-                            </div>
-                            <small class="input-hint">{{ 'The verification code was sent to your email'|t }}</small>
-                        </div>
-
-                        <!-- Submit Button -->
-                        <div class="form-group">
-                            <button type="submit" class="btn-auth">
-                                <i class="fas fa-check-circle"></i> {{ 'Verify Email'|t }}
-                            </button>
-                        </div>
+                <div id="verifyBody"{% if state == 'checking' %} hidden{% endif %}>
+                    <form id="emailVerificationForm" class="ae-auth__form" novalidate>
+                        {{ field('verificationCode', 'web.auth.verify_email.code_label'|t, name='token', autocomplete='off',
+                            help='web.auth.verify_email.code_help'|t, attrs='class=ae-auth__code maxlength=64 spellcheck=false autocapitalize=off') }}
+                        <button type="submit" class="ae-btn ae-btn--primary ae-btn--block ae-btn--lg" id="verifyEmailBtn"><span>{{ 'web.auth.verify_email.submit'|t }}</span></button>
                     </form>
 
-                    <!-- Resend Section -->
-                    <div class="auth-divider">
-                        <span>{{ 'or'|t }}</span>
+                    {%- if can_resend %}
+                    <div class="ae-auth__resend" id="resendSection">
+                        <p class="ae-auth__resend-text"><strong>{{ 'web.auth.verify_email.resend_q'|t }}</strong> {{ 'web.auth.verify_email.resend_hint'|t }}</p>
+                        <button type="button" id="resendEmail" class="ae-btn ae-btn--secondary ae-btn--block"><i class="far fa-paper-plane" aria-hidden="true"></i><span>{{ 'web.auth.verify_email.resend'|t }}</span></button>
+                        <p class="ae-auth__note" id="resendNote" role="status" hidden></p>
                     </div>
-
-                    <div class="resend-section">
-                        <p>{{ "Didn't receive the email?"|t }}</p>
-                        <button type="button" id="resendEmail" class="btn-resend">
-                            <i class="fas fa-paper-plane"></i> {{ 'Resend Verification Email'|t }}
-                        </button>
-                    </div>
-
-                    <!-- Success Message -->
-                    <div id="successMessage" class="auth-success-box" style="display: none;">
-                        <div class="success-icon">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <h3>{{ 'Email Verified!'|t }}</h3>
-                        <p>{{ 'Your email address has been verified successfully. Your account is now fully activated.'|t }}</p>
-                        <a href="{{ url_for('frontend.my_account') }}" class="btn-auth">
-                            {{ 'Go to My Account'|t }}
-                        </a>
-                    </div>
-
-                    <!-- Error Message -->
-                    <div id="errorMessage" class="auth-error-box" style="display: none;">
-                        <div class="error-icon">
-                            <i class="fas fa-exclamation-circle"></i>
-                        </div>
-                        <p id="errorText"></p>
-                    </div>
-
-                    <!-- Footer -->
-                    <div class="auth-footer">
-                        <p><a href="{{ url_for('frontend.my_account') }}"><i class="fas fa-arrow-left"></i> {{ 'Back to My Account'|t }}</a></p>
-                    </div>
+                    {%- elif not signed_in %}
+                    <p class="ae-auth__foot">{{ 'web.auth.verify_email.sign_in_to_resend'|t }} <a class="ae-auth__link" href="{{ url_for('frontend.login', next=url_for('frontend.verify_email')) }}">{{ 'web.auth.verify_email.sign_in'|t }}</a></p>
+                    {%- endif %}
                 </div>
             </div>
-        </section>
-        <!-- email-verification-section end -->
+
+            <div id="successMessage" class="ae-empty ae-auth__result" hidden>
+                <span class="ae-empty__icon ae-auth__result-icon--ok" aria-hidden="true"><i class="fas fa-check"></i></span>
+                <h2 class="ae-empty__title" id="verifyDoneTitle" tabindex="-1">{{ 'web.auth.verify_email.done_title'|t }}</h2>
+                <p class="ae-empty__text">{{ 'web.auth.verify_email.done_text'|t }}</p>
+                <div class="ae-empty__actions">
+                    <a class="ae-btn ae-btn--primary" href="{{ account_action }}">{{ account_label }}</a>
+                </div>
+            </div>
+            {%- endif %}
+        </div>
+    </div>
+</section>
 {% endblock %}
 
 {% block extra_js %}
+{%- if state in ('checking', 'form') %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'my_account_url': url_for('frontend.my_account'),
+    'token': token if state == 'checking' else None,
     'i18n': {
-        'verified_success': 'Email verified successfully!' | t,
-        'invalid_code': 'Invalid or expired verification code' | t,
-        'network_error': 'Network error. Please try again.' | t,
-        'enter_code': 'Please enter the verification code' | t,
-        'sending': 'Sending...' | t,
-        'sent_success': 'Verification email sent successfully! Please check your inbox.' | t,
-        'resend_in': 'Resend in' | t,
-        'resend_button': 'Resend Verification Email' | t,
-        'send_failed': 'Failed to send verification email' | t,
+        'required': 'web.auth.verify_email.need_code' | t,
+        'invalid': 'web.auth.verify_email.invalid' | t,
+        'invalid_link': 'web.auth.verify_email.invalid_link' | t,
+        'sent': 'web.auth.verify_email.sent' | t,
+        'send_failed': 'web.auth.verify_email.send_failed' | t,
+        'rate_limited': 'web.auth.common.rate_limited' | t,
+        'network_error': 'web.auth.common.network_error' | t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/verify-email.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/verify-email.js') }}"></script>
+{%- endif %}
 {% endblock %}

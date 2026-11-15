@@ -43,7 +43,7 @@ def test_the_sidebar_names_a_phone_only_customer_and_shows_the_phone(app, custom
     soup, html = _page(app, customer, "/profile-settings")
 
     box = soup.select_one(".profile-info")
-    assert box.select_one("h4").get_text(strip=True) == "Ali"
+    assert box.select_one(".ae-cabinet-nav__name").get_text(strip=True) == "Ali"
     assert box.select_one("p.text-muted").get_text(strip=True) == PHONE
     assert "None" not in box.get_text()
 
@@ -63,17 +63,22 @@ def test_no_contact_line_without_email_or_phone(app, db, customer):
     soup, _ = _page(app, customer, "/profile-settings")
 
     assert soup.select_one(".profile-info p.text-muted") is None
-    assert soup.select_one(".profile-info h4").get_text(strip=True) == "Ali"
+    assert soup.select_one(".profile-info .ae-cabinet-nav__name").get_text(strip=True) == "Ali"
+
+
+def _email_row(soup):
+    """The profile's read-only email row (website redesign 2026-11-14: contacts are rows, not a form)."""
+    return soup.select_one('[data-contact="email"] dd')
 
 
 def test_profile_settings_hides_the_email_field_without_a_real_email(app, db, customer):
     soup, html = _page(app, customer, "/profile-settings")
-    assert soup.select_one('#contactInfoForm input[name="email"]') is None
-    assert 'value="None"' not in html
+    assert soup.select_one(".ae-acx__email") is None
+    assert "None" not in _email_row(soup).get_text() and 'value="None"' not in html
 
     _set(db, customer, email=PLACEHOLDER)
     soup, html = _page(app, customer, "/profile-settings")
-    assert soup.select_one('#contactInfoForm input[name="email"]') is None and PLACEHOLDER not in html
+    assert soup.select_one(".ae-acx__email") is None and PLACEHOLDER not in html
 
 
 def test_profile_settings_keeps_a_real_email(app, db, customer):
@@ -81,7 +86,7 @@ def test_profile_settings_keeps_a_real_email(app, db, customer):
 
     soup, _ = _page(app, customer, "/profile-settings")
 
-    assert soup.select_one('#contactInfoForm input[name="email"]')["value"] == "ali@example.com"
+    assert _email_row(soup).select_one(".ae-acx__email").get_text(strip=True) == "ali@example.com"
     assert soup.select_one(".profile-info p.text-muted").get_text(strip=True) == "ali@example.com"
 
 
@@ -98,7 +103,7 @@ def test_the_header_and_welcome_line_use_the_greeting_name(app, db, customer, fi
     assert soup.select(".user-menu button.dropdown-toggle")[0].get_text(strip=True) == (
         label if header == "LABEL" else header
     )
-    assert soup.select_one(".welcome-section h3").get_text(strip=True) == welcome
+    assert soup.select_one(".welcome-section .ae-page-head__title").get_text(strip=True) == welcome
 
 
 def test_the_bot_profile_payload_publishes_the_finished_lines(app, db, customer):

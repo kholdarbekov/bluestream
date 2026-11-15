@@ -1,0 +1,109 @@
+{#- Building blocks of the sign-in pages (login, register, forgot and reset password; styles in
+    static/css/pages/auth.css under .ae-auth, behaviour in static/js/pages/auth-form.js).
+
+    auth_head(title, lead)            the card head: the stacked logo, an h2 and one line under it.
+    field(id, label, ...)             a labelled .ae-field with optional help and an inline error slot.
+    password_field(id, label, ...)    the same with a show/hide button (a focusable toggle with aria-pressed).
+    password_rules(rules)             the requirement checklist, one item per entry of PasswordValidator.requirements();
+                                      the pattern or minimum length rides on the item, so the script checks the rule
+                                      the server applies and never keeps its own copy.
+    otp_field(id, name, ...)          the six-cell one-time code, its countdown line and the resend button.
+    or_divider()                      the "or" rule between the form and the Telegram option.
+    form_alert(id)                    the form-level error, announced when the script fills it.
+    Import it `with context` so |t and the template globals resolve. -#}
+
+{% macro auth_head(title, lead=None, title_id=None) -%}
+<div class="ae-auth__head">
+    <picture class="ae-auth__logo">
+        <source type="image/webp" srcset="{{ asset_url('images/brand/aqua-element-logo-stacked.webp') }}">
+        <img src="{{ asset_url('images/brand/aqua-element-logo-stacked.png') }}" width="420" height="498" alt="">
+    </picture>
+    <h2 class="ae-auth__title"{% if title_id %} id="{{ title_id }}" tabindex="-1"{% endif %}>{{ title }}</h2>
+    {%- if lead %}
+    <p class="ae-auth__lead">{{ lead }}</p>
+    {%- endif %}
+</div>
+{%- endmacro %}
+
+{% macro field(id, label, type='text', name=None, autocomplete=None, inputmode=None, help=None, required=True, optional=False, placeholder=None, value=None, attrs='') -%}
+<div class="ae-field" data-field="{{ name or id }}">
+    <label class="ae-field__label" for="{{ id }}">{{ label }}{% if optional %} <span class="ae-field__optional">({{ 'web.auth.common.optional'|t }})</span>{% endif %}</label>
+    <input type="{{ type }}" id="{{ id }}" name="{{ name or id }}"
+        {%- if autocomplete %} autocomplete="{{ autocomplete }}"{% endif %}
+        {%- if inputmode %} inputmode="{{ inputmode }}"{% endif %}
+        {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+        {%- if value %} value="{{ value }}"{% endif %}
+        {%- if required %} required aria-required="true"{% endif %}
+        aria-describedby="{% if help %}{{ id }}-help {% endif %}{{ id }}-error"{% if attrs %} {{ attrs }}{% endif %}>
+    {%- if help %}
+    <p class="ae-field__help" id="{{ id }}-help">{{ help }}</p>
+    {%- endif %}
+    <p class="ae-field__error" id="{{ id }}-error"></p>
+</div>
+{%- endmacro %}
+
+{% macro password_field(id, label, autocomplete, name=None, help=None, describedby=None) -%}
+<div class="ae-field" data-field="{{ name or id }}">
+    <label class="ae-field__label" for="{{ id }}">{{ label }}</label>
+    <div class="ae-field__control ae-field__control--toggle">
+        <input type="password" id="{{ id }}" name="{{ name or id }}" autocomplete="{{ autocomplete }}" required aria-required="true"
+            aria-describedby="{% if help %}{{ id }}-help {% endif %}{% if describedby %}{{ describedby }} {% endif %}{{ id }}-error">
+        <button type="button" class="ae-field__toggle password-toggle" data-target="{{ id }}" aria-controls="{{ id }}" aria-pressed="false"
+            aria-label="{{ 'web.auth.common.show_password'|t }}" data-label-show="{{ 'web.auth.common.show_password'|t }}" data-label-hide="{{ 'web.auth.common.hide_password'|t }}"><i class="far fa-eye" aria-hidden="true"></i></button>
+    </div>
+    {%- if help %}
+    <p class="ae-field__help" id="{{ id }}-help">{{ help }}</p>
+    {%- endif %}
+    <p class="ae-field__error" id="{{ id }}-error"></p>
+</div>
+{%- endmacro %}
+
+{% macro password_rules(rules, id='passwordRules', input_id='password') -%}
+<div class="ae-auth__rules" id="{{ id }}" data-password-rules data-for="{{ input_id }}">
+    <p class="ae-auth__rules-title">{{ 'web.auth.password_rule.title'|t }}</p>
+    <ul>
+        {%- for rule in rules %}
+        <li class="ae-auth__rule" data-rule="{{ rule.id }}"
+            {%- if rule.min_length %} data-min-length="{{ rule.min_length }}"{% endif %}
+            {%- if rule.pattern %} data-pattern="{{ rule.pattern }}"{% endif %}>
+            <i class="far fa-circle" aria-hidden="true"></i>
+            <span>{{ ('web.auth.password_rule.' ~ rule.id)|t|replace('{min}', rule.min_length|string) }}</span>
+            <span class="visually-hidden" data-rule-state>{{ 'web.auth.password_rule.unmet'|t }}</span>
+        </li>
+        {%- endfor %}
+    </ul>
+</div>
+{%- endmacro %}
+
+{#- The one-time code: a single input (SMS autofill, paste) drawn as six cells (.ae-otp in pages/auth.css), then the
+    countdown line and the resend button. AEAuth.wireOtp(input) draws the cells; AEAuth.countdown(...) runs the line
+    from the server's expires_in. Used by register (sign-up code) and verify_phone. -#}
+{% macro otp_field(id='otpCode', name='otp_code', timer_id='otpTimerText', resend_id='resendOtpBtn') -%}
+<div class="ae-field" data-field="{{ name }}">
+    <label class="ae-field__label ae-auth__otp-label" for="{{ id }}">{{ 'web.auth.otp.label'|t }}</label>
+    <div class="ae-otp">
+        <input type="text" id="{{ id }}" name="{{ name }}" class="ae-otp__input" inputmode="numeric" autocomplete="one-time-code"
+            maxlength="6" pattern="[0-9]{6}" required aria-describedby="{{ id }}-error" spellcheck="false">
+        <div class="ae-otp__cells" aria-hidden="true">
+            {%- for _ in range(6) %}<span class="ae-otp__cell"></span>{% endfor -%}
+        </div>
+    </div>
+    <p class="ae-field__error" id="{{ id }}-error"></p>
+</div>
+
+<div class="ae-auth__otp-timer">
+    <p id="{{ timer_id }}" data-template="{{ 'web.auth.otp.expires_in'|t }}" aria-live="off"></p>
+    <button type="button" id="{{ resend_id }}" class="ae-btn ae-btn--ghost ae-btn--sm" hidden><i class="fas fa-redo-alt" aria-hidden="true"></i><span>{{ 'web.auth.otp.resend'|t }}</span></button>
+</div>
+{%- endmacro %}
+
+{% macro or_divider() -%}
+<div class="ae-auth__or" role="separator"><span>{{ 'web.auth.common.or'|t }}</span></div>
+{%- endmacro %}
+
+{% macro form_alert(id) -%}
+<div class="ae-alert ae-alert--danger ae-auth__alert" id="{{ id }}" role="alert" tabindex="-1" hidden>
+    <i class="ae-alert__icon fas fa-exclamation-circle" aria-hidden="true"></i>
+    <p data-alert-text></p>
+</div>
+{%- endmacro %}

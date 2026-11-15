@@ -30,7 +30,7 @@ from business_app.models.loyalty import (
 )
 from business_app.models.user import User
 from business_app.services.loyalty_service import LoyaltyService
-from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
+from business_app.utils.constants import LoyaltyTransactionType
 from business_app.utils.password_security import hash_password
 from shared.enums import UserRole, UserType
 
@@ -437,80 +437,25 @@ def test_gift_points_invalid_phone_returns_error(client, auth_headers, db, sampl
 
 
 # ---------------------------------------------------------------------------
-# Earn points
+# Earn points (route removed 2026-11-13)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 @pytest.mark.api
-def test_earn_points_creates_transaction_for_valid_action(
-    client, auth_headers, db, sample_user, loyalty_program
-):
-    """A valid action awards program-derived points and persists a transaction."""
+def test_customer_cannot_award_themselves_aquacoins(client, auth_headers, db, sample_user, loyalty_program):
+    """POST /earn-points accepted a client-supplied points_amount, so any eligible customer could mint
+    AquaCoins and redeem them (owner decision 2026-11-13: the route is removed). Drive the exact request an
+    attacker would send and prove nothing is credited."""
     response = client.post(
         "/api/v1/loyalty/earn-points",
         headers=auth_headers,
-        json={"action": "birthday_bonus"},
+        json={"action": "review_submitted", "points_amount": 1000000},
     )
 
-    assert response.status_code == 201
-    txn = response.get_json()["data"]["transaction"]
-    # birthday_bonus -> get_action_points reads program.birthday_bonus (default 25).
-    assert txn["points"] == 25
-
-    # A BONUS transaction lands in the ledger and the balance reflects it.
-    bonus = LoyaltyTransaction.query.filter_by(user_id=sample_user.id).all()
-    assert any(
-        t.transaction_type == LoyaltyTransactionType.BONUS
-        and (t.extra_data or {}).get("action_type") == LoyaltyActionType.BIRTHDAY_BONUS.value
-        for t in bonus
-    )
-    assert LoyaltyService().get_available_points(sample_user.id) == 25
-
-
-@pytest.mark.integration
-@pytest.mark.api
-def test_earn_points_honours_explicit_points_amount(client, auth_headers, db, sample_user, loyalty_program):
-    response = client.post(
-        "/api/v1/loyalty/earn-points",
-        headers=auth_headers,
-        json={"action": "review_submitted", "points_amount": 70},
-    )
-
-    assert response.status_code == 201
-    assert response.get_json()["data"]["transaction"]["points"] == 70
-    assert LoyaltyService().get_available_points(sample_user.id) == 70
-
-
-@pytest.mark.integration
-@pytest.mark.api
-def test_earn_points_rejects_invalid_action(client, auth_headers, db, sample_user, loyalty_program):
-    response = client.post(
-        "/api/v1/loyalty/earn-points",
-        headers=auth_headers,
-        json={"action": "not_a_real_action"},
-    )
-
-    assert response.status_code == 400
-    assert response.get_json()["success"] is False
-    # Nothing awarded.
+    assert response.status_code == 404
     assert LoyaltyTransaction.query.filter_by(user_id=sample_user.id).count() == 0
-
-
-@pytest.mark.integration
-@pytest.mark.api
-def test_earn_points_missing_action_field_rejected(client, auth_headers, db, sample_user, loyalty_program):
-    """The @validate_json(["action"]) guard rejects a body without 'action'."""
-    response = client.post(
-        "/api/v1/loyalty/earn-points",
-        headers=auth_headers,
-        json={"points_amount": 50},
-    )
-
-    # @validate_json rejects with its own envelope: {"error", "missing_fields"}.
-    assert response.status_code == 400
-    body = response.get_json()
-    assert "action" in body["missing_fields"]
+    assert LoyaltyService().get_available_points(sample_user.id) == 0
 
 
 # ---------------------------------------------------------------------------

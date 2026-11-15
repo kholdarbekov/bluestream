@@ -1,67 +1,39 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Условия использования Aqua Element: сайт, заказы товаров, подписки и связанные услуги доставки." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Terms and conditions for using Aqua Element website, ordering products, subscriptions, and related delivery services." %}
-{% else %}
-{% set meta_description = "Aqua Element foydalanish shartlari: sayt, buyurtmalar, obunalar va tegishli yetkazib berish xizmatlari." %}
-{% endif %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/content_ui.html' import policy_nav, legal_document with context %}
 
-{% block title %}Terms and Conditions - {{ company_name }}{% endblock %}
+{% set doc_title = 'web.content.terms.title'|t %}
+{% set meta_description = 'web.content.terms.meta'|t %}
+
+{% block title %}{{ doc_title }} — {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/content.css') }}" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>Terms and Conditions</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>Terms and Conditions</li>
-            </ul>
-        </div>
-    </div>
-</section>
+{#- The published terms, section by section. The returnable-bottles clause keeps its anchor (the delivery page links
+    to it) and its own landing.terms.* copy; numbers are CSS counters, so it is numbered like the rest. -#}
+{% set sections = [
+    {'id': 'acceptance', 'h': 'web.content.terms.s1_h'|t, 'p': ['web.content.terms.s1_p'|t]},
+    {'id': 'account', 'h': 'web.content.terms.s2_h'|t, 'p': ['web.content.terms.s2_p'|t]},
+    {'id': 'orders', 'h': 'web.content.terms.s3_h'|t, 'p': ['web.content.terms.s3_p'|t]},
+    {'id': 'pricing-and-payments', 'h': 'web.content.terms.s4_h'|t, 'p': ['web.content.terms.s4_p'|t]},
+    {'id': 'delivery', 'h': 'web.content.terms.s5_h'|t, 'p': ['web.content.terms.s5_p'|t]},
+    {'id': 'returnable-bottles', 'h': 'landing.terms.bottles_heading'|t, 'p': ['landing.terms.bottles_body'|t]},
+    {'id': 'refunds', 'h': 'web.content.terms.s6_h'|t, 'p': ['web.content.terms.s6_p'|t]},
+    {'id': 'acceptable-use', 'h': 'web.content.terms.s7_h'|t, 'p': ['web.content.terms.s7_p'|t]},
+    {'id': 'intellectual-property', 'h': 'web.content.terms.s8_h'|t, 'p': ['web.content.terms.s8_p'|t]},
+    {'id': 'liability', 'h': 'web.content.terms.s9_h'|t, 'p': ['web.content.terms.s9_p'|t]},
+    {'id': 'updates', 'h': 'web.content.terms.s10_h'|t, 'p': ['web.content.terms.s10_p'|t]},
+    {'id': 'contact', 'h': 'web.content.terms.s11_h'|t, 'p': ['web.content.terms.s11_p'|t]},
+] %}
+{{ page_hero(doc_title, [(doc_title, None)]) }}
 
-<section class="service-details">
-    <div class="auto-container">
-        <div class="content-box">
-            <h2>1. Acceptance of Terms</h2>
-            <p>By using the Aqua Element website and placing orders, you agree to these terms. If you do not agree, please discontinue use of our services.</p>
-
-            <h2>2. Eligibility and Account Responsibilities</h2>
-            <p>You are responsible for providing accurate contact, delivery, and payment information. You are also responsible for activity performed through your account credentials.</p>
-
-            <h2>3. Products, Availability, and Orders</h2>
-            <p>Product listings, stock availability, and delivery windows can change. Order confirmation is subject to successful processing, operational availability, and verification checks where required.</p>
-
-            <h2>4. Pricing and Payments</h2>
-            <p>Prices are shown in UZS unless otherwise stated. Final payable totals are presented during checkout. Applicable promotions, delivery fees, or discounts are calculated based on active platform rules.</p>
-
-            <h2>5. Delivery and Fulfillment</h2>
-            <p>Delivery terms follow the current delivery policy and our delivery coverage area. Delays caused by force majeure, traffic, weather, or incorrect delivery details may affect estimated timelines.</p>
-
-            <h2 id="returnable-bottles">{{ 'landing.terms.bottles_heading'|t }}</h2>
-            <p>{{ 'landing.terms.bottles_body'|t }}</p>
-
-            <h2>6. Refunds and Issue Resolution</h2>
-            <p>Refund and replacement handling follows the published refund policy. To resolve issues quickly, provide order details and relevant evidence (such as photos) when contacting support.</p>
-
-            <h2>7. Acceptable Use</h2>
-            <p>You agree not to misuse the platform, interfere with service operation, attempt unauthorized access, or submit fraudulent transactions.</p>
-
-            <h2>8. Intellectual Property</h2>
-            <p>Site content, branding, and materials are owned by Blue Stream Group or licensed for use. Unauthorized copying, redistribution, or commercial exploitation is prohibited.</p>
-
-            <h2>9. Limitation of Liability</h2>
-            <p>To the maximum extent permitted by law, Blue Stream Group is not liable for indirect, incidental, or consequential damages arising from platform use, except where such limitation is legally prohibited.</p>
-
-            <h2>10. Updates to Terms</h2>
-            <p>These terms may be updated as services evolve. Updated terms become effective when posted on this page.</p>
-
-            <h2>11. Contact</h2>
-            <p>For terms-related questions, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
-        </div>
+<section class="ae-section ct ct--legal">
+    <div class="ae-container">
+        {{ policy_nav('terms') }}
+        {{ legal_document(sections, contact=True) }}
     </div>
 </section>
 {% endblock %}

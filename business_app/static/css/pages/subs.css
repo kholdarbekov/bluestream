@@ -1,0 +1,217 @@
+/* /subscriptions and /services (website redesign step 3, group "subs"; design-system v1).
+   Every rule sits under .ss-page, the root both templates wrap their content in. Sections, steps, key/value rows,
+   the FAQ, the band, buttons and icon tiles are ae-ui.css's; this file only lays them out and adds the two
+   page pieces: the spec sheet (.ss-spec: a label column and a content column, rows split by hairlines) and the
+   price list (.ss-prices: one row per bottle, the live price as the largest thing in the row). */
+
+.ss-page p { text-wrap: pretty; }
+
+/* --- Intro (/subscriptions) ---------------------------------------------------------------------------------- */
+.ss-page .ss-intro__grid { display: grid; gap: var(--ae-s7); align-items: center; }
+@media (min-width: 768px) {
+  .ss-page .ss-intro__grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+}
+@media (min-width: 992px) {
+  .ss-page .ss-intro__grid { gap: var(--ae-s8); }
+}
+.ss-page .ss-intro__title { margin: 0 0 var(--ae-s4); text-wrap: balance; }
+.ss-page .ss-intro__lead {
+  max-width: 58ch;
+  margin: 0 0 var(--ae-s6);
+  color: var(--ae-ink-soft);
+  font-size: var(--ae-text-lead);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ss-page .ss-perks { display: grid; gap: var(--ae-s4); margin: 0 0 var(--ae-s6); padding: 0; list-style: none; }
+.ss-page .ss-perks > li { display: flex; align-items: flex-start; gap: var(--ae-s4); margin: 0; }
+.ss-page .ss-perks__text { padding-top: 8px; color: var(--ae-ink); font-size: 16px; line-height: 1.55; text-wrap: pretty; }
+
+/* The product photo is shot on white: a white panel with a hairline holds it without showing its edges. */
+.ss-page .ss-intro__media {
+  display: grid;
+  place-items: center;
+  padding: var(--ae-s6) var(--ae-s5);
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r-lg);
+  background: var(--ae-surface);
+}
+.ss-page .ss-intro__media img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 420px;
+  mix-blend-mode: multiply;
+}
+@media (min-width: 768px) and (max-width: 991px) {
+  .ss-page .ss-intro__media { padding: var(--ae-s5) var(--ae-s4); }
+  .ss-page .ss-intro__media img { max-height: 340px; }
+}
+/* Phones: one column has no room beside the words, and the same bottles head the price list below. */
+@media (max-width: 767px) {
+  .ss-page .ss-intro__media { display: none; }
+}
+
+.ss-page .ss-actions { display: flex; flex-wrap: wrap; gap: var(--ae-s3); }
+@media (max-width: 479px) {
+  .ss-page .ss-actions > .ae-btn,
+  .ss-page .ae-band__actions > .ae-btn { flex: 1 1 100%; }
+}
+
+/* --- How it works ---------------------------------------------------------------------------------------------- */
+.ss-page .ss-steps .ae-steps__text { max-width: 36ch; color: var(--ae-ink-soft); }
+.ss-page .ss-steps > li:last-child { padding-bottom: 0; }
+
+/* --- Spec sheet: label column + content column, hairline between rows ----------------------------------------- */
+.ss-page .ss-spec { border-top: 1px solid var(--ae-line); }
+.ss-page .ss-spec__row {
+  display: grid;
+  gap: var(--ae-s4) var(--ae-s7);
+  padding: var(--ae-s6) 0;
+  border-bottom: 1px solid var(--ae-line);
+}
+@media (min-width: 992px) {
+  .ss-page .ss-spec__row { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); padding: var(--ae-s7) 0; }
+}
+.ss-page .ss-spec__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
+  gap: var(--ae-s3) var(--ae-s4);
+}
+.ss-page .ss-spec__head > :not(.ae-icon-tile):not(.ss-spec__title) { grid-column: 1 / -1; }
+.ss-page .ss-spec__title { margin: 0; font-size: var(--ae-text-h4); font-weight: 800; line-height: 1.3; text-wrap: balance; }
+.ss-page--services .ss-spec__title { font-size: var(--ae-text-h3); }
+/* /services opens with the sheet itself: no rule above the first row or below the last. */
+.ss-page--services .ss-spec { border-top: 0; }
+.ss-page--services .ss-spec__row:first-child { padding-top: 0; }
+.ss-page--services .ss-spec__row:last-child { padding-bottom: 0; border-bottom: 0; }
+.ss-page .ss-spec__text { max-width: 46ch; margin: 0; color: var(--ae-ink-soft); font-size: 16px; line-height: 1.6; }
+.ss-page .ss-spec__body { min-width: 0; }
+.ss-page .ss-actions--after { margin-top: var(--ae-s5); }
+.ss-page .ss-spec__lead { max-width: 62ch; margin: 0 0 var(--ae-s3); color: var(--ae-ink); font-size: 16px; line-height: 1.65; }
+.ss-page .ss-spec__body > .ae-link { margin-top: var(--ae-s1); min-height: 44px; }
+.ss-page .ss-note { max-width: 62ch; margin: var(--ae-s3) 0 0; color: var(--ae-ink-soft); font-size: var(--ae-text-small); line-height: 1.55; }
+
+/* Key/value rows inside the sheet: the name leads, the explanation follows. */
+.ss-page .ss-dl { margin: 0; }
+.ss-page .ss-dl .ae-dl__row { grid-template-columns: minmax(150px, 34%) minmax(0, 1fr); }
+.ss-page .ss-dl .ae-dl__row:first-child { padding-top: 4px; }
+.ss-page .ss-dl dt { color: var(--ae-ink); font-size: 16px; font-weight: 700; }
+.ss-page .ss-dl dd { color: var(--ae-ink-soft); font-size: 15px; font-weight: 500; line-height: 1.55; }
+@media (max-width: 479px) {
+  .ss-page .ss-dl .ae-dl__row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- Price list ------------------------------------------------------------------------------------------------ */
+.ss-page .ss-prices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+}
+.ss-page .ss-price {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ae-s4);
+  margin: 0;
+  padding: var(--ae-s4) var(--ae-s5);
+}
+.ss-page .ss-price + .ss-price { border-top: 1px solid var(--ae-line); }
+.ss-page .ss-price__thumb {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-bg);
+  overflow: hidden;
+}
+.ss-page .ss-price__thumb img { width: 100%; height: 100%; padding: 4px; object-fit: contain; mix-blend-mode: multiply; }
+.ss-page .ss-price__name { display: grid; gap: 2px; min-width: 0; color: var(--ae-ink); font-size: 16px; font-weight: 700; line-height: 1.35; }
+/* /services: the product name is a link that looks like one (.ae-link's colour and underline). Its box is 44px tall
+   without moving the lines around it, and ::after stretches it over the whole row, so the row is the tap target. */
+.ss-page .ss-price__link {
+  display: block;
+  margin: -12px 0;
+  padding: 12px 0;
+  color: var(--ae-aqua-deep);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ss-page .ss-price__link::after { content: ""; position: absolute; inset: 0; }
+.ss-page .ss-price:hover .ss-price__link { color: var(--ae-navy); }
+.ss-page .ss-price__link:focus-visible { outline: 0; }
+.ss-page .ss-price__link:focus-visible::after { outline: 3px solid var(--ae-navy); outline-offset: -4px; border-radius: var(--ae-r); }
+.ss-page .ss-price__meta { color: var(--ae-ink-soft); font-size: 13px; font-weight: 700; }
+.ss-page .ss-price__min { color: var(--ae-ink-soft); font-size: 14px; font-weight: 500; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.ss-page .ss-price__value {
+  color: var(--ae-ink);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+@media (max-width: 479px) {
+  .ss-page .ss-price { grid-template-columns: 48px minmax(0, 1fr); gap: 4px var(--ae-s3); padding: 14px 16px; }
+  .ss-page .ss-price__thumb { width: 48px; height: 48px; grid-row: span 2; align-self: start; }
+  .ss-page .ss-price__value { grid-column: 2; font-size: 20px; text-align: left; }
+}
+
+/* --- Small pieces (/services) ---------------------------------------------------------------------------------- */
+.ss-page .ss-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 62ch;
+  margin: 0 0 var(--ae-s3);
+  color: var(--ae-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+.ss-page .ss-check > i { flex: none; margin-top: 4px; color: var(--ae-ok); font-size: 16px; }
+.ss-page .ss-statement {
+  max-width: 62ch;
+  margin: 0 0 var(--ae-s4);
+  padding: 14px 18px;
+  border-left: 4px solid var(--ae-aqua);
+  border-radius: var(--ae-r-sm);
+  background: var(--ae-pale);
+  color: var(--ae-ink);
+  font-size: 16px;
+  line-height: 1.65;
+}
+/* The subscription schedules on /services: facts in two columns, ticked like the bottle-exchange line, not chips. */
+.ss-page .ss-ticks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: var(--ae-s3) var(--ae-s7);
+  margin: 0 0 var(--ae-s4);
+  padding: 0;
+  list-style: none;
+}
+.ss-page .ss-ticks > li { display: flex; align-items: baseline; gap: 10px; margin: 0; color: var(--ae-ink); font-size: 16px; font-weight: 600; line-height: 1.5; }
+.ss-page .ss-ticks > li > i { flex: none; color: var(--ae-ok); font-size: 15px; }
+@media (max-width: 359px) {
+  .ss-page .ss-ticks { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- Call to action and FAQ (/subscriptions) ------------------------------------------------------------------- */
+.ss-page .ss-band { padding-top: 0; }
+.ss-page .ss-band__text { flex: 1 1 360px; }
+
+@media (min-width: 992px) {
+  .ss-page .ss-faq { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: var(--ae-s7); align-items: start; }
+}
+.ss-page .ss-faq__head { margin-bottom: var(--ae-s5); }
+.ss-page .ss-faq .ae-faq__a p { max-width: 68ch; margin: 0; line-height: 1.65; }

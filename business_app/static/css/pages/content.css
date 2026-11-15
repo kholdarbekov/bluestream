@@ -1,0 +1,418 @@
+/* ==========================================================================
+   Content pages (redesign step 3, "content" group): blog list and article, water-delivery FAQ, and the policy pages
+   (delivery, pricing, refund, terms, privacy). Built on static/css/ae-ui.css: tokens, .ae-prose, .ae-faq, .ae-chips,
+   .ae-band, .ae-card, .ae-panel. Every rule is scoped under `.ct` (the page's content section) so nothing leaks into
+   other pages. Macros: templates/frontend/partials/content_ui.html.
+   ========================================================================== */
+
+/* --- Shared ------------------------------------------------------------- */
+
+/* The theme's .service-details carries 150px of padding; the content pages use the section rhythm instead. */
+.ct.service-details { padding-block: var(--ae-section); }
+/* Policy and FAQ pages: the banner's wave already parts it from the text, so the section starts closer to it. */
+.ct--legal.ae-section,
+.ct--info.ae-section,
+.ct--faq.ae-section,
+.ct--blog.ae-section,
+.ct--article.ae-section { padding-top: clamp(32px, 2vw + 20px, 56px); }
+
+/* A row of chips can be tapped on a phone: 44px targets there, the compact 36px chip from 768px. */
+.ct .ae-chips .ae-chip { min-height: 44px; }
+@media (min-width: 768px) {
+  .ct .ae-chips .ae-chip { min-height: 38px; }
+}
+/* A scrolling chip row runs to the screen edge on phones, so the last chip never looks cut by the gutter. */
+@media (max-width: 767px) {
+  .ct .ae-chips--scroll { margin-inline: calc(-1 * var(--ae-gutter)); padding-inline: var(--ae-gutter); scroll-padding-inline: var(--ae-gutter); }
+}
+
+/* The policy row starts at the container's left edge on every policy page and the FAQ (under the banner title and
+   crumb), so moving between the pages never makes it jump. */
+.ct-policy-nav { margin: 0 0 var(--ae-s7); }
+
+.ct-contact { display: flex; flex-wrap: wrap; gap: var(--ae-s3); margin: var(--ae-s5) 0 0; }
+.ct-contact .ae-btn { max-width: 100%; }
+
+/* The Telegram help line: an icon tile and one sentence that is the link. */
+.ct-help { display: flex; align-items: center; gap: var(--ae-s4); }
+.ct-help__link {
+  color: var(--ae-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 119, 182, .45);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+.ct-help__link:hover { color: var(--ae-navy); text-decoration-color: currentColor; }
+
+
+/* --- Policy documents (terms, privacy, refund) ----------------------------- */
+
+.ct-legal { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s5); }
+
+.ct-toc {
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-bg);
+}
+.ct-toc__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 18px;
+  color: var(--ae-ink);
+  font-size: 15px;
+  font-weight: 800;
+  list-style: none;
+  cursor: pointer;
+}
+.ct-toc__title::-webkit-details-marker { display: none; }
+.ct-toc__title::after {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-right: 2px solid var(--ae-aqua-deep);
+  border-bottom: 2px solid var(--ae-aqua-deep);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .2s var(--ae-ease);
+}
+.ct-toc[open] > .ct-toc__title::after { transform: rotate(-135deg) translate(-2px, -2px); }
+.ct-toc__list { margin: 0; padding: 0 18px 14px; list-style: none; counter-reset: ct-toc; }
+.ct-toc__list li { margin: 0; counter-increment: ct-toc; }
+.ct-toc__list a {
+  display: flex;
+  gap: 10px;
+  min-height: 44px; /* a phone tap target; one line is 12 + 21 + 12 px */
+  padding: 12px 0;
+  border-top: 1px solid var(--ae-line);
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.ct-toc__list a::before {
+  content: counter(ct-toc) ".";
+  flex: none;
+  min-width: 1.6em;
+  color: var(--ae-aqua-deep);
+  font-variant-numeric: tabular-nums;
+}
+.ct-toc__list a:hover { color: var(--ae-navy); }
+
+.ct-legal__main { min-width: 0; }
+/* Sections are numbered by CSS, so each heading's text stays exactly its translation. */
+.ct-legal__body { max-width: 70ch; counter-reset: ct-sec; }
+.ct-legal__body h2 {
+  display: flex;
+  gap: .5em;
+  margin: 1.9em 0 .5em;
+  font-size: clamp(20px, .6vw + 17px, 24px);
+  line-height: 1.3;
+  scroll-margin-top: calc(var(--ae-header-h) + 24px);
+}
+.ct-legal__body h2:first-child { margin-top: 0; }
+.ct-legal__body h2::before {
+  counter-increment: ct-sec;
+  content: counter(ct-sec) ".";
+  flex: none;
+  color: var(--ae-aqua-deep);
+  font-variant-numeric: tabular-nums;
+}
+.ct-legal__body p { max-width: 70ch; }
+.ct-legal .ct-contact { max-width: 70ch; padding-top: var(--ae-s5); border-top: 1px solid var(--ae-line); }
+
+@media (min-width: 992px) {
+  .ct-legal { grid-template-columns: 280px minmax(0, 1fr); gap: var(--ae-s8); align-items: start; }
+  .ct-toc {
+    position: sticky;
+    top: calc(var(--ae-header-h) + 24px);
+    max-height: calc(100vh - var(--ae-header-h) - 48px);
+    overflow: auto;
+    background: transparent;
+    border: 0;
+    border-left: 2px solid var(--ae-line);
+    border-radius: 0;
+  }
+  .ct-toc__title { min-height: 0; padding: 0 0 10px 20px; cursor: default; pointer-events: none; color: var(--ae-ink-soft); font-size: 13px; }
+  .ct-toc__title::after { content: none; }
+  .ct-toc__list { padding: 0 0 0 20px; }
+  .ct-toc__list a { min-height: 0; padding: 7px 0; border-top: 0; font-size: 14px; }
+  .ct-legal--plain { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- Info pages (delivery, pricing): the offer block, then the page's own text ---------------------------------- */
+
+.ct-info { max-width: 880px; margin: 0 auto; }
+.ct-info > .ae-facts { margin-top: 0; }
+.ct-info__title { margin: var(--ae-s7) 0 var(--ae-s4); font-size: var(--ae-text-h3); }
+.ct-info__prose { margin-top: var(--ae-s7); }
+.ct-info__prose h2 { margin-top: 1.6em; font-size: clamp(20px, .6vw + 17px, 24px); }
+.ct-info__prose h2:first-child { margin-top: 0; }
+
+.ct-checklist { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--ae-line); }
+.ct-checklist > li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-s4);
+  margin: 0;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ae-line);
+}
+.ct-checklist p { margin: 0; padding-top: 8px; color: var(--ae-ink); font-size: 16px; line-height: 1.55; }
+.ct-checklist .ae-link { font-weight: 700; }
+
+.ct-info__pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s4); margin-top: var(--ae-s6); }
+@media (min-width: 768px) {
+  .ct-info__pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.ct-linkcard { display: flex; align-items: flex-start; gap: var(--ae-s4); }
+.ct-linkcard__body { display: grid; justify-items: start; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.ct-linkcard__title { color: var(--ae-ink); font-size: 16px; font-weight: 800; line-height: 1.35; }
+.ct-linkcard__text { color: var(--ae-ink-soft); font-size: 14px; line-height: 1.5; }
+.ct-linkcard__cta {
+  margin-top: 6px;
+  color: var(--ae-aqua-deep);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --- FAQ ---------------------------------------------------------------------------------------------------------- */
+
+.ct-faq { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s7); }
+.ct-faq__main { min-width: 0; }
+.ct-faq .ae-faq { max-width: 760px; margin: 0; padding: 0; list-style: none; }
+.ct-faq .ae-faq > li { margin: 0; }
+.ct-faq .ae-faq__a p { max-width: 64ch; margin: 0; color: var(--ae-ink-soft); font-size: 16px; line-height: 1.65; }
+.ct-faq__panel { padding: var(--ae-s5); }
+.ct-faq__aside-title { margin: 0 0 var(--ae-s3); font-size: 17px; font-weight: 800; }
+.ct-faq__links { margin: 0 0 var(--ae-s5); padding: 0; list-style: none; }
+.ct-faq__links li { margin: 0; }
+.ct-faq__links a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ae-line);
+  color: var(--ae-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ct-faq__links a:hover { color: var(--ae-navy); }
+.ct-faq__links i { width: 20px; flex: none; color: var(--ae-aqua-deep); text-align: center; }
+.ct-help--stack { align-items: flex-start; }
+.ct-help--stack .ct-help__link { font-size: 15px; padding-top: 2px; }
+
+@media (min-width: 992px) {
+  .ct-faq { grid-template-columns: minmax(0, 1fr) 320px; gap: var(--ae-s8); align-items: start; }
+  .ct-faq__aside { position: sticky; top: calc(var(--ae-header-h) + 24px); }
+}
+
+/* --- Blog: filter, lead post, grid ------------------------------------------------------------------------------- */
+
+.ct-filter { margin: 0 0 var(--ae-s6); }
+.ct-filter__tag i { font-size: 12px; opacity: .8; }
+
+.ct-posts { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s5); }
+@media (min-width: 640px) {
+  .ct-posts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 992px) {
+  .ct-posts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+}
+
+.ct-post {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+  overflow: hidden;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.ct-post:hover { border-color: var(--ae-line-strong); box-shadow: var(--ae-shadow-sm); }
+.ct-post:focus-within { border-color: var(--ae-navy); }
+.ct-post__media { aspect-ratio: 16 / 10; background: var(--ae-bg); overflow: hidden; }
+.ct-post__media img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .35s var(--ae-ease); }
+.ct-post:hover .ct-post__media img { transform: scale(1.03); }
+/* A post without a real cover: the brand drop on a soft tint of its category (no stock photo stands in). The mark is
+   sized by the card's width, which is always definite (the lead card's media has only a min-height). */
+.ct-post__media--brand {
+  --ct-cover: #DDF3FA;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(120% 95% at 50% 42%, #FFFFFF 0%, var(--ct-cover) 72%);
+}
+.ct-post__media--brand img {
+  width: clamp(72px, 26%, 132px);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 22px rgba(3, 62, 138, .16));
+}
+.ct-post--featured .ct-post__media--brand img { width: clamp(96px, 24%, 176px); }
+/* One card per row on a phone: the brand cover is a short band, so the list is not a column of large drops. */
+@media (max-width: 639px) {
+  .ct-post__media--brand { aspect-ratio: 16 / 7; }
+  .ct-post .ct-post__media--brand img { width: clamp(64px, 20%, 96px); }
+}
+.ct-post__media--health_tips { --ct-cover: #E2F4EB; }
+.ct-post__media--water_benefits { --ct-cover: #E0EBFA; }
+.ct-post__media--company_news { --ct-cover: #FBF0D4; }
+.ct-post__media--quality_assurance { --ct-cover: #E9E8FB; }
+.ct-post__media--environment { --ct-cover: #E5F3E1; }
+.ct-post__body { display: flex; flex: 1 1 auto; flex-direction: column; align-items: flex-start; gap: 10px; padding: 18px 20px 20px; }
+.ct-post__title { margin: 0; font-size: 19px; font-weight: 800; line-height: 1.3; letter-spacing: -.01em; text-wrap: pretty; }
+.ct-post__title a { color: var(--ae-ink); text-decoration: none; }
+/* The title link covers the card, so the whole card opens the article with one tab stop. */
+.ct-post__title a::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+.ct-post__title a:focus-visible { outline: none; }
+.ct-post__title a:focus-visible::after { outline: 3px solid var(--ae-navy); outline-offset: -3px; border-radius: var(--ae-r); }
+.ct-post:hover .ct-post__title a { color: var(--ae-navy); }
+.ct-post__excerpt {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.ct-post__date { margin: auto 0 0; padding-top: 4px; color: var(--ae-ink-soft); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ct-post__more { display: none; }
+
+/* The newest post on the first page: a wide card, picture beside the text from 768px. */
+.ct-lead { margin: 0 0 var(--ae-s6); }
+.ct-post--featured .ct-post__title { font-size: clamp(22px, 1vw + 17px, 30px); line-height: 1.2; }
+.ct-post--featured .ct-post__excerpt { font-size: 16px; -webkit-line-clamp: 4; }
+.ct-post--featured .ct-post__more {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  color: var(--ae-aqua-deep);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (min-width: 768px) {
+  .ct-post--featured { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .ct-post--featured .ct-post__media { aspect-ratio: auto; min-height: 340px; }
+  .ct-post--featured .ct-post__body { justify-content: center; gap: 14px; padding: clamp(24px, 3vw, 40px); }
+  .ct-post--featured .ct-post__date { margin-top: 0; }
+}
+
+/* --- Blog: article ------------------------------------------------------------------------------------------------ */
+
+.ct-article { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ae-s7); }
+.ct-article__main { min-width: 0; max-width: 760px; }
+.ct-article__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 var(--ae-s5); color: var(--ae-ink-soft); font-size: 14px; font-weight: 600; }
+/* The category chip links to its filter: a 44px tap target around a compact badge. */
+.ct-article__cat { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+.ct-article__cat .ae-badge { min-height: 28px; }
+.ct-article__cat:hover .ae-badge { background: #D6F0F9; color: var(--ae-navy); }
+.ct-article__figure { margin: 0 0 var(--ae-s6); border-radius: var(--ae-r-lg); overflow: hidden; background: var(--ae-bg); aspect-ratio: 16 / 9; }
+.ct-article__figure img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* The editor's HTML inside .ae-prose: a stronger intro, cyan markers, a framed table. */
+.ct-article .blog-content { max-width: 70ch; }
+.ct-article .blog-content .lead {
+  margin-bottom: 1.3em;
+  color: var(--ae-ink);
+  font-size: clamp(18px, .3vw + 17px, 20px);
+  font-weight: 500;
+  line-height: 1.65;
+}
+.ct-article .blog-content h2 { scroll-margin-top: calc(var(--ae-header-h) + 24px); }
+.ct-article .blog-content h3 { color: var(--ae-ink); }
+.ct-article .blog-content em { color: var(--ae-ink); }
+.ct-article .blog-content table th:first-child,
+.ct-article .blog-content table td:first-child { color: var(--ae-ink); font-weight: 700; }
+.ct-article .blog-content .ae-table-scroll table { min-width: 520px; }
+.ct-article .blog-content table tbody tr:nth-child(even) { background: var(--ae-bg); }
+/* On a phone a three-column comparison does not fit: each row becomes a small card whose first cell is its title and
+   whose other cells carry their column's header as a label (data-label, set by the article script). Nothing hides
+   off-screen behind a scroll the reader cannot see. */
+@media (max-width: 575px) {
+  .ct-article .blog-content .ae-table-scroll:has(> .ct-stack) { overflow: visible; border: 0; border-radius: 0; }
+  .ct-article .blog-content .ae-table-scroll table.ct-stack { min-width: 0; }
+  .ct-article .blog-content .ct-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ct-article .blog-content .ct-stack,
+  .ct-article .blog-content .ct-stack tbody,
+  .ct-article .blog-content .ct-stack tr,
+  .ct-article .blog-content .ct-stack td { display: block; width: 100%; }
+  .ct-article .blog-content .ct-stack tr,
+  .ct-article .blog-content .ct-stack tbody tr:nth-child(even) { margin: 0 0 12px; padding: 2px 16px; border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-surface); }
+  /* The label floats left and the cell's own inline content (text, <strong>, links) flows right beside it as one
+     run: a flex cell would split "~19 kg + ~1 kg ≈ <strong>20 kg</strong>" into separate, spread-out items. */
+  .ct-article .blog-content .ct-stack td { display: flow-root; padding: 10px 0; text-align: right; }
+  .ct-article .blog-content .ct-stack td::before { content: attr(data-label); float: left; max-width: 45%; margin: 2px 16px 0 0; color: var(--ae-ink-soft); font-size: 13px; font-weight: 700; line-height: 1.4; text-align: left; }
+  .ct-article .blog-content .ct-stack td:first-child { display: block; padding: 12px 0 8px; font-size: 16px; text-align: left; }
+  .ct-article .blog-content .ct-stack td:first-child::before,
+  .ct-article .blog-content .ct-stack td:not([data-label])::before { content: none; }
+  .ct-article .blog-content .ct-stack tr > td:last-child { border-bottom: 0; }
+}
+
+.ct-article .ae-facts { max-width: 760px; margin: var(--ae-s7) 0 0; }
+
+/* Under the price block: the order actions, then the share row (the theme's .post-share-option adds 146px below). */
+.ct-order { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ae-s4) var(--ae-s5); max-width: 760px; margin: var(--ae-s5) 0 0; padding: var(--ae-s5); }
+.ct-order__copy { flex: 1 1 260px; min-width: 0; }
+.ct-order__title { margin: 0 0 2px; color: var(--ae-ink); font-size: 17px; font-weight: 800; line-height: 1.35; }
+.ct-order__text { margin: 0; color: var(--ae-ink-soft); font-size: 15px; line-height: 1.5; }
+.ct-order__actions { display: flex; flex-wrap: wrap; gap: var(--ae-s3); }
+@media (max-width: 575px) {
+  .ct-order__actions, .ct-order__actions .ae-btn { width: 100%; }
+}
+.ct-article .ct-share { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ae-s3); max-width: 760px; margin: var(--ae-s6) 0 0; padding: var(--ae-s5) 0 0; border-top: 1px solid var(--ae-line); }
+.ct-share__label { margin-right: 4px; color: var(--ae-ink); font-size: 15px; font-weight: 800; }
+.ct-share .ae-btn { min-height: 44px; }
+.ct-share .fa-telegram-plane { color: var(--ae-telegram); }
+.ct-share .fa-facebook-f { color: #1877F2; }
+
+.ct-aside-title { margin: 0 0 var(--ae-s3); color: var(--ae-ink); font-size: 15px; font-weight: 800; line-height: 1.35; }
+
+.ct-products { padding: var(--ae-s5); border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-surface); }
+.ct-products__list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.ct-product { position: relative; display: flex; align-items: center; gap: 14px; margin: 0; padding: 12px 0; border-top: 1px solid var(--ae-line); }
+.ct-product:first-child { border-top: 0; padding-top: 4px; }
+.ct-product__thumb { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 12px; background: var(--ae-bg); overflow: hidden; }
+.ct-product__thumb img { width: 100%; height: 100%; padding: 6px; object-fit: contain; }
+.ct-product__body { display: grid; gap: 4px; min-width: 0; }
+.ct-product__name { color: var(--ae-ink); font-size: 15px; font-weight: 700; line-height: 1.35; text-decoration: none; }
+.ct-product__name::after { content: ""; position: absolute; inset: 0; }
+.ct-product:hover .ct-product__name { color: var(--ae-navy); }
+.ct-product__price { color: var(--ae-ink-soft); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ct-product__price [data-price] { color: var(--ae-ink); font-weight: 800; }
+
+.ct-article-toc { display: none; }
+
+@media (min-width: 992px) {
+  .ct-article { grid-template-columns: minmax(0, 1fr) 300px; gap: var(--ae-s8); align-items: stretch; }
+  .ct-article__aside { display: flex; flex-direction: column; gap: var(--ae-s5); }
+  .ct-article-toc:not([hidden]) {
+    display: block;
+    position: sticky;
+    top: calc(var(--ae-header-h) + 24px);
+    max-height: calc(100vh - var(--ae-header-h) - 48px);
+    overflow: auto;
+    padding-left: 18px;
+    border-left: 2px solid var(--ae-line);
+  }
+  .ct-article-toc__list { margin: 0; padding: 0; list-style: none; }
+  .ct-article-toc__list a { display: block; padding: 6px 0; color: var(--ae-ink-soft); font-size: 14px; font-weight: 600; line-height: 1.4; text-decoration: none; }
+  .ct-article-toc__list a:hover { color: var(--ae-navy); }
+}

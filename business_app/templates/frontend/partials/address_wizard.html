@@ -1,0 +1,237 @@
+{#
+  Address wizard: the one place a website customer adds or edits a delivery address (/addresses, and checkout's
+  "Add new address"). Three steps: a point on the map (inside the delivery zone), the details, a review.
+
+  Host page (see addresses.html):
+    {% from 'frontend/partials/address_wizard.html' import address_wizard, address_wizard_styles,
+       address_wizard_scripts with context %}
+    {{ address_wizard_styles() }}     in extra_head: address-wizard.css
+    {{ address_wizard() }}            once, in the content: the modal and its strings (#address-wizard-data)
+    {{ address_wizard_scripts() }}    in extra_js, after base.js (apiRequest, showNotification, jQuery/Bootstrap):
+                                      map-helper.js (lazy-loads the vendored Leaflet on first open) + address-wizard.js
+
+  JS API (static/js/address-wizard.js):
+    AddressWizard.open({address, onSaved, makeDefault})  new address (no `address`) or edit (`address` = a row of
+                                                          GET /auth/addresses). onSaved(address, {created}) runs
+                                                          after a successful save, with the saved row.
+    document 'ae:address-saved' event                     detail {address, created}; fired on every save.
+    AddressWizard.ready                                   Promise of the geo config (center, polygon, districts).
+    AddressWizard.districtName(key)                       localized district name, '' when unknown.
+  Saving: POST /auth/addresses or PUT /auth/addresses/<id>; the backend re-checks the delivery zone.
+#}
+{% from "frontend/macros/page_data.html" import render_page_data %}
+
+{% macro address_wizard_styles() -%}
+<link rel="stylesheet" href="{{ asset_url('css/address-wizard.css') }}">
+{%- endmacro %}
+
+{% macro address_wizard_scripts() -%}
+<script src="{{ asset_url('js/map-helper.js') }}"></script>
+<script src="{{ asset_url('js/address-wizard.js') }}"></script>
+{%- endmacro %}
+
+{% macro address_wizard() -%}
+<div class="modal fade ae-modal ae-wizard" id="addressWizardModal" tabindex="-1" role="dialog" aria-modal="true"
+     aria-labelledby="addressWizardModalTitle" data-backdrop="static">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="addressWizardModalTitle">{{ 'web.checkout.wizard.title_new'|t }}</h2>
+                <button type="button" class="close" data-dismiss="modal" aria-label="{{ 'web.checkout.addr.close'|t }}">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="ae-stepper ae-wizard__stepper">
+                    <ol class="ae-stepper__list">
+                        <li class="ae-stepper__step is-current" data-step-indicator="1" aria-current="step">
+                            <span class="ae-stepper__dot">1</span><span class="ae-stepper__label">{{ 'web.checkout.wizard.step_map'|t }}</span>
+                        </li>
+                        <li class="ae-stepper__step" data-step-indicator="2">
+                            <span class="ae-stepper__dot">2</span><span class="ae-stepper__label">{{ 'web.checkout.wizard.step_details'|t }}</span>
+                        </li>
+                        <li class="ae-stepper__step" data-step-indicator="3">
+                            <span class="ae-stepper__dot">3</span><span class="ae-stepper__label">{{ 'web.checkout.wizard.step_confirm'|t }}</span>
+                        </li>
+                    </ol>
+                    <div class="ae-stepper__compact">
+                        <div class="ae-wizard__compact-row">
+                            <span id="wizardStepLabel">{{ 'web.checkout.wizard.step_map'|t }}</span>
+                            <span class="ae-wizard__count" id="wizardStepCount">{{ 'web.checkout.wizard.step_count'|t(n=1, total=3) }}</span>
+                        </div>
+                        <span class="ae-progress ae-progress--sm" aria-hidden="true"><span class="ae-progress__bar" id="wizardProgressBar" style="width: 33.3%"></span></span>
+                    </div>
+                </div>
+
+                <form id="addressWizardForm" novalidate>
+                    <input type="hidden" id="selectedLatitude" name="latitude">
+                    <input type="hidden" id="selectedLongitude" name="longitude">
+
+                    {# Step 1: the delivery point #}
+                    <section class="ae-wizard__step is-active" id="wizardStep1" data-step="1" aria-label="{{ 'web.checkout.wizard.step_map'|t }}">
+                        <div class="ae-wizard__search">
+                            <label class="visually-hidden" for="addressSearchInput">{{ 'web.checkout.wizard.search_label'|t }}</label>
+                            <div class="ae-wizard__searchbox">
+                                <i class="far fa-search ae-wizard__search-icon" aria-hidden="true"></i>
+                                <input type="search" id="addressSearchInput" class="ae-input" autocomplete="off" enterkeyhint="search"
+                                       placeholder="{{ 'web.checkout.wizard.search_placeholder'|t }}">
+                                <button type="button" id="searchAddressBtn" class="ae-btn ae-btn--secondary">{{ 'web.checkout.wizard.search_button'|t }}</button>
+                            </div>
+                            <button type="button" id="useMyLocationBtn" class="ae-btn ae-btn--ghost ae-wizard__locate">
+                                <i class="far fa-location-arrow" aria-hidden="true"></i><span>{{ 'web.checkout.wizard.my_location'|t }}</span>
+                            </button>
+                        </div>
+
+                        <div class="ae-wizard__map">
+                            <div id="addressWizardMap" class="ae-map" role="application" aria-label="{{ 'web.checkout.wizard.map_label'|t }}"></div>
+                        </div>
+
+                        <p class="ae-wizard__hint">
+                            <i class="far fa-hand-pointer" aria-hidden="true"></i>
+                            <span>{{ 'web.checkout.wizard.map_hint'|t }}</span>
+                        </p>
+
+                        <p id="locationStatus" class="ae-wizard__status d-none" role="status" aria-live="polite">
+                            <i class="far fa-check-circle" aria-hidden="true"></i><span id="locationStatusText"></span>
+                        </p>
+
+                        <div id="wizardZoneAlert" class="ae-alert ae-alert--warn ae-wizard__zone" role="alert" hidden>
+                            <i class="far fa-map-marked-alt ae-alert__icon" aria-hidden="true"></i>
+                            <p><span id="wizardZoneAlertText">{{ 'web.checkout.wizard.outside_zone'|t }}</span>
+                                <a href="{{ url_for('frontend.coverage') }}" target="_blank" rel="noopener">{{ 'web.checkout.wizard.zone_link'|t }}</a></p>
+                        </div>
+                    </section>
+
+                    {# Step 2: the details #}
+                    <section class="ae-wizard__step" id="wizardStep2" data-step="2" aria-label="{{ 'web.checkout.wizard.step_details'|t }}">
+                        <div class="ae-chips ae-wizard__chips" role="group" aria-label="{{ 'web.checkout.wizard.chips_label'|t }}">
+                            <button type="button" class="ae-chip quick-title-btn" aria-pressed="false" data-title="{{ 'web.checkout.wizard.chip_home'|t }}">
+                                <i class="far fa-home" aria-hidden="true"></i> {{ 'web.checkout.wizard.chip_home'|t }}</button>
+                            <button type="button" class="ae-chip quick-title-btn" aria-pressed="false" data-title="{{ 'web.checkout.wizard.chip_work'|t }}">
+                                <i class="far fa-briefcase" aria-hidden="true"></i> {{ 'web.checkout.wizard.chip_work'|t }}</button>
+                            <button type="button" class="ae-chip quick-title-btn" aria-pressed="false" data-title="{{ 'web.checkout.wizard.chip_other'|t }}">
+                                <i class="far fa-map-pin" aria-hidden="true"></i> {{ 'web.checkout.wizard.chip_other'|t }}</button>
+                        </div>
+
+                        <div class="ae-field" id="addressTitleField">
+                            <label for="addressTitle">{{ 'web.checkout.wizard.f_title'|t }} <span class="ae-wizard__req" aria-hidden="true">*</span></label>
+                            <input type="text" id="addressTitle" maxlength="100" required aria-required="true" aria-describedby="addressTitleError"
+                                   placeholder="{{ 'web.checkout.wizard.f_title_ph'|t }}">
+                            <p class="ae-field__error" id="addressTitleError" hidden>{{ 'web.checkout.wizard.f_title_required'|t }}</p>
+                        </div>
+
+                        <div class="ae-field">
+                            <label for="fullAddress">{{ 'web.checkout.wizard.f_address'|t }}</label>
+                            <textarea id="fullAddress" rows="2" aria-describedby="fullAddressHelp"></textarea>
+                            <p class="ae-field__help" id="fullAddressHelp" hidden>{{ 'web.checkout.wizard.f_address_help'|t }}</p>
+                            <p class="ae-wizard__suggest" id="wizardAddressSuggest" hidden>
+                                <span>{{ 'web.checkout.wizard.suggest'|t }} <span id="wizardAddressSuggestText"></span></span>
+                                <button type="button" class="ae-link" id="wizardAddressSuggestBtn">{{ 'web.checkout.wizard.suggest_use'|t }}</button>
+                            </p>
+                        </div>
+
+                        <div class="ae-wizard__grid">
+                            <div class="ae-field">
+                                <label for="districtSelect">{{ 'web.checkout.addr.district'|t }}</label>
+                                <select id="districtSelect" class="ignore">
+                                    <option value="">{{ 'web.checkout.wizard.f_district_ph'|t }}</option>
+                                </select>
+                            </div>
+                            <div class="ae-field">
+                                <label for="streetAddress">{{ 'web.checkout.wizard.f_street'|t }}</label>
+                                <input type="text" id="streetAddress" maxlength="255" autocomplete="address-line1"
+                                       placeholder="{{ 'web.checkout.wizard.f_street_ph'|t }}">
+                            </div>
+                            <div class="ae-field">
+                                <label for="floorNumber">{{ 'web.checkout.addr.floor'|t }}</label>
+                                <input type="text" id="floorNumber" maxlength="20" inputmode="numeric">
+                            </div>
+                            <div class="ae-field">
+                                <label for="apartmentNumber">{{ 'web.checkout.wizard.f_apartment'|t }}</label>
+                                <input type="text" id="apartmentNumber" maxlength="20">
+                            </div>
+                        </div>
+
+                        <div class="ae-field">
+                            <label for="landmark">{{ 'web.checkout.wizard.f_landmark'|t }}</label>
+                            <input type="text" id="landmark" maxlength="255" placeholder="{{ 'web.checkout.wizard.f_landmark_ph'|t }}">
+                        </div>
+                    </section>
+
+                    {# Step 3: review, the courier note and the two flags #}
+                    <section class="ae-wizard__step" id="wizardStep3" data-step="3" aria-label="{{ 'web.checkout.wizard.step_confirm'|t }}">
+                        <div class="ae-wizard__review">
+                            <h3 class="ae-wizard__review-title">{{ 'web.checkout.wizard.summary_title'|t }}</h3>
+                            <dl class="ae-dl ae-wizard__summary" id="wizardSummary"></dl>
+                        </div>
+
+                        <div class="ae-field">
+                            <label for="deliveryInstructions">{{ 'web.checkout.addr.instructions'|t }}</label>
+                            <textarea id="deliveryInstructions" rows="3"
+                                      placeholder="{{ 'web.checkout.wizard.f_instructions_ph'|t }}"></textarea>
+                        </div>
+
+                        <div class="ae-wizard__flags">
+                            <label class="ae-check" for="isDefault">
+                                <input type="checkbox" id="isDefault"><span>{{ 'web.checkout.wizard.is_default'|t }}</span>
+                            </label>
+                            <label class="ae-check" for="isBusiness">
+                                <input type="checkbox" id="isBusiness"><span>{{ 'web.checkout.wizard.is_business'|t }}</span>
+                            </label>
+                        </div>
+                    </section>
+                </form>
+            </div>
+            <div class="modal-footer ae-wizard__footer">
+                <button type="button" id="wizardPrevBtn" class="ae-btn ae-btn--ghost ae-wizard__back" hidden>
+                    <i class="far fa-arrow-left" aria-hidden="true"></i><span>{{ 'web.checkout.wizard.back'|t }}</span>
+                </button>
+                <button type="button" class="ae-btn ae-btn--secondary ae-wizard__cancel" data-dismiss="modal">{{ 'web.checkout.wizard.cancel'|t }}</button>
+                <button type="button" id="wizardNextBtn" class="ae-btn ae-btn--primary">{{ 'web.checkout.wizard.next'|t }}</button>
+                <button type="button" id="wizardSaveBtn" class="ae-btn ae-btn--primary" hidden>{{ 'web.checkout.wizard.save'|t }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{{ render_page_data({
+    'leaflet': {
+        'js': url_for('static', filename='vendor/leaflet/leaflet.js'),
+        'css': url_for('static', filename='vendor/leaflet/leaflet.css'),
+        'images': url_for('static', filename='vendor/leaflet/images/'),
+    },
+    'i18n': {
+        'title_new': 'web.checkout.wizard.title_new'|t,
+        'title_edit': 'web.checkout.wizard.title_edit'|t,
+        'step_labels': ['web.checkout.wizard.step_map'|t, 'web.checkout.wizard.step_details'|t, 'web.checkout.wizard.step_confirm'|t],
+        'step_count': 'web.checkout.wizard.step_count'|t,
+        'locating': 'web.checkout.wizard.locating'|t,
+        'my_location': 'web.checkout.wizard.my_location'|t,
+        'getting_address': 'web.checkout.wizard.getting_address'|t,
+        'point_selected': 'web.checkout.wizard.point_selected'|t,
+        'point_no_address': 'web.checkout.wizard.point_no_address'|t,
+        'not_found': 'web.checkout.wizard.not_found'|t,
+        'search_empty': 'web.checkout.wizard.search_empty'|t,
+        'search_failed': 'web.checkout.wizard.search_failed'|t,
+        'geo_unsupported': 'web.checkout.wizard.geo_unsupported'|t,
+        'geo_denied': 'web.checkout.wizard.geo_denied'|t,
+        'geo_failed': 'web.checkout.wizard.geo_failed'|t,
+        'pick_point': 'web.checkout.wizard.pick_point'|t,
+        'map_failed': 'web.checkout.wizard.map_failed'|t,
+        'f_district_ph': 'web.checkout.wizard.f_district_ph'|t,
+        'not_set': 'web.checkout.wizard.not_set'|t,
+        'saving': 'web.checkout.wizard.saving'|t,
+        'saved': 'web.checkout.wizard.saved'|t,
+        'save_failed': 'web.checkout.wizard.save_failed'|t,
+        'network_error': 'web.checkout.addr.network_error'|t,
+        'summary': {
+            'title': 'web.checkout.wizard.f_title'|t,
+            'address': 'web.checkout.wizard.f_address'|t,
+            'district': 'web.checkout.addr.district'|t,
+            'street': 'web.checkout.wizard.f_street'|t,
+            'floor': 'web.checkout.addr.floor'|t,
+            'apartment': 'web.checkout.wizard.f_apartment'|t,
+            'landmark': 'web.checkout.wizard.f_landmark'|t,
+        },
+    },
+}, element_id='address-wizard-data') }}
+{%- endmacro %}

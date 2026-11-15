@@ -1205,7 +1205,7 @@ def test_the_page_labels_are_in_the_request_language(db, web, build, monday):
     ("uz", {
         "long": "29-oktabr, payshanba", "short": "29-okt, Pa", "day_month": "29-oktabr",
         "money": f"36{NBSP}000{NBSP}so'm", "in_2": "2 kundan keyin", "in_5": "5 kundan keyin",
-        "in_21": "21 kundan keyin", "today": "bugun", "tomorrow": "ertaga", "bank": "Bank o'tkazmasi",
+        "in_21": "21 kundan keyin", "today": "bugun", "tomorrow": "ertaga", "bank": "Bank o‘tkazmasi",
         "by_weekday": "shanba, soat 13:00", "by_date": "7-noyabr, soat 13:00",
         "spans": ["Du–Sh", "Du, Ch, Ju", "Sh, Ya", "Du–Ch, Ju, Sh"],
     }),

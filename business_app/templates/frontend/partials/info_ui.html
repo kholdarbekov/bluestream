@@ -1,0 +1,94 @@
+{#- The info pages' shared pieces (website redesign step 3, group "info"; styles in static/css/pages/info.css).
+    Import `with context`: the macros read external_url_for_lang and the company links from the storefront context.
+
+    - STAGE_COUNT: the filtration stages (web.info.filtration.step_1..11); the key-facts strip prints this number.
+    - mail_text(key, email): the key's text with its {email} placeholder printed as a mailto link (the text stays
+      escaped; the address comes from config, never from the copy).
+    - key_facts(): well depth, the stage count, TDS and pH: the figures /about/sources documents.
+    - mineral_table(): the finished-water mineral profile, one set of keys for every page that prints it.
+    - link_card(href, icon, title, text): a bordered card that links to another info page.
+    - product_href(p): an offer-facts product's page in the visitor's language (the product_url macro of index.html):
+      the raw `p.path` dropped ?lang, so a shared link or a crawler landed on the Uzbek page.
+    - order_band(facts): the navy band every info page ends with: the Telegram bot, then each product page by its live
+      size from the offer facts (the site's shop when no product is listed). -#}
+
+{% set STAGE_COUNT = 11 %}
+{% set MINERAL_ROWS = 9 %}
+
+{% macro mail_text(key, email) -%}
+{%- set parts = (key|t(email='[[email]]')).split('[[email]]') -%}
+{{ parts[0] }}{% for part in parts[1:] %}<a class="info-mail" href="mailto:{{ email }}">{{ email }}</a>{{ part }}{% endfor %}
+{%- endmacro %}
+
+{% macro key_facts() -%}
+<dl class="info-facts" aria-label="{{ 'web.info.fact.label'|t }}">
+    <div class="info-facts__item">
+        <dt>{{ 'web.info.fact.depth_label'|t }}</dt>
+        <dd class="ae-num">{{ 'web.info.fact.depth'|t }}</dd>
+    </div>
+    <div class="info-facts__item">
+        <dt>{{ 'web.info.fact.stages_label'|t }}</dt>
+        <dd class="ae-num">{{ STAGE_COUNT }}</dd>
+    </div>
+    <div class="info-facts__item">
+        <dt>{{ 'web.info.mineral.row_1.param'|t }}</dt>
+        <dd class="ae-num">{{ 'web.info.mineral.row_1.value'|t }}</dd>
+    </div>
+    <div class="info-facts__item">
+        <dt>{{ 'web.info.fact.ph_label'|t }}</dt>
+        <dd class="ae-num">{{ 'web.info.mineral.row_2.value'|t }}</dd>
+    </div>
+</dl>
+{%- endmacro %}
+
+{% macro mineral_table() -%}
+<div class="ae-table-scroll info-table">
+    <table class="info-minerals">
+        <thead>
+            <tr><th scope="col">{{ 'web.info.mineral.col_param'|t }}</th><th scope="col">{{ 'web.info.mineral.col_value'|t }}</th></tr>
+        </thead>
+        <tbody>
+            {%- for n in range(1, MINERAL_ROWS + 1) %}
+            <tr><th scope="row">{{ ('web.info.mineral.row_%d.param' % n)|t }}</th><td class="info-num">{{ ('web.info.mineral.row_%d.value' % n)|t }}</td></tr>
+            {%- endfor %}
+        </tbody>
+    </table>
+</div>
+{%- endmacro %}
+
+{% macro product_href(p) -%}
+{%- if p.slug %}{{ external_url_for_lang('frontend.product_detail_slug', slug=p.slug) }}{% else %}{{ external_url_for_lang('frontend.product_detail', product_id=p.id) }}{% endif -%}
+{%- endmacro %}
+
+{% macro link_card(href, icon, title, text) -%}
+<a class="ae-card ae-card--link info-link" href="{{ href }}">
+    <span class="ae-icon-tile" aria-hidden="true"><i class="{{ icon }}"></i></span>
+    <span class="info-link__body">
+        <span class="info-link__title">{{ title }}</span>
+        <span class="info-link__text">{{ text }}</span>
+    </span>
+    <i class="far fa-arrow-right info-link__arrow" aria-hidden="true"></i>
+</a>
+{%- endmacro %}
+
+{% macro order_band(facts) -%}
+{%- set lang = current_language -%}
+<section class="ae-section ae-section--tight info-band" aria-labelledby="info-band-title">
+    <div class="ae-container">
+        <div class="ae-band">
+            <div class="info-band__text">
+                <h2 id="info-band-title">{{ 'web.info.cta.title'|t }}</h2>
+                <p>{{ 'web.info.cta.text'|t }}</p>
+            </div>
+            <div class="ae-band__actions">
+                <a class="ae-btn ae-btn--primary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer" data-info-cta="bot"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.info.cta.bot'|t }}</a>
+                {%- for p in (facts.products if facts else []) %}
+                <a class="ae-btn ae-btn--on-dark" href="{{ product_href(p) }}" data-info-cta="product" data-product-id="{{ p.id }}">{{ 'web.info.cta.product'|t(size=p.size_text[lang]) }}</a>
+                {%- else %}
+                <a class="ae-btn ae-btn--on-dark" href="{{ external_url_for_lang('frontend.shop') }}" data-info-cta="shop">{{ 'web.info.cta.shop'|t }}</a>
+                {%- endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+{%- endmacro %}

@@ -379,6 +379,32 @@ def submit_order_feedback(order_id):
         return internal_error_response(message=get_translation("error.server_error"))
 
 
+def _judge_checkout_schedule(raw_date, raw_window_start, raw_window_end):
+    """The day and window a customer's checkout asks for, parsed and judged by the one schedule rule
+    (`delivery_window.parse_schedule` and `schedule_error_codes`, as the admin create path judges them), for both the
+    checkout's quote and its order, so the quote never accepts a schedule the order then refuses.
+
+    Returns `(date, start, end)`. Raises `ValidationError` with `error_code` `SCHEDULE_<code>` for the first thing the
+    rule finds wrong (`SCHEDULE_MALFORMED` for a value that does not parse) and the English sentences in
+    `validation_errors`; the page words the code."""
+    from business_app.utils.delivery_window import (
+        describe_schedule_errors,
+        local_now,
+        parse_schedule,
+        schedule_error_codes,
+    )
+
+    try:
+        delivery_date, window_start, window_end = parse_schedule(raw_date, raw_window_start, raw_window_end)
+    except ValueError as exc:
+        raise ValidationError(str(exc), validation_errors=[str(exc)], error_code="SCHEDULE_MALFORMED") from exc
+    codes = schedule_error_codes(delivery_date, window_start, window_end, now_local=local_now())
+    if codes:
+        sentences = describe_schedule_errors(codes)
+        raise ValidationError(sentences[0], validation_errors=sentences, error_code=f"SCHEDULE_{codes[0]}")
+    return delivery_date, window_start, window_end
+
+
 @orders_bp.route("/", methods=["POST"])
 @jwt_required()
 @require_verification("phone")
@@ -400,18 +426,16 @@ def create_order():
         if not address:
             return error_response(message=get_translation("api.addresses.not_found"), status_code=400)
 
-        # The web checkout posts a date and an open-ended window here. Same
-        # helper as the admin create path — the customer-facing surface must not
-        # get a second, laxer expression of the same rule.
-        from business_app.utils.delivery_window import parse_and_validate_schedule
-
-        delivery_date, window_start, window_end, schedule_errors = parse_and_validate_schedule(
-            order_request.delivery_date,
-            order_request.delivery_window_start,
-            order_request.delivery_window_end,
-        )
-        if schedule_errors:
-            return validation_error_response(schedule_errors)
+        # The web checkout posts a date and an open-ended window here, judged as its quote judges them
+        # (`_judge_checkout_schedule`): a refusal keeps its sentences in `errors` and adds `data.error_code`.
+        try:
+            delivery_date, window_start, window_end = _judge_checkout_schedule(
+                order_request.delivery_date,
+                order_request.delivery_window_start,
+                order_request.delivery_window_end,
+            )
+        except ValidationError as refusal:
+            return validation_error_response(refusal.validation_errors, error_code=refusal.error_code)
 
         # Create order using service
         order_data = {
@@ -732,6 +756,12 @@ def estimate_cart():
             cart_request = CartEstimateRequest(**request.get_json())
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
+
+        # The checkout's day and window, judged as its order will judge them (preview = apply). A refusal reaches
+        # `handle_api_exception`: top-level `error_code` `SCHEDULE_<code>`. The bot sends neither, so nothing is judged.
+        _judge_checkout_schedule(
+            cart_request.delivery_date, cart_request.delivery_window_start, cart_request.delivery_window_end
+        )
 
         # Use CartService to calculate cart estimate
         cart_service = get_cart_service()

@@ -101,20 +101,20 @@ def test_the_profile_page_draws_the_switch_disabled_until_the_api_answers(
     assert not switch.has_attr("checked")
     # Firefox restores a stale checked/disabled state on a soft reload unless told not to.
     assert switch.get("autocomplete") == "off"
-    # The existing inert preferences form is untouched (spec §18), and no form can submit the switch.
-    assert soup.select_one("#preferencesForm #reorderRemindersSwitch") is None
+    # No form can submit the switch. The inert preferences form (spec §18) was removed by the website redesign
+    # (owner decision 3, 2026-11-13: it saved nothing and offered SMS, which is OTP-only).
     assert switch.find_parent("form") is None
-    assert [field.get("name") for field in soup.select("#preferencesForm input")] == [
-        "email_notifications",
-        "sms_notifications",
-        "marketing_emails",
-    ]
-    # A disabled switch offers nothing to press: no pointer cursor, no hover highlight.
-    styles = " ".join(style.get_text() for style in soup.select("style"))
-    assert re.search(r"\.check-box input\.check:disabled\s*\+\s*label\s*\{[^}]*cursor:\s*default", styles)
-    assert re.search(r"\.check-box:has\(input\.check:disabled\):hover\s*\{[^}]*background:\s*#f8f9fa", styles)
+    assert soup.select_one("#preferencesForm") is None
+    # The switch is the shared .ae-switch, and its whole row is its label (a 44px tap target, not the 28px track).
+    label = switch.find_parent("label")
+    assert label is not None and "ae-switch" in label.get("class", []) and label.get("for") == "reorderRemindersSwitch"
+    assert switch.get("role") == "switch"
+    # A disabled switch offers nothing to press: no pointer cursor on its row (ae-ui.css fades the track itself).
+    stylesheet = (_BASE_JS.parents[2] / "css" / "pages" / "cabinet-account.css").read_text(encoding="utf-8")
+    assert soup.select_one('link[href*="css/pages/cabinet-account.css"]') is not None
+    assert re.search(r"\.ae-acp__toggle:has\(input:disabled\)\s*\{[^}]*cursor:\s*default", stylesheet)
     # profile-settings.js is on the page and reads the data island the switch's toasts come from.
-    assert soup.select_one('script[src$="js/pages/profile-settings.js"]') is not None
+    assert soup.select_one('script[src*="js/pages/profile-settings.js"]') is not None  # asset_url adds ?v=
     assert set(TOAST_KEYS) <= set(page_data["i18n"])
 
 
@@ -123,10 +123,9 @@ def test_an_uzbek_or_russian_page_carries_no_english_for_the_switch(client, app,
     soup, page_data = _page(client, app, ali, language)
 
     switch = soup.select_one("#reorderRemindersSwitch")
-    card = switch.find_parent(class_="card")
-    assert card.select_one(".card-header").get_text(" ", strip=True) == (
-        BACKEND_TRANSLATIONS["Reorder reminders"][language]
-    )
+    # The switch's own card: since the redesign its section is "Notifications" (the account group's copy).
+    card = switch.find_parent(class_="ae-acp__notify")
+    assert card is not None
     assert soup.select_one('label[for="reorderRemindersSwitch"]').get_text(strip=True) == (
         BACKEND_TRANSLATIONS["Remind me when it is usually time to reorder water"][language]
     )

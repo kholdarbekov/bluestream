@@ -1,0 +1,86 @@
+{#-
+  The pieces both order pages print (order_confirmation.html and order_tracking.html; website redesign 2026-11-14,
+  group "checkout"). Styles: static/css/pages/checkout.css (.ae-order-*, and the checkout summary's .ae-co-line rows
+  and .ae-co__totals, so an order reads the same before and after it is placed).
+
+  Every word is a seeded key and every amount a published label: `items` are the order's lines as the order API
+  serializes them (serialize_order_item: the name in the visitor's language and the product's first image), and
+  `labels` is display_labels.order_detail(order) (the money the order modal prints). The pages format nothing.
+-#}
+
+{#- Where the order goes: the address's own name, its text and the courier note; the map box only when asked for and
+    the address is pinned (order-tracking.js draws the map into it). -#}
+{% macro order_address(address, map=False) -%}
+{%- if address -%}
+<div class="ae-order-addr">
+    {%- if address.title %}
+    <p class="ae-order-addr__title"><i class="far fa-map-marker-alt" aria-hidden="true"></i>{{ address.title }}</p>
+    {%- endif %}
+    <p class="ae-order-addr__line">{{ address.full_address }}</p>
+    {%- if address.delivery_instructions %}
+    <p class="ae-order-addr__note"><i class="far fa-sticky-note" aria-hidden="true"></i>{{ address.delivery_instructions }}</p>
+    {%- endif %}
+    {%- if map and address.latitude and address.longitude %}
+    <div id="orderMap" class="ae-order-addr__map ae-map" role="img" aria-label="{{ 'web.checkout.order.map_label'|t }}"></div>
+    {%- endif %}
+</div>
+{%- else -%}
+<p class="ae-order-addr__none">{{ 'web.cabinet.modal.no_address'|t }}</p>
+{%- endif -%}
+{%- endmacro %}
+
+{#- The order's lines: picture, name, "2 × 38 000 сум" (or the gift badge) and the line's total. -#}
+{% macro order_lines(items, labels, placeholder) -%}
+<ul class="ae-co-lines ae-order-lines order-items">
+    {%- for item in items %}
+    <li class="ae-co-line order-item">
+        <img class="ae-co-line__thumb" src="{{ item.product_image or placeholder }}" data-fallback="{{ placeholder }}" alt="" width="56" height="56" loading="lazy" decoding="async">
+        <span class="ae-co-line__body">
+            <span class="ae-co-line__name item-name">{{ item.product_display_name }}</span>
+            {%- if item.is_reward %}
+            <span><span class="ae-badge ae-badge--gold">{{ 'web.cabinet.orders.reward'|t }}</span></span>
+            {%- else %}
+            <span class="ae-co-line__qty">{{ 'web.cabinet.orders.qty_price'|t(quantity=item.quantity, price=item.unit_price|format_price) }}</span>
+            {%- endif %}
+        </span>
+        <span class="ae-co-line__total item-price">{{ labels['items'][item.id|string] }}</span>
+    </li>
+    {%- endfor %}
+</ul>
+{%- endmacro %}
+
+{#- The money: items, delivery, each discount the order carries (only when it is more than nothing), tax, total. -#}
+{% macro order_totals(order, labels) -%}
+<dl class="ae-dl ae-dl--end ae-co__totals ae-order-totals totals-section">
+    <div class="ae-dl__row total-row">
+        <dt>{{ 'web.checkout.co.subtotal'|t }}</dt>
+        <dd>{{ labels.subtotal }}</dd>
+    </div>
+    <div class="ae-dl__row total-row">
+        <dt>{{ 'web.checkout.co.delivery'|t }}</dt>
+        {%- if order.delivery_fee %}
+        <dd>{{ labels.delivery_fee }}</dd>
+        {%- else %}
+        <dd class="is-free">{{ 'web.checkout.co.free'|t }}</dd>
+        {%- endif %}
+    </div>
+    {%- for key, label in [('tier_discount', 'Tier discount (bot & website perk)'), ('subscription_discount', 'Subscription discount'), ('reward_discount', 'Reward discount')] %}
+    {%- if labels[key] %}
+    <div class="ae-dl__row total-row ae-co__discount">
+        <dt>{{ label|t }}</dt>
+        <dd>−{{ labels[key] }}</dd>
+    </div>
+    {%- endif %}
+    {%- endfor %}
+    {%- if labels.tax %}
+    <div class="ae-dl__row total-row">
+        <dt>{{ 'web.checkout.order.tax'|t }}</dt>
+        <dd>{{ labels.tax }}</dd>
+    </div>
+    {%- endif %}
+    <div class="ae-dl__row ae-dl__total total-row final">
+        <dt>{{ 'web.checkout.co.total'|t }}</dt>
+        <dd>{{ labels.total }}</dd>
+    </div>
+</dl>
+{%- endmacro %}

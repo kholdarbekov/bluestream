@@ -537,6 +537,7 @@ def sample_user(db):
         email='test@example.com',
         phone='+998901234567',
         password_hash=hash_password('TestPassword123!'),
+        password_set_at=datetime.now(UTC),  # a website customer: the password is one they chose
         first_name='Test',
         last_name='User',
         user_type=UserType.INDIVIDUAL,
@@ -585,6 +586,7 @@ def second_sample_user(db):
         email='coworker@example.com',
         phone='+998901234570',
         password_hash=hash_password('TestPassword123!'),
+        password_set_at=datetime.now(UTC),  # a website customer: the password is one they chose
         first_name='Co',
         last_name='Worker',
         user_type=UserType.INDIVIDUAL,

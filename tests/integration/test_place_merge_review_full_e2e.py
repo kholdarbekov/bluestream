@@ -3309,7 +3309,9 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 661 -> 662: the admin's shared-place resolve (plan 2026-11-11, Task 12) added POST
     # /api/v1/admin/shared-place-cases/<int:case_id>/resolve (admin_shared_place.resolve_shared_place_case).
     # Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 662
+    # 662 -> 661: POST /api/v1/loyalty/earn-points (loyalty.earn_points) removed (owner decision 2026-11-13): it let a
+    # customer award themselves any number of AquaCoins. Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 661
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

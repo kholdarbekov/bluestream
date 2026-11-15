@@ -1,560 +1,192 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from "frontend/macros/order_status.html" import order_status_pill %}
+{% from "frontend/partials/order_parts.html" import order_address, order_lines, order_totals with context %}
 
-{% block title %}{{ 'Track Order'|t }} #{{ order.order_number }} - {{ company_name }}{% endblock %}
+{#-
+  An order's own page (/order-tracking?order_id=N; routes.order_tracking, customer_links.order_page_path).
+  - Status: the backend's display_status (F15) through order_status_pill, the one source of its words and tone.
+  - Steps: `.status-timeline .timeline-item` with the state class `active` / `completed` (or none), a
+    `.timeline-time` from the backend's timeline in Tashkent time (`step_times`), and a `.timeline-description`
+    (tests read the classes and descriptions). A cancelled or returned order shows the steps it reached and then its
+    end; the F15 wait for a new date keeps its own rules (below).
+  - Pay, Cancel/Skip/Decline and Confirm: order-actions.js draws the backend's `customer_actions` (spec 2026-10-27
+    §5.3) into div.action-buttons #orderActions; order-tracking.js hands it over and reloads the page every 30 s while
+    the order is live, never under an open confirm or a write in flight.
+  - Address, lines and money: partials/order_parts.html; the map is drawn by order-tracking.js (vendored Leaflet,
+    loaded on demand through map-helper.js) only when the address is pinned.
+  Styles: static/css/pages/checkout.css (.ae-order-page, .ae-track).
+-#}
+
+{% block title %}{{ 'web.checkout.order.number'|t(number=order.order_number) }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-.tracking-section {
-    padding: 100px 0;
-}
-
-.tracking-header {
-    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
-    color: #fff;
-    padding: 30px;
-    border-radius: 10px 10px 0 0;
-    margin-bottom: 0;
-}
-
-.tracking-header h2 {
-    font-size: 24px;
-    margin-bottom: 10px;
-}
-
-.tracking-header .order-meta {
-    display: flex;
-    gap: 30px;
-    flex-wrap: wrap;
-    font-size: 14px;
-    opacity: 0.9;
-}
-
-.tracking-content {
-    background: #fff;
-    border-radius: 0 0 10px 10px;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
-}
-
-.tracking-grid {
-    display: grid;
-    grid-template-columns: 1fr 400px;
-    gap: 30px;
-    padding: 30px;
-}
-
-.status-timeline {
-    position: relative;
-}
-
-.timeline-item {
-    position: relative;
-    padding-left: 50px;
-    padding-bottom: 30px;
-}
-
-.timeline-item:last-child {
-    padding-bottom: 0;
-}
-
-.timeline-item::before {
-    content: '';
-    position: absolute;
-    left: 15px;
-    top: 0;
-    bottom: -30px;
-    width: 2px;
-    background: #e5e5e5;
-}
-
-.timeline-item:last-child::before {
-    display: none;
-}
-
-.timeline-icon {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 35px;
-    height: 35px;
-    border-radius: 50%;
-    background: #f0f0f0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #999;
-    font-size: 16px;
-    z-index: 1;
-}
-
-.timeline-item.active .timeline-icon {
-    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
-    color: #fff;
-    box-shadow: 0 0 0 4px rgba(0, 209, 249, 0.2);
-}
-
-.timeline-item.completed .timeline-icon {
-    background: #28a745;
-    color: #fff;
-}
-
-.timeline-title {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 5px;
-    color: #222;
-}
-
-.timeline-time {
-    font-size: 13px;
-    color: #999;
-    margin-bottom: 5px;
-}
-
-.timeline-description {
-    font-size: 14px;
-    color: #666;
-}
-
-.sidebar-info {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 25px;
-}
-
-.info-section {
-    margin-bottom: 25px;
-}
-
-.info-section:last-child {
-    margin-bottom: 0;
-}
-
-.info-section h4 {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 15px;
-    color: #222;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #e5e5e5;
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-    font-size: 14px;
-}
-
-.info-label {
-    color: #666;
-    font-weight: 600;
-}
-
-.info-value {
-    color: #222;
-    text-align: right;
-}
-
-.status-badge {
-    display: inline-block;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-
-.status-badge.pending {
-    background: #fff3cd;
-    color: #856404;
-}
-
-.status-badge.confirmed {
-    background: #d1ecf1;
-    color: #0c5460;
-}
-
-.status-badge.preparing {
-    background: #d4edda;
-    color: #155724;
-}
-
-.status-badge.out_for_delivery {
-    background: #cce5ff;
-    color: #004085;
-}
-
-.status-badge.delivered {
-    background: #d4edda;
-    color: #155724;
-}
-
-.status-badge.cancelled {
-    background: #f8d7da;
-    color: #721c24;
-}
-
-/* Not an order status: a failed delivery waiting for staff to pick a new date (F15). */
-.status-badge.awaiting_new_date {
-    background: #fff3cd;
-    color: #856404;
-}
-
-.map-container {
-    width: 100%;
-    height: 400px;
-    background: #f0f0f0;
-    border-radius: 8px;
-    margin-bottom: 30px;
-    position: relative;
-    overflow: hidden;
-}
-
-#tracking-map {
-    width: 100%;
-    height: 100%;
-}
-
-.map-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: #999;
-    flex-direction: column;
-}
-
-.map-placeholder i {
-    font-size: 60px;
-    margin-bottom: 15px;
-}
-
-.order-items {
-    margin-top: 20px;
-}
-
-.order-item {
-    display: flex;
-    align-items: center;
-    padding: 12px 0;
-    border-bottom: 1px solid #e5e5e5;
-}
-
-.order-item:last-child {
-    border-bottom: none;
-}
-
-.item-image {
-    width: 50px;
-    height: 50px;
-    border-radius: 5px;
-    object-fit: cover;
-    margin-right: 12px;
-}
-
-.item-details {
-    flex: 1;
-}
-
-.item-name {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 3px;
-}
-
-.item-qty {
-    font-size: 13px;
-    color: #666;
-}
-
-.item-price {
-    font-size: 14px;
-    font-weight: 600;
-    color: #00d1f9;
-}
-
-.action-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: start;
-    gap: 15px;
-    margin-top: 20px;
-}
-/* The published actions take the full row; the container is hidden while it draws nothing (order-actions.js). */
-#orderActions { grid-column: 1 / -1; }
-#orderActions[hidden] { display: none; }
-
-.order-actions__confirm { text-align: left; }
-.order-actions__confirm .btn { min-height: 44px; margin: 0 8px 8px 0; }
-
-.refresh-notice {
-    background: #e3f2fd;
-    border: 1px solid #90caf9;
-    border-radius: 5px;
-    padding: 12px;
-    margin-top: 20px;
-    font-size: 13px;
-    color: #1976d2;
-    text-align: center;
-}
-
-@media (max-width: 991px) {
-    .tracking-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .sidebar-info {
-        order: -1;
-    }
-}
-
-@media (max-width: 767px) {
-    .tracking-header .order-meta {
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .tracking-grid {
-        padding: 20px;
-    }
-
-    .action-buttons {
-        grid-template-columns: 1fr;
-    }
-}
-</style>
-
-{% if map_provider == 'google' and maps_api_key %}
-<script src="https://maps.googleapis.com/maps/api/js?key={{ maps_api_key }}"></script>
-{% endif %}
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
 {% endblock %}
 
+{#- One step of the timeline. `state` is '', 'active', 'completed', 'active completed' or 'cancelled'. -#}
+{% macro step(state, icon, title, time=None, description=None, note=None) -%}
+<li class="timeline-item{% if state %} {{ state }}{% endif %}">
+    <span class="timeline-icon" aria-hidden="true"><i class="far {{ icon }}"></i></span>
+    <div class="timeline-body">
+        <p class="timeline-title">{{ title }}</p>
+        {%- if time %}
+        <p class="timeline-time ae-num">{{ time }}</p>
+        {%- endif %}
+        {%- if description %}
+        <p class="timeline-description">{{ description }}</p>
+        {%- endif %}
+        {%- if note %}
+        <p class="timeline-note">{{ note }}</p>
+        {%- endif %}
+    </div>
+</li>
+{%- endmacro %}
+
 {% block content %}
-{% from "frontend/macros/order_status.html" import order_status_label %}
-<section class="tracking-section">
-    <div class="auto-container">
-        <div class="tracking-content">
-            <div class="tracking-header">
-                <h2>
-                    <i class="far fa-map-marker-alt"></i>
-                    {{ 'Track Order'|t }} #{{ order.order_number }}
-                </h2>
-                <div class="order-meta">
-                    <span><i class="far fa-calendar"></i> {{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
-                    <span><i class="far fa-box"></i> {{ order.order_items|length }} {{ 'items'|t }}</span>
-                    <span><i class="far fa-money-bill"></i> {{ "{:,.0f}".format(order.total_amount) }} UZS</span>
-                </div>
-            </div>
+{% set number_label = 'web.checkout.order.number'|t(number=order.order_number) %}
+{{ page_hero(number_label, crumbs=[('landing.nav.my_account'|t, url_for('frontend.my_account')), ('web.checkout.pay.my_orders'|t, url_for('frontend.my_orders')), (number_label, None)], lead=('web.checkout.track.placed_lead'|t(when=placed_label) if placed_label else None), variant='soft') }}
 
-            <div class="tracking-grid">
-                <!-- Left: Timeline and Map -->
-                <div class="main-content">
-                    <!-- Map -->
-                    {% if delivery and delivery.delivery_latitude and delivery.delivery_longitude %}
-                    <div class="map-container">
-                        <div id="tracking-map"></div>
-                    </div>
+{% set status = order.status.value %}
+{% set closed = display_status in ['cancelled', 'returned'] %}
+{% set address = order.delivery_address %}
+{% set pinned = address and address.latitude and address.longitude %}
+
+<div class="ae-flow ae-order-page ae-track">
+    <section class="ae-section tracking-section">
+        <div class="ae-container ae-track__layout">
+            <section class="ae-card ae-track__status" aria-labelledby="track-status">
+                <div class="ae-track__status-head">
+                    <h2 class="ae-order-title" id="track-status">{{ 'web.checkout.track.status_title'|t }}</h2>
+                    {{ order_status_pill(display_status) }}
+                </div>
+
+                {% if delivery_statement %}
+                <div class="ae-alert ae-order-when">
+                    <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-clock"></i></span>
+                    <p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>
+                </div>
+                {% endif %}
+
+                <ol class="status-timeline">
+                    {% if closed %}
+                    {#- A cancelled or returned order: the steps its history shows it reached, then its end. -#}
+                    {{ step('completed', 'fa-receipt', 'web.checkout.track.placed'|t, step_times.get('created'), 'web.checkout.track.placed_text'|t) }}
+                    {% if step_times.get('confirmed') %}{{ step('completed', 'fa-check', 'web.checkout.track.confirmed'|t, step_times.confirmed) }}{% endif %}
+                    {% if step_times.get('preparing') %}{{ step('completed', 'fa-box', 'web.checkout.track.preparing'|t, step_times.preparing) }}{% endif %}
+                    {% if step_times.get('out_for_delivery') %}{{ step('completed', 'fa-truck', 'web.checkout.track.on_the_way'|t, step_times.out_for_delivery) }}{% endif %}
+                    {% if step_times.get('delivered') %}{{ step('completed', 'fa-check-double', 'web.checkout.track.delivered'|t, step_times.delivered) }}{% endif %}
+                    {{ step('cancelled', 'fa-times' if display_status == 'cancelled' else 'fa-undo', ('web.checkout.track.' ~ display_status)|t, step_times.get(display_status)) }}
                     {% else %}
-                    <div class="map-container">
-                        <div class="map-placeholder">
-                            <i class="far fa-map"></i>
-                            <p>{{ 'Delivery location will be shown here'|t }}</p>
-                        </div>
-                    </div>
+                    {#- F15: `active` reads display_status, so no step is current while the order waits for a new date.
+                        `completed` still reads the order's own status, so the steps it passed stay ticked. While it
+                        waits, the step it had reached is ticked too: a delivery can fail while the order is still
+                        pending, confirmed or preparing, and what failed was the delivery. Out for delivery, where the
+                        attempt failed, is neither. No date is printed while it waits. "Delivery will start soon" shows
+                        only beside the delivery statement (the backend's answer for an undated or today's live order),
+                        so a later-day, waiting, cancelled or returned order does not print it. A step's time shows once
+                        the order has reached it. -#}
+                    {% set waiting_for_date = display_status == 'awaiting_new_date' %}
+                    {% set reached_confirmed = status in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}
+                    {% set reached_preparing = status in ['preparing', 'out_for_delivery', 'delivered'] %}
+
+                    {% set state = 'active' if display_status == 'pending' else ('completed' if reached_confirmed or (waiting_for_date and status == 'pending') else '') %}
+                    {{ step(state, 'fa-receipt', 'web.checkout.track.placed'|t, step_times.get('created'), 'web.checkout.track.placed_text'|t) }}
+
+                    {% set state = 'active' if display_status == 'confirmed' else ('completed' if reached_preparing or (waiting_for_date and status == 'confirmed') else '') %}
+                    {{ step(state, 'fa-check', 'web.checkout.track.confirmed'|t,
+                            step_times.get('confirmed') if reached_confirmed else None,
+                            ('web.checkout.track.confirmed_text'|t) if reached_confirmed else ('web.checkout.track.confirm_wait'|t)) }}
+
+                    {% set state = 'active' if display_status == 'preparing' else ('completed' if status in ['out_for_delivery', 'delivered'] or (waiting_for_date and status == 'preparing') else '') %}
+                    {{ step(state, 'fa-box', 'web.checkout.track.preparing'|t,
+                            step_times.get('preparing') if reached_preparing else None,
+                            ('web.checkout.track.preparing_text'|t) if status == 'preparing' else (None if reached_preparing else ('web.checkout.track.preparing_soon'|t))) }}
+
+                    {% set in_transit = delivery and delivery.status and delivery.status.value == 'in_transit' %}
+                    {% set state = 'active' if display_status == 'out_for_delivery' else ('completed' if status == 'delivered' else '') %}
+                    {% if in_transit %}
+                    {% set description = 'web.checkout.track.on_the_way_text'|t %}
+                    {% elif status == 'delivered' %}
+                    {% set description = 'web.checkout.track.delivery_done'|t %}
+                    {% elif delivery_statement %}
+                    {% set description = 'web.checkout.track.start_soon'|t %}
+                    {% else %}
+                    {% set description = None %}
                     {% endif %}
+                    {{ step(state, 'fa-truck', 'web.checkout.track.on_the_way'|t,
+                            step_times.get('out_for_delivery') if status in ['out_for_delivery', 'delivered'] else None,
+                            description,
+                            ('web.checkout.track.courier'|t(name=courier_name)) if in_transit and courier_name else None) }}
 
-                    <!-- Status Timeline -->
-                    <div class="status-timeline">
-                        <h3 style="margin-bottom: 30px; font-size: 20px; color: #222;">
-                            {{ 'Order Status'|t }}
-                        </h3>
-
-                        {# F15: `active` reads display_status, so no step is current while the order
-                           waits for a new date. `completed` still reads the order's own status, so
-                           the steps it passed stay ticked. While it waits, the step it had reached
-                           is ticked too: a delivery can fail while the order is still pending,
-                           confirmed or preparing, and what failed was the delivery. Out for
-                           Delivery, where the attempt failed, is neither. No date is printed while
-                           it waits. "Delivery will start soon" shows only beside the delivery
-                           statement (the backend's answer for an undated or today's live order),
-                           so a later-day, waiting, cancelled or returned order does not print it. #}
-                        {% set waiting_for_date = display_status == 'awaiting_new_date' %}
-                        <!-- Pending -->
-                        <div class="timeline-item {% if display_status == 'pending' %}active{% elif order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'pending') %}completed{% endif %}">
-                            <div class="timeline-icon">
-                                <i class="far fa-clock"></i>
-                            </div>
-                            <div class="timeline-title">{{ 'Order Placed'|t }}</div>
-                            <div class="timeline-time">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            <div class="timeline-description">{{ 'Your order has been received and is being processed'|t }}</div>
-                        </div>
-
-                        <!-- Confirmed -->
-                        <div class="timeline-item {% if display_status == 'confirmed' %}active{% elif order.status.value in ['preparing', 'out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'confirmed') %}completed{% endif %}">
-                            <div class="timeline-icon">
-                                <i class="far fa-check-circle"></i>
-                            </div>
-                            <div class="timeline-title">{{ 'Order Confirmed'|t }}</div>
-                            {% if order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}
-                            <div class="timeline-time">{{ order.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            <div class="timeline-description">{{ 'Payment confirmed and order is being prepared'|t }}</div>
-                            {% else %}
-                            <div class="timeline-description">{{ 'Waiting for confirmation'|t }}</div>
-                            {% endif %}
-                        </div>
-
-                        <!-- Preparing -->
-                        <div class="timeline-item {% if display_status == 'preparing' %}active{% elif order.status.value in ['out_for_delivery', 'delivered'] or (waiting_for_date and order.status.value == 'preparing') %}completed{% endif %}">
-                            <div class="timeline-icon">
-                                <i class="far fa-box"></i>
-                            </div>
-                            <div class="timeline-title">{{ 'Order Preparing'|t }}</div>
-                            {% if order.status.value in ['preparing', 'out_for_delivery', 'delivered'] %}
-                            <div class="timeline-description">{{ 'Your order is being prepared for delivery'|t }}</div>
-                            {% else %}
-                            <div class="timeline-description">{{ 'Order will be prepared soon'|t }}</div>
-                            {% endif %}
-                        </div>
-
-                        <!-- Out for Delivery -->
-                        <div class="timeline-item {% if display_status == 'out_for_delivery' %}active{% elif order.status.value == 'delivered' %}completed{% endif %}">
-                            <div class="timeline-icon">
-                                <i class="far fa-truck"></i>
-                            </div>
-                            <div class="timeline-title">{{ 'Out for Delivery'|t }}</div>
-                            {% if delivery and delivery.status and delivery.status.value == 'in_transit' %}
-                            <div class="timeline-time">{{ delivery.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            <div class="timeline-description">
-                                {{ 'Your order is on the way'|t }}
-                                {% if delivery.driver %}
-                                <br><strong>{{ 'Driver'|t }}:</strong> {{ delivery.driver.name }}
-                                {% if delivery.driver.phone %}<br><strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.driver.phone }}{% endif %}
-                                {% endif %}
-                            </div>
-                            {% elif order.status.value == 'delivered' %}
-                            <div class="timeline-description">{{ 'Delivery completed'|t }}</div>
-                            {% elif delivery_statement %}
-                            <div class="timeline-description">{{ 'Delivery will start soon'|t }}</div>
-                            {% endif %}
-                        </div>
-
-                        <!-- Delivered -->
-                        <div class="timeline-item {% if display_status == 'delivered' %}active completed{% endif %}">
-                            <div class="timeline-icon">
-                                <i class="far fa-check-double"></i>
-                            </div>
-                            <div class="timeline-title">{{ 'Delivered'|t }}</div>
-                            {% if order.status.value == 'delivered' %}
-                            {% if delivery and delivery.delivered_at %}
-                            <div class="timeline-time">{{ delivery.delivered_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            {% endif %}
-                            <div class="timeline-description">{{ 'Your order has been delivered successfully'|t }}</div>
-                            {% elif scheduled_for_label %}
-                            <div class="timeline-description">{{ 'landing.order.scheduled_for'|t }} {{ scheduled_for_label }}</div>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% if delivery_statement %}<p class="delivery-statement" data-delivery-statement>{{ delivery_statement }}</p>{% endif %}
-
-                    {% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
-                    <div class="refresh-notice">
-                        <i class="far fa-sync"></i>
-                        {{ 'This page automatically refreshes every 30 seconds to show the latest status'|t }}
-                    </div>
+                    {% if status == 'delivered' %}
+                    {% set description = 'web.checkout.track.delivered_text'|t %}
+                    {% elif scheduled_for_label %}
+                    {% set description = ('landing.order.scheduled_for'|t) ~ ' ' ~ scheduled_for_label %}
+                    {% else %}
+                    {% set description = None %}
                     {% endif %}
-                </div>
-
-                <!-- Right: Order Details Sidebar -->
-                <div class="sidebar-info">
-                    <!-- Order Summary -->
-                    <div class="info-section">
-                        <h4>{{ 'Order Summary'|t }}</h4>
-                        <div class="info-row">
-                            <span class="info-label">{{ 'Status'|t }}:</span>
-                            <span class="info-value">
-                                <span class="status-badge {{ display_status }}">{{ order_status_label(display_status) }}</span>
-                            </span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">{{ 'Payment'|t }}:</span>
-                            <span class="info-value">
-                                {{ payment_method_label }}
-                            </span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">{{ 'Total'|t }}:</span>
-                            <span class="info-value" style="color: #00d1f9; font-weight: 700;">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
-                        </div>
-                    </div>
-
-                    <!-- Delivery Address -->
-                    {% if delivery %}
-                    <div class="info-section">
-                        <h4>{{ 'Delivery Address'|t }}</h4>
-                        <p style="color: #666; line-height: 1.6; font-size: 14px;">
-                            {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
-                            {{ delivery.delivery_address_line1 }}<br>
-                            {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
-                            {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
-                            {% if delivery.recipient_phone %}<strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.recipient_phone }}{% endif %}
-                        </p>
-                    </div>
+                    {{ step('active completed' if display_status == 'delivered' else '', 'fa-check-double', 'web.checkout.track.delivered'|t,
+                            step_times.get('delivered') if status == 'delivered' else None, description) }}
                     {% endif %}
+                </ol>
 
-                    <!-- Order Items -->
-                    <div class="info-section">
-                        <h4>{{ 'Order Items'|t }} ({{ order.order_items|length }})</h4>
-                        <div class="order-items">
-                            {% for item in order.order_items %}
-                            <div class="order-item">
-                                <img src="{{ item.product.image_url if item.product.image_url else url_for('static', filename='images/resource/shop/shop-1.jpg') }}"
-                                     alt="{{ item.product.name }}"
-                                     class="item-image">
-                                <div class="item-details">
-                                    <div class="item-name">{{ item.product.name }}</div>
-                                    <div class="item-qty">{{ 'Qty'|t }}: {{ item.quantity }}</div>
-                                </div>
-                                <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
-                            </div>
-                            {% endfor %}
+                {% if auto_refresh %}
+                <p class="ae-pay__live ae-track__live"><span class="ae-pay__dot" aria-hidden="true"></span>{{ 'web.checkout.track.live'|t }}</p>
+                {% endif %}
+            </section>
+
+            <div class="ae-track__side">
+                <section class="ae-card ae-track__summary" aria-labelledby="track-items">
+                    <h2 class="ae-order-title" id="track-items">{{ 'web.checkout.order.items_title'|t }}</h2>
+                    {{ order_lines(items, labels, placeholder) }}
+                    {{ order_totals(order, labels) }}
+                    <dl class="ae-dl ae-dl--end ae-track__method">
+                        <div class="ae-dl__row">
+                            <dt>{{ 'web.checkout.pay.method'|t }}</dt>
+                            <dd>{{ payment_method_label }}</dd>
                         </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="action-buttons">
+                    </dl>
+                    <div class="action-buttons ae-track__actions">
                         {# Pay, Cancel/Skip/Decline and Confirm are drawn here by order-actions.js from the
                            backend's `customer_actions` (spec 2026-10-27 §5.3), the answer the API publishes. #}
                         <div id="orderActions" class="order-actions" data-order-id="{{ order.id }}"></div>
-                        <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                            <i class="far fa-list"></i> {{ 'All Orders'|t }}
-                        </a>
+                        <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary ae-btn--block">{{ 'web.checkout.pay.my_orders'|t }}</a>
                     </div>
-                </div>
+                </section>
+
+                <section class="ae-card ae-track__address" aria-labelledby="track-address">
+                    <h2 class="ae-order-title" id="track-address">{{ 'web.checkout.order.address_title'|t }}</h2>
+                    {{ order_address(address, map=True) }}
+                </section>
             </div>
         </div>
-    </div>
-</section>
+    </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
-{% set map_enabled = (delivery and delivery.delivery_latitude and delivery.delivery_longitude and map_provider == 'google' and maps_api_key) %}
-{% set auto_refresh = order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
+{#- A block sees none of another block's `set`s, so the address is read again here. -#}
+{% set address = order.delivery_address %}
+{% set pinned = address and address.latitude and address.longitude %}
 {{ render_page_data({
     'map': {
-        'enabled': true if map_enabled else false,
-        'lat': delivery.delivery_latitude if map_enabled else none,
-        'lng': delivery.delivery_longitude if map_enabled else none,
-        'address': delivery.delivery_address_line1 if map_enabled else '',
+        'lat': address.latitude,
+        'lng': address.longitude,
+        'label': address.title or address.full_address,
+    } if pinned else none,
+    'leaflet': {
+        'js': url_for('static', filename='vendor/leaflet/leaflet.js'),
+        'css': url_for('static', filename='vendor/leaflet/leaflet.css'),
+        'images': url_for('static', filename='vendor/leaflet/images/'),
     },
     'auto_refresh': true if auto_refresh else false,
     'order': {'id': order.id, 'customer_actions': customer_actions},
     'order_actions': order_actions_words(),
     'subscriptions_url': url_for('frontend.my_subscriptions'),
-    'i18n': {
-        'delivery_location': 'Delivery Location' | t,
-    },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/order-tracking.js') }}"></script>
+<script src="{{ asset_url('js/map-helper.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-actions.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-tracking.js') }}"></script>
 {% endblock %}

@@ -1,6 +1,6 @@
 # Aqua Element
 
-> Aqua Element is a premium artesian drinking-water brand operated by Blue Stream Group, serving Tashkent and the Tashkent Region in Uzbekistan. Source water is drawn from a deep artesian well in the Quyi Chirchiq District (Tashkent Region) at approximately 120 metres, then processed through an 11-stage treatment system that combines mechanical filtration, ion exchange, reverse osmosis, UV and ozone disinfection, and controlled mineralisation. We sell two consumer SKUs — a 10-litre bottle and an 18.9-litre (19-litre standard) returnable bottle — direct to homes, offices, and via subscription, delivered every day.
+> Aqua Element is an artesian drinking-water brand operated by Blue Stream Group, serving Tashkent and the Tashkent Region in Uzbekistan. Source water is drawn from a deep artesian well in the Quyi Chirchiq District (Tashkent Region) at approximately {{ well_depth_metres }} metres, then processed through an 11-stage treatment system that combines mechanical filtration, ion exchange, reverse osmosis, UV and ozone disinfection, and controlled mineralisation. We sell two consumer SKUs — a 10-litre bottle and an 18.9-litre (19-litre standard) returnable bottle — direct to homes, offices, and via subscription, delivered every day.
 
 ## What we sell
 
@@ -49,7 +49,7 @@ For legal entities (yuridik shaxslar / юр. лица) we can provide official c
 
 - **Type**: artesian water from a confined aquifer
 - **Location**: Quyi Chirchiq District, Tashkent Region, Uzbekistan
-- **Well depth**: approximately 120 metres
+- **Well depth**: approximately {{ well_depth_metres }} metres
 
 ## Delivery coverage
 
@@ -72,33 +72,18 @@ and free products at checkout. Full, always-current details — tiers, earn rule
 and rewards — are published for humans at https://aqua-element.uz/loyalty-guide
 and as machine-readable JSON at https://aqua-element.uz/api/public/loyalty.json.
 
-## Our 11-stage filtration & mineralisation process
-
-1. **Quartz filter** — removes coarse suspended particles (sand, rust, mud, visible impurities) from the raw water; reduces turbidity and protects downstream stages from clogging.
-2. **Activated carbon filter** — adsorbs chlorine, off-odours, off-tastes, and many organic compounds; also protects sensitive equipment such as the reverse-osmosis membrane.
-3. **Ion exchanger / softener** — reduces water hardness by removing calcium and magnesium ions that cause scale formation; protects pipes, filters, pumps, and the RO membrane from mineral build-up.
-4. **Regeneration block** — works alongside the ion exchanger by restoring the softener resin once it becomes saturated, keeping softening performance stable over time.
-5. **Polypropylene sediment filter, 5-micron cartridge** — captures fine particles that pass through the earlier stages (small sediment, rust, mechanical impurities) before the water reaches finer filters.
-6. **Polypropylene sediment filter, 1-micron cartridge** — provides a finer mechanical-filtration step; removes very small particles and prepares the water for reverse osmosis.
-7. **Reverse osmosis** — water passes through a semi-permeable membrane that reduces dissolved salts, heavy metals, microorganisms, and many other unwanted impurities. This is the principal purification stage.
-8. **Membrane CIP (Clean-in-Place)** — cleans and maintains the RO membrane, removing scale, mineral deposits, and organic build-up to keep efficiency high and extend service life.
-9. **UV filter** — exposes the water to ultraviolet light, inactivating bacteria, viruses, and other microorganisms without adding any chemicals.
-10. **Mineralisation** — re-introduces beneficial minerals (calcium and magnesium) after RO; improves taste and helps balance the pH.
-11. **Ozone-generator treatment** — final disinfection step before storage and bottling; suppresses microbial growth then naturally breaks down to oxygen.
+## Our {{ treatment_stages|length }}-stage filtration & mineralisation process
+{#- The stages and the mineral profile come from shared/water_facts.py, the source the product feed reads too. #}
+{% for stage in treatment_stages %}
+{{ loop.index }}. **{{ stage.name }}** — {{ stage.summary }}
+{%- endfor %}
 
 ## Mineral profile of the bottled product
 
 Approximate ranges from regulator-overseen testing:
-
-- **TDS (total dissolved solids)**: 30–50 mg/L
-- **pH**: 7.5
-- **Calcium (Ca²⁺)**: 10–60 mg/L
-- **Magnesium (Mg²⁺)**: 7–20 mg/L
-- **Sodium (Na⁺)**: 5–15 mg/L
-- **Potassium (K⁺)**: 1–4 mg/L
-- **Bicarbonate (HCO₃⁻)**: 50–120 mg/L
-- **Sulfate (SO₄²⁻)**: 10–30 mg/L
-- **Chloride (Cl⁻)**: 5–10 mg/L
+{% for row in mineral_profile %}
+- **{{ row.label }}**: {{ row.text }}
+{%- endfor %}
 
 This is a low-mineralised drinking-water profile suitable for daily consumption.
 

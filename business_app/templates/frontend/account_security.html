@@ -1,288 +1,167 @@
 {% extends "frontend/cabinet_base.html" %}
+{% from 'frontend/macros/auth.html' import password_field, password_rules as rules_list, form_alert with context %}
+{#
+  Account security (/account-security, routes.account_security). Two sections in one column:
+  - Signing in: phone, email, the website password and the last sign-in, as read-only rows.
+  - The password. With one (auth_service.has_website_password), #changePasswordForm posts {current_password,
+    new_password} to POST /api/v1/auth/change-password (account-security.js); the checklist is the server's rule
+    (PasswordValidator.requirements()). An account with no password of its choosing (users.password_set_at is NULL:
+    the stored one is one we made up, as for a bot signup or an account an admin, a sales agent or staff created)
+    gets a panel instead: with a real email, #passwordLinkForm sends the
+    set-a-password link to that email from this page (POST /api/v1/auth/forgot-password {identifier},
+    account-security.js), and once it is set the page shows the form; any other account signs in from the Telegram
+    bot.
+  Styles: css/pages/cabinet-account.css (.ae-acs); form building blocks: macros/auth.html, css/pages/auth.css and
+  js/pages/auth-form.js (AEAuth), as on the sign-in pages.
+#}
 {% set active_menu = 'security' %}
 
-{% block cabinet_title %}{{ 'Account Security'|t }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.account.security'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'landing.account.security'|t }}</li>
+<li><span aria-current="page">{{ 'landing.account.security'|t }}</span></li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<style>
-.security-item {
-    margin-bottom: 20px;
-}
-
-.password-strength {
-    margin-top: 5px;
-}
-
-.strength-bar {
-    width: 100%;
-    height: 4px;
-    background-color: #ddd;
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.strength-fill {
-    height: 100%;
-    width: 0%;
-    border-radius: 2px;
-    transition: all 0.3s ease;
-}
-
-.strength-fill.weak { background-color: #dc3545; }
-.strength-fill.fair { background-color: #ffc107; }
-.strength-fill.good { background-color: #17a2b8; }
-.strength-fill.strong { background-color: #28a745; }
-
-.strength-text {
-    font-size: 12px;
-    margin-top: 2px;
-    display: block;
-}
-
-.activity-item {
-    padding: 15px 0;
-    border-bottom: 1px solid #eee;
-}
-
-.activity-item:last-child {
-    border-bottom: none;
-}
-
-.activity-item h6 {
-    margin-bottom: 5px;
-}
-
-.activity-item p {
-    margin-bottom: 0;
-    font-size: 14px;
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/auth.css') }}">
+<link rel="stylesheet" href="{{ asset_url('css/pages/cabinet-account.css') }}">
 {% endblock %}
 
 {% block cabinet_content %}
-<!-- Security Overview -->
-<div class="security-overview mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-shield-alt"></i> {{ 'Security Overview'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="security-item text-center">
-                        <i class="far fa-envelope {{ 'text-success' if user.email_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
-                        <h6 class="mt-2">{{ 'Email Verification'|t }}</h6>
-                        <span class="badge badge-{{ 'success' if user.email_verified_at else 'warning' }}">
-                            {{ 'Verified' if user.email_verified_at else 'Pending' }}
-                        </span>
-                    </div>
+{% set email = user.contact_email %}
+<div class="ae-acs ae-acx">
+
+    {#- 1. Signing in -#}
+    <section class="ae-acx__section" aria-labelledby="acs-signin-title">
+        <h2 class="ae-sec-title" id="acs-signin-title">{{ 'web.account.security.signin_title'|t }}</h2>
+        <dl class="ae-dl ae-acx__card ae-acx__rows">
+            <div class="ae-dl__row ae-acx__row" data-signin="phone">
+                <dt>{{ 'web.account.contact.phone'|t }}</dt>
+                <dd>
+                    <span class="ae-acx__value">
+                        {%- if user.phone %}
+                        <span class="ae-num">{{ user.phone }}</span>
+                        {%- if user.phone_verified_at %}
+                        <span class="ae-badge ae-badge--ok">{{ 'web.account.contact.phone_confirmed'|t }}</span>
+                        {%- else %}
+                        <span class="ae-badge ae-badge--warn">{{ 'web.account.contact.phone_unconfirmed'|t }}</span>
+                        {%- endif %}
+                        {%- else %}
+                        <span class="ae-acx__none">{{ 'web.account.contact.phone_none'|t }}</span>
+                        {%- endif %}
+                    </span>
+                    {%- if not user.phone or not user.phone_verified_at %}
+                    <a class="ae-acx__action" href="{{ url_for('frontend.verify_phone') }}" data-action="verify-phone">{{ ('web.account.contact.phone_confirm' if user.phone else 'web.account.contact.phone_add')|t }}</a>
+                    {%- endif %}
+                </dd>
+            </div>
+            <div class="ae-dl__row ae-acx__row" data-signin="email">
+                <dt>{{ 'web.account.contact.email'|t }}</dt>
+                <dd>
+                    <span class="ae-acx__value">
+                        {%- if email %}
+                        <span class="ae-acx__email">{{ email }}</span>
+                        {%- if user.email_verified_at %}
+                        <span class="ae-badge ae-badge--ok">{{ 'web.account.contact.email_confirmed'|t }}</span>
+                        {%- else %}
+                        <span class="ae-badge ae-badge--warn">{{ 'web.account.contact.email_unconfirmed'|t }}</span>
+                        {%- endif %}
+                        {%- else %}
+                        <span class="ae-acx__none">{{ 'web.account.contact.email_none'|t }}</span>
+                        {%- endif %}
+                    </span>
+                    {%- if email and not user.email_verified_at %}
+                    <a class="ae-acx__action" href="{{ url_for('frontend.verify_email') }}" data-action="verify-email">{{ 'web.account.contact.email_confirm'|t }}</a>
+                    {%- endif %}
+                </dd>
+            </div>
+            {#- Only an account with a website password gets this row; otherwise the section below explains. -#}
+            {%- if has_password %}
+            <div class="ae-dl__row ae-acx__row" data-signin="password">
+                <dt>{{ 'web.account.security.password'|t }}</dt>
+                <dd><span class="ae-acx__value"><span class="ae-badge ae-badge--ok">{{ 'web.account.security.password_set'|t }}</span></span></dd>
+            </div>
+            {%- endif %}
+            {%- if last_login %}
+            <div class="ae-dl__row ae-acx__row" data-signin="last">
+                <dt>{{ 'web.account.security.last_signin'|t }}</dt>
+                <dd><span class="ae-acx__value ae-num">{{ 'web.account.datetime_full'|t(date=last_login[0], time=last_login[1]) }}</span></dd>
+            </div>
+            {%- endif %}
+        </dl>
+    </section>
+
+    {#- 2. The password -#}
+    <section class="ae-acx__section" aria-labelledby="acs-password-title">
+        <h2 class="ae-sec-title" id="acs-password-title">{{ ('web.account.security.change_title' if has_password else 'web.account.security.password')|t }}</h2>
+        {%- if has_password %}
+        <form id="changePasswordForm" class="ae-auth ae-acx__card ae-acs__form" novalidate>
+            {{ form_alert('passwordAlert') }}
+            <div class="ae-alert ae-alert--ok ae-acs__done" id="passwordDone" role="status" tabindex="-1" hidden>
+                <i class="ae-alert__icon fas fa-check-circle" aria-hidden="true"></i>
+                <p><strong class="ae-alert__title">{{ 'web.account.security.changed'|t }}</strong>{{ 'web.account.security.changed_text'|t }}</p>
+            </div>
+            <div class="ae-acs__current">
+                {{ password_field('current_password', 'web.account.security.current_password'|t, 'current-password') }}
+            </div>
+            <div class="ae-acx__grid">
+                {{ password_field('new_password', 'web.auth.reset.new_password'|t, 'new-password', describedby='passwordRules') }}
+                {{ password_field('confirm_password', 'web.auth.common.confirm_password'|t, 'new-password') }}
+            </div>
+            {{ rules_list(password_rules, input_id='new_password') }}
+            <div class="ae-acx__actions">
+                <button type="submit" class="ae-btn ae-btn--primary"><span>{{ 'web.account.security.submit'|t }}</span></button>
+            </div>
+        </form>
+        {%- else %}
+        <div class="ae-panel ae-acs__nopass" data-password-state="none">
+            <span class="ae-icon-tile ae-icon-tile--telegram" aria-hidden="true"><i class="fab fa-telegram-plane"></i></span>
+            <div class="ae-acs__nopass-body">
+                <h3 class="ae-acs__nopass-title">{{ 'web.account.security.nopass_title'|t }}</h3>
+                {%- if email %}
+                <p>{{ 'web.account.security.nopass_email'|t }}</p>
+                <form id="passwordLinkForm" class="ae-acs__link" novalidate>
+                    {{ form_alert('linkAlert') }}
+                    <button type="submit" class="ae-btn ae-btn--secondary"><span>{{ 'web.account.security.send_link'|t }}</span></button>
+                </form>
+                <div class="ae-alert ae-alert--ok ae-acs__sent" id="passwordLinkSent" role="status" tabindex="-1" hidden>
+                    <i class="ae-alert__icon fas fa-envelope-open-text" aria-hidden="true"></i>
+                    <p><strong class="ae-alert__title">{{ 'web.auth.forgot.done_title'|t }}</strong>{{ 'web.account.security.link_sent'|t(email=email) }}</p>
                 </div>
-                <div class="col-md-4">
-                    <div class="security-item text-center">
-                        <i class="far fa-mobile {{ 'text-success' if user.phone_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
-                        <h6 class="mt-2">{{ 'Phone Verification'|t }}</h6>
-                        <span class="badge badge-{{ 'success' if user.phone_verified_at else 'warning' }}">
-                            {{ 'Verified' if user.phone_verified_at else 'Pending' }}
-                        </span>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="security-item text-center">
-                        <i class="far fa-lock text-success" style="font-size: 2rem;"></i>
-                        <h6 class="mt-2">{{ 'Password Protection'|t }}</h6>
-                        <span class="badge badge-success">{{ 'cabinet.security.active'|t }}</span>
-                    </div>
-                </div>
+                {%- else %}
+                <p>{{ 'web.account.security.nopass_bot'|t }}</p>
+                <a class="ae-btn ae-btn--secondary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
+                {%- endif %}
             </div>
         </div>
-    </div>
-</div>
-
-<!-- Change Password -->
-<div class="change-password-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-key"></i> {{ 'Change Password'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <form id="changePasswordForm" class="default-form">
-                <div class="row clearfix">
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <label>{{ 'Current Password'|t }}</label>
-                        <input type="password" name="current_password" placeholder="{{ 'Enter current password'|t }}" required>
-                    </div>
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'New Password'|t }}</label>
-                        <input type="password" name="new_password" placeholder="{{ 'Enter new password'|t }}" required>
-                        <small class="text-muted">{{ 'Password must be at least 8 characters long'|t }}</small>
-                        <div class="password-strength">
-                            <div class="strength-bar">
-                                <div class="strength-fill" id="strengthFill"></div>
-                            </div>
-                            <small class="strength-text" id="strengthText">{{ 'Password strength'|t }}</small>
-                        </div>
-                    </div>
-                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                        <label>{{ 'Confirm New Password'|t }}</label>
-                        <input type="password" name="confirm_password" placeholder="{{ 'Confirm new password'|t }}" required>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="show_passwords">
-                            <label for="show_passwords">{{ 'Show passwords'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <button type="submit" class="theme-btn btn-one">
-                            <i class="far fa-save"></i> {{ 'Change Password'|t }}
-                        </button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Two-Factor Authentication -->
-<div class="two-factor-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-mobile-alt"></i> {{ 'Two-Factor Authentication'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-8">
-                    <h6>{{ 'SMS Authentication'|t }}</h6>
-                    <p class="text-muted">{{ 'Add an extra layer of security by requiring SMS verification for login.'|t }}</p>
-                </div>
-                <div class="col-md-4 text-right">
-                    {% if user.phone_verified_at %}
-                    <button class="btn btn-outline-primary" data-action="setup-2fa">
-                        <i class="far fa-mobile"></i> {{ 'Enable 2FA'|t }}
-                    </button>
-                    {% else %}
-                    <button class="btn btn-outline-warning" data-action="verify-phone-first">
-                        <i class="far fa-exclamation-triangle"></i> {{ 'Verify Phone First'|t }}
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Account Activity -->
-<div class="account-activity-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-history"></i> {{ 'Recent Account Activity'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="activity-list">
-                <div class="activity-item">
-                    <div class="row align-items-center">
-                        <div class="col-md-1">
-                            <i class="far fa-sign-in-alt text-success"></i>
-                        </div>
-                        <div class="col-md-7">
-                            <h6>{{ 'landing.nav.login'|t }}</h6>
-                            <p class="text-muted">{{ 'Successful login from web browser'|t }}</p>
-                        </div>
-                        <div class="col-md-4 text-right">
-                            <small class="text-muted">{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="activity-item">
-                    <div class="row align-items-center">
-                        <div class="col-md-1">
-                            <i class="far fa-user-edit text-info"></i>
-                        </div>
-                        <div class="col-md-7">
-                            <h6>{{ 'Profile Updated'|t }}</h6>
-                            <p class="text-muted">{{ 'Personal information was updated'|t }}</p>
-                        </div>
-                        <div class="col-md-4 text-right">
-                            <small class="text-muted">{{ user.updated_at.strftime('%Y-%m-%d %H:%M') if user.updated_at else 'Never' }}</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="activity-item">
-                    <div class="row align-items-center">
-                        <div class="col-md-1">
-                            <i class="far fa-user-plus text-primary"></i>
-                        </div>
-                        <div class="col-md-7">
-                            <h6>{{ 'Account Created'|t }}</h6>
-                            <p class="text-muted">{{ 'Account was successfully created'|t }}</p>
-                        </div>
-                        <div class="col-md-4 text-right">
-                            <small class="text-muted">{{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'Unknown' }}</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Security Settings -->
-<div class="security-settings-section mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-cogs"></i> {{ 'Security Settings'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <form id="securitySettingsForm" class="default-form">
-                <div class="row clearfix">
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="login_notifications" name="login_notifications" checked>
-                            <label for="login_notifications">{{ 'Send email notifications for new logins'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <div class="check-box">
-                            <input class="check" type="checkbox" id="password_change_notifications" name="password_change_notifications" checked>
-                            <label for="password_change_notifications">{{ 'Send email notifications for password changes'|t }}</label>
-                        </div>
-                    </div>
-                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                        <button type="submit" class="theme-btn btn-one">
-                            <i class="far fa-save"></i> {{ 'Save Security Settings'|t }}
-                        </button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
+        {%- endif %}
+    </section>
 </div>
 {% endblock %}
 
 {% block cabinet_extra_js %}
+{#- Blocks do not share variables: the email is read again here. -#}
+{%- set link_email = none if has_password else user.contact_email %}
+{%- if has_password or link_email %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'verify_phone_url': url_for('frontend.verify_phone'),
+    'link_email': link_email,
     'i18n': {
-        'mismatch': 'New passwords do not match' | t,
-        'too_weak': 'Password is too weak. Please choose a stronger password.' | t,
-        'changed_success': 'Password changed successfully!' | t,
-        'change_failed': 'Failed to change password' | t,
-        'network_error': 'Network error. Please try again.' | t,
-        'strength_label': 'Password strength' | t,
-        'settings_saved': 'Security settings saved successfully!' | t,
-        'weak': 'Weak' | t,
-        'fair': 'Fair' | t,
-        'good': 'Good' | t,
-        'strong': 'Strong' | t,
-        'very_strong': 'Very Strong' | t,
-        'twofa_coming_soon': 'Two-factor authentication setup coming soon!' | t,
-        'verify_phone_confirm': 'You need to verify your phone number before enabling 2FA. Go to phone verification?' | t,
+        'required': 'web.auth.common.required'|t,
+        'passwords_mismatch': 'web.auth.common.passwords_mismatch'|t,
+        'password_rules': 'web.auth.password_rule.not_met'|t,
+        'password_too_common': 'web.auth.password_rule.too_common'|t,
+        'rule_met': 'web.auth.password_rule.met'|t,
+        'rule_unmet': 'web.auth.password_rule.unmet'|t,
+        'wrong_current': 'web.account.security.wrong_current'|t,
+        'changed': 'web.account.security.changed'|t,
+        'change_failed': 'web.account.security.change_failed'|t,
+        'network_error': 'web.auth.common.network_error'|t,
+        'rate_limited': 'web.auth.common.rate_limited'|t,
+        'link_failed': 'web.auth.forgot.failed'|t,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/account-security.js') }}"></script>
+<script src="{{ asset_url('js/pages/auth-form.js') }}"></script>
+<script src="{{ asset_url('js/pages/account-security.js') }}"></script>
+{%- endif %}
 {% endblock %}

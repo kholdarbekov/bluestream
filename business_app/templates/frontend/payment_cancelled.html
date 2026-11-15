@@ -1,182 +1,80 @@
 {% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from "frontend/macros/order_status.html" import order_status_pill %}
 
-{% block title %}{{ 'Payment Cancelled'|t }} - {{ company_name }}{% endblock %}
+{#-
+  Where Click sends a cancelled payment back (/payment/cancel). The order's status in the words every order page
+  uses (macros/order_status.html: order_status_label(display_status)), and Pay when the backend publishes it:
+  static/js/pages/payment-cancelled.js hands `customer_actions.pay` to order-actions.js, which draws it into
+  #paymentActions. Without a session, or for someone else's order, the neutral variant names no order.
+  Hooks: section.payment-cancelled-section .cancelled-content, .order-info, #paymentActions[data-order-id].
+  Styles: static/css/pages/checkout.css (.ae-pay).
+-#}
+
+{% block title %}{{ 'web.checkout.pay.cancel_title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-.payment-cancelled-section {
-    padding: 100px 0;
-    min-height: 70vh;
-    display: flex;
-    align-items: center;
-}
-
-.cancelled-content {
-    max-width: 600px;
-    margin: 0 auto;
-    text-align: center;
-    background: #fff;
-    border-radius: 10px;
-    padding: 50px 30px;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
-}
-
-.cancelled-icon {
-    width: 100px;
-    height: 100px;
-    background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 30px;
-}
-
-.cancelled-icon i {
-    font-size: 50px;
-    color: #fff;
-}
-
-.cancelled-content h2 {
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 15px;
-    color: #222;
-}
-
-.cancelled-content p {
-    font-size: 16px;
-    color: #666;
-    margin-bottom: 10px;
-    line-height: 1.6;
-}
-
-.order-info {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 30px 0;
-}
-
-.info-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid #e5e5e5;
-}
-
-.info-row:last-child {
-    border-bottom: none;
-}
-
-.info-label {
-    font-weight: 600;
-    color: #666;
-}
-
-.info-value {
-    color: #222;
-}
-
-.action-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    margin-top: 30px;
-}
-
-.info-notice {
-    background: #fff3cd;
-    border: 1px solid #ffc107;
-    border-radius: 5px;
-    padding: 15px;
-    margin-top: 20px;
-    font-size: 14px;
-    color: #856404;
-}
-
-@media (max-width: 767px) {
-    .cancelled-content {
-        padding: 40px 20px;
-    }
-
-    .cancelled-content h2 {
-        font-size: 24px;
-    }
-
-    .action-buttons {
-        grid-template-columns: 1fr;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
 {% endblock %}
 
-{% from "frontend/macros/order_status.html" import order_status_label %}
 {% block content %}
-<section class="payment-cancelled-section">
-    <div class="auto-container">
-        <div class="cancelled-content">
-            <div class="cancelled-icon">
-                <i class="far fa-times-circle"></i>
-            </div>
+{{ page_hero('web.checkout.pay.cancel_title'|t, crumbs=[('web.checkout.pay.crumb'|t, None)], variant='soft') }}
 
-            <h2>{{ 'Payment Cancelled'|t }}</h2>
+<div class="ae-flow ae-pay">
+    <section class="ae-section payment-cancelled-section">
+        <div class="ae-container">
+            <div class="ae-card ae-pay__card cancelled-content">
+                <span class="ae-pay__icon ae-pay__icon--warn" aria-hidden="true"><i class="far fa-times"></i></span>
 
-            {% if order %}
-            <p>{{ 'Your payment was cancelled and no charges were made.'|t }}</p>
-            <div class="order-info">
-                <div class="info-row">
-                    <span class="info-label">{{ 'Order Number'|t }}:</span>
-                    <span class="info-value">{{ order.order_number }}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">{{ 'Total Amount'|t }}:</span>
-                    <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">{{ 'Order Status'|t }}:</span>
-                    <span class="info-value">
-                        <span class="badge badge-warning">{{ order_status_label(display_status) }}</span>
-                    </span>
-                </div>
-            </div>
+                {% if order %}
+                <p class="ae-pay__text">{{ 'web.checkout.pay.cancel_text'|t }}</p>
 
-            <div class="info-notice">
-                <i class="far fa-info-circle"></i>
-                {# The backend's published Pay answer decides which sentence; the page works out nothing. #}
-                {% if customer_actions.pay.allowed %}
-                {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|t }}
+                <dl class="ae-dl ae-dl--end ae-pay__facts order-info">
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.order_number'|t }}</dt>
+                        <dd class="info-value ae-num">{{ order.order_number }}</dd>
+                    </div>
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.amount'|t }}</dt>
+                        <dd class="info-value ae-num">{{ order.total_amount|format_price }}</dd>
+                    </div>
+                    <div class="ae-dl__row info-row">
+                        <dt class="info-label">{{ 'web.checkout.pay.status'|t }}</dt>
+                        <dd class="info-value">{{ order_status_pill(display_status) }}</dd>
+                    </div>
+                </dl>
+
+                <div class="ae-alert ae-pay__notice">
+                    <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-info-circle"></i></span>
+                    {# The backend's published Pay answer decides which sentence; the page works out nothing. #}
+                    {% if customer_actions.pay.allowed %}
+                    <p>{{ 'web.checkout.pay.cancel_retry_note'|t }}</p>
+                    {% else %}
+                    <p>{{ 'web.checkout.pay.cancel_closed_note'|t }}</p>
+                    {% endif %}
+                </div>
+
+                {# Pay, drawn by order-actions.js from the published `customer_actions.pay`. #}
+                <div id="paymentActions" class="order-actions ae-pay__pay" data-order-id="{{ order.id }}"></div>
+
+                <div class="ae-pay__actions">
+                    <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary">{{ 'web.checkout.pay.my_orders'|t }}</a>
+                    <a href="{{ url_for('frontend.shop') }}" class="ae-link ae-pay__link">{{ 'web.checkout.pay.continue'|t }}</a>
+                </div>
                 {% else %}
-                {{ 'This order can no longer be paid online. If anything is still owed on it, our team will settle it with you.'|t }}
+                {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
+                <p class="ae-pay__text">{{ 'web.payment_return.neutral_cancel'|t }}</p>
+                <div class="ae-pay__actions">
+                    <a href="{{ company_telegram_bot_url }}" class="ae-btn ae-btn--primary" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}
+                    </a>
+                    <a href="{{ url_for('frontend.my_orders') }}" class="ae-btn ae-btn--secondary">{{ 'web.checkout.pay.my_orders'|t }}</a>
+                </div>
                 {% endif %}
             </div>
-
-            {# Pay, drawn by order-actions.js from the published `customer_actions.pay`. #}
-            <div id="paymentActions" class="order-actions mb-3" data-order-id="{{ order.id }}"></div>
-
-            <div class="action-buttons">
-                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
-                </a>
-                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                    <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
-                </a>
-            </div>
-            {% else %}
-            {# No session, or not this customer's order: nothing about any order is shown (spec 2026-10-27 §4.5). #}
-            <p>{{ 'web.payment_return.neutral_cancel'|t }}</p>
-            <div class="action-buttons">
-                <a href="{{ company_telegram_bot_url }}" class="theme-btn btn-one" target="_blank" rel="noopener noreferrer">
-                    <i class="fab fa-telegram-plane"></i> {{ 'Open the bot'|t }}
-                </a>
-                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
-                </a>
-            </div>
-            {% endif %}
         </div>
-    </div>
-</section>
+    </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -190,6 +88,6 @@
     } if order else none,
     'order_actions': order_actions_words(),
 }) }}
-<script src="{{ url_for('static', filename='js/pages/order-actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/payment-cancelled.js') }}"></script>
+<script src="{{ asset_url('js/pages/order-actions.js') }}"></script>
+<script src="{{ asset_url('js/pages/payment-cancelled.js') }}"></script>
 {% endblock %}

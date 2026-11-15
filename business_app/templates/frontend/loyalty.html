@@ -1,1081 +1,306 @@
 {% extends "frontend/cabinet_base.html" %}
+{% from 'frontend/macros/ui.html' import empty_state %}
+{#
+  Aqua Club in the cabinet (/my-loyalty, routes.my_loyalty). Two server-chosen states:
+  - not eligible (LoyaltyService.is_user_loyalty_eligible): one empty state, no figures, and loyalty.js reads nothing;
+  - a member: the summary, streak bonuses, rewards, history, ways to earn and the levels.
+  Every number is the backend's: the program's from `handbook` (get_loyalty_handbook_context, the /loyalty-guide
+  source), the member's from `summary` (GET /loyalty/points) and `dashboard` (GET /loyalty/account). The template holds
+  no digits. loyalty.js fills rewards (GET /loyalty/rewards), the history (GET /loyalty/points/history, paged and
+  filtered by a chip's `group`, loyalty_serializers.HISTORY_GROUPS) and the referral code (GET /loyalty/referral, on
+  request). Styles: css/pages/cabinet-account.css.
+#}
 {% set active_menu = 'loyalty' %}
 
 {% block cabinet_title %}{{ 'landing.account.loyalty'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'landing.account.loyalty'|t }}</li>
+<li><span aria-current="page">{{ 'landing.account.loyalty'|t }}</span></li>
 {% endblock %}
 
 {% block cabinet_extra_head %}
-<style>
-/* ============================================
-   LOYALTY PAGE - ENHANCED DESIGN SYSTEM
-   ============================================ */
-
-/* Section Spacing & Visual Hierarchy */
-.loyalty-overview,
-.membership-tiers,
-.points-history,
-.available-rewards,
-.earn-points-section {
-    margin-bottom: 2.5rem;
-}
-
-/* Card Base Styles - Consistent Shadows */
-.loyalty-card,
-.tier-card,
-.reward-card,
-.card {
-    border: none;
-    border-radius: 16px;
-    background: #ffffff;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-/* ============================================
-   LOYALTY OVERVIEW CARDS (Stats)
-   ============================================ */
-.loyalty-card {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    border-radius: 20px;
-    overflow: hidden;
-    background: linear-gradient(135deg, #ffffff 0%, #f8faff 100%);
-}
-
-.loyalty-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-}
-
-.loyalty-card .card-body {
-    padding: 2rem 1.5rem;
-}
-
-.loyalty-icon {
-    margin-bottom: 1.25rem;
-    height: 80px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.loyalty-icon i {
-    font-size: 3.5rem !important;
-    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
-}
-
-.loyalty-card h3 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.loyalty-card .text-muted {
-    font-size: 0.95rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* ============================================
-   MEMBERSHIP TIERS - Enhanced Design
-   ============================================ */
-.membership-tiers .card {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-}
-
-.membership-tiers .card-header {
-    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
-    border-bottom: none;
-    padding: 1.25rem 1.5rem;
-    border-radius: 16px 16px 0 0 !important;
-}
-
-.membership-tiers .card-header h5 {
-    margin: 0;
-    font-weight: 600;
-    color: #1a1a2e;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.membership-tiers .card-header h5 i {
-    color: #ffd700;
-    font-size: 1.4rem;
-}
-
-.membership-tiers .card-body {
-    padding: 1.5rem;
-}
-
-/* Tier Cards - Enhanced Styling */
-.tier-card {
-    background: #ffffff;
-    border-radius: 16px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    padding: 1.75rem 1.25rem;
-    margin-bottom: 0;
-    border-left: 5px solid;
-    transition: all 0.3s ease;
-    position: relative;
-    overflow: hidden;
-    height: 100%;
-}
-
-.tier-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    opacity: 0.1;
-    transform: translate(30%, -30%);
-}
-
-.tier-card:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
-}
-
-/* Current Tier Highlight */
-.tier-card.current-tier {
-    border-width: 3px;
-    box-shadow: 0 8px 32px rgba(24, 144, 255, 0.25);
-    background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
-}
-
-.tier-card.current-tier::after {
-    content: '✓ Your Tier';
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 20px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Tier-specific styling */
-.tier-card.bronze {
-    border-left-color: #cd7f32;
-}
-.tier-card.bronze::before { background: #cd7f32; }
-.tier-card.bronze .tier-header i { color: #cd7f32; }
-
-.tier-card.silver {
-    border-left-color: #a0a0a0;
-}
-.tier-card.silver::before { background: #a0a0a0; }
-.tier-card.silver .tier-header i { color: #a0a0a0; }
-
-.tier-card.gold {
-    border-left-color: #ffd700;
-}
-.tier-card.gold::before { background: #ffd700; }
-.tier-card.gold .tier-header i { color: #ffd700; }
-
-.tier-card.platinum {
-    border-left-color: #7c3aed;
-}
-.tier-card.platinum::before { background: #7c3aed; }
-.tier-card.platinum .tier-header i { color: #7c3aed; }
-
-.tier-header {
-    text-align: center;
-    margin-bottom: 1.25rem;
-}
-
-.tier-header i {
-    font-size: 3rem !important;
-    margin-bottom: 0.75rem;
-    display: block;
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));
-}
-
-.tier-header h6 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-    color: #1a1a2e;
-}
-
-.tier-header p {
-    font-size: 0.85rem;
-    color: #666;
-    margin: 0;
-    font-weight: 500;
-}
-
-.tier-benefits ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.tier-benefits li {
-    padding: 0.5rem 0;
-    font-size: 0.875rem;
-    color: #555;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-}
-
-.tier-benefits li::before {
-    content: "✓";
-    color: #52c41a;
-    font-weight: bold;
-    flex-shrink: 0;
-    margin-top: 1px;
-}
-
-/* ============================================
-   POINTS HISTORY - Enhanced Styling
-   ============================================ */
-.points-history .card {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-}
-
-.points-history .card-header {
-    background: linear-gradient(135deg, #fff9f0 0%, #fff5e6 100%);
-    border-bottom: none;
-    padding: 1.25rem 1.5rem;
-}
-
-.points-history .card-header h5 {
-    margin: 0;
-    font-weight: 600;
-    color: #1a1a2e;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.points-history .card-header h5 i {
-    color: #fa8c16;
-    font-size: 1.4rem;
-}
-
-.points-history-item {
-    display: flex;
-    align-items: center;
-    padding: 1.25rem 0;
-    border-bottom: 1px solid #f5f5f5;
-    transition: background-color 0.2s ease;
-}
-
-.points-history-item:hover {
-    background-color: #fafafa;
-    margin: 0 -1rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-}
-
-.points-history-item:last-child {
-    border-bottom: none;
-}
-
-.points-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 1.25rem;
-    color: white;
-    font-size: 1.25rem;
-    flex-shrink: 0;
-}
-
-.points-icon.earned {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-}
-.points-icon.redeemed {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
-}
-.points-icon.expired {
-    background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
-}
-.points-icon.bonus {
-    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
-}
-
-.points-details {
-    flex: 1;
-    min-width: 0;
-}
-
-.points-details .description {
-    font-weight: 600;
-    color: #1a1a2e;
-    margin-bottom: 0.25rem;
-    font-size: 0.95rem;
-}
-
-.points-details .date {
-    color: #888;
-    font-size: 0.85rem;
-}
-
-.points-amount {
-    font-weight: 700;
-    font-size: 1.1rem;
-    margin-left: auto;
-    padding-left: 1rem;
-}
-
-.points-amount.positive { color: #52c41a; }
-.points-amount.negative { color: #ff4d4f; }
-
-/* ============================================
-   REWARDS GRID - Premium Card Design
-   ============================================ */
-.available-rewards .card {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-}
-
-.available-rewards .card-header {
-    background: linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%);
-    border-bottom: none;
-    padding: 1.25rem 1.5rem;
-}
-
-.available-rewards .card-header h5 {
-    margin: 0;
-    font-weight: 600;
-    color: #1a1a2e;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.available-rewards .card-header h5 i {
-    color: #52c41a;
-    font-size: 1.4rem;
-}
-
-.rewards-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1.5rem;
-}
-
-.reward-card {
-    background: #ffffff;
-    border-radius: 16px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    padding: 0;
-    overflow: hidden;
-    transition: all 0.3s ease;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-}
-
-.reward-card:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15);
-}
-
-/* Reward Type Badge */
-.reward-type-badge {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    z-index: 2;
-}
-
-.reward-type-badge.discount {
-    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
-    color: white;
-}
-
-.reward-type-badge.free_delivery {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
-    color: white;
-}
-
-.reward-type-badge.free_product {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: white;
-}
-
-.reward-type-badge.gift_card {
-    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
-    color: white;
-}
-
-.reward-image {
-    width: 100%;
-    height: 140px;
-    object-fit: cover;
-    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
-}
-
-.reward-content {
-    padding: 1.25rem;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.reward-content h5 {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin-bottom: 0.5rem;
-}
-
-.reward-content p {
-    color: #666;
-    font-size: 0.9rem;
-    margin-bottom: 1rem;
-    flex: 1;
-    line-height: 1.5;
-}
-
-/* Points Cost - Prominent Display */
-.reward-points-cost {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: auto;
-    padding-top: 1rem;
-    border-top: 1px solid #f0f0f0;
-}
-
-.points-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 8px 16px;
-    border-radius: 25px;
-    font-weight: 700;
-    font-size: 1rem;
-}
-
-.points-badge i {
-    font-size: 1rem;
-}
-
-.redeem-btn {
-    padding: 8px 20px;
-    border-radius: 25px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
-}
-
-.redeem-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.redeem-btn.can-redeem {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    border: none;
-    color: white;
-}
-
-.redeem-btn.can-redeem:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(82, 196, 26, 0.4);
-}
-
-.redeem-btn.cannot-redeem {
-    background: #f5f5f5;
-    border: 1px solid #d9d9d9;
-    color: #999;
-}
-
-/* System Reward Card - Auto-applied rewards styling */
-.reward-card.system-reward {
-    border: 2px solid #52c41a;
-    background: linear-gradient(to bottom, rgba(82, 196, 26, 0.05), #ffffff);
-}
-
-.reward-card.system-reward::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-}
-
-.system-reward-badge {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    z-index: 2;
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.system-reward-badge i {
-    font-size: 0.65rem;
-}
-
-.system-reward-info {
-    background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 0.8rem;
-    color: #389e0d;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: auto;
-}
-
-.system-reward-info i {
-    font-size: 0.9rem;
-}
-
-/* ============================================
-   WAYS TO EARN POINTS - Enhanced Design
-   ============================================ */
-.earn-points-section .card {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-}
-
-.earn-points-section .card-header {
-    background: linear-gradient(135deg, #fffbe6 0%, #fff7cc 100%);
-    border-bottom: none;
-    padding: 1.25rem 1.5rem;
-}
-
-.earn-points-section .card-header h5 {
-    margin: 0;
-    font-weight: 600;
-    color: #1a1a2e;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.earn-points-section .card-header h5 i {
-    color: #faad14;
-    font-size: 1.4rem;
-}
-
-.earn-points-section .card-body {
-    padding: 1.5rem;
-}
-
-.earn-method {
-    display: flex;
-    align-items: flex-start;
-    padding: 1.25rem;
-    background: linear-gradient(135deg, #fafbff 0%, #f5f7ff 100%);
-    border-radius: 16px;
-    margin-bottom: 1rem;
-    transition: all 0.3s ease;
-    border: 1px solid #f0f0f0;
-}
-
-.earn-method:hover {
-    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
-    transform: translateX(4px);
-    border-color: #d0d8ff;
-}
-
-.earn-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 1.25rem;
-    flex-shrink: 0;
-    background: white;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-
-.earn-icon i {
-    font-size: 1.75rem !important;
-}
-
-.earn-details {
-    flex: 1;
-}
-
-.earn-details h6 {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin-bottom: 0.25rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.earn-details p {
-    color: #666;
-    font-size: 0.9rem;
-    margin: 0;
-    line-height: 1.5;
-}
-
-/* Points Value Badge - Visible in Earn Methods */
-.earn-points-value {
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-/* Referral Code Button */
-.earn-points-section .btn-primary {
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
-    border: none;
-    padding: 12px 32px;
-    border-radius: 30px;
-    font-weight: 600;
-    font-size: 1rem;
-    transition: all 0.3s ease;
-}
-
-.earn-points-section .btn-primary:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(24, 144, 255, 0.4);
-}
-
-/* Referral Code Display */
-.referral-code-display {
-    background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
-    padding: 2rem;
-    border-radius: 16px;
-    margin: 1.5rem 0;
-    border: 2px dashed #91d5ff;
-}
-
-.referral-code-display h4 {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #1890ff;
-    letter-spacing: 3px;
-    margin-bottom: 1rem;
-}
-
-/* ============================================
-   TIER PROGRESS BAR
-   ============================================ */
-.tier-progress {
-    margin-top: 1rem;
-}
-
-.tier-progress .progress {
-    height: 10px;
-    border-radius: 10px;
-    background: #f0f0f0;
-    overflow: hidden;
-}
-
-.tier-progress .progress-bar {
-    background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
-    border-radius: 10px;
-    transition: width 0.6s ease;
-}
-
-/* ============================================
-   MOBILE RESPONSIVE ADJUSTMENTS
-   ============================================ */
-@media (max-width: 992px) {
-    .membership-tiers .row {
-        display: flex;
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        gap: 1rem;
-        padding-bottom: 1rem;
-        margin: 0 -0.5rem;
-        scroll-snap-type: x mandatory;
-    }
-
-    .membership-tiers .col-md-3 {
-        flex: 0 0 280px;
-        max-width: 280px;
-        scroll-snap-align: start;
-        padding: 0 0.5rem;
-    }
-
-    /* Hide scrollbar but keep functionality */
-    .membership-tiers .row::-webkit-scrollbar {
-        height: 6px;
-    }
-
-    .membership-tiers .row::-webkit-scrollbar-track {
-        background: #f0f0f0;
-        border-radius: 10px;
-    }
-
-    .membership-tiers .row::-webkit-scrollbar-thumb {
-        background: #1890ff;
-        border-radius: 10px;
-    }
-}
-
-@media (max-width: 768px) {
-    .loyalty-overview .col-md-4 {
-        margin-bottom: 1rem;
-    }
-
-    .loyalty-card .card-body {
-        padding: 1.5rem 1rem;
-    }
-
-    .loyalty-card h3 {
-        font-size: 2rem;
-    }
-
-    .rewards-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .earn-method {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .earn-icon {
-        margin: 0 auto 1rem;
-    }
-
-    .earn-details h6 {
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ asset_url('css/pages/cabinet-account.css') }}">
 {% endblock %}
 
+{#- A whole number grouped by a no-break space (12 000); a rate with the language's decimal mark (1,15). -#}
+{% macro pts(n) %}{{ "{:,}".format((n or 0)|int).replace(",", " ") }}{% endmacro %}
+{% macro rate(x) %}{% set s = '%g' % x %}{{ s.replace('.', ',') if current_language in ('ru', 'uz') else s }}{% endmacro %}
+
 {% block cabinet_content %}
-<!-- Loyalty Header -->
-<div class="content-header mb-4">
-    <h2><i class="far fa-coins"></i> {{ 'Blue Stream AquaCoins'|t }}</h2>
-    <p class="text-muted">{{ 'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards'|t }}</p>
+{% set unit = 'loyalty_guide.unit.points'|t %}
+{% if not loyalty_eligible %}
+<div class="ae-acl ae-acl--unavailable" data-loyalty-state="unavailable">
+    {{ empty_state('far fa-crown', 'web.account.loyalty.unavailable_title'|t, 'web.account.loyalty.unavailable_text'|t,
+                   secondary={'url': url_for('frontend.loyalty_guide'), 'label': 'web.account.loyalty.guide_link'|t},
+                   heading_tag='h2') }}
 </div>
+{% else %}
+{% set progress = dashboard.tier_progress or {} %}
+{% set target = progress.next_tier_points or 0 %}
+{% set pct = ([[((progress.current or 0) * 100 / target) if target else 100, 0]|max, 100]|min)|round(1) %}
+<div class="ae-acl" data-loyalty-state="member">
 
-<!-- Loyalty Overview -->
-<div class="loyalty-overview mb-4">
-    <div class="row">
-        <!-- AquaCoins Balance -->
-        <div class="col-md-4">
-            <div class="card loyalty-card">
-                <div class="card-body text-center">
-                    <div class="loyalty-icon">
-                        <i class="far fa-coins fa-3x text-warning"></i>
-                    </div>
-                    <h3 class="text-primary" id="currentPoints">0</h3>
-                    <p class="text-muted">{{ 'AquaCoins Balance'|t }}</p>
-                    <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|t }}</small>
-                </div>
+    {# 1. Summary: the balance, the level and the way to the next one. #}
+    <section class="ae-acl__summary" aria-labelledby="acl-balance-label">
+        <div class="ae-acl__balance">
+            <p class="ae-acl__label" id="acl-balance-label">{{ 'web.account.loyalty.balance'|t }}</p>
+            <p class="ae-acl__coins"><span class="ae-acl__coins-value" id="currentPoints">{{ pts(summary.current_balance) }}</span> <span class="ae-acl__coins-unit">{{ unit }}</span></p>
+            {% if (dashboard.points_this_month or 0) > 0 %}
+            <p class="ae-acl__delta" id="pointsThisMonth">{{ 'web.account.loyalty.this_month'|t(pts=pts(dashboard.points_this_month)) }}</p>
+            {% endif %}
+            <div class="ae-acl__summary-actions">
+                <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.shop') }}"><i class="far fa-shopping-cart" aria-hidden="true"></i>{{ 'web.cabinet.dashboard.order_water'|t }}</a>
             </div>
         </div>
+        <div class="ae-acl__tier">
+            <p class="ae-acl__label">{{ 'web.account.loyalty.your_level'|t }}</p>
+            <p class="ae-acl__tier-name">
+                <span class="ae-acl__medal ae-acl__medal--{{ current_tier.key if current_tier else 'none' }}" aria-hidden="true"><i class="fas fa-medal"></i></span>
+                <span id="currentTier">{{ current_tier.name if current_tier else summary.tier }}</span>
+            </p>
+            {% if next_tier %}
+            <span class="ae-progress ae-progress--gold ae-acl__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pct }}" aria-labelledby="tierProgressText">
+                <span class="ae-progress__bar" id="tierProgress" style="width: {{ pct }}%"></span>
+            </span>
+            <p class="ae-acl__next" id="tierProgressText">{{ 'web.account.loyalty.to_next'|t(pts=pts(summary.points_to_next_tier), tier=next_tier.name) }}</p>
+            {% else %}
+            <p class="ae-acl__next" id="tierProgressText">{{ 'web.account.loyalty.top_level'|t }}</p>
+            {% endif %}
+            {% if (summary.points_needed_to_keep or 0) > 0 %}
+            <p class="ae-acl__keep ae-acl__keep--warn"><i class="far fa-exclamation-circle" aria-hidden="true"></i><span>{{ 'web.account.loyalty.keep_level'|t(pts=pts(summary.points_needed_to_keep)) }}</span></p>
+            {% else %}
+            <p class="ae-acl__keep ae-acl__keep--ok"><i class="far fa-check-circle" aria-hidden="true"></i><span>{{ 'web.account.loyalty.level_secured'|t }}</span></p>
+            {% endif %}
+            <p class="ae-acl__fine">{{ 'loyalty_guide.rolling.title'|t(days=handbook.tier_window_days) }}</p>
+        </div>
+    </section>
 
-        <!-- Tier Status -->
-        <div class="col-md-4">
-            <div class="card loyalty-card">
-                <div class="card-body text-center">
-                    <div class="loyalty-icon">
-                        <i class="far fa-trophy fa-3x text-success"></i>
-                    </div>
-                    <h3 class="text-primary" id="currentTier">Bronze</h3>
-                    <!-- Tier Guarantee & Requalification -->
-                     <div class="tier-status-details mt-2">
-                        <small class="d-block text-muted font-weight-bold" id="tierGuaranteeText"></small>
-                        <small class="d-block text-info mt-1" id="tierRequalificationText"></small>
-                    </div>
-                    <div class="tier-progress mt-3">
-                        <div class="progress" style="height: 8px;">
-                            <div class="progress-bar" role="progressbar" style="width: 0%" id="tierProgress"></div>
-                        </div>
-                        <small class="text-muted" id="tierProgressText">0 {{ 'AquaCoins to next tier'|t }}</small>
-                    </div>
-                </div>
-            </div>
+    {# 2. Streak bonuses: one row per live rule, with the member's progress (only when the program has rules). #}
+    {% set streaks = dashboard.streak_progress or [] %}
+    {% set consecutive = dashboard.consecutive_strike_progress or [] %}
+    {% if streaks or consecutive %}
+    <section class="ae-acl__section" aria-labelledby="acl-streaks-title">
+        <div class="ae-acl__head">
+            <h2 class="ae-sec-title" id="acl-streaks-title">{{ 'web.account.loyalty.streaks_title'|t }}</h2>
+            <p class="ae-acl__lead">{{ 'web.account.loyalty.streaks_lead'|t }}</p>
         </div>
+        <ul class="ae-acl__rules">
+            {% for rule in streaks %}
+            {% set done = [rule.current_orders or 0, rule.required_orders]|min %}
+            <li class="ae-acl__rule">
+                <div class="ae-acl__rule-top">
+                    <h3 class="ae-acl__rule-name">{{ rule.name }}</h3>
+                    <span class="ae-badge ae-badge--gold ae-acl__bonus">+{{ pts(rule.bonus_points) }} {{ unit }}</span>
+                </div>
+                <span class="ae-progress ae-progress--sm" role="progressbar" aria-valuemin="0" aria-valuemax="{{ rule.required_orders }}" aria-valuenow="{{ done }}" aria-label="{{ rule.name }}">
+                    <span class="ae-progress__bar" style="width: {{ (done * 100 / rule.required_orders)|round(1) if rule.required_orders else 0 }}%"></span>
+                </span>
+                <p class="ae-acl__rule-meta">{{ 'web.account.loyalty.streak_progress'|t(done=done, need=rule.required_orders, days=rule.window_days) }}</p>
+                {% if rule.min_order_amount %}<p class="ae-acl__rule-meta">{{ 'web.account.loyalty.streak_min'|t(uzs=pts(rule.min_order_amount), unit=('loyalty_guide.unit.uzs'|t)) }}</p>{% endif %}
+            </li>
+            {% endfor %}
+            {% for rule in consecutive %}
+            {% set done = [rule.combined_current or 0, rule.required_consecutive]|min %}
+            <li class="ae-acl__rule">
+                <div class="ae-acl__rule-top">
+                    <h3 class="ae-acl__rule-name">{{ rule.name }}</h3>
+                    <span class="ae-badge ae-badge--gold ae-acl__bonus">+{{ pts(rule.bonus_points) }} {{ unit }}</span>
+                </div>
+                <span class="ae-progress ae-progress--sm" role="progressbar" aria-valuemin="0" aria-valuemax="{{ rule.required_consecutive }}" aria-valuenow="{{ done }}" aria-label="{{ rule.name }}">
+                    <span class="ae-progress__bar" style="width: {{ (done * 100 / rule.required_consecutive)|round(1) if rule.required_consecutive else 0 }}%"></span>
+                </span>
+                <p class="ae-acl__rule-meta">{{ 'web.account.loyalty.consecutive_progress'|t(done=done, need=rule.required_consecutive) }}</p>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
 
-        <!-- Streak Widget -->
-        <div class="col-md-4">
-            <div class="card loyalty-card">
-                <div class="card-body text-center">
-                    <div class="loyalty-icon">
-                        <i class="far fa-fire fa-3x text-danger"></i>
-                    </div>
-                    <h3 class="text-primary" id="currentStreak">0</h3>
-                    <p class="text-muted">{{ 'Month Streak'|t }}</p>
+    {# 3. Rewards: loyalty.js draws them from GET /loyalty/rewards (cost, and what is still missing). #}
+    <section class="ae-acl__section" aria-labelledby="acl-rewards-title">
+        <div class="ae-acl__head">
+            <h2 class="ae-sec-title" id="acl-rewards-title">{{ 'web.account.loyalty.rewards_title'|t }}</h2>
+            <p class="ae-acl__lead">{{ 'web.account.loyalty.rewards_lead'|t }}</p>
+        </div>
+        <div class="ae-acl__rewards" id="rewardsGrid" aria-busy="true">
+            {% for _ in range(3) %}<div class="ae-skeleton ae-skeleton--block ae-acl__reward-skeleton" aria-hidden="true"></div>{% endfor %}
+        </div>
+        <div>
+            <a class="ae-btn ae-btn--secondary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
+        </div>
+    </section>
 
-                    <!-- Streak Progress Bar -->
-                    <div class="mt-2 mb-2">
-                        <div class="progress" style="height: 6px;">
-                            <div class="progress-bar bg-danger" role="progressbar" style="width: 0%" id="streakProgress"></div>
-                        </div>
-                    </div>
+    {# 4. History: chips over GET /loyalty/points/history?group= (the backend's display-category groups, so a row sits
+       under the chip its label belongs to), newest first, "Show more" pages on. #}
+    <section class="ae-acl__section" aria-labelledby="acl-history-title">
+        <div class="ae-acl__head">
+            <h2 class="ae-sec-title" id="acl-history-title">{{ 'web.account.loyalty.history_title'|t }}</h2>
+        </div>
+        <ul class="ae-chips ae-acl__filter" id="historyFilter" aria-label="{{ 'web.account.loyalty.history_filter'|t }}">
+            {% for value, key in [('', 'all'), ('earned', 'earned'), ('bonus', 'bonus'), ('redeemed', 'redeemed'), ('expired', 'expired')] %}
+            <li><button type="button" class="ae-chip" data-group="{{ value }}" aria-pressed="{{ 'true' if not value else 'false' }}">{{ ('web.account.loyalty.filter.' ~ key)|t }}</button></li>
+            {% endfor %}
+        </ul>
+        <div class="ae-acl__history-box">
+            <ul class="ae-acl__history" id="pointsHistoryList" aria-busy="true">
+                {% for _ in range(3) %}<li class="ae-acl__txn" aria-hidden="true"><span class="ae-skeleton ae-skeleton--circle"></span><span class="ae-skeleton ae-skeleton--text"></span></li>{% endfor %}
+            </ul>
+            <div class="ae-acl__history-state" id="historyState" hidden></div>
+        </div>
+        <div class="ae-acl__more" id="historyMore" hidden>
+            <p class="ae-acl__more-info" id="historyInfo" aria-live="polite"></p>
+            <button type="button" class="ae-btn ae-btn--secondary" data-action="history-more">{{ 'web.account.loyalty.show_more'|t }}</button>
+        </div>
+    </section>
 
-                    <small class="text-danger font-weight-bold" id="streakNextText">{{ 'Order more to keep streak!'|t }}</small>
-                    <div class="mt-3">
-                         <span class="badge badge-light border">{{ 'Bonus: 3 Orders/Month'|t }}</span>
-                    </div>
-                </div>
-            </div>
+    {# 5. Ways to earn: the program's live numbers (handbook); the streak rules are section 2. #}
+    <section class="ae-acl__section" aria-labelledby="acl-earn-title">
+        <div class="ae-acl__head">
+            <h2 class="ae-sec-title" id="acl-earn-title">{{ 'web.account.loyalty.earn_title'|t }}</h2>
         </div>
-    </div>
-</div>
-
-<!-- Membership Tiers -->
-<div class="membership-tiers mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="row" id="membershipTiersContainer">
-                <!-- Tier cards will be dynamically loaded from API -->
-                <div class="col-12 text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading membership tiers...'|t }}</p>
+        <ul class="ae-acl__ways">
+            <li class="ae-acl__way">
+                <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-shopping-bag"></i></span>
+                <div class="ae-acl__way-body">
+                    <h3 class="ae-acl__way-title">{{ 'loyalty_guide.earn.purchase_title'|t }}</h3>
+                    <p class="ae-acl__way-text">{{ 'loyalty_guide.earn.purchase_desc'|t(uzs=pts(handbook.uzs_per_point), unit=('loyalty_guide.unit.uzs'|t)) }}</p>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Points History -->
-<div class="points-history mb-4">
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5><i class="far fa-history"></i> {{ 'AquaCoins History'|t }}</h5>
-            <div class="filter-options">
-                <select class="form-control form-control-sm" id="historyFilter">
-                    <option value="">{{ 'All Activity'|t }}</option>
-                    <option value="earned">{{ 'AquaCoins Earned'|t }}</option>
-                    <option value="redeemed">{{ 'AquaCoins Redeemed'|t }}</option>
-                    <option value="expired">{{ 'AquaCoins Expired'|t }}</option>
-                </select>
-            </div>
-        </div>
-        <div class="card-body">
-            <div class="points-history-list" id="pointsHistoryList">
-                <div class="text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading AquaCoins history...'|t }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Available Rewards -->
-<div class="available-rewards mb-4">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-gift"></i> {{ 'Available Rewards'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="rewards-grid" id="rewardsGrid">
-                <div class="text-center py-4">
-                    <i class="far fa-spinner fa-spin fa-2x"></i>
-                    <p class="mt-2">{{ 'Loading rewards...'|t }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Ways to Earn Points -->
-<div class="earn-points-section">
-    <div class="card">
-        <div class="card-header">
-            <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn AquaCoins'|t }}</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="earn-method">
-                        <div class="earn-icon">
-                            <i class="far fa-shopping-cart text-primary"></i>
-                        </div>
-                        <div class="earn-details">
-                            <h6>
-                                {{ 'Make Purchases'|t }}
-                                <span class="earn-points-value">1 AquaCoin / 250 UZS</span>
-                            </h6>
-                            <p>{{ 'Earn 1 AquaCoin for every 250 UZS spent. Higher tiers earn up to 2x coins!'|t }}</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="earn-method">
-                        <div class="earn-icon">
-                            <i class="far fa-user-plus text-success"></i>
-                        </div>
-                        <div class="earn-details">
-                            <h6>
-                                {{ 'Refer Friends'|t }}
-                                <span class="earn-points-value">+500 AquaCoins</span>
-                            </h6>
-                            <p>{{ 'Invite friends with your referral code. Earn 500 AquaCoins when they place their first order!'|t }}</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="earn-method">
-                        <div class="earn-icon">
-                            <i class="far fa-star text-warning"></i>
-                        </div>
-                        <div class="earn-details">
-                            <h6>
-                                {{ 'Write Reviews'|t }}
-                                <span class="earn-points-value">+50 AquaCoins</span>
-                            </h6>
-                            <p>{{ 'Share your experience by reviewing products. Get 50 AquaCoins for each review!'|t }}</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="earn-method">
-                        <div class="earn-icon">
-                            <i class="far fa-birthday-cake text-info"></i>
-                        </div>
-                        <div class="earn-details">
-                            <h6>
-                                {{ 'Birthday Bonus'|t }}
-                                <span class="earn-points-value">+200 AquaCoins</span>
-                            </h6>
-                            <p>{{ 'Celebrate with us! Receive 200 bonus AquaCoins automatically on your birthday.'|t }}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="text-center mt-4">
-                <button class="btn btn-primary" data-action="generate-referral">
-                    <i class="far fa-share"></i> {{ 'Get My Referral Code'|t }}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Referral Code Modal -->
-<div class="modal fade" id="referralModal" tabindex="-1" role="dialog" aria-labelledby="referralModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="referralModalLabel">{{ 'Your Referral Code'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body text-center">
-                <div class="referral-code-display">
-                    <h3 class="text-primary" id="referralCodeText">LOADING...</h3>
-                    <p class="text-muted">{{ 'Share this code with friends'|t }}</p>
-                </div>
-                <div class="referral-actions mt-4">
-                    <button class="btn btn-outline-primary" data-action="copy-referral">
-                        <i class="far fa-copy"></i> {{ 'Copy Code'|t }}
-                    </button>
-                    <button class="btn btn-outline-success ml-2" data-action="share-referral">
-                        <i class="far fa-share"></i> {{ 'cabinet.loyalty.share'|t }}
-                    </button>
-                </div>
-                <div class="referral-stats mt-4">
-                    <div class="row">
-                        <div class="col-6">
-                            <div class="stat-item">
-                                <h5 id="referralCount">0</h5>
-                                <p class="text-muted">{{ 'Friends Referred'|t }}</p>
+            </li>
+            {% if handbook.referral_bonus %}
+            <li class="ae-acl__way ae-acl__way--referral">
+                <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-user-friends"></i></span>
+                <div class="ae-acl__way-body">
+                    <h3 class="ae-acl__way-title">{{ 'loyalty_guide.earn.referral_title'|t }}</h3>
+                    <p class="ae-acl__way-text">{{ 'loyalty_guide.earn.referral_desc'|t(you=pts(handbook.referral_bonus), friend=pts(handbook.referee_bonus)) }}</p>
+                    <div class="ae-acl__referral" id="referralBox">
+                        <button type="button" class="ae-btn ae-btn--secondary ae-btn--sm ae-acl__referral-get" data-action="generate-referral">{{ 'web.account.loyalty.referral_show'|t }}</button>
+                        <div class="ae-acl__referral-card" id="referralCard" hidden>
+                            <p class="ae-acl__referral-label" id="referralLabel">{{ 'web.account.loyalty.referral_code'|t }}</p>
+                            <p class="ae-acl__referral-code" id="referralCodeText" aria-labelledby="referralLabel" tabindex="-1"></p>
+                            <div class="ae-acl__referral-actions">
+                                <button type="button" class="ae-btn ae-btn--primary ae-btn--sm" data-action="copy-referral"><i class="far fa-copy" aria-hidden="true"></i>{{ 'web.account.loyalty.referral_copy'|t }}</button>
+                                <button type="button" class="ae-btn ae-btn--secondary ae-btn--sm" data-action="share-referral"><i class="far fa-share-alt" aria-hidden="true"></i>{{ 'cabinet.loyalty.share'|t }}</button>
                             </div>
-                        </div>
-                        <div class="col-6">
-                            <div class="stat-item">
-                                <h5 id="referralPoints">0</h5>
-                                <p class="text-muted">{{ 'AquaCoins Earned'|t }}</p>
-                            </div>
+                            <dl class="ae-acl__referral-stats">
+                                <div><dt>{{ 'web.account.loyalty.referral_friends'|t }}</dt><dd id="referralCount">0</dd></div>
+                                <div><dt>{{ 'web.account.loyalty.referral_earned'|t }}</dt><dd id="referralPoints">0</dd></div>
+                            </dl>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'cabinet.loyalty.close'|t }}</button>
-            </div>
+            </li>
+            {% endif %}
+            {% if handbook.birthday_bonus %}
+            <li class="ae-acl__way">
+                <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-birthday-cake"></i></span>
+                <div class="ae-acl__way-body">
+                    <h3 class="ae-acl__way-title">{{ 'loyalty_guide.earn.birthday_title'|t }}</h3>
+                    <p class="ae-acl__way-text">{{ 'web.account.loyalty.birthday_text'|t(pts=pts(handbook.birthday_bonus)) }}</p>
+                    {% if not user.date_of_birth %}
+                    <a class="ae-link ae-acl__way-link" href="{{ url_for('frontend.profile_settings') }}">{{ 'web.account.loyalty.birthday_add'|t }}</a>
+                    {% endif %}
+                </div>
+            </li>
+            {% endif %}
+            {% if handbook.surprise.enabled %}
+            <li class="ae-acl__way">
+                <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-gift"></i></span>
+                <div class="ae-acl__way-body">
+                    <h3 class="ae-acl__way-title">{{ 'loyalty_guide.earn.surprise_title'|t }}</h3>
+                    <p class="ae-acl__way-text">{{ 'loyalty_guide.earn.surprise_desc'|t }}</p>
+                </div>
+            </li>
+            {% endif %}
+        </ul>
+    </section>
+
+    {# 6. Levels: one row per tier (handbook), the member's row marked; the discount's condition printed once, from
+       the backend sentence (api.loyalty.tier_discount_condition), right under the column it qualifies. #}
+    {% set has_discount = handbook.tiers|selectattr('discount_percentage', 'gt', 0)|list %}
+    <section class="ae-acl__section" id="membershipTiersContainer" aria-labelledby="acl-levels-title">
+        <div class="ae-acl__head">
+            <h2 class="ae-sec-title" id="acl-levels-title">{{ 'web.account.loyalty.levels_title'|t }}</h2>
         </div>
-    </div>
+        <div class="ae-acl__levels">
+            <table class="ae-table ae-acl__levels-table">
+                <thead>
+                    <tr>
+                        <th scope="col">{{ 'web.account.loyalty.col_level'|t }}</th>
+                        <th scope="col">{{ 'web.account.loyalty.col_points'|t }}</th>
+                        <th scope="col">{{ 'web.account.loyalty.col_rate'|t }}</th>
+                        <th scope="col">{{ 'web.account.loyalty.col_discount'|t }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tier in handbook.tiers %}
+                    {% set is_current = current_tier and tier.key == current_tier.key %}
+                    <tr class="ae-acl__level{% if is_current %} is-highlighted is-current{% endif %}" data-tier="{{ tier.key }}"{% if is_current %} aria-current="true"{% endif %}>
+                        <th scope="row" data-label="{{ 'web.account.loyalty.col_level'|t }}">
+                            <span class="ae-acl__level-name">
+                                <span class="ae-acl__medal ae-acl__medal--{{ tier.key }}" aria-hidden="true"><i class="fas fa-medal"></i></span>
+                                <span>{{ tier.name }}</span>
+                                {% if is_current %}<span class="ae-badge ae-badge--info">{{ 'web.account.loyalty.your_level'|t }}</span>{% endif %}
+                            </span>
+                        </th>
+                        <td data-label="{{ 'web.account.loyalty.col_points'|t }}">{% if tier.max_points %}{{ pts(tier.min_points) }}–{{ pts(tier.max_points) }}{% else %}{{ 'web.account.loyalty.range_from'|t(pts=pts(tier.min_points)) }}{% endif %}</td>
+                        <td data-label="{{ 'web.account.loyalty.col_rate'|t }}">×{{ rate(tier.multiplier) }}</td>
+                        <td data-label="{{ 'web.account.loyalty.col_discount'|t }}">{% if tier.discount_percentage > 0 %}<span class="ae-acl__val">{{ rate(tier.discount_percentage) }}%<sup aria-hidden="true">*</sup></span>{% else %}<span class="ae-acl__none">{{ 'web.account.loyalty.no_discount'|t }}</span>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if has_discount %}
+            <p class="ae-acl__footnote" id="acl-discount-note"><span aria-hidden="true">* </span>{{ 'api.loyalty.tier_discount_condition'|t }}</p>
+            {% endif %}
+        </div>
+        <p class="ae-acl__guide"><a class="ae-link" href="{{ url_for('frontend.loyalty_guide') }}">{{ 'web.account.loyalty.all_rules'|t }}</a></p>
+    </section>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block cabinet_extra_js %}
+{% if loyalty_eligible %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
-    'i18n': {
-        'aquacoins': 'AquaCoins' | t,
-        'discount': 'cabinet.loyalty.discount' | t,
-        'tiers_failed': 'Failed to load membership tiers' | t,
-        'no_tiers': 'No membership tiers available' | t,
-        'this_month': 'this month' | t,
-        'guaranteed_until': 'Guaranteed until' | t,
-        'earn_more_to_keep': 'cabinet.loyalty.earn_more_to_keep' | t,
-        'status_secured': 'Status Secured' | t,
-        'coins_to_next_tier': 'AquaCoins to next tier' | t,
-        'order': 'cabinet.loyalty.order' | t,
-        'no_history': 'No AquaCoins history found' | t,
-        'history_failed': 'Failed to load AquaCoins history' | t,
-        'no_rewards': 'No rewards available' | t,
-        'rewards_failed': 'Failed to load rewards' | t,
-        'type_discount': 'Discount' | t,
-        'type_free_product': 'Free Product' | t,
-        'type_gift_card': 'Gift Card' | t,
-        'auto_applied': 'Auto-Applied' | t,
-        'applied_auto_order': 'Applied automatically to every order' | t,
-        'redeem': 'Redeem' | t,
-        'need_more': 'Need more AquaCoins' | t,
-        'redeem_success': 'Reward redeemed successfully!' | t,
-        'redeem_failed': 'Failed to redeem reward' | t,
-        'details_failed': 'Failed to load reward details' | t,
-        'expires': 'Expires' | t,
-        'points_required': 'AquaCoins Required' | t,
-        'your_points': 'Your AquaCoins' | t,
-        'referral_failed': 'Failed to generate referral code' | t,
-        'referral_copied': 'Referral code copied to clipboard!' | t,
-        'referral_copy_failed': 'Failed to copy referral code' | t,
-        'share_title': 'Join Aqua Element Water Delivery' | t,
-        'share_text_prefix': 'Use my referral code' | t,
+    'loyalty': {
+        'unit': 'loyalty_guide.unit.points'|t,
+        'txn': {
+            'order_earn': 'web.account.loyalty.txn.order_earn'|t,
+            'referral': 'web.account.loyalty.txn.referral'|t,
+            'welcome': 'web.account.loyalty.txn.welcome'|t,
+            'birthday': 'web.account.loyalty.txn.birthday'|t,
+            'streak': 'web.account.loyalty.txn.streak'|t,
+            'surprise': 'web.account.loyalty.txn.surprise'|t,
+            'bonus': 'web.account.loyalty.txn.bonus'|t,
+            'redeem': 'web.account.loyalty.txn.redeem'|t,
+            'refund': 'web.account.loyalty.txn.refund'|t,
+            'expired': 'web.account.loyalty.txn.expired'|t,
+            'adjustment': 'web.account.loyalty.txn.adjustment'|t,
+            'other': 'web.account.loyalty.txn.other'|t,
+        },
+        'i18n': {
+            'history_empty': 'web.account.loyalty.history_empty'|t,
+            'history_empty_filtered': 'web.account.loyalty.history_empty_filtered'|t,
+            'history_failed': 'web.account.loyalty.history_failed'|t,
+            'history_shown': 'web.account.loyalty.history_shown'|t,
+            'txn_order': 'web.account.loyalty.txn_order'|t,
+            'retry': 'web.cabinet.orders.retry'|t,
+            'rewards_empty': 'web.account.loyalty.rewards_empty'|t,
+            'rewards_failed': 'web.account.loyalty.rewards_failed'|t,
+            'reward_ready': 'web.account.loyalty.reward_ready'|t,
+            'reward_missing': 'web.account.loyalty.reward_missing'|t,
+            'reward_auto': 'web.account.loyalty.reward_auto'|t,
+            'type_discount': 'web.account.loyalty.type_discount'|t,
+            'type_free_product': 'web.account.loyalty.type_free_product'|t,
+            'referral_failed': 'web.account.loyalty.referral_failed'|t,
+            'referral_copied': 'web.account.loyalty.referral_copied'|t,
+            'referral_copy_failed': 'web.account.loyalty.referral_copy_failed'|t,
+            'share_title': 'web.account.loyalty.share_title'|t,
+            'share_text': 'web.account.loyalty.share_text'|t,
+        },
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/loyalty.js') }}"></script>
+<script src="{{ asset_url('js/pages/loyalty.js') }}"></script>
+{% endif %}
 {% endblock %}

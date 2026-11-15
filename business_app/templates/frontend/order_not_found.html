@@ -1,0 +1,36 @@
+{% extends "frontend/base.html" %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/macros/ui.html' import empty_state %}
+
+{#-
+  /order-confirmation and /order-tracking with no order id, an order that does not exist or someone else's order
+  (routes._order_not_found, HTTP 404). It names no order, so it says nothing about whose orders exist.
+  Styles: static/css/pages/checkout.css (.ae-order-page).
+-#}
+
+{% block title %}{{ 'web.checkout.order.not_found_title'|t }} — {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ asset_url('css/pages/checkout.css') }}">
+{% endblock %}
+
+{% block content %}
+{{ page_hero('web.checkout.order.not_found_title'|t, crumbs=[('landing.nav.my_account'|t, url_for('frontend.my_account')), ('web.checkout.pay.my_orders'|t, url_for('frontend.my_orders')), ('web.checkout.order.not_found_crumb'|t, None)], variant='soft') }}
+
+<div class="ae-order-page ae-order-missing">
+    <section class="ae-section">
+        <div class="ae-container">
+            <div class="ae-card ae-order-missing__card">
+                {{ empty_state(
+                    'far fa-receipt',
+                    'web.checkout.order.not_found_heading'|t,
+                    'web.checkout.order.not_found_text'|t,
+                    action={'label': 'web.checkout.pay.my_orders'|t, 'url': url_for('frontend.my_orders')},
+                    secondary={'label': 'web.checkout.pay.continue'|t, 'url': url_for('frontend.shop')},
+                    heading_tag='h2',
+                ) }}
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

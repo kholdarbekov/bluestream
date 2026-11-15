@@ -61,7 +61,6 @@ CANCEL_API_URL = "/api/v1/orders/{order_id}/cancel"
 LABEL_KEY = "Awaiting a new delivery date"
 # Task 7's web copy for a cancel refused while the order waits for a new date.
 REFUSAL_KEY = "api.orders.cancel_refused.awaiting_new_date"
-TRACKING_LINE = "Tracking: We will notify you when your order is on the way"
 
 # Short names keep each case on one line.
 OS, DS = OrderStatus, DeliveryStatus
@@ -181,6 +180,14 @@ def _island(soup):
     return json.loads(soup.select_one("script#page-data").string)
 
 
+def _status_pill(soup):
+    """The tracking page's status: the one pill in its status card (macros/order_status.html order_status_pill, whose
+    class `status-<display_status>` names the published status)."""
+    pills = soup.select(".ae-track__status .ae-status")
+    assert len(pills) == 1, pills
+    return pills[0]
+
+
 def _cancel_drawn(soup):
     """The tracking page draws Cancel with order-actions.js, from the `order.customer_actions.cancel` its island
     carries (spec 2026-10-27 §5.3): the same answer GET /orders/<id> publishes. Drawn means published allowed."""
@@ -213,8 +220,8 @@ def test_the_tracking_page_shows_the_wait_not_the_attempt_that_failed(
 
     soup = _page(client, TRACKING_URL.format(order_id=order.id), auth_headers)
 
-    badge = soup.select_one(".status-badge")
-    assert (badge.get_text(strip=True), badge["class"]) == (awaiting_label, ["status-badge", AWAITING])
+    badge = _status_pill(soup)
+    assert (badge.get_text(strip=True), f"status-{AWAITING}" in badge["class"]) == (awaiting_label, True)
     # No step is current. "Delivery will start soon" and the failed attempt's
     # "Estimated delivery" are gone.
     assert [state for state, _description in _stepper(soup)] == steps
@@ -237,8 +244,8 @@ def test_a_live_order_keeps_its_current_step_its_date_and_its_cancel(
 
     soup = _page(client, TRACKING_URL.format(order_id=order.id), auth_headers)
 
-    badge = soup.select_one(".status-badge")
-    assert (badge.get_text(strip=True), badge["class"]) == ("Confirmed", ["status-badge", "confirmed"])
+    badge = _status_pill(soup)
+    assert (badge.get_text(strip=True), "status-confirmed" in badge["class"]) == ("Confirmed", True)
     assert [state for state, _description in _stepper(soup)] == ["completed", "active", "", "", ""]
     # A later day: the date, and no "Delivery will start soon" above it (that line stands beside the statement).
     assert _stepper(soup)[3:] == [
@@ -400,14 +407,20 @@ def test_the_account_page_labels_the_wait_in_recent_orders(
 
     soup = _page(client, ACCOUNT_URL, auth_headers)
 
-    rows = {}
-    for row in soup.select(".recent-orders-section tbody tr"):
-        badge = row.select_one(".badge")
-        rows[row.select_one("td strong").get_text(strip=True)] = (badge.get_text(strip=True), badge["class"])
-    # Both orders are confirmed. Only the one whose delivery failed reads as waiting.
-    assert rows == {
-        f"#{waiting.order_number}": (awaiting_label, ["badge", "badge-warning"]),
-        f"#{live.order_number}": ("Confirmed", ["badge", "badge-primary"]),
+    # Both orders are confirmed. Only the one whose delivery failed reads as waiting (amber); the other keeps its own
+    # status (blue). The pill is macros/order_status.html's order_status_pill (redesign 2026-11-14: rows, not a table).
+    assert _recent_rows(soup) == {
+        waiting.id: (awaiting_label, ["ae-status", "ae-status--warn", f"status-{AWAITING}"]),
+        live.id: ("Confirmed", ["ae-status", "ae-status--info", "status-confirmed"]),
+    }
+
+
+def _recent_rows(soup):
+    """The dashboard's recent orders: the order each row opens -> (the pill's text, the pill's classes). The row's
+    number line is covered with the cabinet copy seeded, in tests/integration/test_web_cabinet_frame.py."""
+    return {
+        int(row["data-order-id"]): (row.select_one(".ae-status").get_text(strip=True), row.select_one(".ae-status")["class"])
+        for row in soup.select('.recent-orders-section [data-action="show-order"]')
     }
 
 
@@ -431,13 +444,9 @@ def test_the_account_page_still_renders_for_a_view_that_publishes_no_display_sta
 
     soup = _page(client, ACCOUNT_URL, auth_headers)
 
-    [row] = soup.select(".recent-orders-section tbody tr")
-    badge = row.select_one(".badge")
-    assert (row.select_one("td strong").get_text(strip=True), badge.get_text(strip=True), badge["class"]) == (
-        f"#{live.order_number}",
-        "Confirmed",
-        ["badge", "badge-primary"],
-    )
+    assert _recent_rows(soup) == {
+        live.id: ("Confirmed", ["ae-status", "ae-status--info", "status-confirmed"]),
+    }
 
 
 @pytest.mark.parametrize(
@@ -470,13 +479,19 @@ def test_the_confirmation_page_names_the_wait_and_drops_the_old_date(
 
     soup = _page(client, CONFIRMATION_URL.format(order_id=order.id), auth_headers)
 
+    # The "when" box (redesign 2026-11-14: the status is the card's pill, no longer a "Status:" line in the box).
     lines = [p.get_text(" ", strip=True) for p in soup.select(".delivery-info-box p")]
+    pill = soup.select(".confirmation-content .ae-status")
+    assert len(pill) == 1, pill
     if awaiting:
-        assert lines == [f"Status: {awaiting_label}", TRACKING_LINE]
+        assert lines == []
+        assert (pill[0].get_text(strip=True), f"status-{AWAITING}" in pill[0]["class"]) == (awaiting_label, True)
+        assert shipped("landing.order.scheduled_for", "ru") not in soup.get_text(" ")
     else:
         # The status itself. Before, the page printed the enum's repr ("Orderstatus.confirmed").
         scheduled = f"{shipped('landing.order.scheduled_for', 'ru')} {display_labels.date_long(delivery_date, 'ru')}"
-        assert lines == [scheduled, "Status: Confirmed", TRACKING_LINE]
+        assert lines == [scheduled]
+        assert (pill[0].get_text(strip=True), "status-confirmed" in pill[0]["class"]) == ("Confirmed", True)
 
 
 def test_the_js_pages_carry_a_label_for_the_display_status_the_api_publishes(

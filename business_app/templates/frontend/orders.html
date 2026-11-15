@@ -1,443 +1,82 @@
 {% extends "frontend/cabinet_base.html" %}
 {% set active_menu = 'orders' %}
 
+{#
+  /my-orders: the shell. orders.js reads GET /api/v1/orders (page, per_page, and the two filters that endpoint
+  honours: `status`, and the period as `start_date`) and draws the cards, the pager and the empty states.
+  Pay / Skip / Cancel / Confirm on a card are order-actions.js's, from the order's `customer_actions`.
+  Styles: css/pages/cabinet.css (.ae-orders).
+#}
+
 {% block cabinet_title %}{{ 'landing.account.orders'|t }}{% endblock %}
 
 {% block cabinet_breadcrumb_items %}
-<li>{{ 'landing.account.orders'|t }}</li>
-{% endblock %}
-
-{% block cabinet_extra_head %}
-<!-- Leaflet CSS for map -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""/>
-<style>
-.order-card {
-    background: #fff;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    transition: all 0.3s;
-    cursor: pointer;
-}
-
-.order-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border-color: #1890ff;
-}
-
-.order-header {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-bottom: 1px solid #eee;
-    border-radius: 8px 8px 0 0;
-}
-
-.order-body {
-    padding: 20px;
-}
-
-.order-footer {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-top: 1px solid #eee;
-    border-radius: 0 0 8px 8px;
-}
-
-.order-status {
-    padding: 8px 18px;
-    border-radius: 25px;
-    font-size: 14px;
-    font-weight: 600;
-    text-transform: capitalize;
-    letter-spacing: 0.3px;
-    display: inline-block;
-}
-
-.order-status.status-large {
-    padding: 10px 24px;
-    font-size: 16px;
-    border-radius: 30px;
-}
-
-.status-pending { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
-.status-confirmed { background: #cce5ff; color: #004085; border: 1px solid #007bff; }
-.status-preparing { background: #d1ecf1; color: #0c5460; border: 1px solid #17a2b8; }
-.status-out_for_delivery { background: #d4edda; color: #155724; border: 1px solid #28a745; }
-.status-delivered { background: #28a745; color: #fff; border: 1px solid #1e7e34; }
-.status-cancelled { background: #f8d7da; color: #721c24; border: 1px solid #dc3545; }
-.status-returned { background: #e2e3e5; color: #383d41; border: 1px solid #6c757d; }
-/* Not an order status: a failed delivery waiting for a new date (F15). The label is a
-   sentence, so it is not capitalized word by word like the one-word statuses. */
-.status-awaiting_new_date { background: #fff3cd; color: #856404; border: 1px solid #ffc107; text-transform: none; }
-
-.order-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 15px;
-}
-
-.order-item img {
-    width: 60px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 6px;
-    margin-right: 15px;
-}
-
-.item-details {
-    flex: 1;
-}
-
-.item-name {
-    font-weight: 600;
-}
-
-.item-specs {
-    font-size: 12px;
-    color: #666;
-}
-
-.item-price {
-    font-weight: 600;
-    color: #1890ff;
-}
-
-/* Modal Order Items Table Styling */
-.modal-order-items {
-    width: 100%;
-}
-
-.modal-order-item {
-    display: flex;
-    align-items: center;
-    padding: 15px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.modal-order-item:last-child {
-    border-bottom: none;
-}
-
-.modal-order-item .item-image {
-    width: 70px;
-    height: 70px;
-    object-fit: cover;
-    border-radius: 8px;
-    margin-right: 15px;
-    background: #f8f9fa;
-    flex-shrink: 0;
-}
-
-.modal-order-item .item-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.modal-order-item .item-name {
-    font-weight: 600;
-    font-size: 15px;
-    color: #333;
-    margin-bottom: 4px;
-}
-
-.modal-order-item .item-sku {
-    font-size: 12px;
-    color: #888;
-}
-
-.modal-order-item .item-qty {
-    text-align: center;
-    padding: 0 20px;
-    min-width: 80px;
-    flex-shrink: 0;
-}
-
-.modal-order-item .item-qty .qty-label {
-    font-size: 11px;
-    color: #888;
-    text-transform: uppercase;
-    display: block;
-}
-
-.modal-order-item .item-qty .qty-value {
-    font-weight: 600;
-    font-size: 16px;
-    color: #333;
-}
-
-.modal-order-item .item-total {
-    text-align: right;
-    min-width: 120px;
-    flex-shrink: 0;
-}
-
-.modal-order-item .item-total .total-label {
-    font-size: 11px;
-    color: #888;
-    text-transform: uppercase;
-    display: block;
-}
-
-.modal-order-item .item-total .total-value {
-    font-weight: 600;
-    font-size: 16px;
-    color: #1890ff;
-}
-
-/* Address Card Styling */
-.address-card-content {
-    padding: 5px 0;
-}
-
-.address-card-content .address-label {
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-}
-
-.address-card-content .address-label i {
-    margin-right: 8px;
-    color: #1890ff;
-}
-
-.address-card-content .address-text {
-    margin-bottom: 12px;
-}
-
-.address-card-content .address-line {
-    color: #555;
-    margin-bottom: 2px;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.address-card-content .address-line:last-of-type {
-    margin-bottom: 0;
-}
-
-.address-card-content .no-address {
-    color: #999;
-    font-style: italic;
-    padding: 10px 0;
-}
-
-/* Delivery Map Styling */
-#orderDeliveryMap {
-    height: 180px;
-    width: 100%;
-    border-radius: 8px;
-    margin-top: 12px;
-    border: 1px solid #e0e0e0;
-}
-
-/* Leaflet tile fixes for modal */
-#orderDeliveryMap .leaflet-tile-pane img,
-#orderDeliveryMap img.leaflet-tile {
-    max-width: none !important;
-    max-height: none !important;
-    width: 256px !important;
-    height: 256px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    opacity: 1 !important;
-}
-
-/* Hide marker shadow */
-#orderDeliveryMap .leaflet-marker-shadow {
-    display: none !important;
-}
-
-/* Marker icon proper sizing - override tile styling */
-#orderDeliveryMap .leaflet-marker-icon {
-    width: 25px !important;
-    height: 41px !important;
-    margin-left: -12px !important;
-    margin-top: -41px !important;
-}
-
-.item-price {
-    font-weight: 600;
-    color: #1890ff;
-}
-
-.tracking-steps {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 20px;
-}
-
-.tracking-step {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    position: relative;
-    flex: 1;
-}
-
-.tracking-step::after {
-    content: '';
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    width: 100%;
-    height: 2px;
-    background: #ddd;
-}
-
-.tracking-step:last-child::after {
-    display: none;
-}
-
-.tracking-step .step-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: #f8f9fa;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 10px;
-    z-index: 1;
-}
-
-.tracking-step.completed .step-icon {
-    background: #28a745;
-    color: #fff;
-}
-
-.tracking-step.active .step-icon {
-    background: #1890ff;
-    color: #fff;
-}
-
-.tracking-step .step-title {
-    font-weight: 600;
-    font-size: 12px;
-}
-
-.tracking-step .step-time {
-    font-size: 11px;
-    color: #666;
-}
-
-@media (max-width: 768px) {
-    .order-card .row {
-        flex-direction: column;
-    }
-
-    .order-item img {
-        width: 50px;
-        height: 50px;
-    }
-
-    .tracking-steps {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .tracking-step {
-        flex-direction: row;
-        margin-bottom: 15px;
-    }
-
-    .tracking-step::after {
-        display: none;
-    }
-}
-</style>
+<li><span aria-current="page">{{ 'landing.account.orders'|t }}</span></li>
 {% endblock %}
 
 {% block cabinet_content %}
-<!-- Orders Header -->
-<div class="content-header mb-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h2><i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}</h2>
-        <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-            <i class="far fa-plus"></i> {{ 'Place New Order'|t }}
-        </a>
-    </div>
-</div>
-
-<!-- Order Filters -->
-<div class="filters-section mb-4">
-    <div class="card">
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="form-group">
-                        <label for="statusFilter">{{ 'Order Status'|t }}</label>
-                        <select class="form-control" id="statusFilter">
-                            <option value="">{{ 'All Orders'|t }}</option>
-                            {% for status in order_statuses %}
-                            <option value="{{ status.value }}">{{ status.label|t }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="form-group">
-                        <label for="dateFilter">{{ 'Time Period'|t }}</label>
-                        <select class="form-control" id="dateFilter">
-                            <option value="">{{ 'All Time'|t }}</option>
-                            <option value="7">{{ 'Last 7 Days'|t }}</option>
-                            <option value="30">{{ 'Last 30 Days'|t }}</option>
-                            <option value="90">{{ 'Last 3 Months'|t }}</option>
-                            <option value="365">{{ 'Last Year'|t }}</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label for="searchOrder">{{ 'Search Orders'|t }}</label>
-                        <input type="text" class="form-control" id="searchOrder" placeholder="{{ 'Order number, product name...'|t }}">
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="form-group">
-                        <label>&nbsp;</label>
-                        <button type="button" class="btn btn-outline-primary btn-block" data-action="apply-filters">
-                            <i class="far fa-search"></i> {{ 'Filter'|t }}
-                        </button>
-                    </div>
-                </div>
+{% from "frontend/macros/order_status.html" import order_status_label %}
+{% from "frontend/macros/ui.html" import empty_state %}
+<div class="ae-orders">
+    <div class="ae-orders__toolbar">
+        <div class="ae-orders__filters" role="group" aria-label="{{ 'web.cabinet.orders.filters'|t }}">
+            <div class="ae-field ae-orders__field">
+                <label class="ae-field__label" for="statusFilter">{{ 'web.cabinet.orders.filter_status'|t }}</label>
+                {#- A native select, styled by .ae-input. -#}
+                <select class="ae-input ignore" id="statusFilter">
+                    <option value="">{{ 'web.cabinet.orders.all_statuses'|t }}</option>
+                    {% for code in order_statuses %}
+                    <option value="{{ code }}">{{ order_status_label(code) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="ae-field ae-orders__field">
+                <label class="ae-field__label" for="dateFilter">{{ 'web.cabinet.orders.filter_period'|t }}</label>
+                <select class="ae-input ignore" id="dateFilter">
+                    <option value="">{{ 'web.cabinet.orders.period_all'|t }}</option>
+                    <option value="7">{{ 'web.cabinet.orders.period_7'|t }}</option>
+                    <option value="30">{{ 'web.cabinet.orders.period_30'|t }}</option>
+                    <option value="90">{{ 'web.cabinet.orders.period_90'|t }}</option>
+                    <option value="365">{{ 'web.cabinet.orders.period_365'|t }}</option>
+                </select>
             </div>
         </div>
+        <a class="ae-btn ae-btn--primary ae-orders__new" href="{{ url_for('frontend.shop') }}"><i class="far fa-plus" aria-hidden="true"></i>{{ 'web.cabinet.dashboard.order_water'|t }}</a>
     </div>
-</div>
 
-<!-- Orders List -->
-<div class="orders-list" id="ordersList">
-    <div class="loading-container text-center py-5" id="loadingOrders">
-        <i class="far fa-spinner fa-spin fa-2x"></i>
-        <p class="mt-2">{{ 'Loading your orders...'|t }}</p>
+    <div class="ae-orders__loading" id="loadingOrders" aria-hidden="true">
+        {%- for _ in range(2) %}
+        <div class="ae-order ae-order--skeleton">
+            <span class="ae-skeleton ae-skeleton--title"></span>
+            <span class="ae-skeleton ae-skeleton--text"></span>
+            <span class="ae-skeleton ae-skeleton--text" style="width: 70%"></span>
+        </div>
+        {%- endfor %}
+        <span class="visually-hidden">{{ 'web.cabinet.orders.loading'|t }}</span>
     </div>
-</div>
 
-<!-- Empty State -->
-<div class="empty-state text-center py-5" id="emptyState" style="display: none;">
-    <i class="far fa-shopping-bag" style="font-size: 4rem; color: #ccc;"></i>
-    <h4 class="mt-3">{{ 'No orders found'|t }}</h4>
-    <p class="text-muted">{{ 'You havent placed any orders yet or no orders match your filters'|t }}</p>
-    <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-        <i class="far fa-shopping-cart"></i> {{ 'Start Shopping'|t }}
-    </a>
-</div>
+    <div class="orders-list ae-orders__list" id="ordersList"></div>
 
-<!-- Pagination -->
-<div class="pagination-section" id="paginationSection" style="display: none;">
-    <nav aria-label="Orders pagination">
-        <ul class="pagination justify-content-center" id="ordersPagination">
-        </ul>
+    <div class="ae-orders__empty" id="emptyState" hidden>
+        <div data-empty="first">
+            {{ empty_state('far fa-shopping-bag', 'web.cabinet.orders.empty_title'|t, 'web.cabinet.orders.empty_text'|t,
+                           {'label': 'web.cabinet.dashboard.order_water'|t, 'url': url_for('frontend.shop')}) }}
+        </div>
+        <div data-empty="filtered" hidden>
+            {{ empty_state('far fa-filter', 'web.cabinet.orders.filtered_title'|t, 'web.cabinet.orders.filtered_text'|t,
+                           {'label': 'web.cabinet.orders.reset'|t, 'action': 'reset-filters'}) }}
+        </div>
+        <div data-empty="failed" hidden>
+            {{ empty_state('far fa-exclamation-triangle', 'web.cabinet.orders.failed_title'|t, None,
+                           {'label': 'web.cabinet.orders.retry'|t, 'action': 'retry-orders'}) }}
+        </div>
+    </div>
+
+    <nav class="pagination-section ae-orders__pager" id="paginationSection" aria-label="{{ 'web.cabinet.orders.pages'|t }}" hidden>
+        <ul class="ae-pagination" id="ordersPagination"></ul>
+        <p class="ae-pagination__info" id="ordersPageInfo"></p>
     </nav>
 </div>
-
 {% endblock %}
 
 {% block cabinet_extra_js %}
@@ -445,24 +84,26 @@
    (inside the content block it ran before them and threw). #}
 {% include 'frontend/partials/order_detail_modal.html' %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
+{% from "frontend/macros/order_status.html" import order_status_label, ORDER_STATUS_TONES %}
+{% set status_labels = {} %}{% for code in ORDER_STATUS_TONES %}{% set _ = status_labels.update({code: order_status_label(code)|striptags}) %}{% endfor %}
 {{ render_page_data({
     'subscriptions_url': url_for('frontend.my_subscriptions'),
     'cart_url': url_for('frontend.cart'),
+    'image_placeholder': url_for('static', filename='images/product-placeholder.svg'),
     'order_actions': order_actions_words(),
+    'status_tones': ORDER_STATUS_TONES,
     'i18n': {
-        'quantity': 'cabinet.orders.quantity' | t,
-        'and': 'and' | t,
-        'more_items': 'more items' | t,
-        'est_delivery': 'Est. delivery' | t,
-        'tracking': 'cabinet.orders.tracking' | t,
-        'order': 'cabinet.orders.order' | t,
-        'order_date': 'Order Date' | t,
-        'delivery_address': 'Delivery Address' | t,
-        'view_details': 'cabinet.orders.view_details' | t,
-        'load_failed': 'Failed to load orders' | t,
-        'load_failed_retry': 'Failed to load orders. Please try again.' | t,
-        'status_labels': {'awaiting_new_date': 'Awaiting a new delivery date' | t},
+        'order_number': 'web.cabinet.order_number' | t,
+        'qty_price': 'web.cabinet.orders.qty_price' | t,
+        'reward': 'web.cabinet.orders.reward' | t,
+        'more_items': 'web.cabinet.orders.more_items' | t,
+        'view_details': 'web.cabinet.orders.details' | t,
+        'showing': 'web.cabinet.orders.showing' | t,
+        'prev': 'web.cabinet.orders.prev' | t,
+        'next': 'web.cabinet.orders.next' | t,
+        'page': 'web.cabinet.orders.page' | t,
+        'status_labels': status_labels,
     },
 }) }}
-<script src="{{ url_for('static', filename='js/pages/orders.js') }}"></script>
+<script src="{{ asset_url('js/pages/orders.js') }}"></script>
 {% endblock %}

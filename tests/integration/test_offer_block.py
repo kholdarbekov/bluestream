@@ -87,20 +87,23 @@ def test_a_fee_above_zero_prints_the_fee_not_free(app, db, offer_skus, monkeypat
 
 def test_the_block_dates_its_prices_with_todays_tashkent_date(app, db, offer_skus, monkeypatch):
     freeze_local_now(monkeypatch, datetime(2026, 11, 12, 20, 30, tzinfo=UTC))  # 01:30 on the 13th in Tashkent
-    as_of = flat(block(app, db, "/", "en").select_one('[data-offer-line="as-of"]').get_text(" "))
+    # The date sits in <time datetime>: read the line as one text, no separator around the element. The shown date's
+    # localized form is tests/integration/test_web_integrate_ui.py's (it seeds the date-format row; here the ISO date
+    # stands in).
+    as_of = flat(block(app, db, "/", "en").select_one('[data-offer-line="as-of"]').get_text())
     assert as_of == shipped("landing.offer.as_of", "en").format(date="2026-11-13")
 
 
 def test_the_home_block_sits_in_the_teaser_before_its_button(app, db, offer_skus):
     teaser = page(app, db, "/", "uz").select_one("section.coverage-teaser")
-    assert teaser.select_one("[data-offer-facts] ~ a.theme-btn") is not None
+    assert teaser.select_one("[data-offer-facts] ~ a.ae-btn") is not None
     assert teaser.select_one("[data-offer-facts] h3[data-offer-heading]") is not None
 
 
 def test_no_active_product_renders_no_block_and_the_page_still_loads(app, db):
     soup = page(app, db, "/", "en")  # page() asserts 200
     assert soup.select_one("[data-offer-facts]") is None
-    assert soup.select_one("section.coverage-teaser a.theme-btn") is not None
+    assert soup.select_one("section.coverage-teaser a.ae-btn") is not None
 
 
 @pytest.mark.parametrize("lang", LANGS)
@@ -114,13 +117,14 @@ def test_the_homepage_title_and_meta_description(app, db, offer_skus, lang):
     assert "17 345" in meta and "12 340" in meta and "{" not in meta
 
 
-def test_the_blog_block_is_under_the_article_and_before_the_tags(app, db, offer_skus, blog_post):
+def test_the_blog_block_is_under_the_article_and_before_the_order_actions_and_the_share_row(app, db, offer_skus, blog_post):
     blog_post.tags = "water"
     db.session.commit()
     soup = page(app, db, f"/blog/{blog_post.slug}", "ru")
     assert soup.select_one(".blog-content [data-offer-facts]") is None  # not inside the article body
     assert soup.select_one(".text ~ [data-offer-facts]") is not None
-    assert soup.select_one("[data-offer-facts] ~ .post-tags") is not None
+    # The tag row (raw English slugs) is gone since the 2026-11 redesign; the order actions follow the price instead.
+    assert soup.select_one("[data-offer-facts] ~ .ct-order") is not None
     assert soup.select_one("[data-offer-facts] ~ .post-share-option") is not None
 
 

@@ -1,54 +1,66 @@
 (function () {
     var PAGE_DATA = getPageData();
+    var I18N = PAGE_DATA.i18n || {};
     var currentPage = 1;
+    var requestedPage = 1; // the page the last read asked for: Try again asks for it again
     var currentFilters = {};
+    var PER_PAGE = 10;
+    var DAY_MS = 24 * 60 * 60 * 1000;
 
-    function escapeHtml(str) {
-        if (str === null || str === undefined) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    // base.js's one copy (window.AE, loaded before every page script).
+    var escapeHtml = window.AE.escapeHtml;
+
+    // `{name}` placeholders, filled by base.js (AE.fill, the one fill every page script shares).
+    var fill = window.AE.fill;
+
+    // Money and dates through base.js (AE.formatMoney mirrors the server's money label, AE.formatDate prints the
+    // Tashkent day in the page's language): this script keeps no format of its own.
+    function money(amount) {
+        return window.AE ? window.AE.formatMoney(amount) : String(amount);
     }
 
-    function formatDate(dateString) {
-        var date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
+    function day(iso) {
+        return window.AE ? window.AE.formatDate(iso) : String(iso || '').slice(0, 10);
     }
 
-    function formatAmount(amount) {
-        var intAmount = Math.floor(parseFloat(amount) || 0);
-        var formatted = intAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-        return formatted + ' UZS';
-    }
-
-    function capitalizeFirst(str) {
-        if (!str) return '';
-        return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-    }
-
-    // F15: label the status the backend publishes. The wait for a new date is not an
-    // order status, so PAGE_DATA carries its copy; any other value is the status itself.
-    // Tolerant of the deploy window (spec §9): this script goes live at `git pull`, before
-    // the template that publishes `status_labels` and the API that publishes `display_status`.
+    // F15: the status the backend publishes (`display_status`: the wait for a new date, else the status itself), in
+    // the words and colour of macros/order_status.html, the one place that words a status, handed over in the island.
     function statusLabel(order) {
-        return (PAGE_DATA.i18n.status_labels || {})[order.display_status] ||
-            capitalizeFirst(order.display_status || order.status);
+        return (PAGE_DATA.i18n.status_labels || {})[order.display_status] || '';
     }
 
-    function debounce(func, wait) {
-        var timeout;
-        return function () {
-            var args = arguments;
-            clearTimeout(timeout);
-            timeout = setTimeout(function () { func.apply(null, args); }, wait);
-        };
+    function statusPill(order) {
+        var tone = (PAGE_DATA.status_tones || {})[order.display_status] || 'muted';
+        var pill = window.AE ? window.AE.statusPill(statusLabel(order), tone)
+            : '<span class="ae-status">' + escapeHtml(statusLabel(order)) + '</span>';
+        // `status-<display_status>`: the hook the order modal and the tests key on.
+        return pill.replace('class="ae-status', 'class="order-status status-' + escapeHtml(order.display_status) + ' ae-status');
+    }
+
+    function thumb(item) {
+        var placeholder = PAGE_DATA.image_placeholder || '/static/images/product-placeholder.svg';
+        var src = item.product_image || placeholder;
+        return '<img class="ae-thumb" src="' + escapeHtml(src) + '" alt="" width="48" height="48" loading="lazy" data-fallback="' +
+            escapeHtml(placeholder) + '">';
+    }
+
+    function itemLine(item) {
+        var name = item.product_display_name || item.product_name || '';
+        var detail = item.is_reward
+            ? '<span class="ae-badge ae-badge--gold">' + escapeHtml(I18N.reward) + '</span>'
+            : escapeHtml(fill(I18N.qty_price, { quantity: item.quantity, price: money(item.unit_price) }));
+        return '<li class="ae-line">' + thumb(item) +
+            '<span class="ae-line__text"><span class="ae-line__name">' + escapeHtml(name) + '</span>' +
+            '<span class="ae-line__meta">' + detail + '</span></span>' +
+            '<span class="ae-line__sum">' + escapeHtml(money(item.total_price)) + '</span></li>';
+    }
+
+    // The address as the customer names it, published by GET /orders (`delivery_address_label`: its title, else its
+    // street line, the rule the subscription page uses). The title is the deploy-window fallback only.
+    function addressLine(order) {
+        var label = order.delivery_address_label || (order.delivery_address && order.delivery_address.title);
+        if (!label) return '';
+        return '<p class="ae-order__addr"><i class="far fa-map-marker-alt" aria-hidden="true"></i><span>' + escapeHtml(label) + '</span></p>';
     }
 
     function displayOrders(orders) {
@@ -60,67 +72,37 @@
         }
 
         var html = orders.map(function (order) {
-            var itemsHtml = (order.order_items || []).slice(0, 2).map(function (item) {
-                return '<div class="order-item">' +
-                    '<img src="' + escapeHtml(item.product_image_url || '/static/images/products/default.jpg') + '" alt="' + escapeHtml(item.product_name) + '">' +
-                    '<div class="item-details">' +
-                    '<div class="item-name">' + escapeHtml(item.product_name) + '</div>' +
-                    '<div class="item-specs">' + escapeHtml(PAGE_DATA.i18n.quantity) + ': ' + item.quantity + '</div>' +
-                    '</div>' +
-                    '<div class="item-price">' + formatAmount(item.unit_price) + '</div>' +
-                    '</div>';
-            }).join('');
-
-            var moreItems = (order.order_items || []).length > 2
-                ? '<div class="text-muted mt-2"><small>' + escapeHtml(PAGE_DATA.i18n.and) + ' ' + (order.order_items.length - 2) + ' ' + escapeHtml(PAGE_DATA.i18n.more_items) + '</small></div>'
-                : '';
-
-            var estDelivery = order.estimated_delivery
-                ? '<small class="text-primary">' + escapeHtml(PAGE_DATA.i18n.est_delivery) + ': ' + escapeHtml(formatDate(order.estimated_delivery)) + '</small>'
-                : '';
-
-            var trackingBlock = order.tracking_number
-                ? '<small class="text-muted">' + escapeHtml(PAGE_DATA.i18n.tracking) + ': ' + escapeHtml(order.tracking_number) + '</small>'
+            var items = order.order_items || [];
+            var itemsHtml = items.slice(0, 2).map(itemLine).join('');
+            var moreItems = items.length > 2
+                ? '<li class="ae-order__more">' + escapeHtml(fill(I18N.more_items, { count: items.length - 2 })) + '</li>'
                 : '';
 
             // Reorder is the backend's `customer_actions.reorder` (the one reorder rule), with its label.
             var reorder = (order.customer_actions && order.customer_actions.reorder) || {};
             var reorderBtn = reorder.allowed
-                ? '<button class="btn btn-sm btn-primary ml-2" data-action="reorder" data-id="' + order.id + '">' +
-                  escapeHtml(reorder.label) + '</button>'
+                ? '<button type="button" class="ae-btn ae-btn--secondary ae-btn--sm" data-action="reorder" data-id="' + order.id + '">' +
+                  '<i class="far fa-redo" aria-hidden="true"></i>' + escapeHtml(reorder.label) + '</button>'
                 : '';
 
-            return '<div class="order-card" data-action="show-order-detail" data-id="' + order.id + '">' +
-                '<div class="order-header">' +
-                '<div class="row align-items-center">' +
-                '<div class="col-md-3"><strong>' + escapeHtml(PAGE_DATA.i18n.order) + ' #' + escapeHtml(order.order_number) + '</strong></div>' +
-                '<div class="col-md-3">' +
-                '<small class="text-muted"><i class="far fa-calendar-alt mr-1"></i>' + escapeHtml(PAGE_DATA.i18n.order_date) + ': ' + escapeHtml(formatDate(order.created_at)) + '</small>' +
+            return '<article class="order-card ae-order" data-action="show-order-detail" data-id="' + order.id + '" ' +
+                'aria-labelledby="order-' + order.id + '-title">' +
+                '<header class="ae-order__head">' +
+                '<div class="ae-order__id">' +
+                '<h2 class="ae-order__num" id="order-' + order.id + '-title">' + escapeHtml(fill(I18N.order_number, { number: order.order_number })) + '</h2>' +
+                '<time class="ae-order__date" datetime="' + escapeHtml(order.created_at) + '">' + escapeHtml(day(order.created_at)) + '</time>' +
                 '</div>' +
-                '<div class="col-md-3">' +
-                '<span class="order-status status-' + escapeHtml(order.display_status) + '">' + escapeHtml(statusLabel(order)) + '</span>' +
-                '</div>' +
-                '<div class="col-md-3 text-right"><strong>' + formatAmount(order.total_amount) + '</strong></div>' +
-                '</div></div>' +
-                '<div class="order-body">' +
-                '<div class="row">' +
-                '<div class="col-md-8">' + itemsHtml + moreItems + '</div>' +
-                '<div class="col-md-4">' +
-                '<div class="delivery-info">' +
-                '<h6>' + escapeHtml(PAGE_DATA.i18n.delivery_address) + '</h6>' +
-                '<p class="text-muted mb-1">' + escapeHtml((order.delivery_address && order.delivery_address.street) || '') + '</p>' +
-                '<p class="text-muted">' + escapeHtml((order.delivery_address && order.delivery_address.city) || '') + '</p>' +
-                estDelivery +
-                '</div></div></div></div>' +
-                '<div class="order-footer">' +
-                '<div class="row align-items-center">' +
-                '<div class="col-md-6">' + trackingBlock + '</div>' +
-                '<div class="col-md-6 text-right">' +
-                '<button class="btn btn-sm btn-outline-primary" data-action="show-order-detail" data-id="' + order.id + '" data-stop-propagation="1">' +
-                escapeHtml(PAGE_DATA.i18n.view_details) + '</button>' +
-                reorderBtn +
-                '<div class="order-actions d-inline-block align-top" data-order-id="' + order.id + '"></div>' +
-                '</div></div></div></div>';
+                '<div class="ae-order__state">' + statusPill(order) +
+                '<span class="ae-order__total">' + escapeHtml(money(order.total_amount)) + '</span></div>' +
+                '</header>' +
+                '<ul class="ae-order__items">' + itemsHtml + moreItems + '</ul>' +
+                '<footer class="ae-order__foot">' +
+                addressLine(order) +
+                '<div class="order-actions ae-order__actions" data-order-id="' + order.id + '"></div>' +
+                '<div class="ae-order__buttons">' + reorderBtn +
+                '<button type="button" class="ae-btn ae-btn--secondary ae-btn--sm" data-action="show-order-detail" data-id="' + order.id + '" data-stop-propagation="1">' +
+                escapeHtml(I18N.view_details) + '</button></div>' +
+                '</footer></article>';
         }).join('');
 
         ordersListElement.innerHTML = html;
@@ -140,46 +122,94 @@
         });
     }
 
+    // A pager link is the true address of that page (filters included), so opening it in a new tab shows that page.
+    function pageLink(page, label, ariaLabel) {
+        return '<li><a href="' + escapeHtml(stateUrl(page)) + '" data-action="page" data-page="' + page + '"' +
+            (ariaLabel ? ' aria-label="' + escapeHtml(ariaLabel) + '"' : '') + '>' + label + '</a></li>';
+    }
+
+    // GET /orders publishes {page, pages, per_page, total, has_next, has_prev}.
     function updatePagination(pagination) {
         var paginationSection = document.getElementById('paginationSection');
         var paginationElement = document.getElementById('ordersPagination');
+        var info = document.getElementById('ordersPageInfo');
+        if (!paginationSection || !paginationElement) return;
 
-        if (pagination.total_pages <= 1) {
-            paginationSection.style.display = 'none';
+        var page = Number(pagination && pagination.page) || 1;
+        var pages = Number(pagination && pagination.pages) || 0;
+        var total = Number(pagination && pagination.total) || 0;
+        currentPage = page;
+
+        if (pages <= 1) {
+            paginationSection.hidden = true;
+            paginationElement.innerHTML = '';
+            if (info) info.textContent = '';
             return;
         }
 
-        paginationSection.style.display = 'block';
-
         var html = '';
+        if (page > 1) html += pageLink(page - 1, '<i class="far fa-chevron-left" aria-hidden="true"></i>', I18N.prev);
 
-        if (pagination.current_page > 1) {
-            html += '<li class="page-item"><a class="page-link" href="#" data-action="page" data-page="' + (pagination.current_page - 1) + '">&laquo;</a></li>';
+        // Every page when there are few; otherwise the first, the last and the two around the current one.
+        var shown = {};
+        for (var i = 1; i <= pages; i++) {
+            if (pages <= 7 || i === 1 || i === pages || Math.abs(i - page) <= 1) shown[i] = true;
+        }
+        var last = 0;
+        for (var p = 1; p <= pages; p++) {
+            if (!shown[p]) continue;
+            if (last && p - last > 1) html += '<li><span class="ae-pagination__gap" aria-hidden="true">…</span></li>';
+            html += p === page
+                ? '<li><span aria-current="page">' + p + '</span></li>'
+                : pageLink(p, String(p), fill(I18N.page, { page: p }));
+            last = p;
         }
 
-        for (var i = 1; i <= pagination.total_pages; i++) {
-            if (i === pagination.current_page) {
-                html += '<li class="page-item active"><span class="page-link">' + i + '</span></li>';
-            } else {
-                html += '<li class="page-item"><a class="page-link" href="#" data-action="page" data-page="' + i + '">' + i + '</a></li>';
-            }
-        }
-
-        if (pagination.current_page < pagination.total_pages) {
-            html += '<li class="page-item"><a class="page-link" href="#" data-action="page" data-page="' + (pagination.current_page + 1) + '">&raquo;</a></li>';
-        }
+        if (page < pages) html += pageLink(page + 1, '<i class="far fa-chevron-right" aria-hidden="true"></i>', I18N.next);
 
         paginationElement.innerHTML = html;
-        currentPage = pagination.current_page;
+        if (info) {
+            var from = (page - 1) * (Number(pagination.per_page) || PER_PAGE) + 1;
+            var to = Math.min(total, from + (Number(pagination.per_page) || PER_PAGE) - 1);
+            info.textContent = fill(I18N.showing, { from: from, to: to, total: total });
+        }
+        paginationSection.hidden = false;
+    }
+
+    function showEmpty(kind) {
+        var empty = document.getElementById('emptyState');
+        if (!empty) return;
+        empty.hidden = !kind;
+        empty.querySelectorAll('[data-empty]').forEach(function (block) {
+            block.hidden = block.getAttribute('data-empty') !== kind;
+        });
+    }
+
+    // A failed read: the cards and the pager of the page shown before would no longer match, so only the failed
+    // state (with Try again) is left.
+    function showFailed() {
+        displayOrders([]);
+        var section = document.getElementById('paginationSection');
+        if (section) section.hidden = true;
+        showEmpty('failed');
+    }
+
+    function setLoading(loading) {
+        var loadingElement = document.getElementById('loadingOrders');
+        if (loadingElement) loadingElement.hidden = !loading;
+        var list = document.getElementById('ordersList');
+        if (list) list.setAttribute('aria-busy', loading ? 'true' : 'false');
+    }
+
+    function hasFilters() {
+        return Object.keys(currentFilters).length > 0;
     }
 
     async function loadOrders(page) {
         page = page || 1;
-        var loadingElement = document.getElementById('loadingOrders');
-        var emptyStateElement = document.getElementById('emptyState');
-
-        loadingElement.style.display = 'block';
-        emptyStateElement.style.display = 'none';
+        requestedPage = page;
+        setLoading(true);
+        showEmpty(null);
 
         try {
             var queryParams = new URLSearchParams(Object.assign(
@@ -191,38 +221,106 @@
             var result = await response.json();
 
             if (response.ok && result.success) {
+                var pages = Number(result.data.pagination && result.data.pagination.pages) || 0;
+                if (!result.data.orders.length && pages && page > pages) {
+                    // An address past the last page (an old link, a list that shrank): show the last page.
+                    remember(pages, true);
+                    return await loadOrders(pages);
+                }
                 displayOrders(result.data.orders);
                 updatePagination(result.data.pagination);
 
                 if (result.data.orders.length === 0) {
-                    emptyStateElement.style.display = 'block';
+                    showEmpty(hasFilters() ? 'filtered' : 'first');
                 }
             } else {
-                showNotification(result.message || PAGE_DATA.i18n.load_failed, 'error');
-                emptyStateElement.style.display = 'block';
+                // The failed state in the list says so and offers Try again (a toast on top repeated it).
+                showFailed();
             }
         } catch (error) {
             console.error('Failed to load orders:', error);
-            showNotification(PAGE_DATA.i18n.load_failed_retry, 'error');
-            emptyStateElement.style.display = 'block';
+            showFailed();
         } finally {
-            loadingElement.style.display = 'none';
+            setLoading(false);
         }
     }
 
-    function applyFilters() {
-        currentFilters = {
-            status: document.getElementById('statusFilter').value,
-            days: document.getElementById('dateFilter').value,
-            search: document.getElementById('searchOrder').value
-        };
+    // The period is the start of the window, sent as `start_date` (an instant, which GET /orders compares with the
+    // order's creation time). The endpoint filters by nothing else the page could offer, so nothing else is offered.
+    function periodStart(days) {
+        var since = new Date(Date.now() - Number(days) * DAY_MS);
+        return since.toISOString().replace(/\.\d{3}Z$/, '+00:00');
+    }
 
-        Object.keys(currentFilters).forEach(function (key) {
-            if (!currentFilters[key]) delete currentFilters[key];
+    // The query GET /orders gets from what the two selects show.
+    function filtersFromSelects() {
+        var statusFilter = document.getElementById('statusFilter');
+        var dateFilter = document.getElementById('dateFilter');
+        var filters = {};
+        if (statusFilter && statusFilter.value) filters.status = statusFilter.value;
+        if (dateFilter && dateFilter.value) filters.start_date = periodStart(dateFilter.value);
+        return filters;
+    }
+
+    // ------------------------------------------------------------------ the list's address
+    // The page, the status and the period live in the address (?page=2&status=delivered&period=30; other parameters,
+    // such as lang, are kept), so a pager link, a reload, Back and a link opened in a new tab show the same list.
+
+    function setParam(params, name, value) {
+        if (value) params.set(name, value);
+        else params.delete(name);
+    }
+
+    function stateUrl(page) {
+        var params = new URLSearchParams(window.location.search);
+        var statusFilter = document.getElementById('statusFilter');
+        var dateFilter = document.getElementById('dateFilter');
+        setParam(params, 'status', statusFilter && statusFilter.value);
+        setParam(params, 'period', dateFilter && dateFilter.value);
+        setParam(params, 'page', page > 1 ? String(page) : '');
+        var query = params.toString();
+        return window.location.pathname + (query ? '?' + query : '');
+    }
+
+    function remember(page, replace) {
+        var url = stateUrl(page);
+        if (!window.history || !window.history.pushState || url === window.location.pathname + window.location.search) return;
+        window.history[replace ? 'replaceState' : 'pushState']({ page: page }, '', url);
+    }
+
+    // The selects take the address's status and period (only a value they offer) and the page number is returned.
+    function readAddress() {
+        var params = new URLSearchParams(window.location.search);
+        [['statusFilter', 'status'], ['dateFilter', 'period']].forEach(function (pair) {
+            var select = document.getElementById(pair[0]);
+            if (!select) return;
+            var value = params.get(pair[1]) || '';
+            var offered = Array.prototype.some.call(select.options, function (option) { return option.value === value; });
+            select.value = offered ? value : '';
         });
+        var page = parseInt(params.get('page'), 10);
+        return page > 0 ? page : 1;
+    }
 
+    function showAddress() {
+        var page = readAddress();
+        currentFilters = filtersFromSelects();
+        loadOrders(page);
+    }
+
+    function applyFilters() {
+        currentFilters = filtersFromSelects();
         currentPage = 1;
+        remember(1);
         loadOrders(currentPage);
+    }
+
+    function resetFilters() {
+        ['statusFilter', 'dateFilter'].forEach(function (id) {
+            var select = document.getElementById(id);
+            if (select) select.value = '';
+        });
+        applyFilters();
     }
 
     function reorderItems(orderId) {
@@ -236,19 +334,14 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        loadOrders();
+        showAddress();
+        window.addEventListener('popstate', showAddress);
 
         var statusFilter = document.getElementById('statusFilter');
         if (statusFilter) statusFilter.addEventListener('change', applyFilters);
 
         var dateFilter = document.getElementById('dateFilter');
         if (dateFilter) dateFilter.addEventListener('change', applyFilters);
-
-        var searchOrder = document.getElementById('searchOrder');
-        if (searchOrder) searchOrder.addEventListener('input', debounce(applyFilters, 500));
-
-        var filterBtn = document.querySelector('[data-action="apply-filters"]');
-        if (filterBtn) filterBtn.addEventListener('click', applyFilters);
 
         // The order modal changed an order (a skip, a cancel, a Pay): the card behind it is out of date too.
         document.addEventListener('orders:changed', function () { loadOrders(currentPage); });
@@ -264,6 +357,8 @@
 
             switch (action) {
                 case 'show-order-detail':
+                    // A tap on a card's text opens it too; a selection in progress is not a tap.
+                    if (target.tagName === 'ARTICLE' && window.getSelection && String(window.getSelection())) return;
                     showOrderDetail(id);
                     break;
                 case 'reorder':
@@ -272,7 +367,16 @@
                     break;
                 case 'page':
                     e.preventDefault();
+                    remember(parseInt(target.dataset.page, 10));
                     loadOrders(parseInt(target.dataset.page, 10));
+                    var list = document.getElementById('ordersList');
+                    if (list && list.scrollIntoView) list.scrollIntoView({ block: 'start' });
+                    break;
+                case 'reset-filters':
+                    resetFilters();
+                    break;
+                case 'retry-orders':
+                    loadOrders(requestedPage);
                     break;
             }
         });

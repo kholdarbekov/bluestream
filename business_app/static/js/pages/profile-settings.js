@@ -1,101 +1,80 @@
+/* Profile settings (templates/frontend/profile_settings.html). Two controls write, each through apiRequest:
+   - the personal details form: ONE save, PUT /api/v1/auth/profile with the names, the date of birth (YYYY-MM-DD from
+     the day / month / year fields, or null when all three are empty), gender and the notification language. The
+     phone is never sent: it changes on /verify-phone. Success is shown only on the server's 200, and the frame's
+     name is left as the server drew it;
+   - the reorder-reminders switch (below). */
 (function () {
     var PAGE_DATA = getPageData();
+    var I18N = PAGE_DATA.i18n || {};
 
-    async function resendEmailVerification() {
-        try {
-            var response = await apiRequest('/auth/resend-email-verification', {
-                method: 'POST'
-            });
-
-            var result = await response.json();
-
-            if (response.ok) {
-                showNotification(PAGE_DATA.i18n.verification_sent, 'success');
-            } else {
-                showNotification(result.message || PAGE_DATA.i18n.verification_failed, 'error');
-            }
-        } catch (error) {
-            showNotification(PAGE_DATA.i18n.network_error, 'error');
-        }
-    }
-
-    function verifyPhone() {
-        window.location.href = PAGE_DATA.verify_phone_url;
+    // The date of birth as the API reads it: "YYYY-MM-DD", null when all three parts are empty, false when only some
+    // are filled or the day/year is not a number. The server judges the date itself (a real day, not in the future).
+    function birthDate(form) {
+        var day = form.elements.dob_day.value.trim();
+        var month = form.elements.dob_month.value;
+        var year = form.elements.dob_year.value.trim();
+        if (!day && !month && !year) return null;
+        if (!/^[0-9]{1,2}$/.test(day) || !month || !/^[0-9]{4}$/.test(year)) return false;
+        return year + '-' + ('0' + month).slice(-2) + '-' + ('0' + day).slice(-2);
     }
 
     var personalForm = document.getElementById('personalInfoForm');
     if (personalForm) {
-        personalForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
+        AEAuth.clearOnInput(personalForm);
+        personalForm.addEventListener('change', function (event) {
+            if (event.target.id === 'dob_month') AEAuth.setFieldError(personalForm, 'date_of_birth', '');
+        });
 
-            var formData = new FormData(this);
-            var data = {
-                first_name: formData.get('first_name'),
-                last_name: formData.get('last_name'),
-                date_of_birth: formData.get('date_of_birth') || null,
-                gender: formData.get('gender') || null,
-                preferred_language: formData.get('preferred_language')
-            };
+        personalForm.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            var button = personalForm.querySelector('button[type="submit"]');
+            if (AEAuth.isBusy(button)) return;
+            AEAuth.clearErrors(personalForm);
+            AEAuth.hideAlert('personalAlert');
 
+            var ok = AEAuth.requireFields(personalForm, I18N.required);
+            var dateOfBirth = birthDate(personalForm);
+            if (dateOfBirth === false) {
+                ok = false;
+                AEAuth.setFieldError(personalForm, 'date_of_birth', I18N.dob_incomplete);
+            }
+            if (!ok) {
+                AEAuth.focusFirstInvalid(personalForm);
+                return;
+            }
+
+            var elements = personalForm.elements;
+            AEAuth.setBusy(button, true);
             try {
                 var response = await apiRequest('/auth/profile', {
                     method: 'PUT',
-                    body: JSON.stringify(data)
+                    body: JSON.stringify({
+                        first_name: elements.first_name.value.trim(),
+                        last_name: elements.last_name.value.trim(),
+                        date_of_birth: dateOfBirth,
+                        gender: elements.gender.value,
+                        preferred_language: elements.preferred_language.value
+                    })
                 });
-
-                var result = await response.json();
+                var result = await AEAuth.readJson(response);
 
                 if (response.ok) {
-                    showNotification(PAGE_DATA.i18n.personal_updated, 'success');
+                    // The frame's name (sidebar, header) is the server's greeting name (shared.user_names): it is
+                    // never redrawn here, so a save cannot swap a company for a person's full name. It shows the
+                    // new name on the next page.
+                    showNotification(I18N.saved, 'success');
+                } else if (response.status === 400 && AEAuth.fieldErrors(result).date_of_birth) {
+                    AEAuth.setFieldError(personalForm, 'date_of_birth', I18N.dob_invalid);
+                    AEAuth.focusFirstInvalid(personalForm);
                 } else {
-                    showNotification(result.message || PAGE_DATA.i18n.personal_failed, 'error');
+                    AEAuth.showAlert('personalAlert', AEAuth.serverMessage(result, I18N.save_failed));
                 }
             } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
+                AEAuth.showAlert('personalAlert', I18N.network_error);
+            } finally {
+                AEAuth.setBusy(button, false);
             }
-        });
-    }
-
-    var contactForm = document.getElementById('contactInfoForm');
-    if (contactForm) {
-        contactForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            var formData = new FormData(this);
-            var data = { phone: formData.get('phone') };
-
-            try {
-                var response = await apiRequest('/auth/profile', {
-                    method: 'PUT',
-                    body: JSON.stringify(data)
-                });
-
-                var result = await response.json();
-
-                if (response.ok) {
-                    showNotification(PAGE_DATA.i18n.contact_updated, 'success');
-
-                    if (data.phone && data.phone !== PAGE_DATA.current_phone) {
-                        setTimeout(function () {
-                            if (confirm(PAGE_DATA.i18n.verify_new_phone)) {
-                                verifyPhone();
-                            }
-                        }, 2000);
-                    }
-                } else {
-                    showNotification(result.message || PAGE_DATA.i18n.contact_failed, 'error');
-                }
-            } catch (error) {
-                showNotification(PAGE_DATA.i18n.network_error, 'error');
-            }
-        });
-    }
-
-    var prefsForm = document.getElementById('preferencesForm');
-    if (prefsForm) {
-        prefsForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            showNotification(PAGE_DATA.i18n.preferences_saved, 'success');
         });
     }
 
@@ -175,34 +154,5 @@
         });
 
         loadReorderReminders();
-    }
-
-    var resendEmailBtn = document.querySelector('[data-action="resend-email-verification"]');
-    if (resendEmailBtn) {
-        resendEmailBtn.addEventListener('click', resendEmailVerification);
-    }
-
-    var verifyPhoneBtn = document.querySelector('[data-action="verify-phone"]');
-    if (verifyPhoneBtn) {
-        verifyPhoneBtn.addEventListener('click', verifyPhone);
-    }
-
-    var phoneInput = document.querySelector('input[name="phone"]');
-    if (phoneInput) {
-        phoneInput.addEventListener('input', function () {
-            var value = this.value.replace(/\D/g, '');
-
-            if (value.length > 0 && !value.startsWith('998')) {
-                if (value.startsWith('0')) {
-                    value = '998' + value.substring(1);
-                } else {
-                    value = '998' + value;
-                }
-            }
-
-            if (value.length > 0) {
-                this.value = '+' + value;
-            }
-        });
     }
 })();

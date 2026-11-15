@@ -25,8 +25,8 @@ WEB_JS = REPO_ROOT / "business_app" / "static" / "js"
 
 # (file relative to static/js, first-argument source) -> the (method, path) pairs it resolves to.
 DYNAMIC_CALLS: Dict[Tuple[str, str], Set[Tuple[str, str]]] = {
-    # address-modal.js saveAddress: `url` is '/addresses/' + id (PUT) or '/addresses/' (POST).
-    ("address-modal.js", "url"): {("PUT", "/addresses/<var>"), ("POST", "/addresses")},
+    # (address-modal.js, never loaded by any page, was deleted by the 2026-11-14 redesign: the address wizard is
+    # the one address form.)
     # subscription-constructor.js: '/delivery/time-slots?weekday=..' and '/payments/methods?context=..'.
     ("subscription-constructor.js", "this.timeSlotsQuery()"): {("GET", "/delivery/time-slots")},
     ("subscription-constructor.js", "this.paymentMethodsQuery()"): {("GET", "/payments/methods")},
@@ -34,12 +34,9 @@ DYNAMIC_CALLS: Dict[Tuple[str, str], Set[Tuple[str, str]]] = {
 
 # Calls to routes that do not exist, found by this test on its first run and outside this change's scope.
 # Each is (file, method, normalised path). Prefer fixing the caller to adding an entry.
-KNOWN_DEAD_WEB_CALLS: Set[Tuple[str, str, str]] = {
-    # contact.js submits the contact form to /api/v1/contact; no such API route exists (the form fails).
-    ("pages/contact.js", "POST", "/contact"),
-    # my-account.js reads /api/v1/orders/summary; the backend serves /api/v1/auth/orders/summary.
-    ("pages/my-account.js", "GET", "/orders/summary"),
-}
+KNOWN_DEAD_WEB_CALLS: Set[Tuple[str, str, str]] = set()
+# (pages/contact.js posted the contact form to /api/v1/contact, which never existed; the website redesign of
+# 2026-11-14 replaced the form with the channel list and deleted the script.)
 
 _CALL = re.compile(r"\bapiRequest\s*\(")
 _METHOD = re.compile(r"""\bmethod\s*:\s*['"`](GET|POST|PUT|PATCH|DELETE)['"`]""", re.I)
@@ -133,6 +130,18 @@ def _path_of(expression: str):
     return path.rstrip("/") or "/"
 
 
+def _in_comment(source: str, at: int) -> bool:
+    """Whether `at` sits in a `// …` line comment or a `/* … */` block (a header that names `apiRequest(` is prose,
+    not a call). A `//` after code on the same line counts only when no quote precedes it, so a URL in a string
+    does not."""
+    line = source[source.rfind("\n", 0, at) + 1 : at]
+    if line.lstrip().startswith(("//", "*", "/*")):
+        return True
+    if "//" in line and not re.search(r"""['"`]""", line.split("//", 1)[0]):
+        return True
+    return source.rfind("/*", 0, at) > source.rfind("*/", 0, at)
+
+
 def _web_calls() -> List[Tuple[str, str, str, str]]:
     """(file, method, normalised path, first argument) for every apiRequest call in the website JS."""
     calls = []
@@ -142,6 +151,8 @@ def _web_calls() -> List[Tuple[str, str, str, str]]:
         for match in _CALL.finditer(source):
             if source[max(0, match.start() - 9) : match.start()].endswith("function "):
                 continue  # the definition in base.js
+            if _in_comment(source, match.start()):
+                continue
             args = _call_args(source, match.end())
             first = _first_argument(args)
             if not first:
@@ -183,6 +194,13 @@ def test_the_extractor_reads_the_call_shapes_the_website_uses():
     assert _path_of("LIST_URL") is None
 
 
+def test_an_api_request_named_in_a_comment_is_not_a_call():
+    source = "/* posts with apiRequest('/nowhere') */\n// apiRequest('/gone')\n * apiRequest('/x')\napiRequest('/real');"
+    found = [m.start() for m in _CALL.finditer(source) if not _in_comment(source, m.start())]
+    assert found == [source.index("apiRequest('/real')")]
+    assert not _in_comment("var u = 'https://x.test'; apiRequest(u);", 26)
+
+
 def _constant_path(relative: str, name: str) -> str:
     """The path a page script keeps in a `var NAME = '…'` constant, normalised like a literal."""
     constant = re.search(rf"var {name} = '([^']+)'", (WEB_JS / relative).read_text("utf-8"))
@@ -200,6 +218,22 @@ DYNAMIC_CALLS[("my-subscriptions.js", "PRODUCTS_URL")] = {
     ("GET", _constant_path("pages/my-subscriptions.js", "PRODUCTS_URL"))
 }
 DYNAMIC_CALLS[("my-subscriptions.js", "query")] = {("GET", _constant_path("pages/my-subscriptions.js", "SLOTS_URL"))}
+
+
+def _persist_calls(relative: str) -> Set[Tuple[str, str]]:
+    """The (method, path) of every `persist('<path>', '<METHOD>', …)` in a page script: cart.js sends each cart write
+    through `persist(path, method, body)`, which calls `apiRequest(path, …)`."""
+    source = (WEB_JS / relative).read_text("utf-8")
+    found = {
+        (method.upper(), _path_of(first.strip()))
+        for first, method in re.findall(r"""\bpersist\(\s*([^,]+?)\s*,\s*['"](\w+)['"]""", source)
+    }
+    assert found, f"{relative}: no persist(path, method) call found; update DYNAMIC_CALLS"
+    return found
+
+
+# cart.js: PUT / DELETE /cart/items/<id>, POST /cart/items (undo) and POST /cart/clear, all through persist().
+DYNAMIC_CALLS[("cart.js", "path")] = _persist_calls("pages/cart.js")
 
 
 @pytest.mark.contract

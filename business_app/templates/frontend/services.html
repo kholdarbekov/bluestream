@@ -1,112 +1,107 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Услуги Aqua Element: доставка воды для дома и офиса, регулярные поставки и надежная поддержка." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Explore Aqua Element services including home and office water delivery, recurring plans, and dependable support." %}
-{% else %}
-{% set meta_description = "Aqua Element xizmatlari: uy va ofis uchun suv yetkazib berish, muntazam rejalar va ishonchli yordam." %}
-{% endif %}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_as_of with context %}
+{% set meta_description = 'web.subs.services.meta'|t %}
 
-{% block title %}{{ 'landing.nav.services'|t }} - {{ company_name }}{% endblock %}
+{#- What Aqua Element really does, and nothing else: water delivery (the public offer facts: live prices and the
+    smallest-order sentence), the empty-bottle exchange (the offer's own-bottles and no-deposit sentences), the
+    subscription, and the delivery zone (the coverage SSOT and the approved delivery statement, printed whole).
+    landing.services.home_delivery.description and .subscription_plans.description are test-pinned. -#}
+
+{% block title %}{{ 'web.subs.services.title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_head %}
-<style>
-/* Professional Page Title with Wavy Border */
-.page-title {
-    position: relative;
-    padding: 180px 0 120px 0 !important;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    overflow: hidden;
-}
-
-.page-title .shape {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    height: 200px;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    z-index: 1;
-}
-
-.page-title .auto-container {
-    position: relative;
-    z-index: 2;
-}
-
-.page-title h1 {
-    font-size: 48px;
-    font-weight: 700;
-    color: #222;
-    margin-bottom: 15px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-}
-</style>
+<link href="{{ asset_url('css/pages/subs.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-        <!-- page-title -->
-        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.services.page_title'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.nav.services'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
+{%- set lang = current_language -%}
+{%- set placeholder = url_for('static', filename='images/product-placeholder.svg') -%}
+{%- set products = offer_facts.products -%}
+{{ page_hero('web.subs.services.title'|t, [('web.subs.services.crumb'|t, None)], lead='web.subs.services.lead'|t) }}
 
-        <!-- service-section -->
-        <section class="service-section">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.services.heading'|t }}</h2>
-                    <p>{{ 'landing.services.description'|t }}</p>
-                </div>
-                <div class="row clearfix">
-                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
-                        <div class="service-block-one">
-                            <div class="inner-box">
-                                <div class="icon-box">
-                                    <i class="flaticon-delivery-truck"></i>
-                                </div>
-                                <h4>{{ 'landing.services.home_delivery.title'|t }}</h4>
-                                <p>{{ 'landing.services.home_delivery.description'|t }}</p>
-                            </div>
-                        </div>
+<div class="ss-page ss-page--services">
+    <section class="ae-section">
+        <div class="ae-container">
+            <div class="ss-spec">
+
+                <div class="ss-spec__row" id="water-delivery">
+                    <div class="ss-spec__head">
+                        <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-truck"></i></span>
+                        <h2 class="ss-spec__title">{{ 'web.subs.services.delivery.title'|t }}</h2>
+                        <p class="ss-spec__text">{{ 'landing.services.home_delivery.description'|t }}</p>
                     </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
-                        <div class="service-block-one">
-                            <div class="inner-box">
-                                <div class="icon-box">
-                                    <i class="flaticon-office-building"></i>
-                                </div>
-                                <h4>{{ 'landing.services.office_solutions.title'|t }}</h4>
-                                <p>{{ 'landing.services.office_solutions.description'|t }}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
-                        <div class="service-block-one">
-                            <div class="inner-box">
-                                <div class="icon-box">
-                                    <i class="flaticon-subscription"></i>
-                                </div>
-                                <h4>{{ 'landing.services.subscription_plans.title'|t }}</h4>
-                                <p>{{ 'landing.services.subscription_plans.description'|t }}</p>
-                            </div>
+                    <div class="ss-spec__body">
+                        {%- if products %}
+                        <ul class="ss-prices" data-services-prices>
+                            {%- for p in products %}
+                            <li class="ss-price" data-product-id="{{ p.id }}">
+                                <span class="ss-price__thumb"><img src="{{ product_images.get(p.id) or placeholder }}" alt="" width="56" height="56" loading="lazy" decoding="async" data-fallback="{{ placeholder }}"></span>
+                                <span class="ss-price__name">
+                                    <span class="ss-price__meta">{{ p.size_text[lang] }}</span>
+                                    <a class="ss-price__link" href="{{ p.path }}">{{ p.name[lang] }}</a>
+                                    <span class="ss-price__min">{{ offer_smallest_order_sentence(p, lang) }}</span>
+                                </span>
+                                <span class="ss-price__value" data-price>{{ p.price_text[lang] }}</span>
+                            </li>
+                            {%- endfor %}
+                        </ul>
+                        {%- endif %}
+                        <p class="ss-note">{{ offer_facts.delivery.line[lang] }} {{ offer_as_of(offer_facts.as_of, lang) }}</p>
+                        <div class="ss-actions ss-actions--after">
+                            <a class="ae-btn ae-btn--primary" href="{{ external_url_for_lang('frontend.shop') }}">{{ 'web.subs.services.delivery.shop'|t }}</a>
+                            <a class="ae-btn ae-btn--secondary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.subs.services.delivery.bot'|t }}</a>
                         </div>
                     </div>
                 </div>
+
+                <div class="ss-spec__row" id="bottle-exchange">
+                    <div class="ss-spec__head">
+                        <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-sync-alt"></i></span>
+                        <h2 class="ss-spec__title">{{ 'web.subs.services.bottles.title'|t }}</h2>
+                        <p class="ss-spec__text">{{ 'landing.offer.own_bottles'|t }}</p>
+                    </div>
+                    <div class="ss-spec__body">
+                        {%- if products|selectattr('no_deposit')|list %}
+                        <p class="ss-check"><i class="far fa-check" aria-hidden="true"></i>{{ 'landing.offer.no_deposit'|t }}</p>
+                        {%- endif %}
+                        <a class="ae-link ae-link--block" href="{{ external_url_for_lang('frontend.terms') }}#returnable-bottles">{{ 'landing.delivery_page.bottle_terms'|t }}</a>
+                    </div>
+                </div>
+
+                <div class="ss-spec__row" id="subscription">
+                    <div class="ss-spec__head">
+                        <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-calendar-check"></i></span>
+                        <h2 class="ss-spec__title">{{ 'web.subs.title'|t }}</h2>
+                        <p class="ss-spec__text">{{ 'landing.services.subscription_plans.description'|t }}</p>
+                    </div>
+                    <div class="ss-spec__body">
+                        {#- The backend's frequencies (`frequencies`), named as the builder names them; plain facts,
+                            nothing here is a control. -#}
+                        <ul class="ss-ticks" data-services-frequencies>
+                            {%- for code in frequencies %}
+                            <li data-frequency="{{ code }}"><i class="far fa-check" aria-hidden="true"></i>{{ ('landing.custom_subscription.frequency.' ~ code)|t }}</li>
+                            {%- endfor %}
+                        </ul>
+                        <a class="ae-link ae-link--block" href="{{ external_url_for_lang('frontend.subscriptions') }}">{{ 'web.subs.services.subscription.link'|t }}</a>
+                    </div>
+                </div>
+
+                <div class="ss-spec__row" id="delivery-zone">
+                    <div class="ss-spec__head">
+                        <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-map-marked-alt"></i></span>
+                        <h2 class="ss-spec__title">{{ 'web.subs.services.zone.title'|t }}</h2>
+                        <p class="ss-spec__text">{{ coverage.summary }}</p>
+                    </div>
+                    <div class="ss-spec__body">
+                        <p class="ss-statement" data-delivery-statement>{{ offer_facts.delivery.statement[lang]|join(' ') }}</p>
+                        <p class="ss-check"><i class="far fa-calendar-check" aria-hidden="true"></i>{{ 'landing.offer.every_day'|t }}</p>
+                        <a class="ae-link ae-link--block" href="{{ external_url_for_lang('frontend.coverage') }}">{{ 'web.subs.services.zone.link'|t }}</a>
+                    </div>
+                </div>
+
             </div>
-        </section>
-        <!-- service-section end -->
+        </div>
+    </section>
+</div>
 {% endblock %}

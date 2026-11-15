@@ -32,7 +32,7 @@ pytestmark = pytest.mark.integration
 
 UNITS = [("uz", "so'm"), ("ru", "сум"), ("en", "so'm")]
 PRICE_NODES = {  # where each page prints a product's price
-    "/": ".shop-section .shop-block h6",
+    "/": ".shop-section .shop-block .price",  # the shared product card, as on /shop
     "/shop": ".product-grid .shop-block .price",
     "/product/{id}": ".price-box .price-group, .related-section .price",
     "/blog/{slug}": ".recent-posts-widget .post-date [data-price]",  # one post in the fixture: no recent-posts list, only product prices
@@ -56,9 +56,13 @@ def test_each_price_carries_its_unit_exactly_once(app, db, offer_skus, blog_post
     assert "17,345" not in str(soup)
 
 
-def test_the_shop_price_filter_keeps_its_currency_boxes(app, db, offer_skus):
+def test_the_shop_has_no_price_filter_or_sort(app, db, offer_skus):
+    # Owner decision 2026-11-13: the price range and the sort did nothing (the route read neither), so they are gone;
+    # the only price on /shop is each card's live one.
     soup = page(app, db, "/shop", "uz")
-    assert [box.get_text(strip=True) for box in soup.select(".input-wrapper span.currency")] == ["UZS", "UZS"]
+    gone = ".input-wrapper, .price-range-slider, #slider-range, #price-min, #price-max, [data-action='sort-products']"
+    assert soup.select(gone) == []
+    assert "UZS" not in soup.select_one("main, body").get_text(" ")
 
 
 OFFER_COUNT = {"/": 1, "/shop": 1, "/product/{id}": 1, "/blog/{slug}": 0}  # JSON-LD offers for one product, per page
@@ -92,8 +96,12 @@ def test_a_discount_shows_one_payable_price_on_every_surface(app, db, offer_skus
 def test_the_shop_grid_and_the_product_page_show_the_list_price_and_the_saving(app, db, offer_skus):
     set_price(db, offer_skus.p19, base=Decimal("17345"), discount=Decimal("15000"))
     shop = page(app, db, "/shop", "uz")
+    # Every card's payable price is a .new-price (the shared product card); only the discounted one has a list price.
+    discounted = next(
+        card for card in shop.select(".shop-block") if card.select_one(f'[data-product-id="{offer_skus.p19.id}"]')
+    )
+    assert _texts(discounted, ".sale-tag, .new-price, .old-price") == ["-13%", "15 000 so'm", "17 345 so'm"]  # page order
     assert _texts(shop, ".shop-block .old-price") == ["17 345 so'm"]
-    assert _texts(shop, ".shop-block .new-price") == ["15 000 so'm"]
     assert _texts(shop, ".shop-block .sale-tag") == ["-13%"]
     own = page(app, db, f"/product/{offer_skus.p19.id}", "uz")
     assert _texts(own, ".price-group .price-new, .price-group .price-old, .price-group .save-tag") == [
@@ -102,7 +110,8 @@ def test_the_shop_grid_and_the_product_page_show_the_list_price_and_the_saving(a
         "-13%",
     ]
     other = page(app, db, f"/product/{offer_skus.p10.id}", "uz")  # p19 is the related product here
-    assert _texts(other, ".related-section .old-price, .related-section .new-price") == ["17 345 so'm", "15 000 so'm"]
+    assert _texts(other, ".related-section .new-price") == ["15 000 so'm"]
+    assert _texts(other, ".related-section .old-price") == ["17 345 so'm"]
 
 
 @pytest.mark.parametrize("discount, charged", [(Decimal("0"), 17345), (Decimal("20000"), 20000)])  # Review Focus 1
@@ -184,10 +193,10 @@ def test_the_product_group_description_names_each_bottle_by_its_facts_size(app, 
     assert _size_en(offer_skus.p19) in description and "18.9" not in description
 
 
-SIZE_LABELS = {  # each product card's size label, "<size> <category>" with the page's own separator
-    "/": (".shop-section .shop-block .lower-content > span", "{size} {category}"),
-    "/shop": (".product-grid .shop-block .lower-content > span", "{size} - {category}"),
-    "/product/{id}": (".related-section .shop-block .lower-content > span", "{size} - {category}"),  # p10 is related
+SIZE_LABELS = {  # each product card's size chip: the size alone, no " - category" (review SITE-29)
+    "/": (".shop-section .shop-block .lower-content > span.ae-product__size", "{size}"),  # the shared product card
+    "/shop": (".product-grid .shop-block .lower-content > span.ae-product__size", "{size}"),
+    "/product/{id}": (".related-section .shop-block .lower-content > span.ae-product__size", "{size}"),  # p10 related
 }
 
 
@@ -218,8 +227,8 @@ def test_no_storefront_template_derives_a_price():
         for word in ("discount_price", "base_price", "current_price"):
             assert word not in source, (name, word)
     assert {name: source.count("format_price") for name, source in sources.items()} == {
-        "index.html": 1,
+        "index.html": 0,
         "shop.html": 0,
         "product_detail.html": 0,
         "blog_detail.html": 0,
-    }  # the unused plan card, index.html:267
+    }  # the home page's unused plan card (the last format_price) is gone with the redesign

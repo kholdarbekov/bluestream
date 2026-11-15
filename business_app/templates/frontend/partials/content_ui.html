@@ -1,0 +1,133 @@
+{#- Building blocks of the content pages (blog, FAQ, policies). Styles: static/css/pages/content.css (.ct-*).
+    Import `with context`: the macros read current_language, company_* and external_url_for_lang. -#}
+
+{#- The policy and help pages as a row of chips; `current` is the page's own entry. -#}
+{% macro policy_nav(current) -%}
+{%- set items = [
+    ('delivery', 'frontend.delivery_policy', 'web.shell.footer.delivery_policy'|t),
+    ('pricing', 'frontend.pricing_policy', 'landing.pricing_policy.title'|t),
+    ('refund', 'frontend.refund_policy', 'web.shell.footer.refund_policy'|t),
+    ('terms', 'frontend.terms', 'web.content.terms.title'|t),
+    ('privacy', 'frontend.privacy', 'web.content.privacy.title'|t),
+    ('faq', 'frontend.water_delivery_faq', 'web.shell.footer.faq'|t),
+] -%}
+<nav class="ct-policy-nav" aria-label="{{ 'web.content.policy_nav.label'|t }}">
+    <ul class="ae-chips ae-chips--scroll">
+        {%- for key, endpoint, label in items %}
+        <li><a class="ae-chip" href="{{ external_url_for_lang(endpoint) }}"{% if key == current %} aria-current="page"{% endif %}>{{ label }}</a></li>
+        {%- endfor %}
+    </ul>
+</nav>
+{{ centre_current_chip() }}
+{%- endmacro %}
+
+{#- Put right after a <nav> holding a scrolling chip row. On a phone the row scrolls sideways: bring the current chip
+    ([aria-current="page"]) to the middle, horizontally only (a vertical scroll would undo a #section jump). -#}
+{% macro centre_current_chip() -%}
+<script>(function (n) { var ul = n.querySelector('ul'), a = n.querySelector('[aria-current="page"]'); if (!ul || !a || ul.scrollWidth <= ul.clientWidth) { return; } var r = a.getBoundingClientRect(), u = ul.getBoundingClientRect(); ul.scrollLeft += (r.left + r.width / 2) - (u.left + u.width / 2); })(document.currentScript.previousElementSibling);</script>
+{%- endmacro %}
+
+{#- The Telegram bot (primary) and email: the two ways to reach us. Never the phone. -#}
+{% macro contact_actions() -%}
+<div class="ct-contact">
+    <a class="ae-btn ae-btn--primary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.content.contact.bot'|t }}</a>
+    <a class="ae-btn ae-btn--secondary" href="mailto:{{ company_email }}"><i class="far fa-envelope" aria-hidden="true"></i>{{ company_email }}</a>
+</div>
+{%- endmacro %}
+
+{#- A policy document: the numbered sections and, from four sections up, a table of contents (sticky beside the text
+    from 992px, a closed <details> above it on phones). A section is {'id', 'h', 'p'}; each paragraph is a string, or
+    (text, id) when the paragraph needs its own anchor. Section numbers are CSS counters, so a heading's text stays its
+    translation. `contact` adds the bot and email buttons under the last section. -#}
+{% macro legal_document(sections, contact=False) -%}
+{%- set with_toc = sections|length >= 4 %}
+<div class="ct-legal{% if not with_toc %} ct-legal--plain{% endif %}">
+    {%- if with_toc %}
+    <details class="ct-toc" data-ct-toc>
+        <summary class="ct-toc__title">{{ 'web.content.toc.title'|t }}</summary>
+        <ol class="ct-toc__list">
+            {%- for s in sections %}
+            <li><a href="#{{ s.id }}">{{ s.h }}</a></li>
+            {%- endfor %}
+        </ol>
+    </details>
+    {#- From 992px the list is always open and its summary is a plain label (no tab stop); below that it is a closed
+        disclosure. Kept in sync on resize and rotation, so a tablet turned to landscape never shows an empty box. -#}
+    <script>(function (d) { if (!window.matchMedia) { return; } var mq = matchMedia('(min-width: 992px)'), s = d.querySelector('summary'); function sync() { if (mq.matches) { d.open = true; s.setAttribute('tabindex', '-1'); } else { s.removeAttribute('tabindex'); } } sync(); if (mq.addEventListener) { mq.addEventListener('change', sync); } else if (mq.addListener) { mq.addListener(sync); } })(document.currentScript.previousElementSibling);</script>
+    {%- endif %}
+    <div class="ct-legal__main">
+        <article class="ae-prose ct-legal__body">
+            {%- for s in sections %}
+            <h2 id="{{ s.id }}">{{ s.h }}</h2>
+            {%- for para in s.p %}
+            {%- if para is string %}
+            <p>{{ para }}</p>
+            {%- else %}
+            <p id="{{ para[1] }}">{{ para[0] }}</p>
+            {%- endif %}
+            {%- endfor %}
+            {%- endfor %}
+        </article>
+        {%- if contact %}
+        {{ contact_actions() }}
+        {%- endif %}
+    </div>
+</div>
+{%- endmacro %}
+
+{#- Order actions under an article's price block: the bot first, then the shop. A tinted panel, not a navy band: the
+    footer already closes every page with the bot band. -#}
+{% macro order_actions() -%}
+<div class="ae-panel ae-panel--pale ct-order">
+    <div class="ct-order__copy">
+        <p class="ct-order__title">{{ 'web.content.cta.title'|t }}</p>
+        <p class="ct-order__text">{{ 'web.content.cta.text'|t }}</p>
+    </div>
+    <div class="ct-order__actions">
+        <a class="ae-btn ae-btn--primary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
+        <a class="ae-btn ae-btn--secondary" href="{{ external_url_for_lang('frontend.shop') }}">{{ 'web.content.cta.shop'|t }}</a>
+    </div>
+</div>
+{%- endmacro %}
+
+{#- A post's publication day in Tashkent time: "8 May 2026" / "8 мая 2026" / "2026-yil 8-may" — the site's one dated
+    format, web.integration.date_year (the offer block's "as of" date uses it too). -#}
+{% macro post_date(dt) -%}
+{%- if dt -%}
+{%- set ymd = (dt|user_datetime('%Y-%m-%d')).split('-') -%}
+<time datetime="{{ ymd|join('-') }}">{{ 'web.integration.date_year'|t(day=ymd[2]|int, month=('web.display_labels.month.' ~ (ymd[1]|int))|t, year=ymd[0]) }}</time>
+{%- endif -%}
+{%- endmacro %}
+
+{#- A blog post card. The title link covers the whole card. A post with a cover shows it (a broken one falls back to
+    the brand image); a post without one shows the designed brand cover, the drop on a tint of its category: never a
+    stock photo standing in for a real one. -#}
+{% macro post_card(post, featured=False, heading_tag='h2') -%}
+{%- set url = external_url_for_lang('frontend.blog_detail', slug=post.slug) -%}
+{%- set excerpt = post.get_translated('excerpt', current_language) or '' -%}
+<article class="ct-post{% if featured %} ct-post--featured{% endif %}">
+    {%- if post.featured_image %}
+    <div class="ct-post__media">
+        <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or '' }}" width="1200" height="750"{% if not featured %} loading="lazy"{% endif %} decoding="async" data-fallback="{{ url_for('static', filename='images/brand/og-default.png') }}">
+    </div>
+    {%- else %}
+    <div class="ct-post__media ct-post__media--brand ct-post__media--{{ post.category.value }}" aria-hidden="true">
+        <img src="{{ url_for('static', filename='images/brand/aqua-element-mark-512.png') }}" alt="" width="512" height="512" loading="lazy" decoding="async">
+    </div>
+    {%- endif %}
+    <div class="ct-post__body">
+        <span class="ae-badge ae-badge--info ct-post__cat">{{ post.get_category_display(current_language) }}</span>
+        <{{ heading_tag }} class="ct-post__title"><a href="{{ url }}">{{ post.get_translated('title', current_language) }}</a></{{ heading_tag }}>
+        {%- if excerpt %}
+        {#- Cut at a word; a cut that ends on punctuation drops it before the ellipsis (never ".…"). -#}
+        {%- set cut = excerpt|truncate(220 if featured else 150, False, '', 0) %}
+        {%- if cut|length < excerpt|length %}{% set cut = cut.rstrip(' .,;:!?—–-') ~ '…' %}{% endif %}
+        <p class="ct-post__excerpt">{{ cut }}</p>
+        {%- endif %}
+        <p class="ct-post__date">{{ post_date(post.published_at) }}</p>
+        {%- if featured %}
+        <span class="ct-post__more" aria-hidden="true">{{ 'web.content.blog.read'|t }}</span>
+        {%- endif %}
+    </div>
+</article>
+{%- endmacro %}

@@ -100,64 +100,20 @@ class LoyaltyHandlers(BaseHandler):
         return "🔴", str(pts)
 
     @staticmethod
-    def _extract_reward_name(description):
-        """Pull the reward name out of our own redeem description format
-        ("Redeemed reward: <name>"). Returns None when it doesn't match, so the
-        caller falls back to the generic localized label rather than guessing."""
-        if not description:
-            return None
-        prefix = "Redeemed reward:"
-        if description.startswith(prefix):
-            return description[len(prefix):].strip() or None
-        return None
+    def _transaction_category(transaction):
+        """A history row's label key and format args, from the API's published fields.
 
-    @classmethod
-    def _transaction_category(cls, transaction):
-        """Map a loyalty transaction to a stable display category + format args.
-
-        Returns ``(category, fmt_kwargs)``; the caller resolves
-        ``telegram.loyalty.txn.<category>`` via i18n. Keying off the granular
-        ``action_type`` (then the coarse ``transaction_type``) keeps the label
-        localized and free of the raw English description / internal user IDs.
+        Returns ``(category, fmt_kwargs)``; the caller resolves ``telegram.loyalty.txn.<category>`` via i18n. The
+        category is the backend's ``display_category`` (business_app/serializers/loyalty_serializers.py, the one
+        mapping the website labels rows by too), so the bot never classifies a transaction itself. The published
+        ``reward_name`` / ``order_id`` only pick the label variant that names them.
         """
-        action = (transaction.get("action_type") or "").lower()
-        txn_type = (transaction.get("transaction_type") or "").lower()
-
-        if action == "referral":
-            return "referral", {}
-        if action == "welcome_bonus":
-            return "welcome", {}
-        if action == "birthday_bonus":
-            return "birthday", {}
-        if action == "streak_bonus":
-            return "streak", {}
-        if action == "surprise_reward":
-            return "surprise", {}
-        if action == "purchase":
-            return "order_earn", {}
-        if action == "reward_refund":
-            order_id = transaction.get("order_id")
-            if order_id:
-                return "refund_order", {"order_id": order_id}
-            return "refund", {}
-        if action in ("order_edit_reversal", "order_edit_award"):
-            return "adjustment", {}
-
-        # No / unknown action_type → fall back to the coarse transaction_type.
-        if txn_type == "redeemed":
-            name = cls._extract_reward_name(transaction.get("description"))
-            if name:
-                return "redeem_named", {"name": name}
-            return "redeem", {}
-        if txn_type == "earned":
-            return "order_earn", {}
-        if txn_type == "bonus":
-            return "bonus", {}
-        if txn_type == "expired":
-            return "expired", {}
-        if txn_type == "adjustment":
-            return "adjustment", {}
-        return "other", {}
+        category = transaction.get("display_category") or "other"
+        if category == "redeem" and transaction.get("reward_name"):
+            return "redeem_named", {"name": transaction["reward_name"]}
+        if category == "refund" and transaction.get("order_id"):
+            return "refund_order", {"order_id": transaction["order_id"]}
+        return category, {}
 
     @staticmethod
     def _parse_history_page(callback_data):

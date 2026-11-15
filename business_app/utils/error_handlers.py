@@ -543,6 +543,10 @@ def register_error_handlers(app):
 
     @app.errorhandler(429)
     def handle_rate_limit_error(error):
+        if _asks_for_a_storefront_page():
+            page = _storefront_error_page(429)
+            if page is not None:
+                return page, 429
         language = get_current_language()
         return ErrorResponse.build_error_response(
             error_type="RATE_LIMIT_EXCEEDED",
@@ -560,6 +564,10 @@ def register_error_handlers(app):
         except:  # noqa: E722
             pass
 
+        if _asks_for_a_storefront_page():
+            page = _storefront_error_page(500)
+            if page is not None:
+                return page, 500
         language = get_current_language()
         return ErrorResponse.build_error_response(
             error_type="INTERNAL_ERROR",
@@ -576,8 +584,60 @@ def register_error_handlers(app):
                 message=get_error_message(ErrorCode.RESOURCE_NOT_FOUND, language=language),
                 status_code=404,
             )
-        # Return 404 page for web routes
+        if _asks_for_a_page():
+            page = _not_found_page()
+            if page is not None:
+                return page, 404
         return "Page not found", 404
+
+
+# Paths that only ever serve files: a miss there is a broken file link, never a page someone opened.
+_FILE_PATH_PREFIXES = ("/static/", "/uploads/")
+
+
+def _asks_for_a_page() -> bool:
+    """A browser opening a page: its Accept header names text/html (Chrome, Firefox, Safari and Googlebot all do).
+    `*/*` alone does not count: curl, scanners probing /wp-login.php and an <img> send it, and each would otherwise
+    get the whole storefront page (about 32 KB and a 50x slower answer, with its database reads). A file path and a
+    request naming no HTML (an agent asking for Markdown) keep the plain answer too."""
+    if request.path.startswith(_FILE_PATH_PREFIXES):
+        return False
+    return any(mimetype == "text/html" and quality > 0 for mimetype, quality in request.accept_mimetypes)
+
+
+def _asks_for_a_storefront_page() -> bool:
+    """A browser opening a storefront page (not an API call): it gets a designed error page, never raw JSON."""
+    return not request.path.startswith("/api/") and _asks_for_a_page()
+
+
+def _render_storefront_error(template: str, **values):
+    """Render an error page inside the storefront shell, or None when it cannot be rendered (the database the shell
+    reads is down, a template fails), so the caller falls back to its plain answer. A URL that matched no storefront
+    route has not run the storefront's context processor: its variables are passed in."""
+    from flask import current_app, render_template
+
+    try:
+        context = {}
+        if "frontend" not in request.blueprints:
+            from business_app.frontend.routes import inject_global_vars
+
+            context = inject_global_vars()
+        return render_template(template, meta_robots="noindex,follow", **values, **context)
+    except Exception:  # noqa: BLE001 - the plain answer is always a valid error response
+        current_app.logger.exception("Rendering %s failed for %s", template, request.path)
+        return None
+
+
+def _not_found_page():
+    """The storefront's 404 page (templates/errors/404.html), or None when it cannot be rendered."""
+    return _render_storefront_error("errors/404.html")
+
+
+def _storefront_error_page(status: int):
+    """The storefront's "something went wrong" page (templates/errors/500.html) for a 500 or a 429: what happened,
+    a retry of the same address, the home page and the Telegram bot. None when it cannot be rendered."""
+    retry_url = request.full_path.rstrip("?") if request.method == "GET" else request.path
+    return _render_storefront_error("errors/500.html", error_status=status, retry_url=retry_url)
 
 
 # Helper function to create error responses with translated messages

@@ -1,0 +1,16 @@
+{
+  "title": "Дом",
+  "full_address": "Toshkent, Chilonzor tumani, Bunyodkor ko‘chasi, 5",
+  "street_address": "ул. Бунёдкор, 5",
+  "district": "chilanzar",
+  "city": "Tashkent",
+  "country": "Uzbekistan",
+  "floor_number": "5",
+  "apartment_number": "12",
+  "delivery_instructions": "Подъезд 2, код домофона 45",
+  "landmark": "рядом со школой",
+  "latitude": 41.2856,
+  "longitude": 69.2034,
+  "is_default": false,
+  "is_business": false
+}

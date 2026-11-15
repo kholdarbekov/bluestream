@@ -367,6 +367,20 @@ async def test_a_number_never_verified_is_confirmed_by_sms_before_the_greeting(l
     assert state(bot) is None and created_no_account(bot)
 
 
+async def test_a_code_still_valid_for_the_number_is_the_one_to_type(link_bot):   # D12, owner 2026-11-14
+    """/send-otp sends a number a new code only once its last one expires: its 429 RESEND_COOLDOWN asks for the
+    code already sent, as a send would, instead of greeting with "could not send"."""
+    bot = await link_bot(confirm=confirmed(phone_status="unverified")); user = bot.updates()
+    cooldown = {"error_code": "RESEND_COOLDOWN", "phone_masked": "+99***2233",
+                "expires_in": 90, "resend_available_in": 90}
+    bot.backend.route("POST", SEND_OTP, lambda _call: backend_failure("still valid", 429, {"data": cooldown}))
+    await bot.send(user.command(f"/start web_{TOKEN}")); await bot.send(user.tap("weblink_yes", card_id(bot)))
+    assert texts(bot)[-1] == copy("telegram.web_link.confirm_number_prompt", phone_masked="+99***2233")
+    assert state(bot) == REGISTER_OTP and not has_contact_button(bot)
+    await bot.send(user.text("123456"))
+    assert len(posts(bot, VERIFY_PHONE)) == 1 and texts(bot)[-1] == copy("telegram.web_link.connected", name="Zarina")
+
+
 async def test_an_sms_that_cannot_be_sent_still_greets_and_never_offers_the_contact_button(link_bot):   # D12
     bot = await link_bot(confirm=confirmed(phone_status="unverified")); user = bot.updates()
     bot.backend.route("POST", SEND_OTP, lambda _call: backend_failure("SMS gateway down", 502))

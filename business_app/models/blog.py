@@ -5,6 +5,7 @@ Manages blog posts/articles for the Water Benefits & Health Tips section
 
 from datetime import datetime, UTC
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, Enum as SQLEnum
+from sqlalchemy import func
 from sqlalchemy.orm import relationship
 from business_app import db
 from business_app.models.base import TimestampMixin
@@ -117,13 +118,20 @@ class BlogPost(db.Model, TimestampMixin, TranslatableMixin):
         self.status = BlogStatus.ARCHIVED
 
     def increment_views(self):
-        """Increment view count"""
-        self.view_count += 1
+        """Count one view without touching `updated_at`: a view is not an edit, and the article's BlogPosting
+        `dateModified` reads `updated_at`. One UPDATE (the counter grows in SQL, so concurrent views never lose a
+        count) that sets `updated_at` to itself, which keeps the column's `onupdate` stamp out of it. The caller
+        commits."""
+        cls = type(self)
+        cls.query.filter(cls.id == self.id).update(
+            {cls.view_count: func.coalesce(cls.view_count, 0) + 1, cls.updated_at: cls.updated_at},
+            synchronize_session=False,
+        )
 
     def get_category_display(self, language=None):
         """Get translated category name"""
         category_translations = {
-            "health_tips": {"en": "Health Tips", "ru": "Советы по здоровью", "uz": "Sog'liq maslahatlari"},
+            "health_tips": {"en": "Health Tips", "ru": "Советы по здоровью", "uz": "Sog‘liq maslahatlari"},
             "water_benefits": {"en": "Water Benefits", "ru": "Польза воды", "uz": "Suv foydalari"},
             "company_news": {"en": "Company News", "ru": "Новости компании", "uz": "Kompaniya yangiliklari"},
             "quality_assurance": {"en": "Quality Assurance", "ru": "Контроль качества", "uz": "Sifat nazorati"},

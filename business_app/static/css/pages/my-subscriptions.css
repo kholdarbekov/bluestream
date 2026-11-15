@@ -7,26 +7,28 @@
    ========================================================================== */
 
 .subs {
-  --subs-ink: #061a3a;
-  --subs-ink-soft: #41607c;
-  --subs-aqua: #00d1f9;
-  --subs-aqua-deep: #0077b6;
-  --subs-navy: #002c8f;
-  --subs-pale: #e7f7fc;
-  --subs-bg: #f6fbfe;
-  --subs-surface: #ffffff;
-  --subs-line: #d7e9f3;
-  --subs-control: #6f8ca3;
-  --subs-danger: #b02a37;
-  --subs-display: 'Spartan', 'Open Sans', sans-serif;
-  --subs-body: 'Open Sans', sans-serif;
-  --subs-shadow: 0 10px 30px -16px rgba(3, 62, 138, .35);
+  /* Scoped names kept for this page's rules; the values are the site tokens (static/css/ae-ui.css). */
+  --subs-ink: var(--ae-ink);
+  --subs-ink-soft: var(--ae-ink-soft);
+  --subs-aqua: var(--ae-aqua);
+  --subs-aqua-deep: var(--ae-aqua-deep);
+  --subs-navy: var(--ae-navy);
+  --subs-pale: var(--ae-pale);
+  --subs-bg: var(--ae-bg);
+  --subs-surface: var(--ae-surface);
+  --subs-line: var(--ae-line);
+  --subs-control: var(--ae-muted);
+  --subs-danger: var(--ae-danger);
+  --subs-display: var(--ae-font);
+  --subs-body: var(--ae-font);
+  --subs-shadow: var(--ae-shadow-sm);
 
   color: var(--subs-ink);
   font-family: var(--subs-body);
   font-size: 15px;
   line-height: 1.6;
-  background: var(--subs-surface);
+  /* The cabinet frame (css/pages/cabinet.css) is the page's background; the page draws on it. */
+  background: transparent;
 }
 
 .subs *,
@@ -47,10 +49,11 @@
 .subs-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 /* Focus: one ring on every interactive element (the theme removes button outlines). */
+/* The site's ring (ae-ui.css): 3px navy, 2px offset. */
 .subs a:focus-visible,
 .subs button:focus-visible,
 .subs [tabindex]:not([tabindex="-1"]):focus-visible {
-  outline: 3px solid var(--subs-aqua-deep);
+  outline: 3px solid var(--subs-navy);
   outline-offset: 2px;
 }
 .subs #sub-h:focus { outline: none; }
@@ -63,47 +66,21 @@
 .subs-bottle--draft { fill: #fff; stroke-dasharray: 2.5 2; }
 .subs-bottle--muted { fill: #fff; stroke: var(--subs-control); stroke-dasharray: 2 2; }
 .subs-bottle--thumb { width: 18px; height: 28px; fill: var(--subs-pale); }
+/* The strip's glyphs are filled, so no card reads as a missing icon: an active subscription's bottle is aqua (its
+   next order placed) or pale aqua (planned), a paused one amber, a cancelled one grey. The dashed outlines stay for
+   the waterline's skipped and drafted bottles only. */
+.subs-card .subs-bottle { stroke-width: 1.4; stroke-dasharray: none; }
+.subs-card .subs-bottle--planned { fill: var(--subs-pale); stroke: var(--subs-aqua-deep); }
+.subs-card .subs-bottle--muted { fill: var(--ae-warn-bg); stroke: var(--ae-gold-deep); }
+.subs-card--muted .subs-bottle--muted { fill: var(--ae-neutral-bg); stroke: var(--ae-neutral); }
 
-/* ------------------------------------------------------------------ chips (one palette) */
-.subs-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  vertical-align: middle;
-}
-.subs-chip i { font-size: 12px; }
-.subs-chip--success { color: #155724; background: #d4edda; }
-.subs-chip--warning { color: #856404; background: #fff3cd; }
-.subs-chip--info { color: #004085; background: #cce5ff; }
-.subs-chip--neutral { color: #383d41; background: #e2e3e5; }
-.subs-chip--danger { color: #721c24; background: #f8d7da; }
-
-/* ------------------------------------------------------------------ buttons */
-.subs-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 10px 20px;
-  border-radius: 999px;
-  border: 0;
-  font: 600 15px/1.3 var(--subs-body);
-  text-align: center;
-  white-space: normal;
-  cursor: pointer;
-}
-.subs .subs-btn--primary { min-height: 48px; padding: 12px 24px; font-size: 16px; background: var(--subs-aqua-deep); color: #fff; }
-.subs .subs-btn--primary:hover, .subs .subs-btn--primary:active { background: var(--subs-navy); color: #fff; }
-.subs .subs-btn--secondary { background: #fff; color: var(--subs-navy); border: 1.5px solid var(--subs-line); }
-.subs .subs-btn--secondary:hover { background: var(--subs-pale); color: var(--subs-navy); }
-.subs a.subs-btn:hover { text-decoration: none; }
-.subs-btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+/* Chips are the site's status pills (ae-ui.css .ae-status--icon) and buttons the site's .ae-btn (site review
+   SITE-08, 2026-11-14). The page's link colour `.subs a` (0,1,1) would outrank .ae-btn's own text colour on a link
+   styled as a button, so those keep the ink text here. */
+.subs a.ae-btn--primary,
+.subs a.ae-btn--secondary { color: var(--ae-ink); }
+.subs a.ae-btn--primary:hover { color: var(--ae-ink); }
+.subs a.ae-btn--secondary:hover { color: var(--ae-navy); }
 
 .subs-link {
   background: none;
@@ -172,12 +149,22 @@
 .subs a.subs-card { color: var(--subs-ink); font-weight: 400; }
 .subs a.subs-card:hover { text-decoration: none; border-color: var(--subs-control); }
 .subs-card .subs-bottle { flex: 0 0 auto; width: 20px; height: 30px; }
-.subs-card .subs-chip { padding: 3px 8px; gap: 5px; }
+.subs-card .ae-status { padding: 3px 8px; gap: 5px; }
 .subs-card__text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.subs-card__name { font-weight: 600; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.subs-card__name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
 .subs-card__meta { font-size: 13px; line-height: 1.45; color: var(--subs-ink-soft); }
 .subs-card[aria-current="true"] {
-  border: 2px solid var(--subs-aqua-deep);
+  border: 2px solid var(--subs-navy);
   background: var(--subs-pale);
   padding: 11px 13px;
 }
@@ -189,8 +176,8 @@
   width: 16px;
   height: 16px;
   background: var(--subs-pale);
-  border-right: 2px solid var(--subs-aqua-deep);
-  border-bottom: 2px solid var(--subs-aqua-deep);
+  border-right: 2px solid var(--subs-navy);
+  border-bottom: 2px solid var(--subs-navy);
   transform: translateX(-50%) rotate(45deg);
 }
 .subs-card--muted { color: var(--subs-ink-soft); }
@@ -222,7 +209,7 @@
 /* ------------------------------------------------------------------ the next-delivery card */
 .subs-hero {
   border: 1px solid var(--subs-line);
-  border-radius: 12px;
+  border-radius: var(--ae-r);
   box-shadow: var(--subs-shadow);
   overflow: hidden;
   background: #fff;
@@ -242,9 +229,9 @@
 .subs .subs-hero__note { margin-top: 10px; font-size: 14px; color: var(--subs-ink-soft); line-height: 1.5; }
 .subs-hero__order { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 10px; }
 .subs-hero__actions { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.subs-hero__actions > .subs-btn { width: 100%; }
+.subs-hero__actions > .ae-btn { width: 100%; }
 .subs-hero__row { display: flex; flex-wrap: wrap; gap: 8px; }
-.subs-hero__row > .subs-btn { flex: 1 1 auto; }
+.subs-hero__row > .ae-btn { flex: 1 1 auto; }
 .subs .subs-hint { font-size: 13px; line-height: 1.45; color: var(--subs-ink-soft); }
 .subs .subs-hero__status { font-size: 14px; color: var(--subs-navy); }
 .subs .subs-hero__status:empty { display: none; }
@@ -257,8 +244,8 @@
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #fff3cd;
-  color: #856404;
+  background: var(--ae-warn-bg);
+  color: var(--ae-warn);
   font-size: 14px;
   line-height: 1.45;
 }
@@ -342,7 +329,7 @@
 .subs-item > .subs-money { text-align: right; }
 .subs-item.is-unavailable .subs-item__thumb { filter: grayscale(1); opacity: .6; }
 .subs-item.is-unavailable .subs-item__text b, .subs-item.is-unavailable > .subs-money { color: var(--subs-ink-soft); }
-.subs .subs-item__warn { display: flex; gap: 6px; margin-top: 2px; color: #856404; }
+.subs .subs-item__warn { display: flex; gap: 6px; margin-top: 2px; color: var(--ae-warn); }
 .subs-item__warn i { margin-top: 3px; }
 
 .subs-totals {
@@ -404,14 +391,45 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 }
 .subs .subs-help { color: var(--subs-ink-soft); font-size: 14px; }
 
-/* Cancelled: read-only on a tint, history still visible. */
-.subs-body.is-readonly .subs-sec { background: var(--subs-bg); padding-left: 16px; padding-right: 16px; border-top-color: #fff; }
+/* Cancelled: read-only, in ONE tinted panel (the sections run on inside it, split by the usual 1px rules), history
+   still visible. The card above it is a slim note, not the elevated next-delivery card. */
+.subs-hero--cancelled { border-color: var(--subs-line); }
+.subs-hero--cancelled .subs-hero__top { padding: 16px 18px; }
+/* The title's pill already says "Cancelled": the panel under it is a slim note (its date and the past-orders line),
+   not a second headline. */
+.subs .subs-hero--cancelled .subs-hero__date--state { font-size: 18px; color: var(--subs-ink); }
+.subs-body.is-readonly .subs-sec { background: var(--subs-bg); padding-left: 18px; padding-right: 18px; border-top-color: var(--subs-line); }
+.subs-body.is-readonly .subs-hero + .subs-sec { border-top: 0; border-radius: var(--ae-r) var(--ae-r) 0 0; }
+.subs-body.is-readonly .subs-sec:has(+ .subs-foot) { border-radius: 0 0 var(--ae-r) var(--ae-r); }
 
-/* No subscriptions yet. */
-.subs-empty { padding: 32px 0 16px; text-align: center; max-width: 520px; margin: 0 auto; }
-.subs-empty .subs-bottle { width: 44px; height: 68px; margin: 0 auto 16px; }
-.subs .subs-empty h2 { font-family: var(--subs-display); font-weight: 800; font-size: 22px; line-height: 1.25; }
-.subs .subs-empty p { margin: 8px 0 20px; color: var(--subs-ink-soft); }
+/* No subscriptions yet: the site's empty state with a filled bottle, the builder's sentence, the three things the
+   page lets a subscriber do, and the way to the builder. */
+.subs-empty { max-width: 560px; }
+/* The site's empty state (ae-ui.css .ae-empty) holds the bottle in its icon tile. `.subs p` / `.subs h2` (0,1,1)
+   outrank .ae-empty's own text rules, so they are restated here. */
+.subs-empty .subs-bottle { width: 28px; height: 44px; fill: var(--subs-aqua); stroke: var(--subs-navy); stroke-width: 1.2; }
+.subs .subs-empty .ae-empty__title { margin: 0 0 8px; font-size: 21px; line-height: 1.3; text-wrap: balance; }
+.subs .subs-empty .ae-empty__text { margin: 0 auto; max-width: 54ch; color: var(--subs-ink-soft); }
+.subs-empty__perks {
+  display: grid;
+  gap: 10px;
+  max-width: 480px;
+  margin: 22px auto 26px !important;
+  text-align: left;
+}
+.subs .subs-empty__perks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--ae-bg);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--subs-ink);
+}
+.subs-empty__perks i { flex: none; width: 20px; margin-top: 2px; color: var(--subs-aqua-deep); text-align: center; }
 
 .subs-error { padding: 24px 0; }
 .subs-error p { margin-bottom: 12px; }
@@ -427,10 +445,8 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
    Inline confirms in the card, read-then-edit sections with a sticky save bar inside the section, the
    Cancel and product-picker modals. 150ms ease-out on opacity only; every target at least 44px. */
 
-.subs .subs-btn--danger { background: var(--subs-danger); color: #fff; }
-.subs .subs-btn--danger:hover, .subs .subs-btn--danger:active { background: #8c1f2a; color: #fff; }
-.subs-btn.is-busy { cursor: progress; }
-.subs-btn .spinner-border-sm { width: 14px; height: 14px; border-width: 2px; flex: 0 0 auto; }
+.subs .ae-btn.is-busy { cursor: progress; }
+.subs .ae-btn .spinner-border-sm { width: 14px; height: 14px; border-width: 2px; flex: 0 0 auto; }
 .subs input:focus-visible,
 .subs select:focus-visible,
 .subs textarea:focus-visible { outline: 3px solid var(--subs-aqua-deep); outline-offset: 2px; }
@@ -441,13 +457,6 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 .subs .subs-sec__status { margin-top: 10px; font-size: 14px; color: var(--subs-navy); }
 .subs .subs-sec__status:empty { display: none; }
 .subs .subs-label { display: block; margin: 12px 0 6px; font-size: 14px; font-weight: 600; color: var(--subs-ink); }
-.subs .subs-input {
-  min-height: 44px;
-  border: 1.5px solid var(--subs-control);
-  border-radius: 8px;
-  color: var(--subs-ink);
-  font: 400 15px/1.4 var(--subs-body);
-}
 .subs textarea.subs-input { min-height: 72px; }
 
 /* The inline two-step (Skip, Pause, an Orders row's Skip or Cancel): under its buttons, never a modal. */
@@ -463,7 +472,7 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 .subs-orow__confirm:focus { outline: none; }
 .subs .subs-confirm__text { margin-bottom: 10px; }
 .subs-confirm__row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.subs-confirm__row > .subs-btn { flex: 1 1 auto; }
+.subs-confirm__row > .ae-btn { flex: 1 1 auto; }
 .subs-reasons { border: 0; margin: 0; padding: 0; min-width: 0; }
 .subs-reasons legend { float: none; width: auto; margin: 0 0 6px; padding: 0; }
 .subs-reasons__chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -488,7 +497,7 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 .subs .subs-val__chip { margin-top: 8px; }
 .subs-edit { animation: subs-fade-in 150ms ease-out; }
 .subs .subs-edit__note { margin-top: 12px; }
-.subs .subs-edit__msg { margin-top: 10px; font-size: 14px; line-height: 1.45; color: #856404; }
+.subs .subs-edit__msg { margin-top: 10px; font-size: 14px; line-height: 1.45; color: var(--ae-warn); }
 
 .subs-fieldset { border: 0; margin: 0 0 18px; padding: 0; min-width: 0; }
 .subs-fieldset legend {
@@ -527,7 +536,7 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 .subs-day { align-items: center; min-height: 44px; padding: 6px 2px; font-weight: 600; font-size: 14px; text-transform: capitalize; }
 /* The chosen day is underlined too, so it is never shown by colour alone. */
 .subs-day.is-checked > span[aria-hidden="true"] { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
-.subs .subs-select { max-width: 220px; min-height: 44px; border: 1.5px solid var(--subs-control); border-radius: 8px; color: var(--subs-ink); }
+.subs .subs-select { max-width: 220px; }
 .subs .subs-select + .subs-hint { margin-top: 6px; }
 
 .subs-preview { margin-top: 4px; padding: 14px 16px 10px; border-radius: 8px; background: var(--subs-pale); }
@@ -602,10 +611,8 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
    Its slot is only the re-draw target and generates no box, so the bar's containing block is the whole open
    form: inside a parent of exactly its own size a sticky box has nowhere to move. */
 .subs-savebar-slot { display: contents; }
-/* The theme gives .boxed_wrapper overflow:hidden (style.css), which makes that never-scrolling box the bar's
-   sticky scrollport, so the bar stayed below the fold. overflow:clip clips the same way without being a scroll
-   container, so the bar follows the viewport. Where clip or :has is unsupported, the bar simply ends the form. */
-.boxed_wrapper:has(.subs) { overflow: clip !important; }
+/* The bar can stick because ae-ui.css gives every page's .boxed_wrapper overflow:clip (the theme's overflow:hidden
+   made that box the bar's never-scrolling scrollport). */
 .subs-savebar {
   position: sticky;
   bottom: 0;
@@ -631,12 +638,19 @@ button.subs-orow__open:hover .subs-orow__when { text-decoration: underline; }
 .subs-savebar__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The fixed mobile social bar and the scroll-top button would cover the bar while it shows. */
 body.subs-editing .social-float-links,
-body.subs-editing .scroll-top { display: none !important; }
+body.subs-editing .scroll-top,
+body.subs-editing .ae-rail,
+body.subs-editing .ae-to-top { display: none !important; }
 
 /* Orders rows: an error under a row's Pay, which stays beside its row. */
 .subs-orow { flex-wrap: wrap; }
 .subs-orow > .subs-orow__open { flex-basis: 0; }
 .subs .subs-orow__error { flex: 1 0 100%; margin: 0 0 8px; }
+/* When a row is too narrow for its buttons they move under the text, at the row's end (on the text's line the
+   margin has no room to take). A row with Pay and Skip/Cancel puts both there together, so neither is left alone. */
+.subs-orow__open + .subs-orow__pay,
+.subs-orow__open + .subs-orow__act { margin-inline-start: auto; }
+.subs-orow:has(> .subs-orow__pay):has(> .subs-orow__act) > .subs-orow__open { flex-basis: 100%; }
 /* Phones: a row's date, chip and amount wrap, so the text takes the whole row and its amount ends the row,
    flush with the row's end as on desktop (beside Pay it was left mid-row, on a line of its own). Pay follows
    it, at the row's end too. */
@@ -650,7 +664,7 @@ body.subs-editing .scroll-top { display: none !important; }
 }
 
 /* The modals keep Bootstrap's frame; only the type, the buttons and the list are this page's. */
-.subs-modal .modal-content { border-radius: 12px; border: 1px solid var(--subs-line); color: var(--subs-ink); }
+.subs-modal .modal-content { border-radius: var(--ae-r-lg); border: 0; box-shadow: var(--ae-shadow); color: var(--subs-ink); }
 .subs .subs-modal__title { font-family: var(--subs-display); font-weight: 800; font-size: 20px; line-height: 1.3; color: var(--subs-ink); }
 .subs-modal__close { min-width: 44px; min-height: 44px; }
 .subs-modal__list { margin: 0 0 16px; }
@@ -674,16 +688,19 @@ body.subs-editing .scroll-top { display: none !important; }
 
 @keyframes subs-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* Spartan has no Cyrillic: Russian headings in Open Sans at the same weights. The backend's ru date labels
-   are nominative and lower case ("четверг, 29 октября"); standing alone as the hero date it starts a line. */
-:lang(ru) .subs h2,
-:lang(ru) .subs h3,
-:lang(ru) .subs .subs-hero__date { font-family: var(--subs-body); }
+/* The backend's ru date labels are nominative and lower case ("четверг, 29 октября"); standing alone as the hero
+   date it starts a line. */
 :lang(ru) .subs .subs-hero__date::first-letter { text-transform: uppercase; }
 
 @media (min-width: 768px) {
-  .subs-strip__item { flex: 0 0 236px; }
-  .subs-strip__item--toggle, .subs-strip__item--new { flex-basis: 170px; }
+  /* From the tablet up the strip wraps instead of scrolling: every card, "Show cancelled" and "New subscription" stay
+     in view (a horizontal scroller clipped the last card at the column edge, with no way for a mouse to reach it). */
+  .subs-strip { flex-wrap: wrap; overflow: visible; scroll-snap-type: none; padding-bottom: 2px; margin-bottom: 16px; }
+  /* On a wrapped strip the pointer under the selected card would point at the next row; the navy border and the
+     tint mark the selection. */
+  .subs-card[aria-current="true"]::after { content: none; }
+  .subs-strip__item { flex: 0 0 224px; }
+  .subs-strip__item--toggle, .subs-strip__item--new { flex-basis: 160px; }
   .subs-bh { margin: 22px 0 16px; }
   .subs .subs-bh h2 { font-size: 24px; }
   .subs-jump { display: none; }
@@ -694,7 +711,11 @@ body.subs-editing .scroll-top { display: none !important; }
   .subs-sec { grid-template-columns: 180px minmax(0, 1fr) auto; gap: 6px 20px; padding: 32px 0; }
   .subs-sec__value { grid-column: 2; grid-row: 1; }
   .subs-sec__action { grid-column: 3; grid-row: 1; margin-top: -10px; }
-  .subs-orow__open { display: grid; grid-template-columns: 120px auto minmax(0, 1fr) auto; }
+  /* The chip's track is max-content: beside Pay + Skip an `auto` track squeezed "Ожидает оплаты" onto two lines;
+     now the buttons move under the row instead (above). Phones keep the wrapping flex row. */
+  .subs-orow__open { display: grid; grid-template-columns: 120px max-content minmax(0, 1fr) auto; }
+  /* ...and the row's text never shrinks under its own width (the amount slid under Pay): the flex line breaks first. */
+  .subs-orow > .subs-orow__open { min-width: min-content; }
   .subs-orow__why:empty { display: block; }
   .subs-orow__amt:empty { display: block; }
   .subs-tiles--freq { grid-template-columns: repeat(4, minmax(0, 1fr)); }

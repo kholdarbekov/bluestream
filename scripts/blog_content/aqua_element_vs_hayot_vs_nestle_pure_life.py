@@ -10,7 +10,7 @@ ARTICLE = {
     "slug": "aqua-element-vs-hayot-vs-nestle-pure-life",
     "category": "quality_assurance",
     "tags": "comparison,hayot,nestle-pure-life,bonaqua,demi,competitors,water-comparison",
-    "featured_image": "/static/images/news/news-2.jpg",
+    "featured_image": None,  # no real photo yet: the cards show the brand cover, never a stock picture
     "image_alt_text": "comparison of bottled water brands in Uzbekistan",
     "is_featured": True,
     "sort_order": 95,
@@ -57,7 +57,7 @@ ARTICLE = {
 <p>Ниже — нейтральные описания на основе общедоступной информации. Если у вас на руках другая этикетка или новые данные — приоритет за актуальной этикеткой.</p>
 
 <h3>Aqua Element</h3>
-<p>Узбекистанский бренд, оператор — Blue Stream Group. Источник — артезианская скважина в Куйичирчикском районе Ташкентской области, глубина около 120 м. На производстве применяется 11 ступеней фильтрации (кварцевый фильтр, активированный уголь, ионообменный умягчитель, блок регенерации, полипропилен 5 мкм, полипропилен 1 мкм, обратный осмос, мембранный CIP, ультрафиолет, реминерализация, озонирование). Декларируемый минеральный профиль: TDS 30–50 мг/л, pH 7,5, Ca²⁺ 10–60 мг/л, Mg²⁺ 7–20 мг/л, Na⁺ 5–15 мг/л. Доступные форматы: бутылки 18,9 л (возвратная) и 10 л (одноразовая). Канал — прямая доставка по Ташкенту и Ташкентской области через сайт, Telegram-бот и телефон. Регулятор — Санэпид.</p>
+<p>Узбекистанский бренд, оператор — Blue Stream Group. Источник — артезианская скважина в Куйичирчикском районе Ташкентской области, глубина около 120 м. На производстве применяется 11 ступеней фильтрации (кварцевый фильтр, активированный уголь, ионообменный умягчитель, блок регенерации, полипропилен 5 мкм, полипропилен 1 мкм, обратный осмос, мембранный CIP, ультрафиолет, реминерализация, озонирование). Декларируемый минеральный профиль: TDS 30–50 мг/л, pH 7,5, Ca²⁺ 10–60 мг/л, Mg²⁺ 7–20 мг/л, Na⁺ 5–15 мг/л. Доступные форматы: бутылки 18,9 л (возвратная) и 10 л (одноразовая). Канал — прямая доставка по Ташкенту и Ташкентской области через сайт и Telegram-бот. Регулятор — Санэпид.</p>
 
 <h3>Hayot</h3>
 <p>Региональный узбекистанский бренд, широко представленный в супермаркетах и продуктовых магазинах. Согласно общедоступной информации, бренд позиционируется как массовая питьевая вода и реализуется в широкой линейке ПЭТ-форматов. Подробный минеральный профиль и стадии фильтрации обычно сообщаются на этикетке. Бренд распространён по всей стране и удобен, когда покупателю важно купить воду «по дороге».</p>
@@ -142,7 +142,7 @@ ARTICLE = {
     </tr>
     <tr>
       <td>Канал распространения</td>
-      <td>Прямая доставка (сайт + Telegram + телефон)</td>
+      <td>Прямая доставка (сайт + Telegram)</td>
       <td>Супермаркеты и магазины</td>
       <td>Супермаркеты и магазины</td>
       <td>Супермаркеты и магазины</td>
@@ -218,81 +218,81 @@ ARTICLE = {
 <p>На текущий момент Aqua Element обслуживает Ташкент и Ташкентскую область. Подробности — в разделе <a href="/water-delivery-faq">FAQ по доставке</a>.</p>
 
 <h3>Где попробовать Aqua Element?</h3>
-<p>Заказать первую бутылку можно через <a href="/shop">каталог</a>, Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> или по телефону. Оборудование (кулер или помпа) и регулярный график подвоза оформляются в <a href="/subscriptions">подписке</a>.</p>
+<p>Заказать первую бутылку можно через <a href="/shop">каталог</a> или Telegram-бот <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. Регулярный график подвоза оформляется в <a href="/subscriptions">подписке</a>.</p>
 
 <h2>Итог</h2>
 
 <p>Сравнение брендов имеет смысл только в системе координат. Мы предложили семь критериев и применили их к шести брендам, представленным в Ташкенте. Aqua Element — один из вариантов, который выгодно отличается раскрытым артезианским источником, подробной 11-ступенчатой фильтрацией, низкой минерализацией и возвратной тарой при прямой доставке. Hayot, Nestle Pure Life, Bonaqua, Demi и Ne Voda — другие достойные варианты с другими акцентами и другой логистикой. Лучший бренд — тот, который соответствует вашему сценарию использования. Сверяйте этикетки, выбирайте осознанно, пейте достаточно воды.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Откуда вода Hayot?","acceptedAnswer":{"@type":"Answer","text":"Hayot — региональный узбекистанский бренд. Конкретный источник и параметры партии указываются на этикетке производителя."}},{"@type":"Question","name":"Минерализована ли Nestle Pure Life?","acceptedAnswer":{"@type":"Answer","text":"Pure Life во многих странах позиционируется как столовая питьевая вода после реминерализации. Точные параметры — по актуальной этикетке."}},{"@type":"Question","name":"Почему TDS у разных брендов так сильно отличается?","acceptedAnswer":{"@type":"Answer","text":"TDS зависит от исходного источника и технологии обработки. Артезианская вода может быть низко- или среднеминерализованной; вода после обратного осмоса обычно реминерализуется по стандарту производителя."}},{"@type":"Question","name":"Какой бренд безопаснее?","acceptedAnswer":{"@type":"Answer","text":"Любой бренд, легально реализуемый в Узбекистане, проходит надзор Санэпид. Это базовая планка безопасности; различия лежат в источнике, минерализации и сервисе."}},{"@type":"Question","name":"Почему у Aqua Element только два размера бутылок?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element сфокусирован на сценарии дома и офиса: бутыли 18,9 л (возвратная) и 10 л (одноразовая) оптимальны для регулярного потребления и снижают объём пластика."}},{"@type":"Question","name":"Можно ли давать любую бутилированную воду младенцу?","acceptedAnswer":{"@type":"Answer","text":"Для детских смесей обычно рекомендуют низкоминерализованную воду с TDS до 100 мг/л и низким натрием. Окончательное решение — за педиатром на основании этикетки."}},{"@type":"Question","name":"Чем артезианская вода отличается от воды после обратного осмоса?","acceptedAnswer":{"@type":"Answer","text":"Артезианская — глубокая напорная подземная вода. Обратный осмос удаляет до 99% растворённых веществ из любой исходной воды, после чего обычно проводится реминерализация."}},{"@type":"Question","name":"Почему вы не сравниваете цены?","acceptedAnswer":{"@type":"Answer","text":"Цены меняются в зависимости от продавца, акций и времени, поэтому сравнение цен быстро устаревает. Сравнение по критериям корректнее."}},{"@type":"Question","name":"Доставляет ли Aqua Element за пределы Ташкента?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element обслуживает Ташкент и Ташкентскую область. Подробности — в разделе FAQ по доставке."}},{"@type":"Question","name":"Где попробовать Aqua Element?","acceptedAnswer":{"@type":"Answer","text":"Заказ — через каталог на сайте, Telegram-бот @aqua_element_bot или по телефону. Регулярный подвоз и оборудование оформляются в подписке."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Откуда вода Hayot?","acceptedAnswer":{"@type":"Answer","text":"Hayot — региональный узбекистанский бренд. Конкретный источник и параметры партии указываются на этикетке производителя."}},{"@type":"Question","name":"Минерализована ли Nestle Pure Life?","acceptedAnswer":{"@type":"Answer","text":"Pure Life во многих странах позиционируется как столовая питьевая вода после реминерализации. Точные параметры — по актуальной этикетке."}},{"@type":"Question","name":"Почему TDS у разных брендов так сильно отличается?","acceptedAnswer":{"@type":"Answer","text":"TDS зависит от исходного источника и технологии обработки. Артезианская вода может быть низко- или среднеминерализованной; вода после обратного осмоса обычно реминерализуется по стандарту производителя."}},{"@type":"Question","name":"Какой бренд безопаснее?","acceptedAnswer":{"@type":"Answer","text":"Любой бренд, легально реализуемый в Узбекистане, проходит надзор Санэпид. Это базовая планка безопасности; различия лежат в источнике, минерализации и сервисе."}},{"@type":"Question","name":"Почему у Aqua Element только два размера бутылок?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element сфокусирован на сценарии дома и офиса: бутыли 18,9 л (возвратная) и 10 л (одноразовая) оптимальны для регулярного потребления и снижают объём пластика."}},{"@type":"Question","name":"Можно ли давать любую бутилированную воду младенцу?","acceptedAnswer":{"@type":"Answer","text":"Для детских смесей обычно рекомендуют низкоминерализованную воду с TDS до 100 мг/л и низким натрием. Окончательное решение — за педиатром на основании этикетки."}},{"@type":"Question","name":"Чем артезианская вода отличается от воды после обратного осмоса?","acceptedAnswer":{"@type":"Answer","text":"Артезианская — глубокая напорная подземная вода. Обратный осмос удаляет до 99% растворённых веществ из любой исходной воды, после чего обычно проводится реминерализация."}},{"@type":"Question","name":"Почему вы не сравниваете цены?","acceptedAnswer":{"@type":"Answer","text":"Цены меняются в зависимости от продавца, акций и времени, поэтому сравнение цен быстро устаревает. Сравнение по критериям корректнее."}},{"@type":"Question","name":"Доставляет ли Aqua Element за пределы Ташкента?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element обслуживает Ташкент и Ташкентскую область. Подробности — в разделе FAQ по доставке."}},{"@type":"Question","name":"Где попробовать Aqua Element?","acceptedAnswer":{"@type":"Answer","text":"Заказ — через каталог на сайте или Telegram-бот @aqua_element_bot. Регулярный подвоз оформляется в подписке."}}]}</script>
 """,
         },
         "uz": {
             "title": "Aqua Element vs Hayot, Nestle Pure Life, Bonaqua va Demi",
             "excerpt": "Toshkentdagi butilkadagi suvni neytral solishtirish: manba turi, filtratsiya, minerallashuv, formatlar, sotuv kanallari. Aqua Element Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda yonida.",
             "meta_title": "Aqua Element vs Hayot, Nestle Pure Life, Bonaqua, Demi",
-            "meta_description": "Aqua Element ni Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda bilan manba, filtratsiya va sotuv kanali bo'yicha solishtirish.",
+            "meta_description": "Aqua Element ni Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda bilan manba, filtratsiya va sotuv kanali bo‘yicha solishtirish.",
             "content": """
-<p><strong>Eslatma.</strong> Ushbu solishtirish e'lon qilingan paytdagi ochiq ma'lumotlarga — etiketkalar, ishlab chiqaruvchi saytlari va standart soha bilimlariga asoslangan. Xaridorlar har doim joriy etiketkalar va sertifikatlarni tekshirib turishi kerak, chunki retseptura va manba o'zgarishi mumkin. Narxlar solishtirilmaydi, chunki ular sotuvchi va vaqtga qarab farq qiladi.</p>
+<p><strong>Eslatma.</strong> Ushbu solishtirish e’lon qilingan paytdagi ochiq ma’lumotlarga — etiketkalar, ishlab chiqaruvchi saytlari va standart soha bilimlariga asoslangan. Xaridorlar har doim joriy etiketkalar va sertifikatlarni tekshirib turishi kerak, chunki retseptura va manba o‘zgarishi mumkin. Narxlar solishtirilmaydi, chunki ular sotuvchi va vaqtga qarab farq qiladi.</p>
 
-<p>Agar siz «Aqua Element yoki Hayot», «Bonaqua va Hayot solishtirish» yoki «O'zbekistonda eng yaxshi butilkadagi suv» deb qidirayotgan bo'lsangiz — bu to'g'ri yondashuv. Ammo yagona «eng yaxshi» brend yo'q: to'g'ri tanlov sizga nima muhimroq ekaniga bog'liq — manba, minerallashuv, shisha formati, yetkazib berish usuli yoki mahalliy kelib chiqish. Maqolada biz neytral mezonlar tizimini taklif qilamiz va uni Toshkentda mavjud oltita brendga qo'llaymiz: Aqua Element, Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda.</p>
+<p>Agar siz «Aqua Element yoki Hayot», «Bonaqua va Hayot solishtirish» yoki «O‘zbekistonda eng yaxshi butilkadagi suv» deb qidirayotgan bo‘lsangiz — bu to‘g‘ri yondashuv. Ammo yagona «eng yaxshi» brend yo‘q: to‘g‘ri tanlov sizga nima muhimroq ekaniga bog‘liq — manba, minerallashuv, shisha formati, yetkazib berish usuli yoki mahalliy kelib chiqish. Maqolada biz neytral mezonlar tizimini taklif qilamiz va uni Toshkentda mavjud oltita brendga qo‘llaymiz: Aqua Element, Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda.</p>
 
-<p>Maqolaning maqsadi — g'olibni e'lon qilish emas, balki sizga asbob berish. Brendlar neytral va faktik tasvirlangan, ochiq manbalarga tayanilgan. Rasmiy ma'lumot bo'lmagan joyda biz «ochiq oshkor qilinmagan» deb yozamiz — taxmin qilishdan ko'ra halolroq. Oxirida solishtirish jadvali, «Sizning stsenariy uchun qanday tanlash» bo'limi va FAQ bor.</p>
+<p>Maqolaning maqsadi — g‘olibni e’lon qilish emas, balki sizga asbob berish. Brendlar neytral va faktik tasvirlangan, ochiq manbalarga tayanilgan. Rasmiy ma’lumot bo‘lmagan joyda biz «ochiq oshkor qilinmagan» deb yozamiz — taxmin qilishdan ko‘ra halolroq. Oxirida solishtirish jadvali, «Sizning stsenariy uchun qanday tanlash» bo‘limi va FAQ bor.</p>
 
 <h2>Butilkadagi suvda nimani solishtirish kerak</h2>
 
-<p>Aniq brendlarga o'tishdan oldin mezonlarni belgilash kerak. Ko'pchilik xaridorlar narx va hajmni solishtiradi — bu ko'rinarli, lekin eng muhimi emas. Suvga professional qarash yetti omilga asoslanadi.</p>
+<p>Aniq brendlarga o‘tishdan oldin mezonlarni belgilash kerak. Ko‘pchilik xaridorlar narx va hajmni solishtiradi — bu ko‘rinarli, lekin eng muhimi emas. Suvga professional qarash yetti omilga asoslanadi.</p>
 
 <h3>1. Suv manbasi turi</h3>
-<p>Manbalar to'rt katta sinfga bo'linadi: <strong>artezian</strong> (jinslar bilan himoyalangan chuqur bosimli yer osti suvlari), <strong>buloq</strong> (yer osti suvlarining yer yuzasiga chiqishi), <strong>yer usti</strong> (daryolar, suv omborlari) va <strong>teskari osmos bilan tozalangan munitsipal</strong> suv. Artezian suvi tarkibining barqarorligi va tabiiy himoyasi bilan qadrlanadi. Munitsipal suv teskari osmosdan keyin xavfsiz bo'lsa-da, uning «kelib chiqishi» yer osti suvidan farq qiladi.</p>
+<p>Manbalar to‘rt katta sinfga bo‘linadi: <strong>artezian</strong> (jinslar bilan himoyalangan chuqur bosimli yer osti suvlari), <strong>buloq</strong> (yer osti suvlarining yer yuzasiga chiqishi), <strong>yer usti</strong> (daryolar, suv omborlari) va <strong>teskari osmos bilan tozalangan munitsipal</strong> suv. Artezian suvi tarkibining barqarorligi va tabiiy himoyasi bilan qadrlanadi. Munitsipal suv teskari osmosdan keyin xavfsiz bo‘lsa-da, uning «kelib chiqishi» yer osti suvidan farq qiladi.</p>
 
 <h3>2. Filtratsiya yondashuvi</h3>
-<p>Bir ishlab chiqaruvchi faqat dezinfeksiyani amalga oshirsa, boshqasi ko'p bosqichli ishlov beradi: mexanik filtrlar, faollashtirilgan ko'mir, ion almashinuvi, teskari osmos, ultrabinafsha nur, ozonlash, reminerallashtirish. Bosqichlar qanchalik to'liq oshkor qilinsa, xaridor o'zi nima sotib olayotganini shunchalik aniq biladi.</p>
+<p>Bir ishlab chiqaruvchi faqat dezinfeksiyani amalga oshirsa, boshqasi ko‘p bosqichli ishlov beradi: mexanik filtrlar, faollashtirilgan ko‘mir, ion almashinuvi, teskari osmos, ultrabinafsha nur, ozonlash, reminerallashtirish. Bosqichlar qanchalik to‘liq oshkor qilinsa, xaridor o‘zi nima sotib olayotganini shunchalik aniq biladi.</p>
 
 <h3>3. Minerallashuv va mineral profil</h3>
-<p>Quruq qoldiq (TDS) suvda erigan moddalarning umumiy miqdorini ko'rsatadi. Past minerallashgan suv — ~100 mg/l gacha; o'rta — 100–500 mg/l; yuqori — 500 mg/l dan ortiq. TDS dan tashqari kaltsiy (Ca), magniy (Mg), natriy (Na), bikarbonat (HCO₃⁻), sulfat va xloridlar nisbati muhim. Past minerallashgan suv ta'mi neytral, kundalik iste'mol, chaqaloq oziqlanishi va kofe uchun qulay.</p>
+<p>Quruq qoldiq (TDS) suvda erigan moddalarning umumiy miqdorini ko‘rsatadi. Past minerallashgan suv — ~100 mg/l gacha; o‘rta — 100–500 mg/l; yuqori — 500 mg/l dan ortiq. TDS dan tashqari kaltsiy (Ca), magniy (Mg), natriy (Na), bikarbonat (HCO₃⁻), sulfat va xloridlar nisbati muhim. Past minerallashgan suv ta’mi neytral, kundalik iste’mol, chaqaloq oziqlanishi va kofe uchun qulay.</p>
 
 <h3>4. Tartibga solish nazorati</h3>
-<p>O'zbekistonda butilkadagi ichimlik suvi nazoratini Sanitariya-epidemiologiya farovonligi va aholi salomatligi qo'mitasi (Sanepid) amalga oshiradi. Mahalliy bozorga yo'naltirilgan brendlar mahalliy tekshiruvlardan o'tadi. Global brendlar qo'shimcha ravishda korporativ standartlarga tayanadi.</p>
+<p>O‘zbekistonda butilkadagi ichimlik suvi nazoratini Sanitariya-epidemiologiya farovonligi va aholi salomatligi qo‘mitasi (Sanepid) amalga oshiradi. Mahalliy bozorga yo‘naltirilgan brendlar mahalliy tekshiruvlardan o‘tadi. Global brendlar qo‘shimcha ravishda korporativ standartlarga tayanadi.</p>
 
 <h3>5. Shisha formati va qaytarish</h3>
 <p>Kichik PET shishalar 0,5 / 1 / 1,5 / 5 litr — supermarket formati. 10 va 18,9 litrli katta shishalar — «uy/ofis» formati, odatda polikarbonat va qaytariladigan. Qaytariladigan shisha plastik chiqindilarni litrga kamaytiradi.</p>
 
 <h3>6. Tarqatish kanali</h3>
-<p>Brendlarning bir qismi supermarket orqali, bir qismi to'g'ridan-to'g'ri yetkazib berish modeli orqali, bir qismi aralash ishlaydi. To'g'ridan-to'g'ri yetkazib berish — vositachilar kam, shaffof zanjir va qulaylik, lekin chegaralangan geografiya.</p>
+<p>Brendlarning bir qismi supermarket orqali, bir qismi to‘g‘ridan-to‘g‘ri yetkazib berish modeli orqali, bir qismi aralash ishlaydi. To‘g‘ridan-to‘g‘ri yetkazib berish — vositachilar kam, shaffof zanjir va qulaylik, lekin chegaralangan geografiya.</p>
 
 <h3>7. Mahalliy yoki import brendi</h3>
-<p>Mahalliy brendlar suvni mahalliy manbalardan quyadi, importlar — yo uzoqdan keltiradi, yo «mahalliy quyilgan» global ostida ishlaydi. Etiketkada bir xil nom bo'lsa ham, bu ikki xil mahsulot.</p>
+<p>Mahalliy brendlar suvni mahalliy manbalardan quyadi, importlar — yo uzoqdan keltiradi, yo «mahalliy quyilgan» global ostida ishlaydi. Etiketkada bir xil nom bo‘lsa ham, bu ikki xil mahsulot.</p>
 
 <h2>Har bir brendning qisqa profili</h2>
 
-<p>Quyida ochiq ma'lumotga asoslangan neytral tavsiflar. Agar sizda boshqa etiketka bo'lsa — ustuvorlik joriy etiketkada.</p>
+<p>Quyida ochiq ma’lumotga asoslangan neytral tavsiflar. Agar sizda boshqa etiketka bo‘lsa — ustuvorlik joriy etiketkada.</p>
 
 <h3>Aqua Element</h3>
-<p>O'zbekiston brendi, operator — Blue Stream Group. Manba — Toshkent viloyati Quyichirchiq tumanidagi taxminan 120 m chuqurlikdagi artezian qudug'i. Ishlab chiqarishda 11 bosqich filtratsiya qo'llaniladi (kvars, faollashtirilgan ko'mir, ion almashinuvi yumshatuvchi, regeneratsiya bloki, polipropilen 5 mkm, polipropilen 1 mkm, teskari osmos, membrana CIP, UB, reminerallashtirish, ozonlash). E'lon qilingan mineral profil: TDS 30–50 mg/l, pH 7,5, Ca²⁺ 10–60 mg/l, Mg²⁺ 7–20 mg/l, Na⁺ 5–15 mg/l. Mavjud formatlar: 18,9 l (qaytariladigan) va 10 l (bir martalik). Kanal — Toshkent shahar va viloyat bo'ylab to'g'ridan-to'g'ri yetkazib berish (sayt, Telegram-bot, telefon). Tartibga soluvchi — Sanepid.</p>
+<p>O‘zbekiston brendi, operator — Blue Stream Group. Manba — Toshkent viloyati Quyichirchiq tumanidagi taxminan 120 m chuqurlikdagi artezian qudug‘i. Ishlab chiqarishda 11 bosqich filtratsiya qo‘llaniladi (kvars, faollashtirilgan ko‘mir, ion almashinuvi yumshatuvchi, regeneratsiya bloki, polipropilen 5 mkm, polipropilen 1 mkm, teskari osmos, membrana CIP, UB, reminerallashtirish, ozonlash). E’lon qilingan mineral profil: TDS 30–50 mg/l, pH 7,5, Ca²⁺ 10–60 mg/l, Mg²⁺ 7–20 mg/l, Na⁺ 5–15 mg/l. Mavjud formatlar: 18,9 l (qaytariladigan) va 10 l (bir martalik). Kanal — Toshkent shahar va viloyat bo‘ylab to‘g‘ridan-to‘g‘ri yetkazib berish (sayt, Telegram-bot). Tartibga soluvchi — Sanepid.</p>
 
 <h3>Hayot</h3>
-<p>Mintaqaviy o'zbek brendi, supermarket va do'konlarda keng ifodalangan. Ochiq ma'lumotga ko'ra, brend ommaviy ichimlik suvi sifatida joylashtirilgan va keng PET formatlarda taqdim etilgan. Batafsil mineral profil va filtratsiya bosqichlari odatda etiketkada ko'rsatiladi. «Yo'l yoqasida» suv olish uchun qulay.</p>
+<p>Mintaqaviy o‘zbek brendi, supermarket va do‘konlarda keng ifodalangan. Ochiq ma’lumotga ko‘ra, brend ommaviy ichimlik suvi sifatida joylashtirilgan va keng PET formatlarda taqdim etilgan. Batafsil mineral profil va filtratsiya bosqichlari odatda etiketkada ko‘rsatiladi. «Yo‘l yoqasida» suv olish uchun qulay.</p>
 
 <h3>Nestle Pure Life</h3>
-<p>Nestlé guruhining global brendi. Pure Life ko'p mamlakatlarda mahalliy quyiladi va korporativ standart bo'yicha standartlashtiriladi. O'zbekiston bozorida odatda chakana hajmdagi PET formatlarida. Aniq manba va profil joriy etiketkadan tekshiriladi.</p>
+<p>Nestlé guruhining global brendi. Pure Life ko‘p mamlakatlarda mahalliy quyiladi va korporativ standart bo‘yicha standartlashtiriladi. O‘zbekiston bozorida odatda chakana hajmdagi PET formatlarida. Aniq manba va profil joriy etiketkadan tekshiriladi.</p>
 
 <h3>Bonaqua</h3>
-<p>The Coca-Cola Company brendi. Bonaqua ko'p mamlakatlarda ko'p bosqichli ishlov va reminerallashtirishdan keyin stol ichimlik suvi sifatida joylashtiriladi; quyish odatda mahalliy. Toshkent javonlarida PET formatlarda mavjud. Aniq parametrlar — etiketkada.</p>
+<p>The Coca-Cola Company brendi. Bonaqua ko‘p mamlakatlarda ko‘p bosqichli ishlov va reminerallashtirishdan keyin stol ichimlik suvi sifatida joylashtiriladi; quyish odatda mahalliy. Toshkent javonlarida PET formatlarda mavjud. Aniq parametrlar — etiketkada.</p>
 
 <h3>Demi</h3>
-<p>Mintaqaviy o'zbek ichimlik suvi brendi, chakana savdoda mavjud. PET formatlarda tarqatiladi. Manba va mineral profil ma'lumotlari — ishlab chiqaruvchi etiketkasida.</p>
+<p>Mintaqaviy o‘zbek ichimlik suvi brendi, chakana savdoda mavjud. PET formatlarda tarqatiladi. Manba va mineral profil ma’lumotlari — ishlab chiqaruvchi etiketkasida.</p>
 
 <h3>Ne Voda</h3>
 <p>Premium segmentda joylashgan mintaqaviy brend. Bir qator chakana va HoReCa nuqtalarida mavjud. Quyish va manbaning aniq xarakteristikalari — etiketkada.</p>
 
-<h2>Aqua Element shu koordinatalarda qanday ko'rinadi</h2>
+<h2>Aqua Element shu koordinatalarda qanday ko‘rinadi</h2>
 
-<p>Aqua Element ga xuddi shu yetti mezon qo'llanilsa: <strong>manba</strong> — artezian, ~120 m, Quyichirchiq; <strong>filtratsiya</strong> — oshkor qilingan 11 bosqich, <a href="/process/11-step-filtration">«Aqua Element 11 bosqichli filtratsiya»</a> sahifasida tasvirlangan; <strong>minerallashuv</strong> — past (TDS 30–50 mg/l), ta'mi neytral, kundalik ichish va chaqaloq ovqati uchun mos; <strong>tartibga soluvchi</strong> — Sanepid; <strong>format</strong> — faqat 18,9 l (qaytariladigan) va 10 l (bir martalik); <strong>kanal</strong> — to'g'ridan-to'g'ri yetkazib berish; <strong>kelib chiqish</strong> — mahalliy O'zbek brendi.</p>
+<p>Aqua Element ga xuddi shu yetti mezon qo‘llanilsa: <strong>manba</strong> — artezian, ~120 m, Quyichirchiq; <strong>filtratsiya</strong> — oshkor qilingan 11 bosqich, <a href="/process/11-step-filtration">«Aqua Element 11 bosqichli filtratsiya»</a> sahifasida tasvirlangan; <strong>minerallashuv</strong> — past (TDS 30–50 mg/l), ta’mi neytral, kundalik ichish va chaqaloq ovqati uchun mos; <strong>tartibga soluvchi</strong> — Sanepid; <strong>format</strong> — faqat 18,9 l (qaytariladigan) va 10 l (bir martalik); <strong>kanal</strong> — to‘g‘ridan-to‘g‘ri yetkazib berish; <strong>kelib chiqish</strong> — mahalliy O‘zbek brendi.</p>
 
 <h2>Solishtirish jadvali</h2>
 
-<p>Jadvalda yetti mezon bo'yicha xulosa. Vakolatli ma'lumot bo'lmagan joyda biz to'g'ridan-to'g'ri «ochiq oshkor qilinmagan» deb yozamiz. Sizning aniq partiyaning etiketkasi — yakuniy haqiqat.</p>
+<p>Jadvalda yetti mezon bo‘yicha xulosa. Vakolatli ma’lumot bo‘lmagan joyda biz to‘g‘ridan-to‘g‘ri «ochiq oshkor qilinmagan» deb yozamiz. Sizning aniq partiyaning etiketkasi — yakuniy haqiqat.</p>
 
 <table>
   <thead>
@@ -310,11 +310,11 @@ ARTICLE = {
     <tr>
       <td>Manba turi</td>
       <td>Artezian, ~120 m, Quyichirchiq</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha (mahalliy quyish)</td>
-      <td>Etiketka bo'yicha (mahalliy quyish)</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha (mahalliy quyish)</td>
+      <td>Etiketka bo‘yicha (mahalliy quyish)</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha</td>
     </tr>
     <tr>
       <td>Filtratsiya bosqichlari</td>
@@ -328,11 +328,11 @@ ARTICLE = {
     <tr>
       <td>Mineral profil</td>
       <td>TDS 30–50 mg/l; pH 7,5</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha</td>
-      <td>Etiketka bo'yicha</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha</td>
+      <td>Etiketka bo‘yicha</td>
     </tr>
     <tr>
       <td>Shisha formatlari</td>
@@ -354,20 +354,20 @@ ARTICLE = {
     </tr>
     <tr>
       <td>Tarqatish kanali</td>
-      <td>To'g'ridan-to'g'ri yetkazish (sayt + Telegram + telefon)</td>
-      <td>Supermarketlar va do'konlar</td>
-      <td>Supermarketlar va do'konlar</td>
-      <td>Supermarketlar va do'konlar</td>
-      <td>Supermarketlar va do'konlar</td>
+      <td>To‘g‘ridan-to‘g‘ri yetkazish (sayt + Telegram)</td>
+      <td>Supermarketlar va do‘konlar</td>
+      <td>Supermarketlar va do‘konlar</td>
+      <td>Supermarketlar va do‘konlar</td>
+      <td>Supermarketlar va do‘konlar</td>
       <td>Chakana va HoReCa</td>
     </tr>
     <tr>
       <td>Mahalliy / import</td>
-      <td>Mahalliy (O'zbekiston)</td>
-      <td>Mahalliy (O'zbekiston)</td>
+      <td>Mahalliy (O‘zbekiston)</td>
+      <td>Mahalliy (O‘zbekiston)</td>
       <td>Global (mahalliy quyish)</td>
       <td>Global (mahalliy quyish)</td>
-      <td>Mahalliy (O'zbekiston)</td>
+      <td>Mahalliy (O‘zbekiston)</td>
       <td>Mahalliy/mintaqaviy</td>
     </tr>
   </tbody>
@@ -375,68 +375,68 @@ ARTICLE = {
 
 <h2>Stsenariyga qarab qanday tanlash</h2>
 
-<p>Bir xil mezonlar to'plami har xil xaridorlar uchun har xil ahamiyatga ega. O'zingizni qaysi guruhga kiritishingizni o'ylab ko'ring.</p>
+<p>Bir xil mezonlar to‘plami har xil xaridorlar uchun har xil ahamiyatga ega. O‘zingizni qaysi guruhga kiritishingizni o‘ylab ko‘ring.</p>
 
 <h3>Bolalari bor oila uchun</h3>
-<p>Eng muhimi — past yoki o'rta minerallashuv (ayniqsa chaqaloq aralashmalari uchun), barqaror yetkazib beruvchi va uy formati. 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar ortiqcha plastik yaratmaydi va do'kondan og'irlik tashish kerak emas. Chaqaloq ovqatini tayyorlash uchun odatda TDS 100 mg/l gacha bo'lgan suv tavsiya etiladi — bu Aqua Element profiliga mos. Bolaga aniq ko'rsatkichlar kerak bo'lsa, pediatr bilan maslahatlashing.</p>
+<p>Eng muhimi — past yoki o‘rta minerallashuv (ayniqsa chaqaloq aralashmalari uchun), barqaror yetkazib beruvchi va uy formati. 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar ortiqcha plastik yaratmaydi va do‘kondan og‘irlik tashish kerak emas. Chaqaloq ovqatini tayyorlash uchun odatda TDS 100 mg/l gacha bo‘lgan suv tavsiya etiladi — bu Aqua Element profiliga mos. Bolaga aniq ko‘rsatkichlar kerak bo‘lsa, pediatr bilan maslahatlashing.</p>
 
 <h3>Ofis uchun</h3>
-<p>Ofisda muhimi — barqaror yetkazib berish, kuler mavjudligi, qaytariladigan idish va yagona hisob-kitob. To'g'ridan-to'g'ri yetkazish modelidagi brendlar bunga yaxshiroq mos keladi. Korporativ mijozlar <a href="/subscriptions">«Obunalar»</a> bo'limi orqali rasmiylashtirishlari mumkin.</p>
+<p>Ofisda muhimi — barqaror yetkazib berish, kuler mavjudligi, qaytariladigan idish va yagona hisob-kitob. To‘g‘ridan-to‘g‘ri yetkazish modelidagi brendlar bunga yaxshiroq mos keladi. Korporativ mijozlar <a href="/subscriptions">«Obunalar»</a> bo‘limi orqali rasmiylashtirishlari mumkin.</p>
 
 <h3>Kofe va choy uchun</h3>
-<p>Barista va specialty-kofe ixlosmandlari past minerallashgan, kaltsiy va magniy nisbati muvozanatli suvni qadrlaydi — u ichimlik ta'mini niqoblamaydi va jihozni asraydi. TDS 30–50 mg/l SCA tavsiyalariga yaqin profil. Brendlarni etiketka bo'yicha solishtiring.</p>
+<p>Barista va specialty-kofe ixlosmandlari past minerallashgan, kaltsiy va magniy nisbati muvozanatli suvni qadrlaydi — u ichimlik ta’mini niqoblamaydi va jihozni asraydi. TDS 30–50 mg/l SCA tavsiyalariga yaqin profil. Brendlarni etiketka bo‘yicha solishtiring.</p>
 
-<h3>Sayohat va tashqarida bo'lish uchun</h3>
-<p>Bu yerda chakana 0,5 / 1,5 l PET formatlari yutadi. Aqua Element bu stsenariy uchun mos emas — chakana shishalar yo'q. Optimal variantlar — Hayot, Nestle Pure Life, Bonaqua, Demi va boshqa chakana brendlar. Bu «eng yaxshi suv» stsenariyga bog'liqligini ko'rsatadi.</p>
+<h3>Sayohat va tashqarida bo‘lish uchun</h3>
+<p>Bu yerda chakana 0,5 / 1,5 l PET formatlari yutadi. Aqua Element bu stsenariy uchun mos emas — chakana shishalar yo‘q. Optimal variantlar — Hayot, Nestle Pure Life, Bonaqua, Demi va boshqa chakana brendlar. Bu «eng yaxshi suv» stsenariyga bog‘liqligini ko‘rsatadi.</p>
 
 <h3>Maxsus parhezlar uchun</h3>
-<p>Agar shifokor natriyni cheklashni, magniy darajasini yoki ma'lum pH ni tavsiya qilgan bo'lsa — bu individual hikoya. Brendlarni emas, partiya etiketkalarini solishtiring.</p>
+<p>Agar shifokor natriyni cheklashni, magniy darajasini yoki ma’lum pH ni tavsiya qilgan bo‘lsa — bu individual hikoya. Brendlarni emas, partiya etiketkalarini solishtiring.</p>
 
-<h2>Mas'uliyatli ishlab chiqaruvchilar uchun umumiy</h2>
+<h2>Mas’uliyatli ishlab chiqaruvchilar uchun umumiy</h2>
 
-<p>Modellar har xil bo'lsa-da, barcha mas'uliyatli brendlarda umumiy asos bor: sanitariya talablariga muvofiqlik, suvni majburiy tekshirish, mikrobiologiya nazorati va doimiy tekshiruvlar. O'zbekistonda butilkadagi suv xavfsizligi — bu barcha bozor ishtirokchilari o'tishga majbur bo'lgan quyi chegara. Farqlar bu chegaradan yuqorida boshlanadi: manbada, filtratsiya tafsilotida, mineral profilda, formatda va logistikada.</p>
+<p>Modellar har xil bo‘lsa-da, barcha mas’uliyatli brendlarda umumiy asos bor: sanitariya talablariga muvofiqlik, suvni majburiy tekshirish, mikrobiologiya nazorati va doimiy tekshiruvlar. O‘zbekistonda butilkadagi suv xavfsizligi — bu barcha bozor ishtirokchilari o‘tishga majbur bo‘lgan quyi chegara. Farqlar bu chegaradan yuqorida boshlanadi: manbada, filtratsiya tafsilotida, mineral profilda, formatda va logistikada.</p>
 
-<h2>Aqua Element nimaga e'tibor qaratadi</h2>
+<h2>Aqua Element nimaga e’tibor qaratadi</h2>
 
-<p>«O'zbekistondagi eng yaxshi suv» deb e'lon qilmasdan, Aqua Element bir nechta narsaga e'tibor qaratadi: oshkor qilingan manba, batafsil 11 bosqichli filtratsiya, e'lon qilingan TDS diapazoni bilan past minerallashuv, 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar va shaffof to'g'ridan-to'g'ri yetkazib berish. Agar bu parametrlar siz uchun muhim bo'lsa: <a href="/process/11-step-filtration">11 bosqichli texnologiya</a>, <a href="/shop">katalog va buyurtma</a>, <a href="/water-delivery-faq">yetkazib berish bo'yicha tez-tez beriladigan savollar</a>. Agar «hoziroq supermarketda» suvga muhtoj bo'lsangiz — chakana brendlarni tanlang.</p>
+<p>«O‘zbekistondagi eng yaxshi suv» deb e’lon qilmasdan, Aqua Element bir nechta narsaga e’tibor qaratadi: oshkor qilingan manba, batafsil 11 bosqichli filtratsiya, e’lon qilingan TDS diapazoni bilan past minerallashuv, 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar va shaffof to‘g‘ridan-to‘g‘ri yetkazib berish. Agar bu parametrlar siz uchun muhim bo‘lsa: <a href="/process/11-step-filtration">11 bosqichli texnologiya</a>, <a href="/shop">katalog va buyurtma</a>, <a href="/water-delivery-faq">yetkazib berish bo‘yicha tez-tez beriladigan savollar</a>. Agar «hoziroq supermarketda» suvga muhtoj bo‘lsangiz — chakana brendlarni tanlang.</p>
 
 <h2>Tez-tez beriladigan savollar</h2>
 
 <h3>Hayot suvi qayerdan?</h3>
-<p>Ochiq ma'lumotga ko'ra, Hayot — mintaqaviy o'zbek brendi. Aniq manba va partiya parametrlari joriy etiketkada ko'rsatilgan.</p>
+<p>Ochiq ma’lumotga ko‘ra, Hayot — mintaqaviy o‘zbek brendi. Aniq manba va partiya parametrlari joriy etiketkada ko‘rsatilgan.</p>
 
 <h3>Nestle Pure Life minerallashganmi?</h3>
-<p>Pure Life ko'p mamlakatlarda reminerallashtirilgan stol ichimlik suvi sifatida joylashtirilgan. Aniq profil — joriy etiketkada.</p>
+<p>Pure Life ko‘p mamlakatlarda reminerallashtirilgan stol ichimlik suvi sifatida joylashtirilgan. Aniq profil — joriy etiketkada.</p>
 
-<h3>Nima uchun TDS brendlar bo'yicha bunchalik farq qiladi?</h3>
-<p>TDS — manba va texnologiyaga bog'liq umumiy ko'rsatkich. Chuqur artezian suvi past yoki o'rta minerallashgan bo'lishi mumkin. Teskari osmosdan keyin suv odatda korporativ standart bo'yicha reminerallashtiriladi. Etiketka — yagona aniq javob.</p>
+<h3>Nima uchun TDS brendlar bo‘yicha bunchalik farq qiladi?</h3>
+<p>TDS — manba va texnologiyaga bog‘liq umumiy ko‘rsatkich. Chuqur artezian suvi past yoki o‘rta minerallashgan bo‘lishi mumkin. Teskari osmosdan keyin suv odatda korporativ standart bo‘yicha reminerallashtiriladi. Etiketka — yagona aniq javob.</p>
 
 <h3>Qaysi brend xavfsizroq?</h3>
-<p>O'zbekistonda qonuniy sotiladigan har qanday brend Sanepid nazoratidan o'tadi. Bu xavfsizlik bo'yicha quyi chegara. Brendlar o'rtasidagi farqlar manba, minerallashuv va xizmat darajasida.</p>
+<p>O‘zbekistonda qonuniy sotiladigan har qanday brend Sanepid nazoratidan o‘tadi. Bu xavfsizlik bo‘yicha quyi chegara. Brendlar o‘rtasidagi farqlar manba, minerallashuv va xizmat darajasida.</p>
 
-<h3>Nima uchun Aqua Element da faqat ikki o'lchamli shisha bor?</h3>
-<p>Aqua Element uy va ofis stsenariysiga e'tibor qaratadi: 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar muntazam iste'mol uchun optimal va plastik izini kamaytiradi.</p>
+<h3>Nima uchun Aqua Element da faqat ikki o‘lchamli shisha bor?</h3>
+<p>Aqua Element uy va ofis stsenariysiga e’tibor qaratadi: 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar muntazam iste’mol uchun optimal va plastik izini kamaytiradi.</p>
 
 <h3>Har qanday butilkadagi suvni chaqaloqqa berish mumkinmi?</h3>
 <p>Chaqaloq aralashmalari uchun odatda TDS 100 mg/l gacha va past natriyli past minerallashgan suv tavsiya etiladi. Yakuniy qaror etiketka asosida pediatr bilan birga qabul qilinadi.</p>
 
 <h3>Artezian suvi teskari osmosdan qanday farq qiladi?</h3>
-<p>Artezian — chuqur bosimli yer osti suvi. Teskari osmos har qanday boshlang'ich suvdan 99% gacha erigan moddalarni olib tashlaydi, undan keyin odatda reminerallashtirish o'tkaziladi. Ikkalasi ham xavfsiz bo'lishi mumkin.</p>
+<p>Artezian — chuqur bosimli yer osti suvi. Teskari osmos har qanday boshlang‘ich suvdan 99% gacha erigan moddalarni olib tashlaydi, undan keyin odatda reminerallashtirish o‘tkaziladi. Ikkalasi ham xavfsiz bo‘lishi mumkin.</p>
 
 <h3>Nima uchun siz narxlarni solishtirmaysiz?</h3>
-<p>Narxlar sotuvchi, aksiya va vaqtga qarab o'zgaradi. Narx solishtirish tez eskiradi. Mezonlar bo'yicha solishtirish to'g'riroq.</p>
+<p>Narxlar sotuvchi, aksiya va vaqtga qarab o‘zgaradi. Narx solishtirish tez eskiradi. Mezonlar bo‘yicha solishtirish to‘g‘riroq.</p>
 
 <h3>Aqua Element Toshkentdan tashqariga yetkazib beradimi?</h3>
-<p>Hozirda Aqua Element Toshkent shahar va viloyatda xizmat qiladi. Tafsilot — <a href="/water-delivery-faq">yetkazib berish FAQ</a> bo'limida.</p>
+<p>Hozirda Aqua Element Toshkent shahar va viloyatda xizmat qiladi. Tafsilot — <a href="/water-delivery-faq">yetkazib berish FAQ</a> bo‘limida.</p>
 
-<h3>Aqua Element ni qayerdan sinab ko'rish mumkin?</h3>
-<p>Birinchi shisha buyurtmasini <a href="/shop">katalog</a>, Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> yoki telefon orqali bering. Jihoz va muntazam yetkazish <a href="/subscriptions">obuna</a> orqali rasmiylashtiriladi.</p>
+<h3>Aqua Element ni qayerdan sinab ko‘rish mumkin?</h3>
+<p>Birinchi shisha buyurtmasini <a href="/shop">katalog</a> yoki Telegram-bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a> orqali bering. Muntazam yetkazish <a href="/subscriptions">obuna</a> orqali rasmiylashtiriladi.</p>
 
 <h2>Xulosa</h2>
 
-<p>Brendlarni solishtirish faqat koordinatalar tizimida ma'noga ega. Biz yetti mezonni taklif qildik va ularni Toshkentdagi oltita brendga qo'lladik. Aqua Element — oshkor qilingan artezian manbasi, batafsil 11 bosqichli filtratsiya, past minerallashuv va qaytariladigan idish bilan to'g'ridan-to'g'ri yetkazib berish bilan ajralib turuvchi variantlardan biri. Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda — boshqa urg'ular va boshqa logistika bilan munosib variantlar. Eng yaxshi brend — sizning foydalanish stsenariyingizga mos keladigan brend. Etiketkalarni tekshiring, ongli tanlang, yetarli suv iching.</p>
+<p>Brendlarni solishtirish faqat koordinatalar tizimida ma’noga ega. Biz yetti mezonni taklif qildik va ularni Toshkentdagi oltita brendga qo‘lladik. Aqua Element — oshkor qilingan artezian manbasi, batafsil 11 bosqichli filtratsiya, past minerallashuv va qaytariladigan idish bilan to‘g‘ridan-to‘g‘ri yetkazib berish bilan ajralib turuvchi variantlardan biri. Hayot, Nestle Pure Life, Bonaqua, Demi va Ne Voda — boshqa urg‘ular va boshqa logistika bilan munosib variantlar. Eng yaxshi brend — sizning foydalanish stsenariyingizga mos keladigan brend. Etiketkalarni tekshiring, ongli tanlang, yetarli suv iching.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Hayot suvi qayerdan?","acceptedAnswer":{"@type":"Answer","text":"Hayot — mintaqaviy o'zbek brendi. Aniq manba va partiya parametrlari ishlab chiqaruvchi etiketkasida ko'rsatiladi."}},{"@type":"Question","name":"Nestle Pure Life minerallashganmi?","acceptedAnswer":{"@type":"Answer","text":"Pure Life ko'p mamlakatlarda reminerallashtirilgan stol ichimlik suvi sifatida joylashtirilgan. Aniq parametrlar — joriy etiketkada."}},{"@type":"Question","name":"Nima uchun TDS brendlar bo'yicha farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"TDS manba va ishlov berish texnologiyasiga bog'liq. Artezian suvi past yoki o'rta minerallashgan bo'lishi mumkin; teskari osmosdan keyin suv standart bo'yicha reminerallashtiriladi."}},{"@type":"Question","name":"Qaysi brend xavfsizroq?","acceptedAnswer":{"@type":"Answer","text":"O'zbekistonda qonuniy sotiladigan har qanday brend Sanepid nazoratidan o'tadi. Bu xavfsizlik chegarasi; farqlar manba, minerallashuv va xizmatda."}},{"@type":"Question","name":"Nima uchun Aqua Element da faqat ikki o'lcham bor?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element uy va ofis stsenariysiga e'tibor qaratadi: 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar muntazam iste'mol uchun optimal va plastik hajmini kamaytiradi."}},{"@type":"Question","name":"Har qanday butilkadagi suvni chaqaloqqa berish mumkinmi?","acceptedAnswer":{"@type":"Answer","text":"Chaqaloq aralashmalari uchun TDS 100 mg/l gacha va past natriyli suv tavsiya etiladi. Yakuniy qaror — pediatr bilan etiketka asosida."}},{"@type":"Question","name":"Artezian suvi teskari osmosdan qanday farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"Artezian — chuqur yer osti suvi. Teskari osmos har qanday boshlang'ich suvdan erigan moddalarning 99% gacha qismini olib tashlaydi, keyin odatda reminerallashtiriladi."}},{"@type":"Question","name":"Nima uchun narxlar solishtirilmagan?","acceptedAnswer":{"@type":"Answer","text":"Narxlar sotuvchi, aksiya va vaqtga qarab o'zgaradi, shuning uchun narx solishtirish tez eskiradi. Mezonlar bo'yicha solishtirish to'g'riroq."}},{"@type":"Question","name":"Aqua Element Toshkentdan tashqariga yetkazib beradimi?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element Toshkent shahar va Toshkent viloyatida xizmat qiladi. Tafsilot — yetkazib berish FAQ bo'limida."}},{"@type":"Question","name":"Aqua Element ni qayerdan sinash mumkin?","acceptedAnswer":{"@type":"Answer","text":"Buyurtma — sayt katalogi, Telegram-bot @aqua_element_bot yoki telefon orqali. Muntazam yetkazish va jihoz obuna orqali rasmiylashtiriladi."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Hayot suvi qayerdan?","acceptedAnswer":{"@type":"Answer","text":"Hayot — mintaqaviy o‘zbek brendi. Aniq manba va partiya parametrlari ishlab chiqaruvchi etiketkasida ko‘rsatiladi."}},{"@type":"Question","name":"Nestle Pure Life minerallashganmi?","acceptedAnswer":{"@type":"Answer","text":"Pure Life ko‘p mamlakatlarda reminerallashtirilgan stol ichimlik suvi sifatida joylashtirilgan. Aniq parametrlar — joriy etiketkada."}},{"@type":"Question","name":"Nima uchun TDS brendlar bo‘yicha farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"TDS manba va ishlov berish texnologiyasiga bog‘liq. Artezian suvi past yoki o‘rta minerallashgan bo‘lishi mumkin; teskari osmosdan keyin suv standart bo‘yicha reminerallashtiriladi."}},{"@type":"Question","name":"Qaysi brend xavfsizroq?","acceptedAnswer":{"@type":"Answer","text":"O‘zbekistonda qonuniy sotiladigan har qanday brend Sanepid nazoratidan o‘tadi. Bu xavfsizlik chegarasi; farqlar manba, minerallashuv va xizmatda."}},{"@type":"Question","name":"Nima uchun Aqua Element da faqat ikki o‘lcham bor?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element uy va ofis stsenariysiga e’tibor qaratadi: 18,9 l (qaytariladigan) va 10 l (bir martalik) idishlar muntazam iste’mol uchun optimal va plastik hajmini kamaytiradi."}},{"@type":"Question","name":"Har qanday butilkadagi suvni chaqaloqqa berish mumkinmi?","acceptedAnswer":{"@type":"Answer","text":"Chaqaloq aralashmalari uchun TDS 100 mg/l gacha va past natriyli suv tavsiya etiladi. Yakuniy qaror — pediatr bilan etiketka asosida."}},{"@type":"Question","name":"Artezian suvi teskari osmosdan qanday farq qiladi?","acceptedAnswer":{"@type":"Answer","text":"Artezian — chuqur yer osti suvi. Teskari osmos har qanday boshlang‘ich suvdan erigan moddalarning 99% gacha qismini olib tashlaydi, keyin odatda reminerallashtiriladi."}},{"@type":"Question","name":"Nima uchun narxlar solishtirilmagan?","acceptedAnswer":{"@type":"Answer","text":"Narxlar sotuvchi, aksiya va vaqtga qarab o‘zgaradi, shuning uchun narx solishtirish tez eskiradi. Mezonlar bo‘yicha solishtirish to‘g‘riroq."}},{"@type":"Question","name":"Aqua Element Toshkentdan tashqariga yetkazib beradimi?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element Toshkent shahar va Toshkent viloyatida xizmat qiladi. Tafsilot — yetkazib berish FAQ bo‘limida."}},{"@type":"Question","name":"Aqua Element ni qayerdan sinash mumkin?","acceptedAnswer":{"@type":"Answer","text":"Buyurtma — sayt katalogi yoki Telegram-bot @aqua_element_bot orqali. Muntazam yetkazish obuna orqali rasmiylashtiriladi."}}]}</script>
 """,
         },
         "en": {
@@ -481,7 +481,7 @@ ARTICLE = {
 <p>The descriptions below rely on publicly available information. If your label says something different, the label of your specific batch wins.</p>
 
 <h3>Aqua Element</h3>
-<p>An Uzbek brand operated by Blue Stream Group. Source: an artesian well in Quyi Chirchiq District, Tashkent Region, at roughly 120 m depth. Production runs 11 filtration stages (quartz, activated carbon, ion-exchange softener, regeneration block, polypropylene 5 µm, polypropylene 1 µm, reverse osmosis, membrane CIP, UV, remineralisation, ozonation). Declared mineral profile: TDS 30–50 mg/L, pH 7.5, Ca²⁺ 10–60 mg/L, Mg²⁺ 7–20 mg/L, Na⁺ 5–15 mg/L. Available formats: 18.9 L (returnable) and 10 L (single-use). Channel: direct delivery across Tashkent and Tashkent Region via web, Telegram bot, and phone. Regulator: Sanepid.</p>
+<p>An Uzbek brand operated by Blue Stream Group. Source: an artesian well in Quyi Chirchiq District, Tashkent Region, at roughly 120 m depth. Production runs 11 filtration stages (quartz, activated carbon, ion-exchange softener, regeneration block, polypropylene 5 µm, polypropylene 1 µm, reverse osmosis, membrane CIP, UV, remineralisation, ozonation). Declared mineral profile: TDS 30–50 mg/L, pH 7.5, Ca²⁺ 10–60 mg/L, Mg²⁺ 7–20 mg/L, Na⁺ 5–15 mg/L. Available formats: 18.9 L (returnable) and 10 L (single-use). Channel: direct delivery across Tashkent and Tashkent Region via the website and the Telegram bot. Regulator: Sanepid.</p>
 
 <h3>Hayot</h3>
 <p>A regional Uzbek brand widely available in supermarkets and grocery shops. According to publicly available information, the brand is positioned as mainstream drinking water and offered in a range of PET formats. Detailed mineral profile and filtration stages are typically printed on the label. Useful when you need water "on the way."</p>
@@ -566,7 +566,7 @@ ARTICLE = {
     </tr>
     <tr>
       <td>Distribution channel</td>
-      <td>Direct delivery (web + Telegram + phone)</td>
+      <td>Direct delivery (web + Telegram)</td>
       <td>Supermarkets and shops</td>
       <td>Supermarkets and shops</td>
       <td>Supermarkets and shops</td>
@@ -642,13 +642,13 @@ ARTICLE = {
 <p>Aqua Element currently serves Tashkent and Tashkent Region. Details are in the <a href="/water-delivery-faq">delivery FAQ</a>.</p>
 
 <h3>Where can I try Aqua Element?</h3>
-<p>You can place a first order via the <a href="/shop">catalogue</a>, the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>, or by phone. Equipment (cooler or pump) and a recurring schedule are arranged through the <a href="/subscriptions">subscription</a>.</p>
+<p>You can place a first order via the <a href="/shop">catalogue</a> or the Telegram bot <a href="https://t.me/aqua_element_bot">@aqua_element_bot</a>. A recurring schedule is arranged through the <a href="/subscriptions">subscription</a>.</p>
 
 <h2>Conclusion</h2>
 
 <p>Brand comparison only makes sense inside a framework. We offered seven criteria and applied them to six brands present in Tashkent. Aqua Element is one option that stands out for a disclosed artesian source, a detailed 11-step filtration train, low published mineralisation, and returnable bottles delivered directly. Hayot, Nestle Pure Life, Bonaqua, Demi, and Ne Voda are other respectable options with different emphases and different logistics. The best brand is the one that fits your use case. Read labels, choose deliberately, and drink enough water.</p>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Where is Hayot water from?","acceptedAnswer":{"@type":"Answer","text":"Hayot is a regional Uzbek brand. The exact source and batch parameters are listed on the manufacturer's current label."}},{"@type":"Question","name":"Is Nestle Pure Life mineralised?","acceptedAnswer":{"@type":"Answer","text":"Pure Life in many markets is positioned as table drinking water with remineralisation. Exact parameters depend on the country of bottling and the batch; check the current label."}},{"@type":"Question","name":"Why does TDS vary across brands?","acceptedAnswer":{"@type":"Answer","text":"TDS reflects both the source and the treatment technology. Artesian water can be low or medium mineralised; reverse-osmosis water is usually remineralised to a corporate standard."}},{"@type":"Question","name":"Is one brand safer than another?","acceptedAnswer":{"@type":"Answer","text":"Any brand legally sold in Uzbekistan is overseen by Sanepid, which is the safety floor. Differences between brands lie above it: in source, mineralisation, and service."}},{"@type":"Question","name":"Why does Aqua Element only sell two bottle sizes?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element focuses on home and office use; the 18.9 L (returnable) and 10 L (single-use) bottles are optimal for steady consumption and minimise plastic per litre."}},{"@type":"Question","name":"Can I give any bottled water to an infant?","acceptedAnswer":{"@type":"Answer","text":"For infant formula, low-mineralised water with TDS up to about 100 mg/L and low sodium is generally recommended. The final decision should be made with a paediatrician based on the current label."}},{"@type":"Question","name":"How is artesian water different from RO water?","acceptedAnswer":{"@type":"Answer","text":"Artesian water is deep confined groundwater. Reverse osmosis removes up to about 99% of dissolved substances from any input water and is usually followed by remineralisation."}},{"@type":"Question","name":"Why don't you compare prices?","acceptedAnswer":{"@type":"Answer","text":"Prices vary by retailer, promotion, format, and time, so a price comparison ages quickly. Comparing on criteria is more useful."}},{"@type":"Question","name":"Does Aqua Element deliver outside Tashkent?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element currently serves Tashkent and Tashkent Region. Details are in the delivery FAQ."}},{"@type":"Question","name":"Where can I try Aqua Element?","acceptedAnswer":{"@type":"Answer","text":"Place a first order via the catalogue on the website, the Telegram bot @aqua_element_bot, or by phone. Equipment and a recurring schedule are set up through the subscription."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Where is Hayot water from?","acceptedAnswer":{"@type":"Answer","text":"Hayot is a regional Uzbek brand. The exact source and batch parameters are listed on the manufacturer's current label."}},{"@type":"Question","name":"Is Nestle Pure Life mineralised?","acceptedAnswer":{"@type":"Answer","text":"Pure Life in many markets is positioned as table drinking water with remineralisation. Exact parameters depend on the country of bottling and the batch; check the current label."}},{"@type":"Question","name":"Why does TDS vary across brands?","acceptedAnswer":{"@type":"Answer","text":"TDS reflects both the source and the treatment technology. Artesian water can be low or medium mineralised; reverse-osmosis water is usually remineralised to a corporate standard."}},{"@type":"Question","name":"Is one brand safer than another?","acceptedAnswer":{"@type":"Answer","text":"Any brand legally sold in Uzbekistan is overseen by Sanepid, which is the safety floor. Differences between brands lie above it: in source, mineralisation, and service."}},{"@type":"Question","name":"Why does Aqua Element only sell two bottle sizes?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element focuses on home and office use; the 18.9 L (returnable) and 10 L (single-use) bottles are optimal for steady consumption and minimise plastic per litre."}},{"@type":"Question","name":"Can I give any bottled water to an infant?","acceptedAnswer":{"@type":"Answer","text":"For infant formula, low-mineralised water with TDS up to about 100 mg/L and low sodium is generally recommended. The final decision should be made with a paediatrician based on the current label."}},{"@type":"Question","name":"How is artesian water different from RO water?","acceptedAnswer":{"@type":"Answer","text":"Artesian water is deep confined groundwater. Reverse osmosis removes up to about 99% of dissolved substances from any input water and is usually followed by remineralisation."}},{"@type":"Question","name":"Why don't you compare prices?","acceptedAnswer":{"@type":"Answer","text":"Prices vary by retailer, promotion, format, and time, so a price comparison ages quickly. Comparing on criteria is more useful."}},{"@type":"Question","name":"Does Aqua Element deliver outside Tashkent?","acceptedAnswer":{"@type":"Answer","text":"Aqua Element currently serves Tashkent and Tashkent Region. Details are in the delivery FAQ."}},{"@type":"Question","name":"Where can I try Aqua Element?","acceptedAnswer":{"@type":"Answer","text":"Place a first order via the catalogue on the website or the Telegram bot @aqua_element_bot. A recurring schedule is set up through the subscription."}}]}</script>
 """,
         },
     },

@@ -33,6 +33,7 @@ from business_app.models.translation import Translation
 from business_app.utils.exceptions import TaxCommitteeUnavailableError
 from business_app.utils.local_windows import local_date
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from scripts.seed_web_ui_checkout_translations import TRANSLATIONS as CHECKOUT_WORDS
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 from tests.integration.customer_action_matrix import ROW, Row, seed
 from tests.integration.test_customer_order_actions_fixtures import (  # noqa: F401  (fixtures)
@@ -75,6 +76,11 @@ def return_page_words(app, db):
         if key.startswith("web.payment_return."):
             for language, value in values.items():
                 db.session.add(Translation(key=key, language=language, value=value, category=_category_for(key)))
+    # The pages' own words since the redesign (website redesign 2026-11-14): the checkout group's seed.
+    for language, rows in CHECKOUT_WORDS.items():
+        for key, value in rows.items():
+            if key.startswith("web.checkout.pay."):
+                db.session.add(Translation(key=key, language=language, value=value, category="web"))
     db.session.commit()
     app.jinja_env.cache.clear()
     yield
@@ -258,6 +264,36 @@ def test_a_completed_payment_returns_to_the_orders_own_page(world, which, expect
 
     assert resp.status_code == 302
     assert resp.headers["Location"] == expected.format(id=order.id, sub=order.subscription_id)
+
+
+@pytest.mark.parametrize("row", ["click_paid", "business_account_unsettled"])
+def test_a_paid_order_on_the_cancel_page_returns_to_its_own_page(world, row):
+    """Review checkout-r04: /payment/cancel said "No money was taken" beside a paid order (dev order 151, a company
+    balance payment). A completed latest payment now goes to the order's own page, as /payment/success does."""
+    order = seed(world.db, world.user, ROW[row], now=world.now.astimezone(UTC))
+    order.payment.status = PaymentStatus.COMPLETED
+    world.db.session.commit()
+
+    resp = world.web._client.get(_en(f"/payment/cancel?order_id={order.id}"), headers=SAME)
+
+    assert (resp.status_code, resp.headers["Location"]) == (302, f"/order-tracking?order_id={order.id}")
+
+
+def test_an_unpaid_order_keeps_the_cancel_page(world, unpaid_click_order):
+    resp = world.web._client.get(_en(f"/payment/cancel?order_id={unpaid_click_order.id}"), headers=SAME)
+
+    assert resp.status_code == 200
+    assert unpaid_click_order.order_number in resp.get_data(as_text=True)
+
+
+def test_a_cash_order_is_never_shown_the_online_payment_wait(world):
+    """Audit F26 / review checkout-r08: a cash order's Payment row stays PENDING until the courier collects it, so the
+    waiting page ("checking your payment", polled, then "took too long") was false for it. Its own page instead."""
+    order = seed(world.db, world.user, ROW["cash_pending"], now=world.now.astimezone(UTC))
+
+    resp = world.web._client.get(_en(f"/payment/success?order_id={order.id}"), headers=SAME)
+
+    assert (resp.status_code, resp.headers["Location"]) == (302, f"/order-tracking?order_id={order.id}")
 
 
 @pytest.mark.parametrize("status", [PaymentStatus.FAILED, PaymentStatus.CANCELLED])

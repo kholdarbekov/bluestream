@@ -1,0 +1,325 @@
+/* Home page (redesign step 3, "home" group). Every rule is scoped under .ae-home (templates/frontend/index.html).
+   The subscription builder's styles live in css/subscription-constructor.css (scoped to #subscription-constructor).
+   One bold moment, the hero: the real bottle on a pale water glow, the price list, the two ways to order, and the
+   brand wave into the page. Every section after it is calm and built from ae-ui components; this file only lays
+   them out. Section backgrounds alternate white / tint: hero (pale) · how · products (tint) · offer · builder (tint) ·
+   quality · club (tint) · guides, then the navy footer with its bot band. */
+
+/* --- Hero ---------------------------------------------------------------------------------------------------- */
+.ae-home .ae-home-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 32px 0 72px;
+  background:
+    radial-gradient(56% 64% at 80% 46%, rgba(0, 209, 249, .18) 0%, rgba(0, 209, 249, 0) 72%),
+    linear-gradient(180deg, var(--ae-bg) 0%, var(--ae-pale) 100%);
+}
+/* The brand wave the inner pages' banners end with, here into the white "How to order". */
+.ae-home .ae-home-hero::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 40px;
+  background: url("../../images/shape/banner-shap.png") center bottom / 100% 100% no-repeat;
+  pointer-events: none;
+}
+/* No z-index here: a stacking context would isolate the bottle's multiply blend from the hero background. */
+.ae-home .ae-home-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+.ae-home .ae-home-hero__title {
+  margin: 0 0 14px;
+  color: var(--ae-ink);
+  font-size: clamp(32px, 1.6rem + 2.6vw, 58px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -.025em;
+  text-wrap: balance;
+}
+.ae-home .ae-home-hero__lead {
+  max-width: 34em;
+  margin: 0 0 24px;
+  color: var(--ae-ink-soft);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+/* Today's prices, read like a price list: the size, the price as the largest thing in its row, the smallest order. */
+.ae-home .ae-home-prices {
+  max-width: 540px;
+  margin: 0 0 24px;
+  padding: 4px 20px;
+  list-style: none;
+  background: var(--ae-surface);
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+}
+.ae-home .ae-home-prices__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "size price" "note note";
+  align-items: center;
+  gap: 6px 16px;
+  padding: 14px 0;
+}
+.ae-home .ae-home-prices__row + .ae-home-prices__row { border-top: 1px solid var(--ae-line); }
+.ae-home .ae-home-prices__size {
+  grid-area: size;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  padding: 5px 12px;
+  border-radius: var(--ae-r-pill);
+  background: var(--ae-pale);
+  color: var(--ae-navy);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.ae-home .ae-home-prices__price {
+  grid-area: price;
+  justify-self: end;
+  color: var(--ae-ink);
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ae-home .ae-home-prices__note { grid-area: note; color: var(--ae-ink-soft); font-size: 14px; line-height: 1.45; }
+
+.ae-home .ae-home-hero__actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }
+.ae-home .ae-home-hero__actions .ae-btn { width: 100%; }
+
+.ae-home .ae-home-hero__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.ae-home .ae-home-hero__facts li { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; }
+.ae-home .ae-home-hero__facts i { flex: 0 0 18px; color: var(--ae-aqua-deep); text-align: center; }
+.ae-home .ae-home-hero__facts a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ae-navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 44, 143, .35);
+  text-underline-offset: 3px;
+}
+.ae-home .ae-home-hero__facts a:hover { text-decoration-color: currentColor; }
+
+/* The bottle: its photo is on white, so it multiplies into the glow behind it (white x glow = glow). */
+.ae-home .ae-home-hero__media { display: flex; justify-content: center; }
+.ae-home .ae-home-hero__stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 460px;
+}
+.ae-home .ae-home-hero__stage::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(100%, 420px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 50% 42%, #fff 0%, #fff 42%, rgba(255, 255, 255, .6) 60%, rgba(255, 255, 255, 0) 71%);
+}
+.ae-home .ae-home-hero__img {
+  position: relative;
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 300px;
+  /* The photo's "white" is 252-253: lifted to 255 so no rectangle shows around the bottle. */
+  filter: brightness(1.025);
+  mix-blend-mode: multiply;
+}
+
+/* Narrow phones: the two order buttons keep their label on one line (uz "Telegram botda buyurtma berish"). */
+@media (max-width: 400px) {
+  .ae-home .ae-home-hero__actions .ae-btn { gap: 8px; padding-inline: 14px; font-size: 15px; }
+}
+@media (min-width: 576px) {
+  .ae-home .ae-home-hero__actions .ae-btn { width: auto; }
+}
+@media (min-width: 768px) {
+  .ae-home .ae-home-hero { padding: 48px 0 96px; }
+  .ae-home .ae-home-hero__lead { font-size: 18px; }
+  .ae-home .ae-home-hero__img { max-height: 420px; }
+  .ae-home .ae-home-hero::after { height: 68px; }
+}
+@media (min-width: 992px) {
+  .ae-home .ae-home-hero { padding: 56px 0 120px; }
+  .ae-home .ae-home-hero__grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 48px; }
+  .ae-home .ae-home-hero__img { max-height: 540px; }
+  .ae-home .ae-home-prices__price { font-size: 26px; }
+}
+
+/* --- Section heads with a side link (products, guides) --------------------------------------------------------- */
+.ae-home .ae-home-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 24px;
+  margin: 0 0 var(--ae-s6);
+}
+.ae-home .ae-home-head .ae-section-head__title { margin: 0; }
+/* Text links on this page are 44px tall to tap (the link text itself keeps its size). */
+.ae-home .ae-home-head .ae-link,
+.ae-home .ae-home-quality__links .ae-link { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* Leads and step texts never end on a lone word ("…или на / сайте."). */
+.ae-home .ae-section-head__lead,
+.ae-home .ae-steps__text { text-wrap: pretty; }
+
+/* --- How to order --------------------------------------------------------------------------------------------- */
+.ae-home .ae-home-how .ae-section-head { margin-bottom: var(--ae-s6); }
+.ae-home .ae-home-how__steps .ae-steps__text { max-width: 34ch; }
+
+/* --- Products: the shared card (partials/product_card.html), side by side; a pair lies flat on wide screens ---- */
+.ae-home .ae-home-products__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s5);
+}
+.ae-home .ae-home-products__grid .ae-product__media { aspect-ratio: 16 / 11; overflow: hidden; }
+/* Product photos are shot on white: they melt into the card's tinted image box, as the hero bottle does. */
+.ae-home .ae-home-products__grid .ae-product__media img { filter: brightness(1.025); mix-blend-mode: multiply; }
+@media (min-width: 768px) {
+  .ae-home .ae-home-products__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1200px) {
+  .ae-home .ae-home-products__grid .ae-product.shop-block { flex-direction: row; }
+  .ae-home .ae-home-products__grid .ae-product__media { flex: 0 0 42%; aspect-ratio: auto; min-height: 280px; }
+  .ae-home .ae-home-products__grid .ae-product__body { justify-content: center; gap: 10px; padding: 28px 28px 28px 24px; }
+  .ae-home .ae-home-products__grid .ae-product__name { font-size: 21px; }
+  .ae-home .ae-home-products__grid .ae-product__price .new-price { font-size: 26px; }
+  .ae-home .ae-home-products__grid .ae-product__note { font-size: 14px; }
+  .ae-home .ae-home-products__grid .ae-product__actions { margin-top: 8px; }
+}
+
+/* --- Delivery and prices (the SSOT offer block, then the coverage check) ---------------------------------------- */
+/* On the container's left edge like every other section: only the block's measure is capped (its delivery
+   statement is prose), never the section, so the heading lines up with "Our water" above it. */
+.ae-home .ae-home-offer__inner { display: flex; flex-direction: column; align-items: flex-start; }
+.ae-home .ae-home-offer__inner > [data-offer-facts] { width: 100%; max-width: 912px; margin-inline: 0; }
+.ae-home .ae-home-offer__cta { margin-top: var(--ae-s6); }
+.ae-home .ae-home-offer .ae-section-head { margin-bottom: var(--ae-s5); }
+
+/* --- Water quality: the intro with its two sources beside four facts -------------------------------------------- */
+.ae-home .ae-home-quality__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s6) var(--ae-s8);
+  align-items: start;
+}
+.ae-home .ae-home-quality__intro .ae-section-head__lead { margin-bottom: var(--ae-s5); }
+.ae-home .ae-home-quality__links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+.ae-home .ae-home-quality__list,
+.ae-home .ae-home-club__facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s5) var(--ae-s6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ae-home .ae-home-quality__list > li,
+.ae-home .ae-home-club__facts > li { display: flex; align-items: flex-start; gap: 16px; }
+.ae-home .ae-home-quality__list .ae-icon-tile,
+.ae-home .ae-home-club__facts .ae-icon-tile { flex: 0 0 auto; }
+.ae-home .ae-home-quality__title,
+.ae-home .ae-home-club__title { margin: 2px 0 4px; color: var(--ae-ink); font-size: 17px; font-weight: 700; line-height: 1.35; }
+.ae-home .ae-home-quality__list p,
+.ae-home .ae-home-club__facts p { margin: 0; font-size: 15px; line-height: 1.6; }
+@media (min-width: 768px) {
+  .ae-home .ae-home-quality__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 992px) {
+  .ae-home .ae-home-quality__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .ae-home .ae-home-quality__intro { position: sticky; top: calc(var(--ae-header-h) + 24px); }
+}
+
+/* --- Aqua Club teaser: the pitch and its actions beside the three facts ----------------------------------------- */
+.ae-home .ae-home-club__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s6) var(--ae-s8);
+  align-items: start;
+}
+.ae-home .ae-home-club__intro .ae-section-head__lead { margin-bottom: var(--ae-s5); }
+.ae-home .ae-home-club__actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.ae-home .ae-home-club__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 var(--ae-s5);
+  padding: 16px 20px;
+  background: var(--ae-surface);
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+}
+.ae-home .ae-home-club__status-list { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 0; }
+.ae-home .ae-home-club__status-list dt { margin: 0 0 2px; color: var(--ae-ink-soft); font-size: 13px; font-weight: 600; }
+.ae-home .ae-home-club__status-list dd { margin: 0; color: var(--ae-ink); font-size: 17px; font-weight: 800; }
+.ae-home .ae-home-club__facts { gap: var(--ae-s5); }
+/* The tiers are names, not filters: plain pills that do not look pressable. */
+.ae-home .ae-home-club__tiers { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.ae-home .ae-home-club__tiers .ae-chip { min-height: 0; padding: 4px 12px; cursor: default; pointer-events: none; }
+@media (max-width: 575px) {
+  .ae-home .ae-home-club__actions .ae-btn { width: 100%; }
+}
+@media (min-width: 992px) {
+  .ae-home .ae-home-club__grid { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); }
+}
+
+/* --- Guides: the featured articles as text cards ---------------------------------------------------------------- */
+.ae-home .ae-home-guides__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ae-s4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ae-home .ae-home-guide { display: flex; flex-direction: column; gap: 8px; height: 100%; padding: 22px 24px; color: inherit; text-decoration: none; }
+.ae-home .ae-home-guide__category { color: var(--ae-aqua-deep); font-size: 13px; font-weight: 700; line-height: 1.4; }
+.ae-home .ae-home-guide__title { margin: 0; color: var(--ae-ink); font-size: 18px; font-weight: 800; line-height: 1.35; }
+.ae-home .ae-home-guide:hover .ae-home-guide__title { color: var(--ae-navy); }
+.ae-home .ae-home-guide__text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ae-ink-soft);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+@media (min-width: 768px) {
+  .ae-home .ae-home-guides__list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ae-s5); }
+}

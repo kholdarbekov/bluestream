@@ -118,14 +118,13 @@ class TestLoyaltyGuidePage:
         resp = client.get("/loyalty-guide", follow_redirects=True)
         assert resp.status_code == 200
 
-    def test_tier_perk_bullets_reflect_live_config(self, client, db, loyalty_program, tiers):
-        """Regression: tier perk bullets must derive their multiplier/discount
-        numbers from live LoyaltyTierConfig, not from hardcoded prose.
+    def test_tier_card_numbers_reflect_live_config(self, client, db, loyalty_program, tiers):
+        """Regression: a tier card's multiplier and discount come from live LoyaltyTierConfig, not hardcoded prose.
 
-        The multiplier/discount bullets are now SHARED, rename-proof keys
-        (loyalty_guide.tier.perk_multiplier/perk_discount) rendered per tier from
-        config — not per-tier keys named after the (renamable) tier name.
-        """
+        Since review C-16 (2026-11-14) the card states them once, in its stats row; the shared perk bullets
+        (loyalty_guide.tier.perk_multiplier/perk_discount) that repeated them are no longer printed, even when their
+        rows exist."""
+        from bs4 import BeautifulSoup
         from business_app.models.translation import Translation
 
         for lang in ("en", "uz", "ru"):
@@ -143,16 +142,24 @@ class TestLoyaltyGuidePage:
         resp = client.get("/loyalty-guide?lang=en")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
+        soup = BeautifulSoup(html, "html.parser")
+        stats = {
+            card.select_one(".lg-tier__name").get_text(strip=True): [
+                s.get_text(strip=True) for s in card.select(".lg-tier__stats strong")
+            ]
+            for card in soup.select("article.lg-tier")
+        }
 
-        # Bullets show the live config values...
-        assert "1.3x AquaCoins on every order" in html
-        assert "3% tier discount" in html
-        # ...and never the old hardcoded values or a literal placeholder.
-        assert "4% tier discount" not in html
+        # The stats show the live config values...
+        assert stats["Gold"] == ["1.3×", "3%*"]
+        assert stats["Silver"] == ["1.25×", "2%*"]
+        # ...Bronze (0% discount) shows its multiplier and no discount...
+        assert stats["Bronze"] == ["1×"]
+        # ...and no bullet repeats them, nor a literal placeholder.
+        assert "AquaCoins on every order" not in html
+        assert "tier discount" not in html
         assert "{pct}" not in html
         assert "{mult}" not in html
-        # Bronze (0% discount) must NOT show a discount bullet.
-        assert "0% tier discount" not in html
 
     def test_tier_name_is_driven_by_model_translation_not_static_keys(self, client, db, loyalty_program, tiers):
         """The page must render the tier name from the model's translatable field

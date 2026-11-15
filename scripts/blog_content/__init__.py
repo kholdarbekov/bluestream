@@ -15,7 +15,9 @@ ARTICLE = {
                                                           #    "company_news", "quality_assurance",
                                                           #    "lifestyle", "environment")
     "tags":            str,                              # comma-separated tag list
-    "featured_image":  str,                              # absolute or app-relative URL
+    "featured_image":  str | None,                       # absolute or app-relative URL of a REAL photo; None
+                                                          #   until there is one (the cards show the brand
+                                                          #   cover). Never a stock picture.
     "image_alt_text":  str,
     "is_featured":     bool,
     "sort_order":      int,                              # higher = appears earlier in lists

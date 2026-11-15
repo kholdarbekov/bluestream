@@ -1,0 +1,304 @@
+<div class="ae-flow ae-co">
+<section class="ae-section ae-co__section">
+<div class="ae-container">
+<div class="ae-co__layout">
+<form class="ae-card ae-co__form" id="checkout-form" novalidate="">
+<fieldset class="ae-co__step" id="address-section">
+<legend class="ae-co__step-title"><span aria-hidden="true" class="ae-co__num">1</span>Delivery address</legend>
+<div class="ae-co__addresses" id="address-grid">
+<label class="ae-radio-card address-card selected" data-action="select-address" data-address-id="101">
+<input checked="" class="ae-co-radio" name="delivery_address" type="radio" value="101"/>
+<span class="ae-radio-card__title ae-co-addr__title">
+<span class="ae-co-addr__name">Ofis</span>
+<span class="ae-badge ae-co-addr__main">Main</span>
+</span>
+<span class="ae-radio-card__text ae-co-addr__line">Toshkent, Shayxontohur tumani, drive probe</span>
+<span class="ae-co-addr__note"><i aria-hidden="true" class="far fa-comment-alt"></i><span>2-podyezd</span></span>
+</label>
+<label class="ae-radio-card address-card" data-action="select-address" data-address-id="102">
+<input class="ae-co-radio" name="delivery_address" type="radio" value="102"/>
+<span class="ae-radio-card__title ae-co-addr__title">
+<span class="ae-co-addr__name">Uy</span>
+<span class="ae-badge ae-co-addr__main" hidden="">Main</span>
+</span>
+<span class="ae-radio-card__text ae-co-addr__line">Toshkent, Shayxontohur tumani, drive probe</span>
+<span class="ae-co-addr__note" hidden=""><i aria-hidden="true" class="far fa-comment-alt"></i><span></span></span>
+</label>
+<button class="ae-co-add" data-action="show-add-address" type="button">
+<span aria-hidden="true" class="ae-co-add__icon"><i class="far fa-plus"></i></span>
+<span>Add address</span>
+</button>
+</div>
+<div class="ae-co-empty" hidden="" id="address-empty">
+<span aria-hidden="true" class="ae-icon-tile"><i class="far fa-map-marker-alt"></i></span>
+<div class="ae-co-empty__body">
+<p class="ae-co-empty__title">Add a delivery address</p>
+<p class="ae-co-empty__text">Mark the place on the map once, and next time it fills in by itself.</p>
+<button class="ae-btn ae-btn--primary" data-action="show-add-address" type="button">
+<i aria-hidden="true" class="far fa-plus"></i>Add address
+                                </button>
+</div>
+</div>
+<p class="ae-field__error ae-co__error" id="address-error" role="alert"></p>
+<template id="address-card-template"><label class="ae-radio-card address-card" data-action="select-address" data-address-id="">
+<input class="ae-co-radio" name="delivery_address" type="radio" value=""/>
+<span class="ae-radio-card__title ae-co-addr__title">
+<span class="ae-co-addr__name"></span>
+<span class="ae-badge ae-co-addr__main" hidden="">Main</span>
+</span>
+<span class="ae-radio-card__text ae-co-addr__line" hidden=""></span>
+<span class="ae-co-addr__note" hidden=""><i aria-hidden="true" class="far fa-comment-alt"></i><span></span></span>
+</label></template>
+</fieldset>
+<fieldset class="ae-co__step" id="delivery-time-section">
+<legend class="ae-co__step-title"><span aria-hidden="true" class="ae-co__num">2</span>Delivery day and time</legend>
+<div class="ae-alert ae-co__statement">
+<span aria-hidden="true" class="ae-alert__icon"><i class="far fa-clock"></i></span>
+<p class="delivery-statement" data-delivery-statement="">In Tashkent city, Aqua Element normally delivers the same day when you order in the first half of the day. Later orders normally arrive the same evening or the next day. In the neighbouring areas of Tashkent Region we normally deliver on the day you order or the next day.</p>
+</div>
+<div class="ae-co__when">
+<div class="ae-field ae-co__date" id="delivery-date-field">
+<label for="delivery-date">Delivery day</label><input aria-describedby="delivery-date-error" id="delivery-date" max="2026-01-01" min="2026-01-01" name="delivery_date" required="" type="date" value="2026-01-01"/>
+<p class="ae-field__error" id="delivery-date-error" role="alert"></p>
+</div>
+<div class="ae-co__windows-field">
+<span class="ae-field__label" id="windows-label">Convenient time</span>
+<div aria-describedby="delivery-window-error" aria-labelledby="windows-label" class="ae-co__windows" id="time-slots-container" role="radiogroup">
+</div>
+<p class="ae-field__error" id="delivery-window-error" role="alert"></p>
+</div>
+</div>
+</fieldset>
+<fieldset class="ae-co__step" id="payment-section">
+<legend class="ae-co__step-title"><span aria-hidden="true" class="ae-co__num">3</span>Payment</legend>
+<div aria-busy="true" aria-label="Payment" class="ae-co__methods" id="payment-methods-container" role="radiogroup">
+<span class="ae-skeleton ae-co__method-skeleton"></span>
+<span class="ae-skeleton ae-co__method-skeleton"></span>
+</div>
+<input id="selected-payment-method" type="hidden" value="cash"/>
+</fieldset>
+<fieldset class="ae-co__step" id="notes-section">
+<legend class="ae-co__step-title"><span aria-hidden="true" class="ae-co__num">4</span>Comment and terms</legend>
+<div class="ae-field">
+<label for="order-notes">Comment on the order <span class="ae-field__optional">(optional)</span></label>
+<textarea id="order-notes" maxlength="500" name="order_notes" placeholder="Anything the courier should know about this delivery" rows="3"></textarea>
+</div>
+<div class="ae-co__terms" id="terms-field">
+<label class="ae-check">
+<input aria-describedby="agree-terms-error" id="agree-terms" type="checkbox"/>
+                                I accept the <a class="ae-co__terms-link" href="/terms" rel="noopener" target="_blank">terms of use</a>.
+                            </label>
+<p class="ae-field__error" id="agree-terms-error" role="alert"></p>
+</div>
+</fieldset>
+</form>
+<aside aria-labelledby="summary-title" class="ae-card ae-co__summary" id="order-summary">
+<h2 class="ae-co__summary-title" id="summary-title">Your order</h2>
+<ul aria-busy="true" class="ae-co-lines" id="summary-items">
+<li aria-hidden="true" class="ae-co-line ae-co-line--skeleton">
+<span class="ae-skeleton ae-co-line__thumb"></span>
+<span class="ae-co-line__body"><span class="ae-skeleton ae-skeleton--text"></span><span class="ae-skeleton ae-skeleton--text"></span></span>
+</li>
+</ul>
+<dl aria-live="polite" class="ae-dl ae-dl--end ae-co__totals">
+<div class="ae-dl__row">
+<dt>Items</dt>
+<dd id="summary-subtotal">—</dd>
+</div>
+<div class="ae-dl__row ae-co__discount" id="summary-discount-row" style="display: none;">
+<dt id="summary-discount-label"></dt>
+<dd id="summary-discount"></dd>
+</div>
+<div class="ae-dl__row ae-co__discount" id="summary-reward-row" style="display: none;">
+<dt id="summary-reward-label"></dt>
+<dd id="summary-reward"></dd>
+</div>
+<div class="ae-dl__row ae-co__discount" id="summary-tier-row" style="display: none;">
+<dt id="summary-tier-label"></dt>
+<dd id="summary-tier"></dd>
+</div>
+<div class="ae-dl__row">
+<dt>Delivery</dt>
+<dd id="summary-delivery">—</dd>
+</div>
+<div class="ae-dl__row ae-dl__total">
+<dt>Total</dt>
+<dd id="summary-total">—</dd>
+</div>
+</dl>
+<p class="ae-co__perk" id="summary-cod-savings-row" style="display: none;">
+<i aria-hidden="true" class="far fa-badge-percent"></i><span id="summary-cod-savings"></span>
+</p>
+<div class="ae-alert ae-alert--warn ae-co__notice" id="min-order-warning" role="status" style="display: none;">
+<span aria-hidden="true" class="ae-alert__icon"><i class="far fa-info-circle"></i></span>
+<div>
+<strong class="ae-alert__title" id="min-order-title"></strong>
+<p id="min-order-text"></p>
+</div>
+</div>
+<div aria-live="polite" class="ae-co__state" hidden="" id="checkoutPaymentState" role="status"></div>
+<div class="ae-co__actions">
+<button class="ae-btn ae-btn--primary ae-btn--lg ae-btn--block" data-action="place-order" id="place-order-btn" type="button">Place order</button>
+<a class="ae-link ae-co__back" href="/cart"><i aria-hidden="true" class="far fa-arrow-left"></i>Back to cart</a>
+</div>
+</aside>
+</div>
+</div>
+</section>
+<div class="ae-sticky-bar ae-co__bar" id="checkout-bar">
+<div class="ae-sticky-bar__summary">
+<span class="ae-sticky-bar__label">Total</span>
+<span class="ae-sticky-bar__value" id="checkout-bar-total">—</span>
+</div>
+<button class="ae-btn ae-btn--primary" data-action="place-order" type="button">Place order</button>
+</div>
+<div aria-labelledby="loading-title" aria-modal="true" class="ae-co-overlay" id="loading-overlay" role="alertdialog" style="display: none;">
+<div class="ae-co-overlay__card">
+<span aria-hidden="true" class="ae-co-overlay__spinner"></span>
+<p class="ae-co-overlay__title" id="loading-title">Placing your order…</p>
+<p class="ae-co-overlay__text">This takes a few seconds.</p>
+</div>
+</div>
+</div>
+<div aria-labelledby="addressWizardModalTitle" aria-modal="true" class="modal fade ae-modal ae-wizard" data-backdrop="static" id="addressWizardModal" role="dialog" tabindex="-1">
+<div class="modal-dialog modal-lg" role="document">
+<div class="modal-content">
+<div class="modal-header">
+<h2 class="modal-title" id="addressWizardModalTitle">New address</h2>
+<button aria-label="Close" class="close" data-dismiss="modal" type="button">
+<span aria-hidden="true">×</span>
+</button>
+</div>
+<div class="modal-body">
+<div class="ae-stepper ae-wizard__stepper">
+<ol class="ae-stepper__list">
+<li aria-current="step" class="ae-stepper__step is-current" data-step-indicator="1">
+<span class="ae-stepper__dot">1</span><span class="ae-stepper__label">Point on the map</span>
+</li>
+<li class="ae-stepper__step" data-step-indicator="2">
+<span class="ae-stepper__dot">2</span><span class="ae-stepper__label">Address details</span>
+</li>
+<li class="ae-stepper__step" data-step-indicator="3">
+<span class="ae-stepper__dot">3</span><span class="ae-stepper__label">Review</span>
+</li>
+</ol>
+<div class="ae-stepper__compact">
+<div class="ae-wizard__compact-row">
+<span id="wizardStepLabel">Point on the map</span>
+<span class="ae-wizard__count" id="wizardStepCount">Step 1 of 3</span>
+</div>
+<span aria-hidden="true" class="ae-progress ae-progress--sm"><span class="ae-progress__bar" id="wizardProgressBar" style="width: 33.3%"></span></span>
+</div>
+</div>
+<form id="addressWizardForm" novalidate="">
+<input id="selectedLatitude" name="latitude" type="hidden"/>
+<input id="selectedLongitude" name="longitude" type="hidden"/>
+<section aria-label="Point on the map" class="ae-wizard__step is-active" data-step="1" id="wizardStep1">
+<div class="ae-wizard__search">
+<label class="visually-hidden" for="addressSearchInput">Find an address</label>
+<div class="ae-wizard__searchbox">
+<i aria-hidden="true" class="far fa-search ae-wizard__search-icon"></i>
+<input autocomplete="off" class="ae-input" enterkeyhint="search" id="addressSearchInput" placeholder="Street or landmark" type="search"/>
+<button class="ae-btn ae-btn--secondary" id="searchAddressBtn" type="button">Find</button>
+</div>
+<button class="ae-btn ae-btn--ghost ae-wizard__locate" id="useMyLocationBtn" type="button">
+<i aria-hidden="true" class="far fa-location-arrow"></i><span>My location</span>
+</button>
+</div>
+<div class="ae-wizard__map">
+<div aria-label="Map. Tap to mark the delivery point" class="ae-map" id="addressWizardMap" role="application"></div>
+</div>
+<p class="ae-wizard__hint">
+<i aria-hidden="true" class="far fa-hand-pointer"></i>
+<span>Tap the map where the courier should come. You can drag the pin. The blue outline is our delivery zone.</span>
+</p>
+<p aria-live="polite" class="ae-wizard__status d-none" id="locationStatus" role="status">
+<i aria-hidden="true" class="far fa-check-circle"></i><span id="locationStatusText"></span>
+</p>
+<div class="ae-alert ae-alert--warn ae-wizard__zone" hidden="" id="wizardZoneAlert" role="alert">
+<i aria-hidden="true" class="far fa-map-marked-alt ae-alert__icon"></i>
+<p><span id="wizardZoneAlertText">We don’t deliver to this point yet. Mark a spot inside the blue outline.</span>
+<a href="/coverage" rel="noopener" target="_blank">See the delivery zone</a></p>
+</div>
+</section>
+<section aria-label="Address details" class="ae-wizard__step" data-step="2" id="wizardStep2">
+<div aria-label="Quick name" class="ae-chips ae-wizard__chips" role="group">
+<button aria-pressed="false" class="ae-chip quick-title-btn" data-title="Home" type="button">
+<i aria-hidden="true" class="far fa-home"></i> Home</button>
+<button aria-pressed="false" class="ae-chip quick-title-btn" data-title="Work" type="button">
+<i aria-hidden="true" class="far fa-briefcase"></i> Work</button>
+<button aria-pressed="false" class="ae-chip quick-title-btn" data-title="Other" type="button">
+<i aria-hidden="true" class="far fa-map-pin"></i> Other</button>
+</div>
+<div class="ae-field" id="addressTitleField">
+<label for="addressTitle">Name <span aria-hidden="true" class="ae-wizard__req">*</span></label>
+<input aria-describedby="addressTitleError" aria-required="true" id="addressTitle" maxlength="100" placeholder="For example, Home or Office" required="" type="text"/>
+<p class="ae-field__error" hidden="" id="addressTitleError">Give the address a name.</p>
+</div>
+<div class="ae-field">
+<label for="fullAddress">Address</label>
+<textarea aria-describedby="fullAddressHelp" id="fullAddress" rows="2"></textarea>
+<p class="ae-field__help" hidden="" id="fullAddressHelp">Filled in from the map point. Correct it if something is off.</p>
+<p class="ae-wizard__suggest" hidden="" id="wizardAddressSuggest">
+<span>From the map: <span id="wizardAddressSuggestText"></span></span>
+<button class="ae-link" id="wizardAddressSuggestBtn" type="button">Use it</button>
+</p>
+</div>
+<div class="ae-wizard__grid">
+<div class="ae-field">
+<label for="districtSelect">District</label>
+<select class="ignore" id="districtSelect">
+<option value="">Choose a district</option>
+</select>
+</div>
+<div class="ae-field">
+<label for="streetAddress">Street and house</label>
+<input autocomplete="address-line1" id="streetAddress" maxlength="255" placeholder="For example, Navoi street, 12" type="text"/>
+</div>
+<div class="ae-field">
+<label for="floorNumber">Floor</label>
+<input id="floorNumber" inputmode="numeric" maxlength="20" type="text"/>
+</div>
+<div class="ae-field">
+<label for="apartmentNumber">Apartment or office</label>
+<input id="apartmentNumber" maxlength="20" type="text"/>
+</div>
+</div>
+<div class="ae-field">
+<label for="landmark">Landmark</label>
+<input id="landmark" maxlength="255" placeholder="For example, next to the school" type="text"/>
+</div>
+</section>
+<section aria-label="Review" class="ae-wizard__step" data-step="3" id="wizardStep3">
+<div class="ae-wizard__review">
+<h3 class="ae-wizard__review-title">Check the address</h3>
+<dl class="ae-dl ae-wizard__summary" id="wizardSummary"></dl>
+</div>
+<div class="ae-field">
+<label for="deliveryInstructions">Note for the courier</label>
+<textarea id="deliveryInstructions" placeholder="Entrance, intercom code, how to find the door" rows="3"></textarea>
+</div>
+<div class="ae-wizard__flags">
+<label class="ae-check" for="isDefault">
+<input id="isDefault" type="checkbox"/><span>Make this my main address</span>
+</label>
+<label class="ae-check" for="isBusiness">
+<input id="isBusiness" type="checkbox"/><span>This is a business address</span>
+</label>
+</div>
+</section>
+</form>
+</div>
+<div class="modal-footer ae-wizard__footer">
+<button class="ae-btn ae-btn--ghost ae-wizard__back" hidden="" id="wizardPrevBtn" type="button">
+<i aria-hidden="true" class="far fa-arrow-left"></i><span>Back</span>
+</button>
+<button class="ae-btn ae-btn--secondary ae-wizard__cancel" data-dismiss="modal" type="button">Cancel</button>
+<button class="ae-btn ae-btn--primary" id="wizardNextBtn" type="button">Next</button>
+<button class="ae-btn ae-btn--primary" hidden="" id="wizardSaveBtn" type="button">Save address</button>
+</div>
+</div>
+</div>
+</div>
+<script id="address-wizard-data" type="application/json">{"i18n": {"f_district_ph": "Choose a district", "geo_denied": "Location access is off. Allow it in the browser or tap the map.", "geo_failed": "Couldn\u2019t find your location. Tap the map instead.", "geo_unsupported": "This browser can\u2019t share your location. Tap the map instead.", "getting_address": "Looking up the address\u2026", "locating": "Finding you\u2026", "map_failed": "The map didn\u2019t load. Check the internet and open the form again.", "my_location": "My location", "network_error": "No connection. Check the internet and try again.", "not_found": "Nothing found. Try other words or tap the map.", "not_set": "Not set", "pick_point": "Tap the map to mark the delivery point.", "point_no_address": "Point selected. Type the address on the next step.", "point_selected": "Point selected", "save_failed": "Couldn\u2019t save the address. Please try again.", "saved": "Address saved", "saving": "Saving\u2026", "search_empty": "Type a street or a landmark first.", "search_failed": "Search isn\u2019t available right now. Tap the map instead.", "step_count": "Step {n} of {total}", "step_labels": ["Point on the map", "Address details", "Review"], "summary": {"address": "Address", "apartment": "Apartment or office", "district": "District", "floor": "Floor", "landmark": "Landmark", "street": "Street and house", "title": "Name"}, "title_edit": "Edit address", "title_new": "New address"}, "leaflet": {"css": "/static/vendor/leaflet/leaflet.css", "images": "/static/vendor/leaflet/images/", "js": "/static/vendor/leaflet/leaflet.js"}}</script>
+<script id="page-data" type="application/json">{"addresses_url": "/addresses", "cart_url": "/cart", "checkout_url": "/checkout", "current_language": "en", "default_image": "/static/images/product-placeholder.svg", "i18n": {"agree_terms": "Accept the terms to place the order.", "calculating": "Calculating\u2026", "cod_savings": "Pay cash on delivery and save {amount}", "discount": "Discount", "free": "Free", "min_amount_text": "Add {remaining} more in the cart to place the order.", "min_amount_title": "The minimum order is {minimum}", "min_qty_line": "{name}: at least {min}, add {remaining} more in the cart", "min_qty_title": "Some items are below their smallest order", "place_order_failed": "Couldn\u2019t place the order. Please try again.", "quote_failed_text": "Check your cart, or refresh the page in a minute.", "quote_failed_title": "We couldn\u2019t work out the total", "reward_discount": "Reward discount", "schedule_date_far": "You can plan a delivery up to {date}. Choose that day or an earlier one.", "schedule_date_past": "That day has passed. Choose today or a later day.", "schedule_other": "Choose another delivery day or time.", "schedule_title": "Check the delivery day and time", "schedule_window_passed": "This time has already passed today. Choose a later time or another day.", "select_delivery_address": "Choose where to deliver the order.", "select_delivery_date": "Choose a delivery day.", "tier_discount_line": "{tier} website discount ({percent}%)", "untitled_address": "Address", "window_afternoon": "Afternoon", "window_anytime": "Any time", "window_evening": "Evening", "window_morning": "Morning"}, "login_url": "/login", "method_labels": {"business_account": "Bank transfer", "cash": "Cash", "click": "Click"}, "method_notes": {"business_account": "From your company\u2019s prepaid balance", "cash": "Pay the courier on delivery", "click": "Click wallet or a linked card"}, "min_order_amount": 20000, "order_actions": {"confirmed": "web.order_actions.confirmed", "failed": "web.order_actions.failed", "keep": "web.order_actions.keep", "open_subscription": "web.order_actions.open_subscription", "preparing_payment": "web.order_actions.preparing_payment", "reason_prompt": "web.order_actions.reason_prompt", "reason_text": "web.order_actions.reason_text", "reorder_dropped": "web.order_actions.reorder_dropped", "switch_to_cash": "web.order_actions.switch_to_cash", "try_again": "web.order_actions.try_again", "working": "web.order_actions.working"}, "schedule": {"max_date": "2026-01-01", "max_label": "16 January", "today": "2026-01-01", "windows": [{"end": null, "key": "anytime", "open_today": true, "start": null}, {"end": "12:00", "key": "morning", "open_today": true, "start": "09:00"}, {"end": "18:00", "key": "afternoon", "open_today": true, "start": "12:00"}, {"end": "21:00", "key": "evening", "open_today": true, "start": "18:00"}]}}</script>

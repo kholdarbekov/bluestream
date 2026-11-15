@@ -361,6 +361,7 @@ def reverse_geocode():
     Returns:
     - formatted_address: Human-readable address
     - district: Detected district if available
+    - district_key: Canonical TASHKENT_DISTRICTS key for that district, or null
     - city: City name
     - country: Country name
     """
@@ -382,6 +383,7 @@ def reverse_geocode():
         )
 
     from business_app.services.maps_service import MapsService
+    from business_app.utils.district_text import canonical_district
 
     maps_service = MapsService()
 
@@ -422,6 +424,9 @@ def reverse_geocode():
             data={
                 "formatted_address": formatted_address,
                 "district": district,
+                # The canonical TASHKENT_DISTRICTS key for that free-text name (None when it does not resolve), so
+                # pickers select it without re-deriving the name->key match in JS.
+                "district_key": canonical_district(district),
                 "city": get_translation("api.addresses.city.tashkent"),
                 "country": get_translation("api.addresses.country.uzbekistan"),
             }

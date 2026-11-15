@@ -63,6 +63,8 @@
        "street_address": null,
        "title": null
       },
+      "delivery_address_district_label": null,
+      "delivery_address_label": "Chilonzor 5",
       "delivery_date": null,
       "delivery_fee": 0.0,
       "delivery_notes": null,
@@ -157,6 +159,8 @@
        "street_address": null,
        "title": null
       },
+      "delivery_address_district_label": null,
+      "delivery_address_label": "Chilonzor 5",
       "delivery_date": null,
       "delivery_fee": 0.0,
       "delivery_notes": null,
@@ -266,6 +270,8 @@
        "street_address": null,
        "title": null
       },
+      "delivery_address_district_label": null,
+      "delivery_address_label": "Chilonzor 5",
       "delivery_date": null,
       "delivery_fee": 0.0,
       "delivery_notes": null,
@@ -286,7 +292,9 @@
        {
         "id": 1,
         "is_reward": false,
+        "product_display_name": "Pure Water 19L",
         "product_id": 1,
+        "product_image": null,
         "product_name": "Pure Water 19L",
         "product_sku": null,
         "quantity": 2,
@@ -419,6 +427,8 @@
         "street_address": null,
         "title": null
        },
+       "delivery_address_district_label": null,
+       "delivery_address_label": "Chilonzor 5",
        "delivery_date": null,
        "delivery_fee": 0.0,
        "delivery_notes": null,
@@ -439,7 +449,9 @@
         {
          "id": 1,
          "is_reward": false,
+         "product_display_name": "Pure Water 19L",
          "product_id": 1,
+         "product_image": null,
          "product_name": "Pure Water 19L",
          "product_sku": null,
          "quantity": 2,
@@ -551,6 +563,8 @@
         "street_address": null,
         "title": null
        },
+       "delivery_address_district_label": null,
+       "delivery_address_label": "Chilonzor 5",
        "delivery_date": null,
        "delivery_fee": 0.0,
        "delivery_notes": null,
@@ -571,7 +585,9 @@
         {
          "id": 1,
          "is_reward": false,
+         "product_display_name": "Pure Water 19L",
          "product_id": 1,
+         "product_image": null,
          "product_name": "Pure Water 19L",
          "product_sku": null,
          "quantity": 2,

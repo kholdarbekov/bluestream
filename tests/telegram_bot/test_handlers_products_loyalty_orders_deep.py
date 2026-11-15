@@ -843,62 +843,41 @@ class TestLoyaltyHistoryDisplay:
     def test_signed_amount_handles_non_int(self):
         assert loyalty_module.LoyaltyHandlers._signed_amount(None) == ("🟢", "+0")
 
-    # --- _transaction_category: stable category + format args ---
-    def test_category_referral(self):
+    # --- _transaction_category: the label is the API's published display_category ---
+    # The action/type → category mapping itself is pinned on the backend serializer
+    # (tests/integration/test_web_account_loyalty.py::test_the_display_category_mapping_is_the_serializers);
+    # the rows here are shaped like GET /loyalty/history's items.
+    def test_category_is_the_published_display_category(self):
+        for category in ("referral", "welcome", "birthday", "streak", "surprise", "order_earn", "bonus",
+                         "expired", "adjustment", "redeem", "refund"):
+            cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
+                {"transaction_type": "earned", "action_type": "purchase", "display_category": category,
+                 "reward_name": None, "order_id": None})
+            assert (cat, fmt) == (category, {}), category
+
+    def test_category_never_classifies_the_raw_fields_itself(self):
+        # A row without a published category is "other", whatever its action/type say.
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "bonus", "action_type": "referral",
-             "description": "Referral bonus for user #75"}
-        )
-        assert cat == "referral"
-        assert fmt == {}
+            {"transaction_type": "earned", "action_type": "streak_bonus", "description": "Streak bonus"})
+        assert (cat, fmt) == ("other", {})
 
-    def test_category_welcome(self):
-        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "bonus", "action_type": "welcome_bonus"})
-        assert cat == "welcome"
-
-    def test_category_birthday(self):
-        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "bonus", "action_type": "birthday_bonus"})
-        assert cat == "birthday"
-
-    def test_category_streak(self):
-        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "earned", "action_type": "streak_bonus"})
-        assert cat == "streak"
-
-    def test_category_purchase_is_order_earn(self):
+    def test_category_redeem_named_uses_the_published_reward_name(self):
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "earned", "action_type": "purchase",
-             "description": "Order #TG_000066_26"})
-        assert cat == "order_earn"
-        assert fmt == {}
-
-    def test_category_surprise_reward_is_not_order_earn(self):
-        # type=earned but action=surprise_reward → its own label, not order earnings.
-        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "earned", "action_type": "surprise_reward",
-             "description": "Surprise Reward! Thanks for being loyal 💙"})
-        assert cat == "surprise"
-        assert fmt == {}
-
-    def test_category_redeem_named_extracts_reward(self):
-        cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "redeemed",
-             "description": "Redeemed reward: 19 litrlik suv"}
-        )
+            {"transaction_type": "redeemed", "display_category": "redeem", "reward_name": "19 litrlik suv",
+             "description": "Redeemed reward: 19 litrlik suv"})
         assert cat == "redeem_named"
         assert fmt == {"name": "19 litrlik suv"}
 
-    def test_category_redeem_unknown_description_falls_back(self):
+    def test_category_redeem_without_a_reward_name_falls_back(self):
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "redeemed", "description": "something else"})
+            {"transaction_type": "redeemed", "display_category": "redeem", "reward_name": None,
+             "description": "something else"})
         assert cat == "redeem"
         assert fmt == {}
 
     def test_category_refund_with_order(self):
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "adjustment", "action_type": "reward_refund",
+            {"transaction_type": "adjustment", "action_type": "reward_refund", "display_category": "refund",
              "order_id": 141, "description": "Refund of redeemed reward (order #141)"}
         )
         assert cat == "refund_order"
@@ -906,18 +885,14 @@ class TestLoyaltyHistoryDisplay:
 
     def test_category_refund_without_order(self):
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "adjustment", "action_type": "reward_refund"})
+            {"transaction_type": "adjustment", "action_type": "reward_refund", "display_category": "refund",
+             "order_id": None})
         assert cat == "refund"
         assert fmt == {}
 
-    def test_category_order_edit_is_adjustment(self):
-        cat, _ = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "adjustment", "action_type": "order_edit_award"})
-        assert cat == "adjustment"
-
     def test_category_unknown_falls_back_to_other(self):
         cat, fmt = loyalty_module.LoyaltyHandlers._transaction_category(
-            {"transaction_type": "weird", "description": "x"})
+            {"transaction_type": "weird", "description": "x", "display_category": "other"})
         assert cat == "other"
         assert fmt == {}
 

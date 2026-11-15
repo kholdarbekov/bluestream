@@ -1,4 +1,4 @@
-"""The checkout's delivery windows are translated words; the times come from checkout.js (D25, §11)."""
+"""The checkout's delivery windows are translated words; the times are the server's (D25, §11; review checkout-r10)."""
 
 import json
 from pathlib import Path
@@ -45,6 +45,10 @@ def test_the_checkout_windows_are_translated(app, db, sample_user, language):
     assert i18n["window_anytime"] == BACKEND_TRANSLATIONS["api.subscriptions.time.any_time"][language]
 
 
-def test_checkout_js_adds_the_times_from_its_own_window_table():
+def test_checkout_js_adds_the_times_the_server_publishes():
+    """Since review checkout-r10 the windows' times are the server's (`delivery_window.CHECKOUT_WINDOWS`, published as
+    page data `schedule.windows`; asserted rendered in tests/integration/test_web_checkout_flow.py): checkout.js keeps
+    no table of its own and labels each tile with the published bounds."""
     source = (ROOT / "business_app/static/js/pages/checkout.js").read_text("utf-8")
-    assert "preset.label + ' (' + preset.start + '–' + preset.end + ')'" in source
+    assert "windowWord(win) + ' (' + win.start + '–' + win.end + ')'" in source
+    assert "WINDOW_PRESETS" not in source and "'09:00'" not in source

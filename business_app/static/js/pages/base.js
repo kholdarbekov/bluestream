@@ -76,7 +76,8 @@
 
     function updateCartCount() {
         var count = window.cart.reduce(function (sum, item) { return sum + item.quantity; }, 0);
-        var cartCounters = document.querySelectorAll('#cart-count, #cart-count-sticky, .cart-box span');
+        // The header has ONE counter (#cart-count); [data-cart-count] marks any other place that shows it.
+        var cartCounters = document.querySelectorAll('#cart-count, [data-cart-count]');
 
         cartCounters.forEach(function (counter) {
             counter.textContent = count;
@@ -114,95 +115,81 @@
         updateCartCount();
     }
 
-    // Toast styles — injected once
-    (function () {
-        var toastContainer = document.getElementById('toast-container');
-        if (!toastContainer) {
-            toastContainer = document.createElement('div');
-            toastContainer.id = 'toast-container';
-            toastContainer.style.cssText =
-                'position: fixed; top: 20px; right: 20px; z-index: 99999; ' +
-                'display: flex; flex-direction: column; gap: 10px; max-width: 400px; pointer-events: none;';
-            document.body.appendChild(toastContainer);
+    // Toasts. The container is in base.html and the look is in ae-ui.css; a page without base.html's markup gets a
+    // bare container. #toast-container and the .toast-* class names are what page scripts and tests read.
+    // The container is the ONE live region (polite, additions only): a toast is announced once, whatever its type.
+    // A live region added together with its text is often not read at all, and a role="alert" toast inside the
+    // polite container was read twice by some screen readers.
+    function toastContainer() {
+        var container = document.getElementById('toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'ae-toasts';
+            container.setAttribute('aria-live', 'polite');
+            container.setAttribute('aria-atomic', 'false');
+            container.setAttribute('aria-relevant', 'additions');
+            document.body.appendChild(container);
         }
+        return container;
+    }
+    toastContainer();
 
-        var styleId = 'toast-notification-styles';
-        if (!document.getElementById(styleId)) {
-            var style = document.createElement('style');
-            style.id = styleId;
-            style.textContent =
-                '.toast-notification { display: flex; align-items: flex-start; padding: 16px 20px; border-radius: 12px; background: #ffffff; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1); pointer-events: auto; transform: translateX(120%); opacity: 0; transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55); cursor: pointer; min-width: 300px; max-width: 400px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }' +
-                '.toast-notification.show { transform: translateX(0); opacity: 1; }' +
-                '.toast-notification.hide { transform: translateX(120%); opacity: 0; }' +
-                '.toast-notification .toast-icon { flex-shrink: 0; width: 24px; height: 24px; margin-right: 14px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 14px; }' +
-                '.toast-notification .toast-content { flex: 1; margin-right: 10px; }' +
-                '.toast-notification .toast-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; color: #1a1a2e; }' +
-                '.toast-notification .toast-message { font-size: 13px; color: #666; line-height: 1.4; }' +
-                '.toast-notification .toast-close { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(0, 0, 0, 0.05); color: #999; font-size: 12px; transition: all 0.2s ease; cursor: pointer; }' +
-                '.toast-notification .toast-close:hover { background: rgba(0, 0, 0, 0.1); color: #333; }' +
-                '.toast-notification .toast-progress { position: absolute; bottom: 0; left: 0; height: 3px; border-radius: 0 0 12px 12px; width: 100%; transform-origin: left; }' +
-                '.toast-notification.toast-success { border-left: 4px solid #10b981; background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%); }' +
-                '.toast-notification.toast-success .toast-icon { background: #10b981; color: white; }' +
-                '.toast-notification.toast-success .toast-progress { background: #10b981; }' +
-                '.toast-notification.toast-error { border-left: 4px solid #ef4444; background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%); }' +
-                '.toast-notification.toast-error .toast-icon { background: #ef4444; color: white; }' +
-                '.toast-notification.toast-error .toast-progress { background: #ef4444; }' +
-                '.toast-notification.toast-warning { border-left: 4px solid #f59e0b; background: linear-gradient(135deg, #ffffff 0%, #fffbeb 100%); }' +
-                '.toast-notification.toast-warning .toast-icon { background: #f59e0b; color: white; }' +
-                '.toast-notification.toast-warning .toast-progress { background: #f59e0b; }' +
-                '.toast-notification.toast-info { border-left: 4px solid #3b82f6; background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%); }' +
-                '.toast-notification.toast-info .toast-icon { background: #3b82f6; color: white; }' +
-                '.toast-notification.toast-info .toast-progress { background: #3b82f6; }' +
-                '@media (max-width: 480px) { #toast-container { left: 10px; right: 10px; max-width: calc(100% - 20px); } .toast-notification { min-width: auto; max-width: 100%; } }' +
-                '@keyframes shrinkProgress { from { transform: scaleX(1); } to { transform: scaleX(0); } }';
-            document.head.appendChild(style);
-        }
-    })();
+    var TOAST_ICONS = {
+        success: 'fas fa-check',
+        error: 'fas fa-exclamation',
+        warning: 'fas fa-exclamation',
+        info: 'fas fa-info'
+    };
+
+    // How long a toast stays when the caller names no duration: an error stays twice as long. Hovering or focusing a
+    // toast pauses its clock (and the progress line), so nobody loses a message while reading it.
+    var TOAST_DURATION = { error: 10000 };
+    var TOAST_DEFAULT_DURATION = 5000;
 
     function showNotification(message, type, duration) {
-        type = type || 'info';
-        duration = duration === undefined ? 5000 : duration;
+        type = TOAST_ICONS[type] ? type : 'info';
+        if (duration === undefined) duration = TOAST_DURATION[type] || TOAST_DEFAULT_DURATION;
 
-        var container = document.getElementById('toast-container');
-        if (!container) return;
-
-        var icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
-        var titles = {
-            success: PAGE_DATA.i18n.success,
-            error: PAGE_DATA.i18n.error,
-            warning: PAGE_DATA.i18n.warning,
-            info: PAGE_DATA.i18n.info
-        };
+        var container = toastContainer();
+        var i18n = PAGE_DATA.i18n || {};
 
         var toast = document.createElement('div');
         toast.className = 'toast-notification toast-' + type;
 
         var iconDiv = document.createElement('div');
         iconDiv.className = 'toast-icon';
-        iconDiv.textContent = icons[type] || icons.info;
+        iconDiv.setAttribute('aria-hidden', 'true');
+        var icon = document.createElement('i');
+        icon.className = TOAST_ICONS[type];
+        iconDiv.appendChild(icon);
 
         var contentDiv = document.createElement('div');
         contentDiv.className = 'toast-content';
-        var titleDiv = document.createElement('div');
-        titleDiv.className = 'toast-title';
-        titleDiv.textContent = titles[type] || titles.info;
+        if (i18n[type]) {
+            var titleDiv = document.createElement('div');
+            titleDiv.className = 'toast-title';
+            titleDiv.textContent = i18n[type];
+            contentDiv.appendChild(titleDiv);
+        }
         var messageDiv = document.createElement('div');
         messageDiv.className = 'toast-message';
         messageDiv.textContent = message;
-        contentDiv.appendChild(titleDiv);
         contentDiv.appendChild(messageDiv);
 
-        var closeDiv = document.createElement('div');
-        closeDiv.className = 'toast-close';
-        closeDiv.textContent = '✕';
+        var closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'toast-close';
+        closeButton.setAttribute('aria-label', i18n.close || '×');
+        closeButton.innerHTML = '<i class="far fa-times" aria-hidden="true"></i>';
 
         var progressDiv = document.createElement('div');
         progressDiv.className = 'toast-progress';
-        progressDiv.style.animation = 'shrinkProgress ' + duration + 'ms linear forwards';
+        if (duration > 0) progressDiv.style.animation = 'shrinkProgress ' + duration + 'ms linear forwards';
 
         toast.appendChild(iconDiv);
         toast.appendChild(contentDiv);
-        toast.appendChild(closeDiv);
+        toast.appendChild(closeButton);
         toast.appendChild(progressDiv);
 
         container.appendChild(toast);
@@ -214,17 +201,45 @@
             toast.classList.add('hide');
             setTimeout(function () {
                 if (toast.parentNode) toast.parentNode.removeChild(toast);
-            }, 400);
+            }, 300);
         };
 
-        closeDiv.addEventListener('click', function (e) {
+        closeButton.addEventListener('click', function (e) {
             e.stopPropagation();
             closeToast();
         });
 
         toast.addEventListener('click', closeToast);
 
-        if (duration > 0) setTimeout(closeToast, duration);
+        if (duration > 0) {
+            var remaining = duration;
+            var startedAt = 0;
+            var timer = null;
+            var hovered = false;
+            var focused = false;
+            var run = function () {
+                if (timer || remaining <= 0) return;
+                startedAt = Date.now();
+                timer = setTimeout(closeToast, remaining);
+                progressDiv.style.animationPlayState = 'running';
+            };
+            var hold = function () {
+                if (!timer) return;
+                clearTimeout(timer);
+                timer = null;
+                remaining -= Date.now() - startedAt;
+                progressDiv.style.animationPlayState = 'paused';
+            };
+            var sync = function () { if (hovered || focused) hold(); else run(); };
+            toast.addEventListener('mouseenter', function () { hovered = true; sync(); });
+            toast.addEventListener('mouseleave', function () { hovered = false; sync(); });
+            toast.addEventListener('focusin', function () { focused = true; sync(); });
+            toast.addEventListener('focusout', function (e) {
+                focused = toast.contains(e.relatedTarget);
+                sync();
+            });
+            run();
+        }
 
         return toast;
     }
@@ -376,6 +391,269 @@
         });
     }
 
+    // ---------------------------------------------------------------- window.AE: shared page helpers
+    // One copy for every page script (no per-page escapeHtml / money / date code).
+    var NBSP = '\u00a0';
+    var DATE_LOCALES = { ru: 'ru-RU', uz: 'uz-Latn-UZ', en: 'en-GB' };
+    var DISPLAY_TIMEZONE = 'Asia/Tashkent';
+    var STATUS_TONES = {
+        ok: 'ok', success: 'ok', warn: 'warn', warning: 'warn', danger: 'danger',
+        info: 'info', progress: 'progress', muted: 'muted', neutral: 'muted'
+    };
+
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // An amount as the server prints it (business_app/utils/display_labels.py money): whole so'm, half away from
+    // zero, thousands grouped by a no-break space, in the language's template `web.display_labels.money`
+    // ("{amount} сум"), published in the page data. Without the template: "36 000 UZS", as the server falls back.
+    function formatMoney(amount) {
+        var number = Number(amount) || 0;
+        var whole = (number < 0 ? -1 : 1) * Math.round(Math.abs(number));
+        var grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+        var template = PAGE_DATA.money_template;
+        if (typeof template === 'string' && template.indexOf('{amount}') !== -1) {
+            return template.replace('{amount}', grouped);
+        }
+        return grouped + NBSP + 'UZS';
+    }
+
+    // A date in the server's own words (page data `date_words`: web.display_labels.* and web.integration.date_year),
+    // so it reads exactly as the dates the server prints: "30 сентября 2026", "30 September 2026",
+    // "2026-yil 30-sentabr"; the weekday and the time follow when asked for.
+    // `{name}` placeholders filled from `values`; a name without a value stays as written. The one fill every page
+    // script uses (AE.fill).
+    function fill(template, values) {
+        return String(template === null || template === undefined ? '' : template).replace(/\{(\w+)\}/g, function (match, name) {
+            return Object.prototype.hasOwnProperty.call(values || {}, name) ? values[name] : match;
+        });
+    }
+
+    function formatWithWords(date, settings) {
+        var words = PAGE_DATA.date_words;
+        var parts = {};
+        new Intl.DateTimeFormat('en-GB', {
+            timeZone: settings.timeZone, year: 'numeric', month: 'numeric', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short'
+        }).formatToParts(date).forEach(function (part) { parts[part.type] = part.value; });
+        var weekdayIndex = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday);
+        var values = { day: String(+parts.day), month: words.months[+parts.month - 1], year: parts.year };
+        var withYear = typeof words.date_year === 'string' && words.date_year.indexOf('{day}') !== -1;
+        var text = settings.year && withYear
+            ? fill(words.date_year, values)
+            : fill(words.day_month, values) + (settings.year ? ', ' + parts.year : '');
+        if (settings.weekday && weekdayIndex >= 0) text += ', ' + words.weekdays[weekdayIndex];
+        if (settings.hour || settings.minute) text += ' ' + parts.hour + ':' + parts.minute;
+        return text;
+    }
+
+    // A date in the page's language and Tashkent time. `iso` is an ISO string ("2026-11-13" or a full timestamp) or
+    // a Date; `options` are Intl.DateTimeFormat options (default: day, long month, year). A date-only string is read
+    // as that calendar day, never shifted by a time zone. Prefer a label the backend publishes where one exists.
+    function formatDate(iso, options) {
+        if (iso === null || iso === undefined || iso === '') return '';
+        var date;
+        var dateOnly = typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso);
+        if (dateOnly) {
+            var parts = iso.split('-');
+            date = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2], 12));
+        } else {
+            date = iso instanceof Date ? iso : new Date(iso);
+        }
+        if (isNaN(date.getTime())) return String(iso);
+        var lang = (document.documentElement.lang || PAGE_DATA.language || 'uz').slice(0, 2);
+        var settings = Object.assign(
+            { day: 'numeric', month: 'long', year: 'numeric' },
+            options || {},
+            { timeZone: dateOnly ? 'UTC' : DISPLAY_TIMEZONE }
+        );
+        try {
+            // Uzbek always (no browser has its month names); Russian and English for a plain day-month(-year) date,
+            // the one the server prints. A weekday or a time in ru/en stays with Intl.
+            var plain = settings.month === 'long' && !settings.weekday && !settings.hour && !settings.minute;
+            var words = PAGE_DATA.date_words;
+            var withYear = words && typeof words.date_year === 'string' && words.date_year.indexOf('{day}') !== -1;
+            if (words && words.months && (lang === 'uz' || (plain && (withYear || !settings.year)))) {
+                return formatWithWords(date, settings);
+            }
+            return new Intl.DateTimeFormat(DATE_LOCALES[lang] || lang, settings).format(date);
+        } catch (error) {
+            return date.toISOString().slice(0, 10);
+        }
+    }
+
+    // A status pill's HTML (.ae-status). The label is the backend's published wording; the tone is its colour.
+    function statusPill(label, tone) {
+        var cssTone = STATUS_TONES[tone] || 'muted';
+        return '<span class="ae-status ae-status--' + cssTone + '">' + escapeHtml(label) + '</span>';
+    }
+
+    // A product image that failed to load shows the placeholder instead (once, so a missing placeholder never loops).
+    function imgFallback(img) {
+        if (!img || img.dataset.aeFallback === 'done') return;
+        img.dataset.aeFallback = 'done';
+        img.src = img.getAttribute('data-fallback') || PAGE_DATA.image_placeholder || '/static/images/product-placeholder.svg';
+    }
+
+    window.AE = Object.assign(window.AE || {}, {
+        escapeHtml: escapeHtml,
+        fill: fill,
+        formatMoney: formatMoney,
+        formatDate: formatDate,
+        statusPill: statusPill,
+        imgFallback: imgFallback
+    });
+
+    // Server-rendered and script-rendered images that opt in with data-fallback fall back on error.
+    document.addEventListener('error', function (event) {
+        var target = event.target;
+        if (target && target.tagName === 'IMG' && target.hasAttribute('data-fallback')) imgFallback(target);
+    }, true);
+    // base.js runs after the page's images: one that already failed fired its error before the listener existed.
+    // A broken image is complete with no width; one still loading (or lazy and not started) is not complete.
+    function fallbackBrokenImages() {
+        document.querySelectorAll('img[data-fallback]').forEach(function (img) {
+            if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) imgFallback(img);
+        });
+    }
+    fallbackBrokenImages();
+
+    // ---------------------------------------------------------------- Shell: menus, drawer, footer
+    // Header menus: a [data-ae-menu-toggle] button opens its .ae-menu (nav dropdowns, language, account, search).
+    // One is open at a time; Escape or a click elsewhere closes it and Escape returns focus to the button.
+    function setMenu(menu, open) {
+        if (!menu) return;
+        menu.classList.toggle('is-open', open);
+        var toggle = menu.querySelector('[data-ae-menu-toggle]');
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+            var field = menu.querySelector('.ae-search__panel input[type="search"]');
+            if (field) setTimeout(function () { field.focus({ preventScroll: true }); }, 30);
+        }
+    }
+
+    function closeMenus(except) {
+        document.querySelectorAll('.ae-menu.is-open').forEach(function (menu) {
+            if (menu !== except) setMenu(menu, false);
+        });
+    }
+
+    function initMenus() {
+        document.addEventListener('click', function (event) {
+            var toggle = event.target.closest('[data-ae-menu-toggle]');
+            if (toggle) {
+                var menu = toggle.closest('.ae-menu');
+                var open = !menu.classList.contains('is-open');
+                closeMenus(menu);
+                setMenu(menu, open);
+                return;
+            }
+            if (!event.target.closest('.ae-menu')) closeMenus();
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Escape') return;
+            var menu = document.querySelector('.ae-menu.is-open');
+            if (!menu) return;
+            setMenu(menu, false);
+            var toggle = menu.querySelector('[data-ae-menu-toggle]');
+            // preventScroll: the header is sticky, and a focus that "scrolls it into view" moves the page.
+            if (toggle) toggle.focus({ preventScroll: true });
+        });
+        // Tabbing out of an open menu closes it.
+        document.addEventListener('focusin', function (event) {
+            document.querySelectorAll('.ae-menu.is-open').forEach(function (menu) {
+                if (!menu.contains(event.target)) setMenu(menu, false);
+            });
+        });
+    }
+
+    // Mobile drawer: a real dialog. Focus moves in and is kept there, Escape and the backdrop close it, focus goes
+    // back to the menu button.
+    function initDrawer() {
+        var drawer = document.querySelector('[data-ae-drawer]');
+        var opener = document.querySelector('[data-ae-drawer-open]');
+        if (!drawer || !opener) return;
+        var panel = drawer.querySelector('.ae-drawer__panel');
+        var lastFocus = null;
+        var FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), summary, [tabindex]:not([tabindex="-1"])';
+
+        function focusables() {
+            return Array.prototype.filter.call(panel.querySelectorAll(FOCUSABLE), function (el) {
+                return el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement;
+            });
+        }
+
+        function open() {
+            lastFocus = document.activeElement;
+            closeMenus();
+            drawer.classList.add('is-open');
+            document.body.classList.add('ae-drawer-open');
+            opener.setAttribute('aria-expanded', 'true');
+            var close = drawer.querySelector('.ae-drawer__close');
+            setTimeout(function () { (close || panel).focus({ preventScroll: true }); }, 50);
+        }
+
+        function close() {
+            if (!drawer.classList.contains('is-open')) return;
+            drawer.classList.remove('is-open');
+            document.body.classList.remove('ae-drawer-open');
+            opener.setAttribute('aria-expanded', 'false');
+            // preventScroll: focus going back into the sticky header must not move the page.
+            if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus({ preventScroll: true });
+        }
+
+        opener.addEventListener('click', open);
+        drawer.querySelectorAll('[data-ae-drawer-close]').forEach(function (el) { el.addEventListener('click', close); });
+        drawer.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') { close(); return; }
+            if (event.key !== 'Tab') return;
+            var items = focusables();
+            if (!items.length) return;
+            var first = items[0];
+            var last = items[items.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus({ preventScroll: true }); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus({ preventScroll: true }); }
+        });
+        // The drawer is the compact bar's menu: leaving that width closes it.
+        if (window.matchMedia) {
+            var wide = window.matchMedia('(min-width: 1280px)');
+            var onWide = function (event) { if (event.matches) close(); };
+            if (wide.addEventListener) wide.addEventListener('change', onWide);
+            else if (wide.addListener) wide.addListener(onWide);
+        }
+    }
+
+    // Footer link columns: collapsed accordions on phones; from 768px always open, and the summary is only the
+    // column's heading: out of the tab order, and neither a click nor a screen reader's activation closes it.
+    function initFooterColumns() {
+        var columns = document.querySelectorAll('[data-ae-footer-col]');
+        if (!columns.length || !window.matchMedia) return;
+        var phone = window.matchMedia('(max-width: 767px)');
+        var apply = function () {
+            columns.forEach(function (column) {
+                column.open = !phone.matches;
+                var summary = column.querySelector('summary');
+                if (!summary) return;
+                if (phone.matches) summary.removeAttribute('tabindex');
+                else summary.tabIndex = -1;
+            });
+        };
+        columns.forEach(function (column) {
+            var summary = column.querySelector('summary');
+            if (summary) summary.addEventListener('click', function (event) { if (!phone.matches) event.preventDefault(); });
+            column.addEventListener('toggle', function () { if (!phone.matches && !column.open) column.open = true; });
+        });
+        apply();
+        if (phone.addEventListener) phone.addEventListener('change', apply);
+        else if (phone.addListener) phone.addListener(apply);
+    }
+
     // Expose globals for page scripts and inline handlers already converted via data-action
     window.getAuthToken = getAuthToken;
     window.setAuthToken = setAuthToken;
@@ -393,6 +671,9 @@
 
     document.addEventListener('DOMContentLoaded', async function () {
         optimizeNonCriticalImages();
+        initMenus();
+        initDrawer();
+        initFooterColumns();
 
         if (PAGE_DATA.is_authenticated) {
             window.cartSyncPromise = syncCartFromDatabase();
@@ -414,10 +695,12 @@
             });
         });
 
+        // The product card's default button (partials/product_card.html): it adds the smallest order the backend
+        // publishes on the card (data-qty = offer facts smallest_order_quantity), never one bottle below it.
         document.body.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-action="add-to-cart-shop"]');
             if (btn) {
-                addToCart(parseInt(btn.dataset.productId, 10));
+                addToCart(parseInt(btn.dataset.productId, 10), parseInt(btn.dataset.qty, 10) || 1);
             }
         });
     });

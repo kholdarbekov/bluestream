@@ -3,7 +3,9 @@ Template helpers for multilingual content
 Provides Jinja2 filters and functions for easy access to translatable content
 """
 
-from flask import current_app
+import os
+
+from flask import current_app, url_for
 from jinja2 import pass_context
 
 
@@ -413,6 +415,24 @@ def register_multilingual_globals(app):
     def entity_translations_summary(entity):
         """Get entity translations summary in templates"""
         return get_entity_translations_summary(entity)
+
+
+def asset_url(filename: str) -> str:
+    """URL of a file under static/ with `?v=<mtime>`.
+
+    nginx caches /static/ for hours, so an unversioned stylesheet can outlive a deploy and style new markup with
+    old rules. The file's modification time changes whenever a deploy changes the file, so the URL changes with it.
+    A missing file falls back to the plain static URL (the request then 404s as it would have anyway)."""
+    try:
+        version = int(os.stat(os.path.join(current_app.static_folder, filename)).st_mtime)
+    except OSError:
+        return url_for("static", filename=filename)
+    return url_for("static", filename=filename, v=version)
+
+
+def register_asset_globals(app):
+    """Register static-asset helpers: {{ asset_url('css/ae-ui.css') }}"""
+    app.add_template_global(asset_url, "asset_url")
 
 
 # CSS styles for language badges

@@ -308,6 +308,7 @@ CUSTOMER_PAGES = [
     "/profile-settings",
     "/account-security",
     "/addresses",
+    "/verify-phone",
     "/order-tracking?order_id=1",
     "/order-confirmation?order_id=1",
     "/checkout",
@@ -325,6 +326,7 @@ PAGE_ENDPOINTS = [
     "profile_settings",
     "account_security",
     "addresses",
+    "verify_phone",
 ]
 
 

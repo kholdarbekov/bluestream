@@ -1,0 +1,402 @@
+/* ==========================================================================
+   Cabinet (design-system v1): the frame every account page sits in (cabinet_base.html), the dashboard
+   (my_account.html), My orders (orders.html) and the shared order modal (partials/order_detail_modal.html).
+   Components and tokens are ae-ui.css's (.ae-cabinet, .ae-cabinet-nav, .ae-page-head, .ae-stat, .ae-status,
+   .ae-pagination, .ae-modal, .ae-empty, .ae-skeleton); this file only lays them out for these pages.
+   Every rule is scoped under .ae-cabinet-page (the frame) or .ae-od (the modal, which sits outside the frame).
+   ========================================================================== */
+
+/* 1. Frame ================================================================ */
+
+.ae-cabinet-hero .content-box h1 { margin-bottom: 8px; }
+
+.ae-cabinet-page { padding: 40px 0 var(--ae-section); background: var(--ae-surface); }
+.ae-cabinet-page .ae-cabinet__main { min-width: 0; }
+.ae-cabinet-page .ae-cabinet__main > :last-child { margin-bottom: 0; }
+
+/* Who is signed in: an initial in the brand's navy-to-aqua drop, the name, the phone or email. */
+.ae-cabinet-page .ae-cabinet-nav__avatar {
+  background: linear-gradient(140deg, var(--ae-navy) 0%, var(--ae-aqua-deep) 100%);
+  font-size: 18px;
+  line-height: 1;
+}
+.ae-cabinet-page .ae-cabinet-nav__who { min-width: 0; }
+.ae-cabinet-page .ae-cabinet-nav__name { margin: 0; font-family: var(--ae-font); }
+.ae-cabinet-page .ae-cabinet-nav__sub { margin: 2px 0 0; font-variant-numeric: tabular-nums; color: var(--ae-ink-soft) !important; }
+.ae-cabinet-page .ae-cabinet-nav__list,
+.ae-cabinet-page .ae-cabinet-nav__list > li { list-style: none; margin: 0; padding: 0; }
+.ae-cabinet-page .ae-cabinet-nav__list > li::before { content: none; }
+.ae-cabinet-page .ae-cabinet-nav__link { text-decoration: none; transition: background-color .15s ease, color .15s ease; }
+.ae-cabinet-page .ae-cabinet-nav__link > span { min-width: 0; }
+.ae-cabinet-page .ae-cabinet-nav__link--quiet:hover { color: var(--ae-danger); background: var(--ae-danger-bg); }
+.ae-cabinet-page .ae-cabinet-nav__link--quiet:hover > i { color: var(--ae-danger); }
+
+@media (min-width: 992px) {
+  .ae-cabinet-page .ae-cabinet-nav { padding: 12px; }
+  .ae-cabinet-page .ae-cabinet-nav__me { padding: 8px 8px 16px; }
+  .ae-cabinet-page .ae-cabinet-nav__out { margin-top: 8px !important; padding-top: 8px !important; border-top: 1px solid var(--ae-line); }
+}
+
+@media (max-width: 991px) {
+  /* The tab strip sits flush under the banner and sticks under the header; the content comes right after it. */
+  .ae-cabinet-page { padding-top: 0; }
+  .ae-cabinet-page .ae-cabinet { gap: 20px; }
+  .ae-cabinet-page .ae-cabinet-nav { margin-bottom: 0; }
+  /* A fade at the strip's end says there is more to scroll. */
+  .ae-cabinet-page .ae-cabinet-nav__list {
+    padding: 2px 0;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%);
+  }
+  .ae-cabinet-page .ae-cabinet-nav__list > li:last-child { padding-right: 28px; }
+  .ae-cabinet-page .ae-cabinet-nav__link--quiet { border-style: dashed; }
+}
+
+/* Section headings inside a page: one size everywhere. */
+.ae-cabinet-page .ae-sec-title,
+.ae-cabinet-page .ae-dash__section-title {
+  margin: 0;
+  font-size: var(--ae-text-h4);
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--ae-ink);
+}
+
+/* The 48px product thumbnail every order line draws (orders, modal). */
+.ae-thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--ae-line);
+  border-radius: 10px;
+  background: var(--ae-bg);
+  object-fit: contain;
+  padding: 3px;
+}
+.ae-thumb--lg { width: 56px; height: 56px; border-radius: 12px; }
+
+/* An order line: thumb, name over "2 × 19 000 so'm", the line total at the end. */
+.ae-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 10px 0;
+  list-style: none;
+}
+.ae-line__text { display: grid; gap: 2px; min-width: 0; }
+.ae-line__name { font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--ae-ink); overflow-wrap: anywhere; }
+.ae-line__meta { font-size: 14px; line-height: 1.4; color: var(--ae-ink-soft); font-variant-numeric: tabular-nums; }
+.ae-line__sum { font-size: 15px; font-weight: 700; color: var(--ae-ink); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+
+
+/* 2. Dashboard (my_account.html) ========================================= */
+
+.ae-dash { display: grid; gap: 28px; }
+.ae-dash > * { margin: 0; }
+.ae-dash__head { margin: 0; align-items: center; }
+.ae-dash__head .ae-page-head__title { text-wrap: balance; overflow-wrap: anywhere; }
+.ae-dash__notice { margin: 0; align-items: flex-start; }
+.ae-dash__notice .ae-link { margin-top: 4px; }
+
+.ae-dash__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ae-dash__stats > li { display: flex; min-width: 0; margin: 0; list-style: none; }
+.ae-dash__stats > li::before { content: none; }
+/* A count tile: the icon beside the number, the label under the number. */
+.ae-dash__stat {
+  flex: 1 1 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 2px;
+  min-height: 100%;
+  padding: 16px 18px;
+}
+.ae-dash__stat .ae-stat__icon { grid-row: 1 / span 2; margin: 0; }
+.ae-dash__stat .ae-stat__value { grid-column: 2; align-self: end; }
+.ae-dash__stat .ae-stat__label { grid-column: 2; align-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; line-height: 1.35; }
+.ae-dash__stat:focus-visible { outline-offset: 3px; }
+@media (max-width: 575px) {
+  /* An odd last tile (no AquaCoins for this account) takes the row. */
+  .ae-dash__stats > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@media (min-width: 768px) {
+  .ae-dash__stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+}
+
+/* Telegram: the connect promo (available) or the connected / stopped note. */
+.ae-dash__tg { align-items: flex-start; gap: 16px 20px; padding: 22px 24px; }
+.ae-dash__tg-body { flex: 1 1 280px; min-width: 0; }
+.ae-dash__tg-title { margin: 0 0 6px; font-size: 18px; font-weight: 800; line-height: 1.35; color: var(--ae-ink); }
+.ae-dash__tg-text { margin: 0; font-size: 15px; line-height: 1.55; color: var(--ae-ink-soft); }
+.ae-dash__perks { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 12px 0 0; padding: 0; list-style: none; }
+.ae-dash__perks li { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; color: var(--ae-ink); list-style: none; }
+.ae-dash__perks li::before { content: none; }
+.ae-dash__perks i { color: var(--ae-ok); }
+.ae-dash__tg-action { align-self: center; }
+@media (max-width: 575px) {
+  .ae-dash__tg { padding: 18px; }
+  .ae-dash__tg-action { width: 100%; }
+}
+/* The note wraps telegram_panel(); the Bootstrap alert colours on the wrapper are the tests' hook only. */
+.ae-dash__tg-note { margin: 0; padding: 0; border: 0; background: none; color: inherit; }
+.ae-dash__tg-note--ok .ae-panel { background: var(--ae-ok-bg); border-color: #BCE3CF; }
+.ae-dash__tg-note--warn .ae-panel { background: var(--ae-warn-bg); border-color: #F3DDA8; }
+
+/* Recent orders: one row per order (number and date, status and amount, a chevron), the whole row opens it. */
+.ae-dash__section { display: grid; gap: 12px; }
+.ae-dash__section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+/* "All orders": a 44px tap target that still reads as a text link. */
+.ae-dash__more { min-height: 44px; }
+.ae-dash__section .ae-empty { padding: 32px 16px; border: 1px solid var(--ae-line); border-radius: var(--ae-r); max-width: none; }
+
+.ae-orows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-surface); overflow: hidden; }
+.ae-orows > li { margin: 0; list-style: none; }
+.ae-orows > li::before { content: none; }
+.ae-orows > li + li { border-top: 1px solid var(--ae-line); }
+.ae-orow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 8px 16px;
+  width: 100%;
+  min-height: 64px;
+  margin: 0;
+  padding: 12px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--ae-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+.ae-orow:hover { background: var(--ae-bg); }
+.ae-orow:focus-visible { outline-offset: -3px; }
+.ae-orow__id { display: grid; gap: 2px; min-width: 0; }
+.ae-orow__num { font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--ae-ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ae-orow__date { font-size: 14px; color: var(--ae-ink-soft); }
+.ae-orow__state { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; }
+.ae-orow__sum { min-width: 96px; font-size: 15px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ae-orow__go { color: var(--ae-muted); font-size: 13px; }
+/* An active subscription's row: a link to /my-subscriptions in the same shape; the frequency after the amount is quieter. */
+a.ae-srow, a.ae-srow:hover, a.ae-srow:focus { color: var(--ae-ink); text-decoration: none; }
+.ae-srow .ae-orow__sum { white-space: normal; }
+.ae-srow__per { font-weight: 600; color: var(--ae-ink-soft); }
+@media (max-width: 575px) {
+  .ae-orow { grid-template-columns: minmax(0, 1fr) 14px; padding: 12px 14px; }
+  .ae-orow__state { grid-column: 1; grid-row: 2; justify-content: space-between; }
+  .ae-orow__go { grid-column: 2; grid-row: 1 / span 2; }
+  .ae-orow__sum { min-width: 0; }
+}
+
+.ae-dash__export { margin: -8px 0 0; }
+.ae-dash__export .ae-btn { min-height: 44px; padding: 8px 12px; color: var(--ae-ink-soft); font-size: 14px; font-weight: 600; }
+.ae-dash__export .ae-btn:hover { color: var(--ae-navy); }
+
+
+/* 3. My orders (orders.html, orders.js) ================================== */
+
+.ae-orders { display: grid; gap: 20px; }
+.ae-orders > * { margin: 0; }
+
+.ae-orders__toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; }
+.ae-orders__filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; flex: 1 1 360px; max-width: 520px; }
+.ae-orders__field { margin: 0; }
+.ae-orders__field .ae-input { min-height: 44px; padding-top: 9px; padding-bottom: 9px; font-size: 15px; }
+.ae-orders__new { flex: none; min-height: 44px; }
+@media (max-width: 575px) {
+  .ae-orders__filters { flex-basis: 100%; max-width: none; }
+  .ae-orders__new { width: 100%; }
+}
+
+.ae-orders__list { display: grid; gap: 16px; }
+.ae-orders__list:empty { display: none; }
+.ae-orders__loading { display: grid; gap: 16px; }
+.ae-orders__loading[hidden] { display: none; }
+
+.ae-order {
+  display: grid;
+  gap: 4px;
+  padding: 18px 20px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  background: var(--ae-surface);
+  color: var(--ae-ink);
+  cursor: pointer;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.ae-order:hover { border-color: var(--ae-line-strong); box-shadow: var(--ae-shadow-sm); }
+.ae-order--skeleton { cursor: default; }
+.ae-order--skeleton:hover { border-color: var(--ae-line); box-shadow: none; }
+.ae-order__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ae-line);
+}
+.ae-order__id { display: grid; gap: 2px; min-width: 0; }
+.ae-order__num { margin: 0; font-size: 16px; font-weight: 800; line-height: 1.35; color: var(--ae-ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ae-order__date { font-size: 14px; color: var(--ae-ink-soft); }
+.ae-order__state { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; }
+.ae-order__total { font-size: 18px; font-weight: 800; color: var(--ae-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ae-order__items { margin: 0; padding: 4px 0 0; list-style: none; }
+.ae-order__items > li::before { content: none; }
+.ae-order__items .ae-line + .ae-line { border-top: 1px dashed var(--ae-line); }
+.ae-order__more { margin: 0 0 4px 62px; font-size: 14px; color: var(--ae-ink-soft); list-style: none; }
+.ae-order__addr { display: flex; align-items: baseline; gap: 8px; flex: 1 1 200px; min-width: 0; margin: 0; font-size: 14px; line-height: 1.45; color: var(--ae-ink-soft); }
+.ae-order__addr i { flex: none; color: var(--ae-aqua-deep); }
+.ae-order__addr span { min-width: 0; overflow-wrap: anywhere; }
+.ae-order__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 8px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ae-line);
+}
+.ae-order__buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.ae-order__actions { flex: 0 1 auto; min-width: 0; cursor: default; }
+.ae-order__actions[hidden] { display: none; }
+/* An open skip / cancel confirm takes the card's width. */
+.ae-order__actions:has(.order-actions__confirm:not([hidden])) { flex-basis: 100%; order: 3; }
+.ae-order .ae-btn--sm { min-height: 44px; }
+@media (max-width: 575px) {
+  .ae-order { padding: 16px; }
+  .ae-order__head { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .ae-order__state { justify-content: space-between; }
+  .ae-order__foot { justify-content: stretch; }
+  .ae-order__buttons { width: 100%; }
+  /* Each button as wide as its words, the row shared out: "Повторить заказ" no longer breaks in two beside
+     "Подробнее"; when both do not fit (360 px, long uz labels) they wrap to a row each. */
+  .ae-order__buttons > .ae-btn { flex: 1 1 auto; white-space: nowrap; }
+  .ae-order__more { margin-left: 0; }
+}
+
+.ae-orders__empty .ae-empty { max-width: none; padding: 40px 20px; border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-bg); }
+.ae-orders__empty [hidden] { display: none; }
+.ae-orders__pager { display: grid; gap: 4px; }
+.ae-orders__pager[hidden] { display: none; }
+.ae-orders__pager .ae-pagination { margin: 4px 0 0; }
+.ae-orders__pager .ae-pagination > li { margin: 0; list-style: none; }
+.ae-orders__pager .ae-pagination > li::before { content: none; }
+.ae-orders__pager .ae-pagination a,
+.ae-orders__pager .ae-pagination span { min-width: 44px; height: 44px; }
+.ae-orders__pager .ae-pagination .ae-pagination__gap { border-color: transparent; background: transparent; min-width: 24px; padding: 0; }
+.ae-orders__pager .ae-pagination__info { margin: 0; }
+
+@media (max-width: 575px) {
+  .ae-cabinet-page .order-actions__buttons { justify-content: stretch !important; }
+  .ae-cabinet-page .order-actions .order-actions__buttons > .ae-btn { flex: 1 1 0; }
+  .ae-order__actions { flex-basis: 100%; }
+}
+
+
+/* 4. The order modal (partials/order_detail_modal.html, order-detail-modal.js) ============ */
+
+.ae-od .modal-title { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ae-od .modal-body { color: var(--ae-ink); }
+.ae-od__body { display: grid; gap: 22px; }
+.ae-od__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ae-od__placed { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 15px; color: var(--ae-ink-soft); }
+.ae-od__placed i { color: var(--ae-aqua-deep); }
+.ae-od__section { min-width: 0; }
+.ae-od__title { margin: 0 0 8px; font-size: 16px; font-weight: 800; line-height: 1.35; color: var(--ae-ink); }
+.ae-od__items { margin: 0; padding: 0 16px; list-style: none; border: 1px solid var(--ae-line); border-radius: var(--ae-r); }
+.ae-od__items > li + li { border-top: 1px solid var(--ae-line); }
+.ae-od__items .ae-line { padding: 12px 0; }
+.ae-od__grid { display: grid; gap: 22px; }
+@media (min-width: 768px) {
+  .ae-od__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
+}
+.ae-od__address { display: grid; gap: 4px; }
+.ae-od__address p { margin: 0; }
+.ae-od__address-title { font-weight: 700; color: var(--ae-ink); }
+.ae-od__address-line { font-size: 15px; line-height: 1.5; color: var(--ae-ink-soft); overflow-wrap: anywhere; }
+.ae-od__note { display: flex; gap: 8px; margin-top: 4px !important; font-size: 14px; color: var(--ae-ink-soft); }
+.ae-od__note i { margin-top: 3px; color: var(--ae-muted); }
+.ae-od__muted { margin: 0; color: var(--ae-ink-soft); }
+.ae-od__map {
+  height: 180px;
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r-sm);
+  overflow: hidden;
+  z-index: 0;
+}
+.ae-od__map[hidden] { display: none; }
+/* Leaflet's tiles under the theme's global img rules. */
+.ae-od__map .leaflet-tile-pane img,
+.ae-od__map img.leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
+  width: 256px !important;
+  height: 256px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+.ae-od__map .leaflet-marker-shadow { display: none !important; }
+.ae-od__summary { padding: 4px 16px; border: 1px solid var(--ae-line); border-radius: var(--ae-r); background: var(--ae-bg); }
+.ae-od__summary .ae-dl__row { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 0; }
+.ae-od__summary .ae-dl__row dt { font-weight: 600; }
+.ae-od__summary .ae-od__discount dd { color: var(--ae-ok); }
+.ae-od__summary .ae-dl__total { border-top: 1.5px solid var(--ae-ink); }
+.ae-od__summary .ae-dl__total dt,
+.ae-od__summary .ae-dl__total dd { font-size: 17px; }
+
+.ae-od .modal-footer { align-items: flex-start; }
+.ae-od__actions { flex: 1 1 260px; min-width: 0; }
+.ae-od__actions:empty,
+.ae-od__actions[hidden] { display: none; }
+.ae-od__actions .order-actions__buttons { justify-content: flex-start !important; }
+.ae-od__actions .order-actions__deadline,
+.ae-od__actions .order-actions__subscription { text-align: left !important; }
+.ae-od__buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto !important; }
+@media (max-width: 575px) {
+  .ae-od__buttons { width: 100%; flex-direction: column-reverse; }
+  .ae-od__buttons > .ae-btn { width: 100%; }
+  /* The footer is a column here: a flex-basis would become a height (an empty 260 px band under the buttons). */
+  .ae-od__actions { flex: 0 0 auto; width: 100%; }
+  .ae-od__actions .order-actions__buttons > .ae-btn { flex: 1 1 100%; }
+  .ae-od__items { padding: 0 12px; }
+  .ae-od__summary { padding: 4px 12px; }
+}
+
+
+/* 5. The pages the next batch rebuilds (loyalty, addresses, profile, security): their Bootstrap cards keep the
+   frame's look until then (this was cabinet_base.html's inline style, now on the tokens). ================ */
+
+.ae-cabinet-page .cabinet-content .card {
+  border: 1px solid var(--ae-line);
+  border-radius: var(--ae-r);
+  box-shadow: none;
+  margin-bottom: 24px;
+  background: var(--ae-surface);
+}
+.ae-cabinet-page .cabinet-content .card-header {
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--ae-line);
+  border-radius: var(--ae-r) var(--ae-r) 0 0 !important;
+  background: var(--ae-bg);
+}
+.ae-cabinet-page .cabinet-content .card-header h5 { margin: 0; font-weight: 800; color: var(--ae-ink); }
+.ae-cabinet-page .cabinet-content .card-header i { margin-right: 10px; color: var(--ae-aqua-deep); }
+.ae-cabinet-page .cabinet-content .card-body { padding: 22px; }

@@ -1,232 +1,57 @@
 {% extends "frontend/base.html" %}
-{% if current_language == 'ru' %}
-{% set meta_description = "Галерея Aqua Element: контроль качества воды, процессы доставки и фотографии продукции." %}
-{% elif current_language == 'en' %}
-{% set meta_description = "Browse Aqua Element gallery highlights featuring water quality processes, delivery operations, and product photos." %}
-{% else %}
-{% set meta_description = "Aqua Element galereyasi: suv sifati jarayonlari, yetkazib berish amaliyoti va mahsulot fotosuratlari." %}
-{% endif %}
+{#- /gallery (redesign step 3, group "info"). Only real Aqua Element photos: each listed product's own picture (the
+    Product row's first image, as the shop prints it) with its live size, linking to its product page. The theme's
+    stock photos (images/gallery/gallery-*.jpg: models, glasses, hands; deleted 2026-11-14) are never shown as ours, and the eleven files
+    the old page named never existed. More photos live on Instagram and the Telegram channel, linked below. -#}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
+{% from 'frontend/macros/ui.html' import empty_state %}
+{% from 'frontend/partials/info_ui.html' import product_href with context %}
 
-{% block title %}{{ 'landing.gallery.page_title'|t }} - {{ company_name }}{% endblock %}
+{% set meta_description = 'web.info.gallery.meta'|t %}
 
-{% block content %}
-<!-- Page Title -->
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'landing.nav.gallery'|t }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>{{ 'landing.nav.gallery'|t }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
-<!-- End Page Title -->
+{% block title %}{{ 'web.info.gallery.title'|t }} — {{ company_name }}{% endblock %}
 
-<!-- gallery-section -->
-<section class="gallery-section centred">
-    <div class="auto-container">
-        <div class="sec-title centred">
-            <p>{{ 'landing.gallery.subtitle'|t }}</p>
-            <h2>{{ 'landing.gallery.heading'|t }}</h2>
-        </div>
-        <div class="sortable-masonry">
-            <div class="filters">
-                <ul class="filter-tabs filter-btns clearfix">
-                    <li class="active filter" data-role="button" data-filter=".all">{{ 'landing.gallery.filter.all'|t }}</li>
-                    <li class="filter" data-role="button" data-filter=".water_quality">{{ 'landing.gallery.filter.water_quality'|t }}</li>
-                    <li class="filter" data-role="button" data-filter=".delivery">{{ 'landing.gallery.filter.delivery'|t }}</li>
-                    <li class="filter" data-role="button" data-filter=".products">{{ 'landing.gallery.filter.products'|t }}</li>
-                    <li class="filter" data-role="button" data-filter=".facilities">{{ 'landing.gallery.filter.facilities'|t }}</li>
-                </ul>
-            </div>
-            <div class="items-container row clearfix">
-                <!-- Water Quality Testing -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all water_quality">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-testing.jpg') }}" alt="{{ 'landing.gallery.item.water_testing.title'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.water_testing.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.water_testing.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/water-testing.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Delivery Service -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/delivery-truck.jpg') }}" alt="{{ 'landing.gallery.item.delivery.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.delivery.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.delivery.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/delivery-truck.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Water Bottles Products -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-bottles.jpg') }}" alt="{{ 'landing.gallery.item.bottles.title'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.bottles.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.bottles.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/water-bottles.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Water Treatment Facility -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities water_quality">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/treatment-facility.jpg') }}" alt="{{ 'landing.gallery.item.treatment.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.treatment.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.treatment.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/treatment-facility.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Water Cooler Installation -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products facilities">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/cooler-installation.jpg') }}" alt="{{ 'landing.gallery.item.cooler.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.cooler.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.cooler.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/cooler-installation.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Customer Service -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/customer-service.jpg') }}" alt="{{ 'landing.gallery.item.customer_service.title'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.customer_service.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.customer_service.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/customer-service.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Laboratory Testing -->
-                <div class="col-lg-8 col-md-12 col-sm-12 masonry-item large-column all water_quality facilities">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/laboratory.jpg') }}" alt="{{ 'landing.gallery.item.laboratory.title'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.laboratory.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.laboratory.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/laboratory.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Warehouse Operations -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities products">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/warehouse.jpg') }}" alt="{{ 'landing.gallery.item.warehouse.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.warehouse.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.warehouse.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/warehouse.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Team Photo -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/team.jpg') }}" alt="{{ 'landing.gallery.item.team.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.team.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.team.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/team.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Office Interior -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/office.jpg') }}" alt="{{ 'landing.gallery.item.office.title'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.office.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.office.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/office.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Product Range -->
-                <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
-                    <div class="gallery-block-one">
-                        <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/product-range.jpg') }}" alt="{{ 'landing.gallery.item.product_range.alt'|t }}"></figure>
-                            <div class="content-box">
-                                <h4>{{ 'landing.gallery.item.product_range.title'|t }}</h4>
-                                <p>{{ 'landing.gallery.item.product_range.description'|t }}</p>
-                            </div>
-                            <div class="link">
-                                <a href="{{ url_for('static', filename='images/gallery/product-range.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-    </div>
-</section>
-<!-- gallery-section end -->
+{% block extra_head %}
+<link href="{{ asset_url('css/pages/info.css') }}" rel="stylesheet">
 {% endblock %}
 
-{% block extra_js %}
-<script src="{{ url_for('static', filename='js/isotope.js') }}"></script>
-<script src="{{ url_for('static', filename='js/pages/gallery.js') }}"></script>
+{% block content %}
+{%- set lang = current_language -%}
+{%- set placeholder = url_for('static', filename='images/product-placeholder.svg') -%}
+<div class="info info--gallery">
+    {{ page_hero('web.info.gallery.title'|t, [('web.info.gallery.title'|t, None)], lead='web.info.gallery.lead'|t) }}
+
+    <section class="ae-section"{% if photos %} aria-labelledby="gallery-title"{% endif %}>
+        <div class="ae-container">
+            {%- if photos %}
+            <h2 class="info-h2" id="gallery-title">{{ 'web.info.gallery.products_h'|t }}</h2>
+            {%- endif %}
+            <ul class="info-gallery">
+                {%- for p in photos %}
+                {%- set size = p.offer.size_text[lang] %}
+                <li class="info-gallery__item">
+                    <a class="ae-card ae-card--link info-photo" href="{{ product_href(p.offer) }}" data-product-id="{{ p.offer.id }}">
+                        <span class="info-photo__frame">
+                            <img src="{{ p.image }}" data-fallback="{{ placeholder }}" alt="{{ 'web.home.hero.image_alt'|t(size=size) }}"
+                                 width="533" height="800" loading="lazy" decoding="async">
+                        </span>
+                        <span class="info-photo__caption">
+                            <span class="info-photo__title">{{ 'web.info.cta.product'|t(size=size) }}</span>
+                            <span class="info-photo__more">{{ 'web.info.gallery.open_product'|t }}<i class="far fa-arrow-right" aria-hidden="true"></i></span>
+                        </span>
+                    </a>
+                </li>
+                {%- endfor %}
+                <li class="info-gallery__item info-gallery__item--more">
+                    <div class="ae-panel ae-panel--pale info-gallery-more" data-gallery-more>
+                        {{ empty_state('fab fa-instagram', 'web.info.gallery.more_h'|t, 'web.info.gallery.more_text'|t,
+                                       action={'label': 'web.shell.social.instagram'|t, 'url': company_instagram_url, 'external': True, 'icon': 'fab fa-instagram'},
+                                       secondary={'label': 'web.shell.social.channel'|t, 'url': company_telegram_channel_url, 'external': True, 'icon': 'fas fa-paper-plane'},
+                                       heading_tag='h3' if photos else 'h2') }}
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </section>
+</div>
 {% endblock %}

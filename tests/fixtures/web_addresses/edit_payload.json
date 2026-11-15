@@ -1,0 +1,16 @@
+{
+  "title": "Офис",
+  "full_address": "Toshkent, Shayxontohur tumani, drive probe",
+  "street_address": null,
+  "district": "shaykhontohur",
+  "city": "Tashkent",
+  "country": "Uzbekistan",
+  "floor_number": null,
+  "apartment_number": null,
+  "delivery_instructions": null,
+  "landmark": null,
+  "latitude": 41.2989,
+  "longitude": 69.2401,
+  "is_default": true,
+  "is_business": true
+}

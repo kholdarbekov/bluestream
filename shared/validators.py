@@ -42,12 +42,20 @@ def _parse(phone):
         return None
 
 
-def normalize_phone_number(phone: str) -> Optional[str]:
-    """
-    Normalize to E.164 (+998XXXXXXXXX) via libphonenumber.
-    Returns None if the input is not a valid Uzbekistan mobile number.
-    """
-    parsed = _parse(phone)
+def _domestic_trunk_national(phone) -> Optional[str]:
+    """The 9-digit number inside the legacy domestic form "8 90 123 45 67" / "8(90)1234567", else None.
+
+    libphonenumber knows no national prefix for UZ, so the trunk "8" older customers still type before the
+    number is read as a tenth digit. A "+" always means an international number, never this form."""
+    candidate = str(phone).strip()
+    digits = re.sub(r"\D", "", candidate)
+    if candidate.startswith("+") or len(digits) != 10 or not digits.startswith("8"):
+        return None
+    return digits[1:]
+
+
+def _accepted_e164(parsed) -> Optional[str]:
+    """E.164 for a parsed number we accept: a valid Uzbekistan mobile. None for anything else."""
     if parsed is None or not phonenumbers.is_valid_number(parsed):
         return None
     # Restrict to Uzbekistan (+998). A bare/foreign number that libphonenumber
@@ -57,6 +65,24 @@ def normalize_phone_number(phone: str) -> Optional[str]:
     if phonenumbers.number_type(parsed) not in _ACCEPTED_NUMBER_TYPES:
         return None
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def normalize_phone_number(phone: str) -> Optional[str]:
+    """
+    Normalize to E.164 (+998XXXXXXXXX) via libphonenumber.
+    Returns None if the input is not a valid Uzbekistan mobile number.
+
+    Reads every common way of typing a number: +998 90 123 45 67, 998901234567, 00998901234567,
+    90 123 45 67, (90) 123-45-67 and the legacy domestic 8 90 123 45 67. The domestic form is tried
+    only when the number as typed was refused, so no input that had an answer gets a different one,
+    and it accepts exactly what its 9-digit number accepts on its own (owner decision 2026-11-14).
+    """
+    normalized = _accepted_e164(_parse(phone))
+    if normalized is None and phone:
+        national = _domestic_trunk_national(phone)
+        if national:
+            normalized = _accepted_e164(_parse(national))
+    return normalized
 
 
 def validate_uzbekistan_phone(phone: str):

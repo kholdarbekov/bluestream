@@ -19,7 +19,7 @@ SERVICE_TRANSLATIONS = {
     # Additional Auth Messages
     'api.auth.account_disabled': {
         'en': 'Account has been disabled',
-        'uz': 'Hisob o\'chirilgan',
+        'uz': "Hisob o‘chirilgan",
         'ru': 'Аккаунт отключен'
     },
     'api.auth.admin_already_exists': {
@@ -140,7 +140,7 @@ SERVICE_TRANSLATIONS = {
     },
     'error.validation.invalid_password': {
         'en': 'Invalid password',
-        'uz': 'Noto\'g\'ri parol',
+        'uz': "Noto‘g‘ri parol",
         'ru': 'Неверный пароль'
     },
     'error.validation.no_email_address': {
@@ -160,7 +160,7 @@ SERVICE_TRANSLATIONS = {
     },
     'error.validation.phone_already_exists': {
         'en': 'Phone number already registered',
-        'uz': 'Telefon raqami allaqachon ro\'yxatdan o\'tgan',
+        'uz': "Telefon raqami allaqachon ro‘yxatdan o‘tgan",
         'ru': 'Номер телефона уже зарегистрирован'
     },
 

@@ -36,6 +36,15 @@ def customer(db, sample_user):
     return sample_user
 
 
+def _minus(app, amount):
+    """A discount row's amount as the page prints it: the website's money label (display_labels.money, the one the
+    order modal prints too) after a minus sign."""
+    from business_app.utils import display_labels
+
+    with app.test_request_context():
+        return "−" + display_labels.money(amount, "en")
+
+
 def _confirmation_html(app, user, order_id):
     response = app.test_client().get(CONFIRMATION_URL.format(order_id=order_id), headers=customer_headers(app, user))
     assert response.status_code == 200, response.get_data(as_text=True)[:500]
@@ -54,7 +63,7 @@ def test_order_confirmation_shows_the_tier_saving(app, db, customer, sample_prod
     totals = _confirmation_html(app, customer, order.id)
 
     assert TIER_LABEL_START in totals
-    assert "−{:,.0f}".format(order.tier_discount) in totals
+    assert _minus(app, order.tier_discount) in totals
 
 
 def test_order_confirmation_shows_no_discount_rows_when_none_apply(app, db, customer, sample_product, user_address):
@@ -76,8 +85,8 @@ def test_order_confirmation_shows_subscription_and_reward_rows_from_the_order(ap
 
     totals = _confirmation_html(app, customer, order.id)
 
-    assert "Subscription discount" in totals and "−1,234" in totals
-    assert "Reward discount" in totals and "−5,678" in totals
+    assert "Subscription discount" in totals and _minus(app, Decimal("1234")) in totals
+    assert "Reward discount" in totals and _minus(app, Decimal("5678")) in totals
 
 
 def test_web_order_renderers_use_only_server_discount_fields():

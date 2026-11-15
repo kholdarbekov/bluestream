@@ -44,6 +44,8 @@ from business_app.models.translation import Translation
 from business_app.services import subscription_service as subscription_service_module
 from business_app.tasks.subscription_tasks import process_daily_subscription_billing
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, _category_for
+from scripts.seed_web_ui_cabinet_translations import CATEGORY as CABINET_CATEGORY, TRANSLATIONS as CABINET_TRANSLATIONS
+from scripts.seed_web_ui_integration_translations import TRANSLATIONS as INTEGRATION_TRANSLATIONS
 from shared.enums import LIVE_SUBSCRIPTION_STATUSES, DeliveryStatus, OrderStatus, PaymentStatus, SubscriptionStatus
 from tests.integration.test_subscription_action_guards import (  # noqa: F401  (fixtures)
     BASE,
@@ -105,6 +107,13 @@ def seeded(db):
         for language, value in values.items():
             if value:
                 db.session.add(Translation(key=key, language=language, value=value, category=_category_for(key)))
+    # The cabinet group's own seed (website redesign 2026-11-14): the order modal's and the status pills' words
+    # (`web.cabinet.*`), which the modal this page includes reads.
+    # The site's one full-date format (web.integration.date_year), which base.html hands AE.formatDate.
+    for seed in (CABINET_TRANSLATIONS, INTEGRATION_TRANSLATIONS):
+        for language, rows in seed.items():
+            for key, value in rows.items():
+                db.session.add(Translation(key=key, language=language, value=value, category=CABINET_CATEGORY))
     db.session.commit()
 
 
@@ -839,7 +848,11 @@ def _shell(app, sample_user) -> dict:
             "html": str(soup.select_one("#orderDetailModal")),
             "island": json.loads(soup.select_one("script#order-detail-modal-data").string),
         }
-        shell[language] = {"html": str(soup.select_one("div.subs")), "island": island, "modal": modal}
+        # base.html's island words the page's money and dates are written with (AE.formatMoney, AE.formatDate): the
+        # order modal prints a line's unit price through them.
+        base_island = json.loads(soup.select_one("script#base-page-data").string)
+        base = {name: base_island.get(name) for name in ("money_template", "date_words")}
+        shell[language] = {"html": str(soup.select_one("div.subs")), "island": island, "modal": modal, "base": base}
     return shell
 
 
@@ -942,7 +955,8 @@ def test_the_shell_has_the_containers_the_renderer_fills(app, db, sample_user, l
     assert island["method_labels"]["cash"] == BACKEND_TRANSLATIONS["web.display_labels.payment_method.cash"][language]
     # The shared order modal, after the base scripts (its script reads getPageData as it loads).
     assert soup.select_one("#orderDetailModal") is not None
-    scripts = [tag.get("src", "") for tag in soup.find_all("script")]
+    # Paths only: base.html versions every local asset URL (`?v=<mtime>`, asset_url), the order is what counts here.
+    scripts = [tag.get("src", "").split("?")[0] for tag in soup.find_all("script")]
     page_data = next(i for i, src in enumerate(scripts) if src.endswith("/_page-data.js"))
     modal = next(i for i, src in enumerate(scripts) if src.endswith("/order-detail-modal.js"))
     page = next(i for i, src in enumerate(scripts) if src.endswith("/my-subscriptions.js"))
@@ -951,7 +965,9 @@ def test_the_shell_has_the_containers_the_renderer_fills(app, db, sample_user, l
     # once, before the page script (spec 2026-10-27 §5.3, §8).
     order_actions = [i for i, src in enumerate(scripts) if src.endswith("/order-actions.js")]
     assert len(order_actions) == 1 and order_actions[0] < page
-    assert soup.select_one('link[href$="/css/pages/my-subscriptions.css"]') is not None
+    # Linked through asset_url like the scripts (`?v=<mtime>`): the path is what counts.
+    styles = [tag.get("href", "").split("?")[0] for tag in soup.find_all("link", rel="stylesheet")]
+    assert any(href.endswith("/css/pages/my-subscriptions.css") for href in styles)
 
 
 def test_the_fake_plans_and_the_dead_panel_are_gone():
@@ -996,7 +1012,7 @@ def test_the_home_page_manage_link_opens_my_subscriptions(app, db, client):
     soup = BeautifulSoup(
         app.test_client().get("/?lang=en", follow_redirects=True).get_data(as_text=True), "html.parser"
     )
-    [link] = soup.select("#subscription-constructor .more-btn a.theme-btn")
+    [link] = soup.select("#subscription-constructor .more-btn a.ae-btn")
     assert link["href"] == "/my-subscriptions"
 
 

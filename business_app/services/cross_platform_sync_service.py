@@ -188,10 +188,12 @@ class CrossPlatformSyncService:
 
         `web_user` is the account that keeps everything (the phone holder); `telegram_user` is the
         one whose Telegram moves to it: a bot signup, or a website account linked from /my-account.
-        A website account also brings its sign-in (spec 2026-10-19 R8b): a real email moves with its
-        password, even over the survivor's own email, so the customer keeps the website login they
-        just used, and every other login of the survivor ends (R8e). A bot signup brings nothing,
-        even with a real email an admin typed: it has no website password (`has_website_password`).
+        An account with a website login brings it (spec 2026-10-19 R8b): a real email moves with its
+        password and that password's stamp (`password_set_at`), even over the survivor's own email, so
+        the customer keeps the website login they just used, and every other login of the survivor ends
+        (R8e). That is a website account, or a bot signup that has set a password through the emailed
+        link (`has_website_password`, the one rule). A bot signup that never set one brings nothing,
+        even with a real email an admin typed: its stored password is one nobody knows.
         """
         secondary_id = telegram_user.id
         primary_id = web_user.id
@@ -208,6 +210,7 @@ class CrossPlatformSyncService:
         brings_web_login = is_deliverable_email(telegram_user.email) and has_website_password(telegram_user)
         web_email = telegram_user.email
         web_password_hash = telegram_user.password_hash
+        web_password_set_at = telegram_user.password_set_at
         web_email_verified_at = telegram_user.email_verified_at
         web_is_verified = telegram_user.is_verified
         web_preferred_language = telegram_user.preferred_language
@@ -251,6 +254,7 @@ class CrossPlatformSyncService:
                 )
             web_user.email = web_email
             web_user.password_hash = web_password_hash
+            web_user.password_set_at = web_password_set_at
             web_user.email_verified_at = web_email_verified_at
             web_user.is_verified = web_is_verified
             web_user.preferred_language = web_preferred_language
@@ -559,6 +563,7 @@ class CrossPlatformSyncService:
         # Save web data to transfer
         web_email = web_user.email
         web_password_hash = web_user.password_hash
+        web_password_set_at = web_user.password_set_at
         web_phone = web_user.phone
         web_first_name = web_user.first_name
         web_last_name = web_user.last_name
@@ -585,6 +590,7 @@ class CrossPlatformSyncService:
         # Step 4: Transfer web-specific data to telegram user
         telegram_user.email = web_email
         telegram_user.password_hash = web_password_hash
+        telegram_user.password_set_at = web_password_set_at  # the stamp travels with the password it dates
         telegram_user.phone = web_phone or telegram_user.phone
 
         # Preserve primary telegram profile names; only backfill missing values

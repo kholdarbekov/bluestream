@@ -747,8 +747,19 @@ class LoyaltyService:
         transaction_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        group: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get filtered points history for API."""
+        """Get filtered points history for API.
+
+        `group` is a history filter of the website's chips (loyalty_serializers.HISTORY_GROUPS): the rows whose
+        display category (the label the row carries) is in that group, so a streak bonus recorded as EARNED is listed
+        under "bonus" where its label puts it. It is applied to the customer's rows in Python with the serializer's own
+        classifier, never re-expressed in SQL.
+        """
+        from business_app.serializers.loyalty_serializers import HISTORY_GROUPS, display_category
+
+        if group and group not in HISTORY_GROUPS:
+            raise ValidationError("Invalid history group")
         query = LoyaltyTransaction.query.filter_by(user_id=user_id)
 
         if transaction_type:
@@ -772,7 +783,22 @@ class LoyaltyService:
                 raise ValidationError("Invalid end date format") from exc
             query = query.filter(LoyaltyTransaction.created_at <= end_dt)
 
-        pagination = query.order_by(LoyaltyTransaction.created_at.desc()).paginate(
+        query = query.order_by(LoyaltyTransaction.created_at.desc(), LoyaltyTransaction.id.desc())
+        if group:
+            categories = HISTORY_GROUPS[group]
+            rows = [
+                row
+                for row in query.all()
+                if display_category(
+                    (row.extra_data or {}).get("action_type"),
+                    getattr(row.transaction_type, "value", row.transaction_type),
+                )
+                in categories
+            ]
+            start = (max(page, 1) - 1) * per_page
+            return {"items": rows[start : start + per_page], "total": len(rows), "page": page, "per_page": per_page}
+
+        pagination = query.paginate(
             page=page,
             per_page=per_page,
             error_out=False,

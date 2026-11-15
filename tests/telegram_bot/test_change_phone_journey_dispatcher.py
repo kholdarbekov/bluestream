@@ -60,6 +60,7 @@ TRANSLATIONS = {
     "telegram.phone.phone_accepted": "Phone accepted",
     "telegram.phone.invalid_format": "That is not a valid Uzbek mobile number",
     "telegram.phone.verification_code_sent_to_phone_prompt": "Code sent to {phone_masked}",
+    "telegram.phone.code_still_valid_prompt": "The code sent to {phone_masked} still works",
     "telegram.phone.verification_sms_send_failed": "Could not send the SMS: {error}",
     "telegram.phone.already_registered_use_different": (
         "This number is already registered. Use a different one"
@@ -233,8 +234,11 @@ async def test_a_typed_number_is_saved_only_after_its_code_and_the_name_step_sti
     [
         (409, "Email already registered", "This number is already registered. Use a different one"),
         (500, "SMS gateway down", "Could not send the SMS: SMS gateway down"),
+        # The per-address limit is a 429 too, but without RESEND_COOLDOWN: nothing was sent and no code is live.
+        (429, "Rate limit exceeded. Try again in 41 seconds.",
+         "Could not send the SMS: Rate limit exceeded. Try again in 41 seconds."),
     ],
-    ids=["number-held-by-another-account", "sms-not-sent"],
+    ids=["number-held-by-another-account", "sms-not-sent", "address-rate-limit"],
 )
 async def test_a_refused_code_request_keeps_the_customer_on_the_phone_step(
     bot, user, status, error, expected
@@ -252,6 +256,42 @@ async def test_a_refused_code_request_keeps_the_customer_on_the_phone_step(
     assert "pending_phone_verification" not in flow_data(bot)
     assert phone_writes(bot) == []
     assert profile_phone_writes(bot) == []
+
+
+async def test_a_number_whose_code_is_still_valid_goes_on_to_that_code(bot, user):
+    """/send-otp sends a number a new code only once its last one expires (owner 2026-11-14). Its 429
+    RESEND_COOLDOWN is no failure: the code already sent is the one to type, and it still binds the number."""
+    bot.backend.route(
+        "POST", SEND_OTP,
+        lambda _c: backend_failure(
+            "The code we already sent to this number still works — enter it.",
+            status_code=429,
+            data={
+                "success": False,
+                "message": "The code we already sent to this number still works — enter it.",
+                "data": {
+                    "error_code": "RESEND_COOLDOWN", "phone_masked": MASKED,
+                    "expires_in": 120, "resend_available_in": 120,
+                },
+            },
+        ),
+    )
+    await reach_typed_phone_step(bot, user)
+
+    await bot.send(user.text(NEW_PHONE_E164))
+
+    assert payloads(bot, "POST", SEND_OTP) == [{"phone": NEW_PHONE_E164}]
+    assert last_text(bot) == f"The code sent to {MASKED} still works"
+    assert state(bot) == PHONE_VERIFY_OTP
+    assert flow_data(bot).get("pending_phone_verification") == NEW_PHONE_E164
+
+    bot.backend.route("POST", VERIFY_PHONE, lambda _c: {"data": {"phone": NEW_PHONE_E164}})
+    bot.telegram.reset()
+    await bot.send(user.text("123456"))
+
+    assert payloads(bot, "POST", VERIFY_PHONE) == [{"otp": "123456"}]
+    assert texts(bot) == ["Phone number is verified", "Enter your full name"]
+    assert phone_writes(bot) == []
 
 
 async def test_a_number_the_validator_rejects_never_costs_an_sms(bot, user):

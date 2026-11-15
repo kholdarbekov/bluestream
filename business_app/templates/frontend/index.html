@@ -1,4 +1,13 @@
 {% extends "frontend/base.html" %}
+{#- The home page (redesign step 3, "home" group). One bold moment, the hero, built around the real Aqua Element
+    bottle (the hero product's own image) with live prices from the public offer facts; every section after it is
+    calm. Prices, sizes and smallest orders are the offer facts' (never typed here), and the delivery sentences are
+    the SSOT's, printed whole. Styles: static/css/pages/home.css (scoped to .ae-home) and, for the subscription
+    builder, static/css/subscription-constructor.css (scoped to #subscription-constructor). -#}
+{% from "frontend/partials/offer_facts.html" import offer_facts_block %}
+{% from "frontend/partials/product_card.html" import product_card %}
+{#- Sign-in that brings the visitor back to the builder (login's `next`); the builder's note and script use it. #}
+{% set builder_sign_in_url = url_for('frontend.login', next=url_for('frontend.index') ~ '#subscription-constructor') %}
 {% if home_meta_description %}
 {% set meta_description = home_meta_description %}
 {% endif %}
@@ -11,7 +20,7 @@
   "@type": "Organization",
   "name": company_name,
   "url": url_for('frontend.index', _external=True),
-  "logo": url_for('static', filename='images/logo.png', _external=True),
+  "logo": seo.logo_url,
   "contactPoint": [{
     "@type": "ContactPoint",
     "telephone": company_phone,
@@ -34,828 +43,438 @@
 <script type="application/ld+json">{{ website_schema | tojson }}</script>
 {% endblock %}
 
-{% block content %}
-        <h1 class="sr-only">{{ 'landing.hero.title_1'|t }} - {{ company_name }}</h1>
-        <!-- banner-section -->
-        <section class="banner-style-two banner-style-three">
-            <div class="pattern-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-24.png') }});"></div>
-            <div class="banner-carousel owl-theme owl-carousel owl-dots-none">
-                <div class="slide-item">
-                    <div class="auto-container">
-                        <div class="inner-box">
-                            <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'landing.image.water_delivery'|t }}" fetchpriority="high"></figure>
-                            </div>
-                            <div class="content-box">
-                                <h2>{{ 'landing.hero.title_1'|t }}</h2>
-                                <p>{{ 'landing.hero.subtitle_1'|t }}</p>
-                                <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_discover'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="slide-item">
-                    <div class="auto-container">
-                        <div class="inner-box">
-                            <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4-elon-musk.png') }}" alt="{{ 'landing.image.premium_water'|t }}"></figure>
-                            </div>
-                            <div class="content-box">
-                                <h2>{{ 'landing.hero.title_2'|t }}</h2>
-                                <p>{{ 'landing.hero.subtitle_2'|t }}</p>
-                                <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_shop_now'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="slide-item">
-                    <div class="auto-container">
-                        <div class="inner-box">
-                            <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-3.png') }}" alt="{{ 'landing.image.home_delivery'|t }}"></figure>
-                            </div>
-                            <div class="content-box">
-                                <h2>{{ 'landing.hero.title_3'|t }}</h2>
-                                <p>{{ 'landing.hero.subtitle_3'|t }}</p>
-                                <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'landing.nav.about'|t }}</a>
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_view_plans'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- banner-section end -->
-
-        <!-- feature-section -->
-        <section class="feature-section light alternat-2 centred">
-            <div class="pattern-layer">
-                <div class="pattern-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-25.png') }});"></div>
-                <div class="pattern-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-26.png') }});"></div>
-            </div>
-            <div class="auto-container">
-                <div class="inner-container wow fadeInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms">
-                    <div class="title-text">
-                        <h2>{{ 'landing.features.trusted_name.title_line1'|t }} <br />{{ 'landing.features.trusted_name.title_line2'|t }}</h2>
-                    </div>
-                    <div class="row clearfix">
-                        <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
-                            <div class="feature-block-one">
-                                <div class="inner-box">
-                                    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
-                                    <div class="icon-box"><i class="flaticon-water-drop"></i></div>
-                                    <h4>{{ 'landing.features.purity.title'|t }}</h4>
-                                    <p>{{ 'landing.features.purity.description'|t }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
-                            <div class="feature-block-one">
-                                <div class="inner-box">
-                                    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
-                                    <div class="icon-box"><i class="flaticon-water-drop-1"></i></div>
-                                    <h4>{{ 'landing.features.chlorine_free.title'|t }}</h4>
-                                    <p>{{ 'landing.features.chlorine_free.description'|t }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
-                            <div class="feature-block-one">
-                                <div class="inner-box">
-                                    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
-                                    <div class="icon-box"><i class="flaticon-recycle"></i></div>
-                                    <h4>{{ 'landing.features.filtration.title'|t }}</h4>
-                                    <p>{{ 'landing.features.filtration.description'|t }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
-                            <div class="feature-block-one">
-                                <div class="inner-box">
-                                    <div class="icon-box"><i class="flaticon-glass"></i></div>
-                                    <h4>{{ 'landing.features.healthy_water.title'|t }}</h4>
-                                    <p>{{ 'landing.features.healthy_water.description'|t }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- feature-section end -->
-
-        <!-- about-section -->
-        <section class="about-section">
-            <div class="auto-container">
-                <div class="row align-items-center clearfix">
-                    <div class="col-lg-6 col-md-12 col-sm-12 image-column">
-                        <div class="image_block_2">
-                            <div class="image-box">
-                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'landing.footer.about_us'|t }}"></figure>
-                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'landing.image.quality_water'|t }}"></figure>
-                                <div class="text">
-                                    <h2>100+</h2>
-                                    <h6>{{ 'landing.about.meters_deep'|t }}</h6>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-6 col-md-12 col-sm-12 content-column">
-                        <div class="content_block_1">
-                            <div class="content-box wow fadeInRight animated" data-wow-delay="00ms" data-wow-duration="1500ms">
-                                <div class="sec-title">
-                                    <h2>{{ 'landing.about.home.title'|t }}</h2>
-                                </div>
-                                <div class="text">
-                                    <p>{{ 'landing.about.home.description_1'|t }}</p>
-                                    <p>{{ 'landing.about.home.description_2'|t }}</p>
-                                </div>
-                                <div class="btn-box">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'landing.button.read_more'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- about-section end -->
-
-        <!-- shop-section -->
-        <section class="shop-section centred pt-145 bg-color-1">
-            <div class="pattern-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-18.png') }});"></div>
-            <div class="auto-container">
-                <div class="sec-title">
-                    <h2>{{ 'landing.shop.home.title_line1'|t }} <br />{{ 'landing.shop.home.title_line2'|t }}</h2>
-                </div>
-                <div class="row clearfix">
-                    {% for product in featured_products[:3] %}
-                    <div class="col-lg-4 col-md-6 col-sm-12 shop-block">
-                        <div class="shop-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 300 }}ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <figure class="image-box">
-                                    {% if product.images and product.images|length > 0 %}
-                                    <img src="{{ product.images[0] }}" alt="{{ product.name }}" loading="lazy" decoding="async">
-                                    {% else %}
-                                    <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}" loading="lazy" decoding="async">
-                                    {% endif %}
-                                </figure>
-                                <div class="lower-content">
-                                    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                    {% set offer = offer_by_id.get(product.id) %}
-                                    <span>{% if offer %}{{ offer.size_text[current_language] }}{% endif %} {% if product.category %}{{ product.category.name }}{% endif %}</span>
-                                    <h4><a href="{% if product.slug %}{{ url_for('frontend.product_detail_slug', slug=product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">{{ product.name }}</a></h4>
-                                    <h6>{% if offer %}{{ offer.price_text[current_language] }}{% endif %}</h6>
-                                    <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
-                                    <div class="btn-box">
-                                        <button data-action="add-to-cart-shop" data-product-id="{{ product.id }}" class="theme-btn btn-two">{{ 'landing.button.add_to_cart'|t }}</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                <div class="more-btn">
-                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'landing.shop.view_all_products'|t }}</a>
-                </div>
-            </div>
-        </section>
-        <!-- shop-section end -->
-
-        <!-- coverage-teaser -->
-        <section class="coverage-teaser light centred pt-60 pb-60">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.coverage.home_title'|t }}</h2>
-                    <p>{{ 'landing.coverage.home_text'|t }}</p>
-                </div>
-                {% from "frontend/partials/offer_facts.html" import offer_facts_block %}
-                {{ offer_facts_block(offer_facts, current_language, heading_tag='h3') }}
-                <a href="{{ external_url_for_lang('frontend.coverage') }}" class="theme-btn btn-one">{{ 'landing.coverage.home_cta'|t }}</a>
-            </div>
-        </section>
-        <!-- coverage-teaser end -->
-
-        <!-- subscription-section -->
-        {% if subscription_plans %}
-        <section class="pricing-section">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.subscription.home.title_line1'|t }} <br />{{ 'landing.subscription.home.title_line2'|t }}</h2>
-                    <p>{{ 'landing.subscription.home.subtitle'|t }}</p>
-                </div>
-                <div class="row clearfix">
-                    {% for plan in subscription_plans %}
-                    <div class="col-lg-4 col-md-6 col-sm-12 pricing-block">
-                        <div class="pricing-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 200 }}ms" data-wow-duration="1500ms">
-                            <div class="pricing-table {% if plan.is_popular %}popular{% endif %}">
-                                {% if plan.is_popular %}
-                                <div class="popular-tag">{{ 'landing.subscription.most_popular'|t }}</div>
-                                {% endif %}
-                                <div class="table-header">
-                                    <h4>{{ plan.name }}</h4>
-                                    <div class="price">{{ plan.price|format_price }}<span>/{{ plan.period|translate(current_language) }}</span></div>
-                                </div>
-                                <div class="table-content">
-                                    <ul class="feature-list">
-                                        {% for feature in plan.features %}
-                                        <li>{{ feature|t }}</li>
-                                        {% endfor %}
-                                        {% if plan.free_delivery %}
-                                        <li>{{ 'landing.subscription.free_delivery'|t }}</li>
-                                        {% endif %}
-                                        {% if plan.discount_percentage > 0 %}
-                                        <li>{{ plan.discount_percentage }}% {{ 'landing.subscription.discount'|t }}</li>
-                                        {% endif %}
-                                    </ul>
-                                </div>
-                                <div class="table-footer">
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'landing.subscription.choose_plan'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </section>
-        {% endif %}
-        <!-- subscription-section end -->
-
-        <!-- aqua-club-public-section -->
-        {% if loyalty_handbook %}
-        <section class="service-section" id="aqua-club-public">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.loyalty.public_title'|t }}</h2>
-                    <p>{{ 'landing.loyalty.public_subtitle'|t }}</p>
-                </div>
-                <div class="row clearfix">
-                    <div class="col-lg-4 col-md-6 col-sm-12">
-                        <div class="aqua-club-fact">
-                            <h4>{{ 'landing.loyalty.public_earn_title'|t }}</h4>
-                            <p>{{ 'landing.loyalty.public_earn'|t(bonus=loyalty_handbook.signup_bonus) }}</p>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12">
-                        <div class="aqua-club-fact">
-                            <h4>{{ 'landing.loyalty.public_tiers_title'|t }}</h4>
-                            <p>
-                                {% for t in loyalty_handbook.tiers %}{{ t.name }}{% if not loop.last %} · {% endif %}{% endfor %}
-                            </p>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12">
-                        <div class="aqua-club-fact">
-                            <h4>{{ 'landing.loyalty.public_redeem_title'|t }}</h4>
-                            <p>{{ 'landing.loyalty.public_redeem'|t }}</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="more-btn text-center">
-                    <a href="{{ external_url_for_lang('frontend.loyalty_guide') }}" class="theme-btn btn-one">{{ 'landing.loyalty.public_cta_primary'|t }}</a>
-                </div>
-            </div>
-        </section>
-        {% endif %}
-        <!-- aqua-club-public-section end -->
-
-        <!-- loyalty-section -->
-        {% if featured_rewards %}
-        <section class="service-section bg-color-2">
-            <div class="pattern-layer">
-                <div class="pattern-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-10.png') }});"></div>
-                <div class="pattern-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-2.png') }});"></div>
-            </div>
-            <div class="auto-container">
-                <div class="sec-title light centred">
-                    <h2>{{ 'landing.loyalty.title'|t }}</h2>
-                    <p>{{ 'landing.loyalty.subtitle'|t }}</p>
-                </div>
-                {% if current_user and loyalty_data %}
-                <div class="loyalty-status text-center mb-5">
-                    <div class="loyalty-card">
-                        <h4>{{ 'landing.loyalty.your_status'|t }}</h4>
-                        <div class="loyalty-info">
-                            <span class="loyalty-badge">{{ loyalty_data.current_tier }}</span>
-                            <div class="points-info">
-                                <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'landing.loyalty.points'|t }}</strong>
-                            </div>
-                        </div>
-                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'landing.loyalty.view_rewards'|t }}</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="row clearfix">
-                    {% for reward in featured_rewards %}
-                    <div class="col-lg-3 col-md-6 col-sm-12 service-block">
-                        <div class="service-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 200 }}ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <div class="icon-box">
-                                    <i class="flaticon-star"></i>
-                                </div>
-                                <h4><a href="{{ url_for('frontend.my_loyalty') }}">{{ reward.name }}</a></h4>
-                                <p>{{ (reward.description or '')[:50] }}{% if reward.description and reward.description|length > 50 %}...{% endif %}</p>
-                                <div class="points-required">
-                                    <strong>{{ reward.points_cost }} {{ 'landing.loyalty.points'|t }}</strong>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                <div class="more-btn text-center">
-                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'landing.loyalty.join_program'|t }}</a>
-                </div>
-            </div>
-        </section>
-        {% endif %}
-        <!-- loyalty-section end -->
-
-        <!-- cta-section -->
-        <section class="cta-section bg-color-2">
-            <div class="pattern-layer">
-                <div class="pattern-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-10.png') }});"></div>
-                <div class="pattern-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-2.png') }});"></div>
-                <div class="pattern-3" style="background-image: url({{ url_for('static', filename='images/shape/shape-33.png') }});"></div>
-                <div class="pattern-4" style="background-image: url({{ url_for('static', filename='images/shape/shape-34.png') }});"></div>
-            </div>
-            <div class="auto-container">
-                <div class="row align-items-center clearfix">
-                    <div class="col-lg-6 col-md-12 col-sm-12 image-column">
-                        <figure class="image-box wow slideInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms clearfix">
-                            <img src="{{ url_for('static', filename='images/resource/cta-1.png') }}" alt="{{ 'landing.image.premium_service'|t }}">
-                        </figure>
-                    </div>
-                    <div class="col-lg-6 col-md-12 col-sm-12 content-column">
-                        <div class="content_block_3">
-                            <div class="content-box">
-                                <div class="sec-title light">
-                                    <h2>{{ 'landing.cta.title'|t }}</h2>
-                                </div>
-                                <div class="text">
-                                    <p>{{ 'landing.cta.description'|t }}</p>
-                                </div>
-                                <ul class="list clearfix">
-                                    <li>{{ 'landing.cta.feature.free_delivery'|t }}</li>
-                                    <li>{{ 'landing.cta.feature.seven_days'|t }}</li>
-                                    <li>{{ 'landing.cta.feature.quality_guarantee'|t }}</li>
-                                </ul>
-                                <div class="btn-box">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- cta-section end -->
-
-        <!-- blog-section -->
-        <section class="team-section">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.health.title'|t }}</h2>
-                    <p>{{ 'landing.health.subtitle'|t }}</p>
-                </div>
-                <div class="row clearfix blog-posts-equal-height">
-                    {% if featured_posts and featured_posts|length > 0 %}
-                        {% for post in featured_posts %}
-                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 300 }}ms" data-wow-duration="1500ms">
-                                <div class="inner-box">
-                                    <div class="image-box">
-                                        <figure class="image">
-                                            <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
-                                                {% if post.featured_image %}
-                                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
-                                                {% else %}
-                                                    <img src="{{ url_for('static', filename='images/news/news-' ~ (loop.index + 3) ~ '.jpg') }}" alt="{{ post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
-                                                {% endif %}
-                                            </a>
-                                        </figure>
-                                    </div>
-                                    <div class="lower-content">
-                                        <h4>
-                                            <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
-                                                {{ post.get_translated('title', current_language) }}
-                                            </a>
-                                        </h4>
-                                        <span class="designation">{{ post.get_category_display(current_language) }}</span>
-                                        <p>{{ (post.get_translated('excerpt', current_language)[:120] + '...') if post.get_translated('excerpt', current_language)|length > 120 else post.get_translated('excerpt', current_language) }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <!-- Fallback to static content if no posts available -->
-                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
-                                <div class="inner-box">
-                                    <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'landing.image.water_benefits'|t }}"></figure>
-                                    </div>
-                                    <div class="lower-content">
-                                        <h4><a href="#">{{ 'landing.health.article1.title'|t }}</a></h4>
-                                        <span class="designation">{{ 'landing.health.article1.category'|t }}</span>
-                                        <p>{{ 'landing.health.article1.description'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
-                                <div class="inner-box">
-                                    <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'landing.image.water_quality'|t }}"></figure>
-                                    </div>
-                                    <div class="lower-content">
-                                        <h4><a href="#">{{ 'landing.health.article2.title'|t }}</a></h4>
-                                        <span class="designation">{{ 'landing.health.article2.category'|t }}</span>
-                                        <p>{{ 'landing.health.article2.description'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
-                                <div class="inner-box">
-                                    <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'landing.image.hydration_benefits'|t }}"></figure>
-                                    </div>
-                                    <div class="lower-content">
-                                        <h4><a href="#">{{ 'landing.health.article3.title'|t }}</a></h4>
-                                        <span class="designation">{{ 'landing.health.article3.category'|t }}</span>
-                                        <p>{{ 'landing.health.article3.description'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    {% endif %}
-                </div>
-                {% if featured_posts and featured_posts|length > 0 %}
-                <div class="more-btn centred" style="margin-top: 40px;">
-                    <a href="{{ url_for('frontend.blog_list') }}" class="theme-btn btn-one">{{ 'landing.health.view_all_posts'|t }}</a>
-                </div>
-                {% endif %}
-            </div>
-        </section>
-        <!-- blog-section end -->
-
-        <!-- subscription-constructor-section -->
-        <section class="subscription-constructor-section" id="subscription-constructor">
-            <div class="pattern-layer"></div>
-            <div class="auto-container">
-                <div class="sec-title">
-                    <h2>{{ 'landing.custom_subscription.title_line1'|t }} <br />{{ 'landing.custom_subscription.title_line2'|t }}</h2>
-                    <p>{{ 'landing.custom_subscription.subtitle'|t }}</p>
-                </div>
-
-                <div class="constructor-container">
-                    <!-- Step Indicators -->
-                    <div class="constructor-steps">
-                        <div class="constructor-step" data-step="1">
-                            <div class="step-number">1</div>
-                            <div class="step-label">{{ 'landing.custom_subscription.step.products'|t }}</div>
-                        </div>
-                        <div class="constructor-step" data-step="2">
-                            <div class="step-number">2</div>
-                            <div class="step-label">{{ 'landing.custom_subscription.step.schedule'|t }}</div>
-                        </div>
-                        <div class="constructor-step" data-step="3">
-                            <div class="step-number">3</div>
-                            <div class="step-label">{{ 'landing.contact.info.address'|t }}</div>
-                        </div>
-                        <div class="constructor-step" data-step="4">
-                            <div class="step-number">4</div>
-                            <div class="step-label">{{ 'landing.custom_subscription.step.payment'|t }}</div>
-                        </div>
-                        <div class="constructor-step" data-step="5">
-                            <div class="step-number">5</div>
-                            <div class="step-label">{{ 'landing.custom_subscription.step.review'|t }}</div>
-                        </div>
-                    </div>
-
-                    <!-- Constructor Content -->
-                    <div class="constructor-content">
-                        <!-- Step 1: Select Products -->
-                        <div class="constructor-panel active" id="step-1">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.choose_products'|t }}</h3>
-                            <div class="product-grid" id="products-grid">
-                                <!-- Products will be dynamically loaded -->
-                            </div>
-                        </div>
-
-                        <!-- Step 2: Delivery Frequency & Schedule -->
-                        <div class="constructor-panel" id="step-2">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.delivery_schedule'|t }}</h3>
-
-                            <!-- Frequency Selection -->
-                            <div style="margin-bottom: 40px;">
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_frequency'|t }}</h4>
-                                <div class="frequency-options">
-                                    <div class="frequency-option" data-frequency="daily">
-                                        <div class="frequency-icon">🗓️</div>
-                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.daily'|t }}</div>
-                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.daily_desc'|t }}</div>
-                                    </div>
-                                    <div class="frequency-option" data-frequency="weekly">
-                                        <div class="frequency-icon">📅</div>
-                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.weekly'|t }}</div>
-                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.weekly_desc'|t }}</div>
-                                    </div>
-                                    <div class="frequency-option" data-frequency="biweekly">
-                                        <div class="frequency-icon">📆</div>
-                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.biweekly'|t }}</div>
-                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.biweekly_desc'|t }}</div>
-                                    </div>
-                                    <div class="frequency-option" data-frequency="monthly">
-                                        <div class="frequency-icon">📋</div>
-                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.monthly'|t }}</div>
-                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.monthly_desc'|t }}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Day Selection -->
-                            <div class="schedule-selector" id="day-selector" style="display: none; margin-bottom: 40px;">
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_day'|t }}</h4>
-                                <div class="day-selector">
-                                    <button type="button" class="day-btn" data-day="1">{{ 'landing.custom_subscription.day.monday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="2">{{ 'landing.custom_subscription.day.tuesday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="3">{{ 'landing.custom_subscription.day.wednesday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="4">{{ 'landing.custom_subscription.day.thursday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="5">{{ 'landing.custom_subscription.day.friday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="6">{{ 'landing.custom_subscription.day.saturday'|t }}</button>
-                                    <button type="button" class="day-btn" data-day="0">{{ 'landing.custom_subscription.day.sunday'|t }}</button>
-                                </div>
-                            </div>
-
-                            <!-- Day of the month (monthly) -->
-                            <div class="schedule-selector" id="month-day-selector" style="display: none; margin-bottom: 40px;">
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_day_of_month'|t }}</h4>
-                                <select id="month-day-select" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e5e5; border-radius: 8px; font-size: 16px; font-weight: 500; color: #333; background: #fff; cursor: pointer;">
-                                    <option value="">{{ 'landing.custom_subscription.select_day_of_month'|t }}</option>
-                                    {% for day_number in range(1, 32) %}
-                                    <option value="{{ day_number }}">{{ day_number }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-
-                            <!-- Time Slot Selection -->
-                            <div>
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.time_slot'|t }}</h4>
-                                <select id="time-slots-select" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e5e5; border-radius: 8px; font-size: 16px; font-weight: 500; color: #333; background: #fff; cursor: pointer; transition: all 0.3s ease;">
-                                    <option value="">{{ 'landing.custom_subscription.select_time_slot'|t }}</option>
-                                    <!-- Time slots will be dynamically loaded -->
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Step 3: Delivery Address -->
-                        <div class="constructor-panel" id="step-3">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.select_address'|t }}</h3>
-                            <div id="addresses-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
-                                <!-- Addresses will be dynamically loaded -->
-                            </div>
-                        </div>
-
-                        <!-- Step 4: Payment Method -->
-                        <div class="constructor-panel" id="step-4">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.choose_payment'|t }}</h3>
-                            <div id="payment-methods-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 800px; margin: 0 auto;">
-                                <!-- Payment methods will be dynamically loaded -->
-                            </div>
-                        </div>
-
-                        <!-- Step 5: Review & Confirm -->
-                        <div class="constructor-panel" id="step-5">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.review'|t }}</h3>
-                            <div id="review-container">
-                                <!-- Review will be dynamically rendered -->
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Navigation -->
-                    <div class="constructor-navigation">
-                        <button type="button" class="nav-btn nav-btn-prev" style="display: none;">
-                            {{ 'landing.custom_subscription.button.previous'|t }}
-                        </button>
-                        <button type="button" class="nav-btn nav-btn-next">
-                            {{ 'landing.custom_subscription.button.next'|t }}
-                        </button>
-                        <button type="button" class="nav-btn nav-btn-submit" style="display: none;">
-                            {{ 'landing.custom_subscription.button.create'|t }}
-                        </button>
-                    </div>
-                </div>
-
-                <!-- View All Subscriptions Button -->
-                <div class="more-btn centred" style="margin-top: 50px;">
-                    <a href="{{ url_for('frontend.my_subscriptions') }}" class="theme-btn btn-one">{{ 'landing.custom_subscription.manage_subscriptions'|t }}</a>
-                </div>
-            </div>
-        </section>
-        <!-- subscription-constructor-section end -->
-
-        <!-- Loading Overlay -->
-        <div class="loading-overlay" id="loading-overlay">
-            <div class="loading-spinner"></div>
-        </div>
-
-        <!-- testimonial-style-two -->
-        <section class="testimonial-style-two centred bg-color-1">
-            <div class="thumb-box">
-                <div class="thumb thumb-1"><img src="{{ url_for('static', filename='images/resource/thumb-1.jpg') }}" alt=""></div>
-                <div class="thumb thumb-2"><img src="{{ url_for('static', filename='images/resource/thumb-2.jpg') }}" alt=""></div>
-                <div class="thumb thumb-3"><img src="{{ url_for('static', filename='images/resource/thumb-3.jpg') }}" alt=""></div>
-                <div class="thumb thumb-4"><img src="{{ url_for('static', filename='images/resource/thumb-4.jpg') }}" alt=""></div>
-                <div class="thumb thumb-5"><img src="{{ url_for('static', filename='images/resource/thumb-5.jpg') }}" alt=""></div>
-                <div class="thumb thumb-6"><img src="{{ url_for('static', filename='images/resource/thumb-6.jpg') }}" alt=""></div>
-            </div>
-            <div class="pattern-layer">
-                <div class="pattern-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-35.png') }});"></div>
-                <div class="pattern-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-36.png') }});"></div>
-            </div>
-            <div class="map-layer" style="background-image: url({{ url_for('static', filename='images/icons/map-1.png') }});"></div>
-            <div class="auto-container">
-                <div class="sec-title">
-                    <h2>{{ 'landing.testimonials.title_line1'|t }} <br />{{ 'landing.testimonials.title_line2'|t }}</h2>
-                </div>
-                <div class="row clearfix">
-                    <div class="col-xl-8 col-lg-12 col-md-12 offset-xl-2">
-                        <div class="single-item-carousel owl-carousel owl-theme dots-style-one owl-nav-none">
-                            <div class="testimonial-block-two">
-                                <div class="inner-box">
-                                    <figure class="author-thumb"><img src="{{ url_for('static', filename='images/resource/testimonial-1.jpg') }}" alt=""></figure>
-                                    <div class="inner">
-                                        <ul class="rating clearfix">
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                        </ul>
-                                        <p>{{ 'landing.testimonials.customer1.text'|t }}</p>
-                                        <h5>Aziza Karimova</h5>
-                                        <span class="designation">{{ 'landing.testimonials.customer1.designation'|t }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="testimonial-block-two">
-                                <div class="inner-box">
-                                    <figure class="author-thumb"><img src="{{ url_for('static', filename='images/resource/testimonial-2.jpg') }}" alt=""></figure>
-                                    <div class="inner">
-                                        <ul class="rating clearfix">
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                        </ul>
-                                        <p>{{ 'landing.testimonials.customer2.text'|t }}</p>
-                                        <h5>Axrorjon Aliev</h5>
-                                        <span class="designation">{{ 'landing.testimonials.customer2.designation'|t }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="testimonial-block-two">
-                                <div class="inner-box">
-                                    <figure class="author-thumb"><img src="{{ url_for('static', filename='images/resource/testimonial-3.jpg') }}" alt=""></figure>
-                                    <div class="inner">
-                                        <ul class="rating clearfix">
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                            <li><i class="fas fa-star"></i></li>
-                                        </ul>
-                                        <p>{{ 'landing.testimonials.customer3.text'|t }}</p>
-                                        <h5>Malika Tasheva</h5>
-                                        <span class="designation">{{ 'landing.testimonials.customer3.designation'|t }}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- testimonial-style-two end -->
-
-        <!-- video-section -->
-        <section class="video-section">
-            <div class="auto-container">
-                <div class="inner-container">
-                    <div class="video-inner">
-                        <div class="inner-box" style="background-image: url({{ url_for('static', filename='images/background/video-1.jpg') }});">
-                             <div class="video-btn">
-                                <a href="https://www.youtube.com/watch?v=9iMGFqMmUFs" class="lightbox-image" data-caption=""><i class="fas fa-play"></i></a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- video-section end -->
-
-        <!-- news-section -->
-        <section class="news-section">
-            <div class="auto-container">
-                <div class="sec-title centred">
-                    <h2>{{ 'landing.news.title'|t }}</h2>
-                    <p>{{ 'landing.news.subtitle'|t }}</p>
-                </div>
-                <div class="row clearfix">
-                    <div class="col-lg-4 col-md-6 col-sm-12 news-block">
-                        <div class="news-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ 'landing.image.water_delivery_news'|t }}"></a></figure>
-                                <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'landing.news.article1.category'|t }}</a></div>
-                                    <h4><a href="#">{{ 'landing.news.article1.title'|t }}</a></h4>
-                                    <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'landing.news.article1.author'|t }}</a></li>
-                                        <li>{{ 'landing.news.article1.date'|t }}</li>
-                                    </ul>
-                                    <div class="text">
-                                        <p>{{ 'landing.news.article1.description'|t }}</p>
-                                    </div>
-                                    <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 news-block">
-                        <div class="news-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'landing.image.health_tips_news'|t }}"></a></figure>
-                                <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'landing.news.article2.category'|t }}</a></div>
-                                    <h4><a href="#">{{ 'landing.news.article2.title'|t }}</a></h4>
-                                    <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'landing.news.article2.author'|t }}</a></li>
-                                        <li>{{ 'landing.news.article2.date'|t }}</li>
-                                    </ul>
-                                    <div class="text">
-                                        <p>{{ 'landing.news.article2.description'|t }}</p>
-                                    </div>
-                                    <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 news-block">
-                        <div class="news-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-3.jpg') }}" alt="{{ 'landing.image.quality_standards_news'|t }}"></a></figure>
-                                <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'landing.news.article3.category'|t }}</a></div>
-                                    <h4><a href="#">{{ 'landing.news.article3.title'|t }}</a></h4>
-                                    <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'landing.news.article3.author'|t }}</a></li>
-                                        <li>{{ 'landing.news.article3.date'|t }}</li>
-                                    </ul>
-                                    <div class="text">
-                                        <p>{{ 'landing.news.article3.description'|t }}</p>
-                                    </div>
-                                    <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- news-section end -->
+{% block extra_head %}
+<link href="{{ asset_url('css/subscription-constructor.css') }}" rel="stylesheet">
+<link href="{{ asset_url('css/pages/home.css') }}" rel="stylesheet">
 {% endblock %}
 
-{% block extra_head %}
-<link href="{{ url_for('static', filename='css/subscription-constructor.css') }}" rel="stylesheet">
+{%- macro product_url(slug, product_id) -%}
+{%- if slug %}{{ external_url_for_lang('frontend.product_detail_slug', slug=slug) }}{% else %}{{ external_url_for_lang('frontend.product_detail', product_id=product_id) }}{% endif -%}
+{%- endmacro %}
+
+{% block content %}
+{%- set lang = current_language -%}
+{%- set placeholder = url_for('static', filename='images/product-placeholder.svg') -%}
+{%- set facts = offer_facts.products -%}
+<div class="ae-home">
+
+    <!-- Hero: the real bottle, today's prices from the offer facts, order in the bot or on the site -->
+    <section class="ae-home-hero" aria-labelledby="home-title">
+        <div class="ae-container ae-home-hero__grid">
+            <div class="ae-home-hero__copy">
+                <h1 class="ae-home-hero__title" id="home-title">{{ 'web.home.hero.title'|t }}</h1>
+                <p class="ae-home-hero__lead">{{ 'web.home.hero.lead'|t }}</p>
+
+                {%- if facts %}
+                <ul class="ae-home-prices" aria-label="{{ 'web.home.hero.prices'|t }}">
+                    {%- for p in facts %}
+                    <li class="ae-home-prices__row" data-hero-product="{{ p.id }}">
+                        <span class="ae-home-prices__size">{{ p.size_text[lang] }}</span>
+                        <span class="ae-home-prices__price ae-num">{{ p.price_text[lang] }}</span>
+                        <span class="ae-home-prices__note">{{ offer_smallest_order_sentence(p, lang) }}</span>
+                    </li>
+                    {%- endfor %}
+                </ul>
+                {%- endif %}
+
+                <div class="ae-home-hero__actions">
+                    <a class="ae-btn ae-btn--primary ae-btn--lg" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.home.hero.order_bot'|t }}
+                    </a>
+                    <a class="ae-btn ae-btn--secondary ae-btn--lg" href="{{ external_url_for_lang('frontend.shop') }}">
+                        <i class="far fa-shopping-cart" aria-hidden="true"></i>{{ 'web.home.hero.order_site'|t }}
+                    </a>
+                </div>
+
+                <ul class="ae-home-hero__facts">
+                    {%- if facts %}
+                    <li><i class="far fa-truck" aria-hidden="true"></i>{{ offer_facts.delivery.line[lang] }}</li>
+                    {%- endif %}
+                    <li><i class="far fa-calendar-check" aria-hidden="true"></i>{{ 'landing.offer.every_day'|t }}</li>
+                    <li><i class="far fa-filter" aria-hidden="true"></i><a href="{{ external_url_for_lang('frontend.process_filtration') }}">{{ 'web.shell.footer.filtration'|t }}</a></li>
+                </ul>
+            </div>
+
+            <div class="ae-home-hero__media">
+                <div class="ae-home-hero__stage">
+                    {%- if hero %}
+                    <img class="ae-home-hero__img" src="{{ hero.image or placeholder }}" data-fallback="{{ placeholder }}"
+                         alt="{{ 'web.home.hero.image_alt'|t(size=hero.offer.size_text[lang]) }}" width="533" height="800"
+                         fetchpriority="high" decoding="async">
+                    {%- else %}
+                    <img class="ae-home-hero__img" src="{{ placeholder }}" alt="" width="533" height="800" decoding="async">
+                    {%- endif %}
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How ordering works: a true sequence (order, delivery, the empty bottle) -->
+    {#- The lead says only what every customer can do: order in a few taps and follow the delivery in the bot or on the
+        site. Where the water goes is the delivery-zone SSOT, printed in the next section ("Delivering across
+        Tashkent"); no fleet or region claim here. test_public_copy_is_truthful reads it from
+        `section.cta-section .text p`. Step 2 says what happens with the order, not the delivery terms: those are the
+        hero's facts and the offer block's. #}
+    <section class="ae-section cta-section ae-home-how" aria-labelledby="home-how-title">
+        <div class="ae-container">
+            <div class="ae-section-head">
+                <h2 class="ae-section-head__title" id="home-how-title">{{ 'web.home.how.title'|t }}</h2>
+                <div class="text"><p class="ae-section-head__lead">{{ 'web.home.how.lead'|t }}</p></div>
+            </div>
+            <ol class="ae-steps ae-steps--row ae-home-how__steps">
+                <li>
+                    <strong class="ae-steps__title">{{ 'web.home.how.order_title'|t }}</strong>
+                    <p class="ae-steps__text">{{ 'web.home.how.order_text'|t }}</p>
+                </li>
+                <li>
+                    <strong class="ae-steps__title">{{ 'web.home.how.deliver_title'|t }}</strong>
+                    <p class="ae-steps__text">{{ 'web.home.how.deliver_text'|t }}</p>
+                </li>
+                {%- if facts | selectattr('no_deposit') | list %}
+                <li>
+                    <strong class="ae-steps__title">{{ 'web.home.how.return_title'|t }}</strong>
+                    <p class="ae-steps__text">{{ 'landing.offer.no_deposit'|t }}</p>
+                </li>
+                {%- endif %}
+            </ol>
+        </div>
+    </section>
+
+    <!-- Products: the featured bottles, one card each (partials/product_card.html) -->
+    {%- if featured_products %}
+    <section class="ae-section ae-section--tint shop-section ae-home-products" aria-labelledby="home-products-title">
+        <div class="ae-container">
+            <div class="ae-home-head">
+                <h2 class="ae-section-head__title" id="home-products-title">{{ 'web.home.products.title'|t }}</h2>
+                <a class="ae-link" href="{{ external_url_for_lang('frontend.shop') }}">{{ 'web.home.products.all'|t }}</a>
+            </div>
+            <div class="ae-home-products__grid">
+                {%- for product in featured_products[:3] %}
+                {{ product_card(product, offer_by_id.get(product.id), lang, product_url(product.slug, product.id),
+                                image=(product.images[0] if product.images else None),
+                                heading_tag='h3') }}
+                {%- endfor %}
+            </div>
+        </div>
+    </section>
+    {%- endif %}
+
+    <!-- Delivery and prices: the SSOT offer block, then the coverage check -->
+    <section class="ae-section coverage-teaser ae-home-offer" aria-labelledby="home-offer-title">
+        <div class="ae-container ae-home-offer__inner">
+            <div class="ae-section-head">
+                <h2 class="ae-section-head__title" id="home-offer-title">{{ 'landing.coverage.home_title'|t }}</h2>
+                <p class="ae-section-head__lead">{{ 'landing.coverage.home_text'|t }}</p>
+            </div>
+            {{ offer_facts_block(offer_facts, lang, heading_tag='h3') }}
+            <a href="{{ external_url_for_lang('frontend.coverage') }}" class="ae-btn ae-btn--secondary ae-home-offer__cta"><i class="far fa-map-marker-alt" aria-hidden="true"></i>{{ 'landing.coverage.home_cta'|t }}</a>
+        </div>
+    </section>
+
+    <!-- Subscription builder (subscription-constructor.js; linked from /subscriptions and /my-subscriptions).
+         Styles: static/css/subscription-constructor.css, scoped to #subscription-constructor. -->
+    <section class="ae-section ae-section--tint subscription-constructor-section" id="subscription-constructor" aria-labelledby="home-builder-title">
+        <div class="ae-container">
+            <div class="ae-section-head">
+                <h2 class="ae-section-head__title" id="home-builder-title">{{ 'web.home.builder.title'|t }}</h2>
+                <p class="ae-section-head__lead">{{ 'web.home.builder.lead'|t }}</p>
+            </div>
+
+            {%- if not current_user %}
+            <div class="ae-alert sc-signin">
+                <i class="far fa-user-circle ae-alert__icon" aria-hidden="true"></i>
+                <p class="sc-signin__text">{{ 'web.home.builder.sign_in_note'|t }}</p>
+                <a class="ae-btn ae-btn--secondary ae-btn--sm sc-signin__btn" href="{{ builder_sign_in_url }}">{{ 'web.home.builder.sign_in'|t }}</a>
+            </div>
+            {%- endif %}
+
+            <div class="constructor-container sc-card">
+                <div class="constructor-steps ae-stepper">
+                    <ol class="ae-stepper__list" aria-label="{{ 'web.home.builder.steps'|t }}">
+                        <li class="constructor-step ae-stepper__step is-current active" data-step="1" aria-current="step">
+                            <span class="step-number ae-stepper__dot">1</span>
+                            <span class="step-label ae-stepper__label">{{ 'web.home.builder.step_products'|t }}</span>
+                        </li>
+                        <li class="constructor-step ae-stepper__step" data-step="2">
+                            <span class="step-number ae-stepper__dot">2</span>
+                            <span class="step-label ae-stepper__label">{{ 'web.home.builder.step_schedule'|t }}</span>
+                        </li>
+                        <li class="constructor-step ae-stepper__step" data-step="3">
+                            <span class="step-number ae-stepper__dot">3</span>
+                            <span class="step-label ae-stepper__label">{{ 'web.home.builder.step_address'|t }}</span>
+                        </li>
+                        <li class="constructor-step ae-stepper__step" data-step="4">
+                            <span class="step-number ae-stepper__dot">4</span>
+                            <span class="step-label ae-stepper__label">{{ 'web.home.builder.step_payment'|t }}</span>
+                        </li>
+                        <li class="constructor-step ae-stepper__step" data-step="5">
+                            <span class="step-number ae-stepper__dot">5</span>
+                            <span class="step-label ae-stepper__label">{{ 'web.home.builder.step_review'|t }}</span>
+                        </li>
+                    </ol>
+                    <div class="ae-stepper__compact">
+                        <span class="sc-compact" aria-live="polite">{{ 'web.home.builder.step_of'|t(current=1, total=5) }}: {{ 'web.home.builder.step_products'|t }}</span>
+                        <span class="ae-progress ae-progress--sm" aria-hidden="true"><span class="ae-progress__bar sc-progress" style="width: 20%;"></span></span>
+                    </div>
+                </div>
+
+                <div class="constructor-content">
+                    <!-- Step 1: products -->
+                    <div class="constructor-panel active" id="step-1">
+                        <h3 class="sc-panel-title" tabindex="-1">{{ 'web.home.builder.products_title'|t }}</h3>
+                        <div class="sc-products" id="products-grid" aria-busy="true"></div>
+                    </div>
+
+                    <!-- Step 2: frequency, day and time -->
+                    <div class="constructor-panel" id="step-2">
+                        <h3 class="sc-panel-title" tabindex="-1">{{ 'web.home.builder.schedule_title'|t }}</h3>
+
+                        <fieldset class="sc-group">
+                            <legend class="sc-label">{{ 'web.home.builder.frequency_label'|t }}</legend>
+                            <div class="frequency-options sc-frequencies">
+                                <button type="button" class="frequency-option ae-radio-card" data-frequency="daily" aria-pressed="false">
+                                    <span class="frequency-icon ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-calendar-day"></i></span>
+                                    <span class="sc-choice__body">
+                                        <span class="frequency-name ae-radio-card__title">{{ 'landing.custom_subscription.frequency.daily'|t }}</span>
+                                        <span class="frequency-description ae-radio-card__text">{{ 'landing.custom_subscription.frequency.daily_desc'|t }}</span>
+                                    </span>
+                                </button>
+                                <button type="button" class="frequency-option ae-radio-card" data-frequency="weekly" aria-pressed="false">
+                                    <span class="frequency-icon ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-calendar-week"></i></span>
+                                    <span class="sc-choice__body">
+                                        <span class="frequency-name ae-radio-card__title">{{ 'landing.custom_subscription.frequency.weekly'|t }}</span>
+                                        <span class="frequency-description ae-radio-card__text">{{ 'landing.custom_subscription.frequency.weekly_desc'|t }}</span>
+                                    </span>
+                                </button>
+                                <button type="button" class="frequency-option ae-radio-card" data-frequency="biweekly" aria-pressed="false">
+                                    <span class="frequency-icon ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-calendar-alt"></i></span>
+                                    <span class="sc-choice__body">
+                                        <span class="frequency-name ae-radio-card__title">{{ 'landing.custom_subscription.frequency.biweekly'|t }}</span>
+                                        <span class="frequency-description ae-radio-card__text">{{ 'landing.custom_subscription.frequency.biweekly_desc'|t }}</span>
+                                    </span>
+                                </button>
+                                <button type="button" class="frequency-option ae-radio-card" data-frequency="monthly" aria-pressed="false">
+                                    <span class="frequency-icon ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-calendar"></i></span>
+                                    <span class="sc-choice__body">
+                                        <span class="frequency-name ae-radio-card__title">{{ 'landing.custom_subscription.frequency.monthly'|t }}</span>
+                                        <span class="frequency-description ae-radio-card__text">{{ 'landing.custom_subscription.frequency.monthly_desc'|t }}</span>
+                                    </span>
+                                </button>
+                            </div>
+                        </fieldset>
+
+                        <!-- Weekday (weekly, biweekly): the buttons carry the browser's getDay() number; each is named
+                             with the weekday names the review uses (web.display_labels.weekday.N, 0 = Monday). -->
+                        <div class="schedule-selector sc-group" id="day-selector" style="display: none;">
+                            <p class="sc-label">{{ 'web.home.builder.day_label'|t }}</p>
+                            <div class="day-selector sc-days">
+                                <button type="button" class="day-btn" data-day="1">{{ 'web.display_labels.weekday.0'|t }}</button>
+                                <button type="button" class="day-btn" data-day="2">{{ 'web.display_labels.weekday.1'|t }}</button>
+                                <button type="button" class="day-btn" data-day="3">{{ 'web.display_labels.weekday.2'|t }}</button>
+                                <button type="button" class="day-btn" data-day="4">{{ 'web.display_labels.weekday.3'|t }}</button>
+                                <button type="button" class="day-btn" data-day="5">{{ 'web.display_labels.weekday.4'|t }}</button>
+                                <button type="button" class="day-btn" data-day="6">{{ 'web.display_labels.weekday.5'|t }}</button>
+                                <button type="button" class="day-btn" data-day="0">{{ 'web.display_labels.weekday.6'|t }}</button>
+                            </div>
+                        </div>
+
+                        <!-- Day of the month (monthly) -->
+                        <div class="schedule-selector sc-group" id="month-day-selector" style="display: none;">
+                            <div class="ae-field sc-field">
+                                <label class="ae-field__label" for="month-day-select">{{ 'web.home.builder.month_day_label'|t }}</label>
+                                <select id="month-day-select" class="ae-input">
+                                    <option value="">{{ 'landing.custom_subscription.select_day_of_month'|t }}</option>
+                                    {%- for day_number in range(1, 32) %}
+                                    <option value="{{ day_number }}">{{ day_number }}</option>
+                                    {%- endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Time slot -->
+                        <div class="sc-group">
+                            <div class="ae-field sc-field">
+                                <label class="ae-field__label" for="time-slots-select">{{ 'web.home.builder.time_label'|t }}</label>
+                                <select id="time-slots-select" class="ae-input">
+                                    <option value="">{{ 'landing.custom_subscription.select_time_slot'|t }}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: address -->
+                    <div class="constructor-panel" id="step-3">
+                        <h3 class="sc-panel-title" tabindex="-1">{{ 'web.home.builder.address_title'|t }}</h3>
+                        <div class="sc-options sc-options--two" id="addresses-list"></div>
+                    </div>
+
+                    <!-- Step 4: way to pay -->
+                    <div class="constructor-panel" id="step-4">
+                        <h3 class="sc-panel-title" tabindex="-1">{{ 'web.home.builder.payment_title'|t }}</h3>
+                        <div class="sc-options sc-options--three" id="payment-methods-grid"></div>
+                    </div>
+
+                    <!-- Step 5: review -->
+                    <div class="constructor-panel" id="step-5">
+                        <h3 class="sc-panel-title" tabindex="-1">{{ 'web.home.builder.review_title'|t }}</h3>
+                        <div id="review-container"></div>
+                    </div>
+                </div>
+
+                <div class="ae-alert ae-alert--danger sc-error" id="sc-error" role="alert" hidden>
+                    <i class="far fa-exclamation-circle ae-alert__icon" aria-hidden="true"></i>
+                    <p class="sc-error__text"></p>
+                </div>
+
+                <div class="constructor-navigation sc-nav">
+                    <button type="button" class="nav-btn nav-btn-prev ae-btn ae-btn--secondary" style="display: none;">
+                        <i class="far fa-arrow-left" aria-hidden="true"></i><span>{{ 'web.home.builder.back'|t }}</span>
+                    </button>
+                    <button type="button" class="nav-btn nav-btn-next ae-btn ae-btn--primary">
+                        <span>{{ 'web.home.builder.next'|t }}</span><i class="far fa-arrow-right" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="nav-btn nav-btn-submit ae-btn ae-btn--primary" style="display: none;">
+                        <i class="far fa-check" aria-hidden="true"></i><span>{{ 'web.home.builder.create'|t }}</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="more-btn sc-more">
+                <a href="{{ url_for('frontend.my_subscriptions') }}" class="ae-btn ae-btn--secondary sc-more__link"><i class="far fa-list-ul" aria-hidden="true"></i>{{ 'web.home.builder.manage'|t }}</a>
+            </div>
+        </div>
+
+        <div class="loading-overlay" id="loading-overlay" aria-hidden="true">
+            <div class="loading-spinner"></div>
+        </div>
+    </section>
+
+    <!-- Water quality: each fact links to its source -->
+    <section class="ae-section ae-home-quality" aria-labelledby="home-quality-title">
+        <div class="ae-container ae-home-quality__grid">
+            <div class="ae-home-quality__intro">
+                <h2 class="ae-section-head__title" id="home-quality-title">{{ 'web.home.quality.title'|t }}</h2>
+                <p class="ae-section-head__lead">{{ 'web.home.quality.lead'|t }}</p>
+                <div class="ae-home-quality__links">
+                    <a class="ae-btn ae-btn--secondary" href="{{ external_url_for_lang('frontend.process_filtration') }}">{{ 'web.home.quality.process_link'|t }}</a>
+                    <a class="ae-link" href="{{ external_url_for_lang('frontend.about_sources') }}">{{ 'web.home.quality.sources_link'|t }}</a>
+                </div>
+            </div>
+            <ul class="ae-home-quality__list">
+                <li>
+                    <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-water"></i></span>
+                    <div><h3 class="ae-home-quality__title">{{ 'web.home.quality.source_title'|t }}</h3><p>{{ 'web.home.quality.source_text'|t }}</p></div>
+                </li>
+                <li>
+                    <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-filter"></i></span>
+                    <div><h3 class="ae-home-quality__title">{{ 'web.home.quality.stages_title'|t }}</h3><p>{{ 'web.home.quality.stages_text'|t }}</p></div>
+                </li>
+                <li>
+                    <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-shield-check"></i></span>
+                    <div><h3 class="ae-home-quality__title">{{ 'web.home.quality.disinfection_title'|t }}</h3><p>{{ 'web.home.quality.disinfection_text'|t }}</p></div>
+                </li>
+                <li>
+                    <span class="ae-icon-tile" aria-hidden="true"><i class="far fa-clipboard-check"></i></span>
+                    <div><h3 class="ae-home-quality__title">{{ 'web.home.quality.oversight_title'|t }}</h3><p>{{ 'web.home.quality.oversight_text'|t }}</p></div>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Aqua Club teaser: live signup bonus and tiers; the guide explains the rest -->
+    <section class="ae-section ae-section--tint ae-home-club" id="aqua-club-public" aria-labelledby="home-club-title">
+        <div class="ae-container ae-home-club__grid">
+            <div class="ae-home-club__intro">
+                <h2 class="ae-section-head__title" id="home-club-title">{{ 'web.home.club.title'|t }}</h2>
+                <p class="ae-section-head__lead">{{ 'web.home.club.lead'|t }}</p>
+                {%- if loyalty_data %}
+                <div class="ae-home-club__status">
+                    <dl class="ae-home-club__status-list">
+                        <div><dt>{{ 'web.home.club.your_tier'|t }}</dt><dd><span class="ae-badge ae-badge--gold">{{ loyalty_data.tier_name }}</span></dd></div>
+                        <div><dt>{{ 'web.home.club.balance'|t }}</dt><dd class="ae-num">{{ loyalty_data.points_balance }} {{ 'landing.loyalty.points'|t }}</dd></div>
+                    </dl>
+                    <a class="ae-btn ae-btn--primary" href="{{ url_for('frontend.my_loyalty') }}">{{ 'web.home.club.my_coins'|t }}</a>
+                </div>
+                {%- endif %}
+                <div class="ae-home-club__actions">
+                    <a class="ae-btn {% if loyalty_data %}ae-btn--secondary{% else %}ae-btn--primary{% endif %}" href="{{ external_url_for_lang('frontend.loyalty_guide') }}">{{ 'landing.loyalty.public_cta_primary'|t }}</a>
+                    {%- if not current_user %}
+                    <a class="ae-btn ae-btn--secondary" href="{{ url_for('frontend.register') }}">{{ 'web.home.club.join'|t }}</a>
+                    {%- endif %}
+                </div>
+            </div>
+            {%- if loyalty_handbook %}
+            <ul class="ae-home-club__facts">
+                <li>
+                    <span class="ae-icon-tile ae-icon-tile--gold" aria-hidden="true"><i class="far fa-coins"></i></span>
+                    <div>
+                        <h3 class="ae-home-club__title">{{ 'web.home.club.earn_title'|t }}</h3>
+                        <p>{{ 'landing.loyalty.public_earn'|t(bonus=loyalty_handbook.signup_bonus) }}</p>
+                    </div>
+                </li>
+                {%- if loyalty_handbook.tiers %}
+                <li>
+                    <span class="ae-icon-tile ae-icon-tile--gold" aria-hidden="true"><i class="far fa-medal"></i></span>
+                    <div>
+                        <h3 class="ae-home-club__title">{{ 'web.home.club.tiers_title'|t }}</h3>
+                        <ul class="ae-chips ae-home-club__tiers" aria-label="{{ 'web.home.club.tiers'|t }}">
+                            {%- for tier in loyalty_handbook.tiers %}
+                            <li class="ae-chip">{{ tier.name }}</li>
+                            {%- endfor %}
+                        </ul>
+                    </div>
+                </li>
+                {%- endif %}
+                <li>
+                    <span class="ae-icon-tile ae-icon-tile--gold" aria-hidden="true"><i class="far fa-gift"></i></span>
+                    <div>
+                        <h3 class="ae-home-club__title">{{ 'landing.loyalty.public_redeem_title'|t }}</h3>
+                        <p>{{ 'landing.loyalty.public_redeem'|t }}</p>
+                    </div>
+                </li>
+            </ul>
+            {%- endif %}
+        </div>
+    </section>
+
+    <!-- Guides: the featured blog posts, text-only cards -->
+    {%- if featured_posts %}
+    <section class="ae-section ae-home-guides" aria-labelledby="home-guides-title">
+        <div class="ae-container">
+            <div class="ae-home-head">
+                <h2 class="ae-section-head__title" id="home-guides-title">{{ 'web.home.guides.title'|t }}</h2>
+                <a class="ae-link" href="{{ external_url_for_lang('frontend.blog_list') }}">{{ 'web.home.guides.all'|t }}</a>
+            </div>
+            <ul class="ae-home-guides__list">
+                {%- for post in featured_posts %}
+                <li>
+                    <a class="ae-card ae-card--link ae-home-guide" href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
+                        <span class="ae-home-guide__category">{{ post.get_category_display(lang) }}</span>
+                        <h3 class="ae-home-guide__title">{{ post.get_translated('title', lang) }}</h3>
+                        <p class="ae-home-guide__text">{{ post.get_translated('excerpt', lang) or '' }}</p>
+                    </a>
+                </li>
+                {%- endfor %}
+            </ul>
+        </div>
+    </section>
+    {%- endif %}
+</div>
 {% endblock %}
 
 {% block extra_js %}
 {% from "frontend/macros/page_data.html" import render_page_data %}
-{# The builder's own words, in the visitor's language: the whole page data of the script (`CONSTRUCTOR_PAGE`).
-   `{day}`, `{number}`, `{quantity}`, `{count}` and `{place}` are filled in by the script. #}
+{#- The builder's own words, in the visitor's language: the whole page data of the script (`CONSTRUCTOR_PAGE`).
+   `{day}`, `{number}`, `{quantity}`, `{count}`, `{place}`, `{current}` and `{total}` are filled in by the script.
+   `method_labels` names each way to pay a customer can pick (`builder_payment_methods`, from the payments SSOT) with
+   the display labels /my-subscriptions uses; `method_notes` adds one line under each; `addresses_url` is where a new
+   address is added; `sign_in_url` signs in and comes back to the builder. #}
+{%- set method_labels = {} -%}
+{%- set method_notes = {} -%}
+{%- for method in builder_payment_methods or [] %}
+{%- set _ = method_labels.update({method: ('web.display_labels.payment_method.' ~ method)|t}) %}
+{%- set _ = method_notes.update({method: ('web.home.builder.method_note.' ~ method)|t}) %}
+{%- endfor %}
 {{ render_page_data({
     'i18n': {
         'day_of_month': 'Day {day} of the month' | t,
@@ -901,6 +520,19 @@
         'name_to': 'landing.custom_subscription.name.to' | t,
         'name_default': 'landing.custom_subscription.name.default' | t,
     },
+    'ui': {
+        'step_of': 'web.home.builder.step_of' | t,
+        'min_quantity': 'web.home.builder.min_quantity' | t,
+        'quantity': 'web.home.builder.quantity' | t,
+        'fewer': 'web.home.builder.fewer' | t,
+        'more': 'web.home.builder.more' | t,
+        'catalog_failed': 'web.home.builder.catalog_failed' | t,
+        'retry': 'web.home.builder.retry' | t,
+    },
+    'method_labels': method_labels,
+    'method_notes': method_notes,
+    'addresses_url': url_for('frontend.addresses'),
+    'sign_in_url': builder_sign_in_url,
     'frequency_names': {
         'daily': 'landing.custom_subscription.frequency.daily' | t,
         'weekly': 'landing.custom_subscription.frequency.weekly' | t,
@@ -917,6 +549,5 @@
         'web.display_labels.weekday.6' | t,
     ],
 }, element_id='subscription-constructor-data') }}
-<script src="{{ url_for('static', filename='js/custom-index.js') }}"></script>
-<script src="{{ url_for('static', filename='js/subscription-constructor.js') }}"></script>
+<script src="{{ asset_url('js/subscription-constructor.js') }}"></script>
 {% endblock %}

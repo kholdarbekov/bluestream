@@ -1,17 +1,19 @@
 {% extends "frontend/base.html" %}
+{#- /coverage (redesign step 3, group "info"). Everything about the zone comes from the delivery-zone SSOT
+    (shared/constants.py get_delivery_coverage: TASHKENT_POLYGON, the districts, the summary and region note); the
+    address check, a pin dropped on the map and "my location" all ask GET /api/public/check-delivery (?address= or
+    ?lat=&lng=), the same answer agents get: the zone is decided server-side only. The "when it arrives" lines are the
+    offer facts' delivery statement, printed whole. The FAQ is printed and repeated by the FAQPage JSON-LD from the
+    same keys. Hooks coverage-map.js reads: #coverage-data, #coverage-map, #coverage-form, #coverage-address,
+    #coverage-check-btn, #coverage-locate-btn, #coverage-address-error, the #coverage-result-* panels, the chips'
+    data-district and the legend's data-map-hint (the touch hint replaces the pointer one on phones). -#}
+{% from 'frontend/partials/page_hero.html' import page_hero with context %}
 
-{% block title %}{{ 'landing.coverage.title'|t }} - {{ company_name }}{% endblock %}
+{% set meta_description = 'web.info.coverage.meta'|t %}
+
+{% block title %}{{ 'landing.coverage.title'|t }} — {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
-{% if current_language == 'uz' %}
-  {% set meta_description = "Aqua Element butun Toshkent shahri va Toshkent viloyatining qo'shni hududlariga suv yetkazib beradi. Manzilingizni tekshiring." %}
-{% elif current_language == 'ru' %}
-  {% set meta_description = "Aqua Element доставляет воду по всему Ташкенту и прилегающим районам Ташкентской области. Проверьте свой адрес." %}
-{% else %}
-  {% set meta_description = "Aqua Element delivers water across all of Tashkent city and neighbouring areas of the Tashkent Region. Check your address." %}
-{% endif %}
-<meta name="description" content="{{ meta_description }}">
-
 {# Inline coverage data: one source for the map JS, the checker, and the JSON-LD #}
 <script type="application/json" id="coverage-data">
 {{ {
@@ -38,222 +40,147 @@
   "url": "{{ company_website }}/coverage"
 }
 </script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "Do you deliver to my address?",
-      "acceptedAnswer": { "@type": "Answer", "text": "We deliver to all of Tashkent city and neighbouring areas of the Tashkent Region. Enter your address or drop a pin on the coverage map to confirm your exact location." }
-    },
-    {
-      "@type": "Question",
-      "name": "Do you deliver to the wider Tashkent Region?",
-      "acceptedAnswer": { "@type": "Answer", "text": "We cover neighbouring parts of the Tashkent Region that border the city, shown precisely by the boundary on our coverage map. Areas further out are not covered yet." }
-    }
-  ]
-}
-</script>
+{%- set faq_items = [] %}
+{%- for n in range(1, 3) %}
+{%- set _ = faq_items.append({
+    "@type": "Question",
+    "name": ('web.info.coverage.faq_%d_q' % n)|t,
+    "acceptedAnswer": {"@type": "Answer", "text": ('web.info.coverage.faq_%d_a' % n)|t}
+}) %}
+{%- endfor %}
+<script type="application/ld+json">{{ {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": faq_items} | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
-<style>
-  /* ---- Page-title banner: same idiom as services/about so the transparent,
-        absolutely-positioned .header-style-two clears the content below it. ---- */
-  .page-title {
-    position: relative;
-    padding: 180px 0 130px 0 !important;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    overflow: hidden;
-  }
-  .page-title .shape {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    height: 200px;
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    z-index: 1;
-  }
-  .page-title .auto-container { position: relative; z-index: 2; }
-  .page-title h1 {
-    font-size: 48px;
-    line-height: 1.1;
-    font-weight: 700;
-    color: #002c8f;
-    margin-bottom: 14px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.06);
-  }
-  .page-title .lead {
-    max-width: 640px;
-    margin: 0 auto 18px;
-    color: #44556b;
-    font-size: 17px;
-  }
-
-  /* ---- Coverage section ---- */
-  .coverage-section { padding: 70px 0 100px; }
-  .coverage-grid {
-    display: grid;
-    grid-template-columns: 1.4fr 1fr;
-    gap: 30px;
-    align-items: stretch;
-  }
-  #coverage-map {
-    height: 100%;
-    min-height: 480px;
-    width: 100%;
-    border-radius: 16px;
-    border: 1px solid #d9e7f1;
-    box-shadow: 0 24px 50px rgba(0, 44, 143, 0.10);
-    z-index: 1;
-  }
-
-  /* Checker card */
-  .coverage-checker {
-    background: #fff;
-    border: 1px solid #e2edf5;
-    border-radius: 16px;
-    padding: 30px 28px;
-    box-shadow: 0 24px 50px rgba(0, 44, 143, 0.08);
-  }
-  .coverage-checker h3 {
-    font-size: 23px;
-    font-weight: 700;
-    color: #002c8f;
-    margin-bottom: 6px;
-  }
-  .coverage-checker .checker-hint { color: #6b7b8d; font-size: 14px; margin-bottom: 20px; }
-  .coverage-checker input#coverage-address {
-    width: 100%;
-    padding: 14px 16px;
-    border: 1px solid #d6e3ec;
-    border-radius: 10px;
-    font-size: 15px;
-    color: #1f3149;
-    transition: border-color .2s ease, box-shadow .2s ease;
-  }
-  .coverage-checker input#coverage-address:focus {
-    outline: none;
-    border-color: #00d1f9;
-    box-shadow: 0 0 0 3px rgba(0, 209, 249, 0.18);
-  }
-  .coverage-checker input#coverage-address::placeholder { color: #9aabbb; }
-
-  .coverage-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-  .coverage-actions .theme-btn { cursor: pointer; }
-  .coverage-actions .btn-locate {
-    background: transparent;
-    color: #0b6aa2;
-    border: 1px solid #b9d9ec;
-  }
-  .coverage-actions .btn-locate:before { background: #eef7fc; }
-  .coverage-actions .btn-locate:hover { color: #002c8f; }
-  .coverage-actions .btn-locate i { margin-right: 7px; }
-
-  .coverage-result {
-    margin-top: 18px;
-    padding: 14px 16px;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: 600;
-    display: none;
-  }
-  .coverage-result.ok { display: block; background: #e7f7ee; border: 1px solid #b6e6c9; color: #136c3c; }
-  .coverage-result.no { display: block; background: #fdeceb; border: 1px solid #f3c4bf; color: #9c2c23; }
-
-  .coverage-districts { margin-top: 26px; padding-top: 22px; border-top: 1px solid #eef3f7; }
-  .coverage-districts .districts-label {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: .02em;
-    text-transform: uppercase;
-    color: #5a6b7e;
-    margin-bottom: 12px;
-  }
-  .coverage-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .coverage-chips .chip {
-    background: #eaf8fe;
-    border: 1px solid #cfeefb;
-    color: #0b6aa2;
-    border-radius: 999px;
-    padding: 5px 13px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  @media (max-width: 991px) {
-    .coverage-grid { grid-template-columns: 1fr; }
-    #coverage-map { min-height: 380px; }
-    .page-title { padding: 150px 0 110px 0 !important; }
-    .page-title h1 { font-size: 38px; }
-  }
-  @media (max-width: 575px) {
-    .coverage-section { padding: 50px 0 70px; }
-    .coverage-checker { padding: 24px 20px; }
-    .coverage-actions .theme-btn { width: 100%; text-align: center; }
-  }
-</style>
+<link rel="stylesheet" href="{{ asset_url('vendor/leaflet/leaflet.css') }}">
+<link href="{{ asset_url('css/pages/info.css') }}" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<!-- page-title -->
-<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
-    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'landing.coverage.title'|t }}</h1>
-            <p class="lead">{{ coverage.summary }}</p>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>{{ 'landing.nav.coverage'|t }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
-<!-- page-title end -->
+{%- set lang = current_language -%}
+<div class="info info--coverage">
+    {{ page_hero('landing.coverage.title'|t, [('landing.nav.coverage'|t, None)], lead=coverage.summary) }}
 
-<!-- coverage-section -->
-<section class="coverage-section">
-    <div class="auto-container">
-        <div class="coverage-grid">
-            <div><div id="coverage-map"></div></div>
-
-            <div class="coverage-checker">
-                <h3>{{ 'landing.coverage.checker_title'|t }}</h3>
-                <p class="checker-hint">{{ 'landing.coverage.checker_hint'|t }}</p>
-
-                <input id="coverage-address" type="text" placeholder="{{ 'landing.coverage.address_placeholder'|t }}">
-
-                <div class="coverage-actions">
-                    <button id="coverage-check-btn" class="theme-btn btn-one btn-sm" type="button">{{ 'landing.coverage.check_btn'|t }}</button>
-                    <button id="coverage-locate-btn" class="theme-btn btn-locate btn-sm" type="button"><i class="fas fa-location-arrow"></i>{{ 'landing.coverage.use_location'|t }}</button>
+    <section class="ae-section info-cov" aria-labelledby="coverage-check-title">
+        <div class="ae-container">
+            <div class="info-cov__grid">
+                <div class="info-cov__mapcol">
+                    <div id="coverage-map" class="info-cov__map" role="region" aria-label="{{ 'web.info.coverage.map_label'|t }}"></div>
+                    <div class="info-cov__legend">
+                        <span class="info-cov__key info-cov__key--zone">{{ 'web.info.coverage.legend_zone'|t }}</span>
+                        <span class="info-cov__key info-cov__key--district">{{ 'web.info.coverage.legend_district'|t }}</span>
+                        <span class="info-cov__tap" data-map-hint="pointer">{{ 'web.info.coverage.map_hint'|t }}</span>
+                        <span class="info-cov__tap" data-map-hint="touch" hidden>{{ 'web.info.coverage.map_hint_touch'|t }}</span>
+                    </div>
                 </div>
 
-                <div id="coverage-result-ok" class="coverage-result">{{ 'landing.coverage.result_ok'|t }}</div>
-                <div id="coverage-result-no" class="coverage-result">{{ 'landing.coverage.result_no'|t }}</div>
+                <div class="ae-card info-cov__checker">
+                    <h2 class="info-cov__title" id="coverage-check-title">{{ 'landing.coverage.checker_title'|t }}</h2>
+                    <p class="info-cov__intro">{{ 'landing.coverage.checker_hint'|t }}</p>
+                    <form id="coverage-form" class="info-cov__form">
+                        <div class="ae-field">
+                            <label class="ae-field__label" for="coverage-address">{{ 'web.info.coverage.address_label'|t }}</label>
+                            <input id="coverage-address" class="ae-input" type="text" name="address" maxlength="256" autocomplete="street-address" required
+                                   placeholder="{{ 'web.info.coverage.address_placeholder'|t }}">
+                            <p id="coverage-address-error" class="ae-field__error" hidden><i class="fas fa-exclamation-circle" aria-hidden="true"></i>{{ 'web.info.coverage.address_empty'|t }}</p>
+                        </div>
+                        <div class="info-cov__actions">
+                            <button id="coverage-check-btn" class="ae-btn ae-btn--primary" type="submit">{{ 'landing.coverage.check_btn'|t }}</button>
+                            <button id="coverage-locate-btn" class="ae-btn ae-btn--secondary" type="button"><i class="far fa-location-arrow" aria-hidden="true"></i>{{ 'web.info.coverage.locate'|t }}</button>
+                        </div>
+                    </form>
 
-                <div class="coverage-districts">
-                    <div class="districts-label">{{ 'landing.coverage.districts_label'|t }}</div>
-                    <div class="coverage-chips">
-                        {% for d in coverage.districts %}<span class="chip">{{ d.name }}</span>{% endfor %}
+                    <div class="info-cov__results" aria-live="polite">
+                        <p id="coverage-result-checking" class="info-cov__checking" hidden>{{ 'web.info.coverage.checking'|t }}</p>
+                        <div id="coverage-result-ok" class="coverage-result ae-alert ae-alert--ok" hidden>
+                            <i class="fas fa-check-circle ae-alert__icon" aria-hidden="true"></i>
+                            <div>
+                                <strong class="ae-alert__title">{{ 'web.info.coverage.ok_title'|t }}</strong>
+                                <p>{{ 'web.info.coverage.ok_text'|t }}</p>
+                                <div class="info-cov__next">
+                                    <a class="ae-btn ae-btn--primary ae-btn--sm" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.info.cta.bot'|t }}</a>
+                                    <a class="ae-btn ae-btn--secondary ae-btn--sm" href="{{ external_url_for_lang('frontend.shop') }}">{{ 'web.info.cta.shop'|t }}</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="coverage-result-no" class="coverage-result ae-alert ae-alert--warn" hidden>
+                            <i class="fas fa-map-marker-alt ae-alert__icon" aria-hidden="true"></i>
+                            <div>
+                                <strong class="ae-alert__title">{{ 'web.info.coverage.no_title'|t }}</strong>
+                                <p>{{ 'web.info.coverage.no_text'|t }}</p>
+                                <div class="info-cov__next">
+                                    <a class="ae-btn ae-btn--secondary ae-btn--sm" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'landing.footer.open_bot'|t }}</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="coverage-result-notfound" class="coverage-result ae-alert" hidden>
+                            <i class="fas fa-search ae-alert__icon" aria-hidden="true"></i>
+                            <p>{{ 'web.info.coverage.notfound'|t }}</p>
+                        </div>
+                        <div id="coverage-result-error" class="coverage-result ae-alert ae-alert--danger" hidden>
+                            <i class="fas fa-exclamation-circle ae-alert__icon" aria-hidden="true"></i>
+                            <p>{{ 'web.info.coverage.error'|t }}</p>
+                        </div>
+                        <div id="coverage-result-geo" class="coverage-result ae-alert" hidden>
+                            <i class="fas fa-location-arrow ae-alert__icon" aria-hidden="true"></i>
+                            <p>{{ 'web.info.coverage.geo_error'|t }}</p>
+                        </div>
+                    </div>
+
+                    <div class="info-cov__districts">
+                        <h3 class="info-cov__label" id="coverage-districts-title">{{ 'landing.coverage.districts_label'|t }}</h3>
+                        <ul class="ae-chips" aria-labelledby="coverage-districts-title">
+                            {%- for d in coverage.districts %}
+                            <li><button type="button" class="ae-chip" data-district="{{ d.key }}" aria-pressed="false">{{ d.name }}</button></li>
+                            {%- endfor %}
+                        </ul>
+                        <p class="info-note">{{ 'web.info.coverage.region_plus'|t(region=coverage.region_note) }}</p>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-</section>
-<!-- coverage-section end -->
+    </section>
+
+    {%- if offer_facts %}
+    <section class="ae-section ae-section--tint" aria-labelledby="coverage-when-title">
+        <div class="ae-container">
+            <div class="info-split">
+                <div class="info-split__head">
+                    <h2 class="info-h2" id="coverage-when-title">{{ 'web.info.coverage.when_h'|t }}</h2>
+                </div>
+                <div class="ae-panel info-when">
+                    <p class="info-when__statement" data-delivery-statement>{{ offer_facts.delivery.statement[lang] | join(' ') }}</p>
+                    <ul class="info-ticks">
+                        <li><i class="far fa-truck" aria-hidden="true"></i>{{ offer_facts.delivery.line[lang] }}</li>
+                        <li><i class="far fa-calendar-check" aria-hidden="true"></i>{{ 'landing.offer.every_day'|t }}</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+    {%- endif %}
+
+    <section class="ae-section" aria-labelledby="coverage-faq-title">
+        <div class="ae-container">
+            <div class="info-split">
+                <div class="info-split__head">
+                    <h2 class="info-h2" id="coverage-faq-title">{{ 'web.info.coverage.faq_h'|t }}</h2>
+                </div>
+                <div class="ae-faq info-cov__faq">
+                    {%- for n in range(1, 3) %}
+                    <details class="ae-faq__item"{% if loop.first %} open{% endif %}>
+                        <summary class="ae-faq__q"><h3>{{ ('web.info.coverage.faq_%d_q' % n)|t }}</h3></summary>
+                        <div class="ae-faq__a"><p>{{ ('web.info.coverage.faq_%d_a' % n)|t }}</p></div>
+                    </details>
+                    {%- endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
-<script src="{{ url_for('static', filename='js/coverage-map.js') }}"></script>
+<script src="{{ asset_url('vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ asset_url('js/coverage-map.js') }}"></script>
 {% endblock %}

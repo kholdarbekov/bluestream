@@ -39,7 +39,6 @@ OPEN_CONFIG = [
 ]
 
 GUARDED_POST = [
-    ("/api/v1/loyalty/earn-points", {"action": "test"}),
     ("/api/v1/loyalty/gift-points", {"recipient_phone": "+998901234567", "points_amount": 1}),
 ]
 

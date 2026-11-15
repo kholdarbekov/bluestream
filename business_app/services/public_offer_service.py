@@ -7,6 +7,12 @@ prints these facts and derives none of its own. The unit price is the one an ord
 delivery line follows the configured fee. Amounts stay `Decimal` inside the facts, and a number that leaves through
 JSON goes through `_json_number`. Money and litre text come from `display_labels` only.
 
+The size a surface prints is the product's volume (`Product.volume`) and nothing else: the trade size (`Product.size`,
+5L/10L/19L) is never printed (owner, 2026-11-15). A product that records no volume prints no size: copy that names a
+product by its size reads its `label` (the volume, else the product's name), the price line has a sizeless twin, and
+the FAQ sizes answer is left out. The trade size only lets a shop search for "19 л" find the 18.9 l bottle
+(`size_search_terms`).
+
 Plain functions over the models and the config, both read on every call. Nothing is memoised: in tests one app context
 outlives many requests, so a memo on `g` would serve the first page's facts to every later one. The module never
 imports `business_app.frontend` and never touches `request`, `url_for` or `g`, so it runs outside a request too.
@@ -33,6 +39,8 @@ EVERY_DAY_KEY = "landing.offer.every_day"
 # The one sentence that names a product's price; a product page with no written description describes itself with it.
 PRICE_LINE_KEY = "landing.offer.price_line"
 SMALLEST_ORDER_KEY = "landing.offer.smallest_order"
+# The price line of a product that records no volume: it drops the size ("<name>, <size>" would name it twice).
+PRICE_LINE_NO_SIZE_KEY = "landing.offer.price_line_no_size"
 HOME_META_KEY = "landing.offer.meta_home"
 FAQ_KEY = "landing.offer.faq."
 NO_DEPOSIT_KEY = "landing.offer.no_deposit"
@@ -73,16 +81,25 @@ def _smallest_order_quantity(product, unit_price: Decimal) -> int:
     return max(minimum, ceil(_config_amount("MIN_ORDER_AMOUNT") / unit_price))
 
 
-def _size_text(litres: Decimal | None, size_code: str | None, language: str) -> str:
-    """The size as printed, "18,9 l (19 l)": the litres, then the trade size in brackets when it is a different
-    number; the trade size alone when the product records no volume."""
-    trade_size = Decimal(size_code.removesuffix("L")) if size_code else None
+def _size_text(litres: Decimal | None, languages) -> dict | None:
+    """The size as printed, per language: the volume alone ("18,9 l" / "18,9 л" / "18.9 L"). None when the product
+    records no volume: it then prints no size at all, never the trade size."""
     if litres is None:
-        return display_labels.litres(trade_size, language)
-    text = display_labels.litres(litres, language)
-    if trade_size is not None and trade_size != litres:
-        text = f"{text} ({display_labels.litres(trade_size, language)})"
-    return text
+        return None
+    return {language: display_labels.litres(litres, language) for language in languages}
+
+
+def size_search_terms(product_facts: dict, languages=LANGUAGES) -> list[str]:
+    """What a size search may match for one product: its printed size in every language, plus its trade size
+    ("19 л" / "19 l" / "19 L" for the 18.9 l bottle), the number buyers type. Search only: no page prints the trade
+    size."""
+    size_text = product_facts["size_text"]
+    terms = list(size_text.values()) if size_text else []
+    size_code = product_facts["size_code"]
+    if size_code:
+        trade_litres = Decimal(size_code.removesuffix("L"))
+        terms += [display_labels.litres(trade_litres, language) for language in languages]
+    return terms
 
 
 def product_offer_facts(product, languages=LANGUAGES) -> dict:
@@ -96,15 +113,24 @@ def product_offer_facts(product, languages=LANGUAGES) -> dict:
     quantity = _smallest_order_quantity(product, unit_price)
     smallest_order_total = unit_price * quantity
     returnable = product.is_returnable_bottle
+    name = {language: product.get_translated("name", language) for language in languages}
+    size_text = _size_text(litres, languages)
     return {
         "id": product.id,
         "sku": product.sku,
         "slug": product.slug,
         "path": product_public_path(product),
-        "name": {language: product.get_translated("name", language) for language in languages},
+        "name": name,
         "litres": litres,
+        # The trade size ("19L"): decisions and search only (the hero, the bottle group, `size_search_terms`), never
+        # printed.
         "size_code": size_code,
-        "size_text": {language: _size_text(litres, size_code, language) for language in languages},
+        # The volume as printed, or None: a product without a volume prints no size.
+        "size_text": size_text,
+        # The product as copy names it by its size: its volume, or its name when it records no volume. The one place
+        # that rule lives; the smallest order, the home meta description, the bottle group's decision rule and the
+        # photo and link labels (`offer_sized_label`) all read it.
+        "label": size_text or name,
         "unit_price": unit_price,
         "list_price": list_price,
         "price_text": _money_text(unit_price, languages),
@@ -122,32 +148,34 @@ def product_offer_facts(product, languages=LANGUAGES) -> dict:
 
 
 def price_sentence(product_facts: dict, language: str) -> str:
-    """The sentence "<name>, <size> — price <price>." for one product, in `language`. Without its translation row it
-    falls back to "<name> — <price>", so the price is named either way."""
+    """The sentence "<name>, <size> — price <price>." for one product, in `language`; "<name> — price <price>." for a
+    product with no size. Without its translation row it falls back to "<name> — <price>", so the price is named
+    either way."""
     name = product_facts["name"][language]
     price = product_facts["price_text"][language]
-    sentence = get_translation(
-        PRICE_LINE_KEY, language, name=name, size=product_facts["size_text"][language], price=price
-    )
-    return f"{name} — {price}" if sentence == PRICE_LINE_KEY else sentence
+    size_text = product_facts["size_text"]
+    key, size = (PRICE_LINE_KEY, {"size": size_text[language]}) if size_text else (PRICE_LINE_NO_SIZE_KEY, {})
+    sentence = get_translation(key, language, name=name, price=price, **size)
+    return f"{name} — {price}" if sentence == key else sentence
 
 
 def smallest_order_sentence(product_facts: dict, language: str) -> str:
-    """The sentence "Smallest order: <qty> × <size> = <total>." for one product, in `language`."""
+    """The sentence "Smallest order: <qty> × <label> = <total>." for one product, in `language`: the label is its size,
+    or its name when it records no volume."""
     return get_translation(
         SMALLEST_ORDER_KEY,
         language,
         qty=product_facts["smallest_order_quantity"],
-        size=product_facts["size_text"][language],
+        size=product_facts["label"][language],
         total=product_facts["smallest_order_total_text"][language],
     )
 
 
 def home_meta_description(facts: dict, language: str) -> str | None:
-    """The homepage meta description: every active product's "<size> — <price>", in `language`. None when no
-    product is listed, so the layout prints its default."""
+    """The homepage meta description: every active product's "<label> — <price>" (the label is its size, or its name
+    when it records no volume), in `language`. None when no product is listed, so the layout prints its default."""
     prices = ", ".join(
-        f"{product['size_text'][language]} — {product['price_text'][language]}" for product in facts["products"]
+        f"{product['label'][language]} — {product['price_text'][language]}" for product in facts["products"]
     )
     return get_translation(HOME_META_KEY, language, prices=prices) if prices else None
 
@@ -155,19 +183,22 @@ def home_meta_description(facts: dict, language: str) -> str | None:
 def build_offer_faq(facts: dict, language: str) -> list[dict]:
     """The FAQ entries that state the offer facts, as `[{"id", "q", "a"}, ...]` of plain `str` (never `Markup`, so the
     FAQPage JSON-LD carries the same text the page shows): price, sizes and smallest order, then the deposit answer
-    when a product is lent with no deposit. Empty when no product is listed."""
+    when a product is lent with no deposit. Empty when no product is listed.
+
+    The sizes answer lists every listed product's size, so it is left out when any product records no volume: listing
+    the others would say they are all the bottles there are."""
     products = facts["products"]
     if not products:
         return []
     answers = {
         "price": " ".join(
             [*(price_sentence(product, language) for product in products), facts["delivery"]["line"][language]]
-        ),
-        "sizes": get_translation(
-            f"{FAQ_KEY}sizes_a", language, sizes=", ".join(product["size_text"][language] for product in products)
-        ),
-        "minimum": " ".join(smallest_order_sentence(product, language) for product in products),
+        )
     }
+    if all(product["size_text"] for product in products):
+        sizes = ", ".join(product["size_text"][language] for product in products)
+        answers["sizes"] = get_translation(f"{FAQ_KEY}sizes_a", language, sizes=sizes)
+    answers["minimum"] = " ".join(smallest_order_sentence(product, language) for product in products)
     if any(product["no_deposit"] for product in products):
         answers["deposit"] = get_translation(NO_DEPOSIT_KEY, language)
     return [

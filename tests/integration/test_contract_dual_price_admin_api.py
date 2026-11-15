@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from business_app import db as _db
+from business_app.models.product import Product
 from business_app.models.corporate import (
     CorporateContractProductPrice,
     CorporatePrepaymentEventType,
@@ -180,3 +181,42 @@ def test_the_admin_product_payload_publishes_the_catalogue_unit_price(app, db, a
     assert resp.status_code == 200, resp.get_data(as_text=True)
     item = next(p for p in resp.get_json()["data"]["items"] if p["id"] == sample_product.id)
     assert item["catalogue_unit_price"] == float(CATALOGUE)
+
+
+def test_the_contract_screens_name_a_product_by_its_volume_never_its_trade_size(
+    app, db, admin_user, world, sample_product
+):
+    """Owner, 2026-11-15: a product's size is its volume ("18.9 L"); the trade size (`Product.size`, "19L") is never
+    published to a screen. Both producers: a product with a balance row (its `to_dict`) and one with only a price row
+    (the service's stand-in row)."""
+    contract, _row = world
+    sample_product.volume = 18.9  # its trade size stays 19L
+    no_volume = Product(
+        name="Office pump",
+        category_id=sample_product.category_id,
+        size="5L",
+        volume=None,
+        base_price=Decimal("9000.00"),
+        is_active=True,
+    )
+    db.session.add(no_volume)
+    db.session.flush()
+    db.session.add(
+        CorporateContractProductPrice(
+            contract_id=contract.id, product_id=no_volume.id, is_prepayment_eligible=True, is_active=True
+        )
+    )
+    db.session.commit()
+
+    prices = {row["product_id"]: row for row in _served_prices(app, admin_user, contract.id)}
+    resp = app.test_client().get(
+        f"/api/v1/admin/corporate/contracts/{contract.id}/balance", headers=admin_headers(app, admin_user)
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    balance = {row["product_id"]: row for row in resp.get_json()["data"]["balance"]["products"]}
+
+    for rows in (prices, balance):
+        assert set(rows) == {sample_product.id, no_volume.id}
+        assert rows[sample_product.id]["product_volume"] == 18.9
+        assert rows[no_volume.id]["product_volume"] is None
+        assert not any("product_size" in row for row in rows.values())

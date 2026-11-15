@@ -23,6 +23,7 @@ from business_app.services.public_offer_service import (
     product_offer_facts,
     product_public_path,
     public_price_range,
+    size_search_terms,
 )
 from business_app.utils import display_labels
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
@@ -118,18 +119,32 @@ def test_a_zero_price_does_not_raise(app, db, offer_skus):
     assert (p["smallest_order_quantity"], p["smallest_order_total"]) == (2, Decimal("0"))
 
 
-def test_size_text_names_the_litres_and_the_trade_size(app, db, offer_skus, sample_product):
+def test_size_text_is_the_volume_and_never_the_trade_size(app, db, offer_skus, sample_product):
+    """Owner, 2026-11-15: the trade size (`Product.size`, "19L") is never printed; the volume is the only size."""
     seed_copy(db, ("web.display_labels",))
     big, small = _facts_for(offer_skus.p19), _facts_for(offer_skus.p10)
     assert (big["litres"], big["size_code"], big["sku"]) == (Decimal("18.9"), "19L", "AE-19")
-    assert big["size_text"] == {
-        "uz": "18,9\u00a0l (19\u00a0l)",
-        "ru": "18,9\u00a0л (19\u00a0л)",
-        "en": "18.9\u00a0L (19\u00a0L)",
-    }
+    assert big["size_text"] == {"uz": "18,9\u00a0l", "ru": "18,9\u00a0л", "en": "18.9\u00a0L"}
     assert small["size_text"] == {"uz": "10\u00a0l", "ru": "10\u00a0л", "en": "10\u00a0L"}
-    # volume 19.0 is the trade size: no bracket
-    assert product_offer_facts(sample_product)["size_text"]["en"] == "19\u00a0L"
+    assert product_offer_facts(sample_product)["size_text"]["en"] == "19\u00a0L"  # its volume is 19.0
+    # The label (how copy names a product by its size) is the size when the product has one.
+    assert (big["label"], small["label"]) == (big["size_text"], small["size_text"])
+
+
+def test_a_product_without_a_volume_has_no_size_text_but_is_still_found_by_its_trade_size(app, db, offer_skus):
+    seed_copy(db, ("web.display_labels",))
+    offer_skus.p19.volume = None
+    db.session.commit()
+    big = _facts_for(offer_skus.p19)
+    assert (big["litres"], big["size_text"], big["size_code"]) == (None, None, "19L")
+    # Copy that names a product by its size names this one by its name instead, never by the trade size.
+    assert big["label"] == big["name"]
+    # Search only: the trade size, in each language's litres word; nothing printed.
+    assert size_search_terms(big) == ["19\u00a0l", "19\u00a0л", "19\u00a0L"]
+    assert size_search_terms(_facts_for(offer_skus.p10)) == [
+        *("10\u00a0l", "10\u00a0л", "10\u00a0L"),  # the printed size
+        *("10\u00a0l", "10\u00a0л", "10\u00a0L"),  # the trade size
+    ]
 
 
 def test_no_deposit_follows_the_returnable_flag_and_stock_decides_availability(app, db, offer_skus):

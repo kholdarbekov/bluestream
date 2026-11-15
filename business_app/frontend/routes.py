@@ -28,6 +28,7 @@ from business_app.services.public_offer_service import (
     home_meta_description,
     price_sentence,
     public_price_range,
+    size_search_terms,
     smallest_order_sentence,
 )
 from business_app.services.public_urls_service import STATIC_PUBLIC_PATHS, public_blog_paths, public_product_paths
@@ -346,7 +347,8 @@ def _build_dual_sku_product_group(facts, language):
                 "name": product_facts["name"][language],
                 "sku": product_facts["sku"],
                 "url": product_url,
-                "size": product_facts["size_text"]["en"],
+                # The volume only; no `size` without one (the trade size is never printed).
+                **({"size": product_facts["size_text"]["en"]} if product_facts["size_text"] else {}),
                 "additionalProperty": [
                     {
                         "@type": "PropertyValue",
@@ -376,10 +378,11 @@ def _build_dual_sku_product_group(facts, language):
 
     prices = [variant["offers"]["price"] for variant in variants if variant["offers"]["price"] > 0]
     in_stock = any(product_facts["available"] for product_facts in bottles)
-    # The decision rule names each bottle by its facts' size, one sentence per variant present: no typed size.
+    # The decision rule names each bottle by its facts' label (its size, or its name when it records no volume), one
+    # sentence per variant present: no typed size.
     size_by_code = {}
     for product_facts in bottles:
-        size_by_code.setdefault(product_facts["size_code"], product_facts["size_text"]["en"])
+        size_by_code.setdefault(product_facts["size_code"], product_facts["label"]["en"])
     sentences = ["Aqua Element delivers artesian drinking water across Tashkent in two bottle sizes."]
     if "19L" in size_by_code:
         sentences.append(
@@ -521,9 +524,10 @@ def shop():
         query = query.filter_by(category_id=category_id)
 
     if search:
-        # The words the pages print for a product, in every language, ignoring case and spacing: its name, its size
-        # ("19 л") and its category ("Питьевая вода"). Every word of the query must be one of them, in any order. The
-        # name column alone holds one language's name and LIKE is case-sensitive, so "вода" found nothing.
+        # The words a buyer types for a product, in every language, ignoring case and spacing: its name, its size
+        # ("18,9 л", and the trade size "19 л" that no page prints: size_search_terms) and its category ("Питьевая
+        # вода"). Every word of the query must be one of them, in any order. The name column alone holds one
+        # language's name and LIKE is case-sensitive, so "вода" found nothing.
         def words(text):
             return " ".join(str(text or "").casefold().split())
 
@@ -539,7 +543,7 @@ def shop():
                 words(text)
                 for text in [
                     *facts["name"].values(),
-                    *facts["size_text"].values(),
+                    *size_search_terms(facts),
                     *category_names.get(category_of.get(product_id), []),
                 ]
                 if text
@@ -2576,8 +2580,9 @@ def public_products_feed():
                 "name": facts["name"],
                 "description": i18n_description,
                 "shortDescription": i18n_short_description,
+                # The volume only: no label without one (the trade size is never published as a size).
                 "size": {
-                    "label": f"{_json_number(litres)}L" if litres is not None else facts["size_code"],
+                    "label": f"{_json_number(litres)}L" if litres is not None else None,
                     "litres": _json_number(litres) if litres is not None else None,
                 },
                 # From the ledger's own rule, not from the size string — see

@@ -21,10 +21,11 @@ from tests.integration.sales_pay_builders import freeze_local_now
 
 pytestmark = pytest.mark.integration
 
+# The size is the volume only: the trade size ("19 l") is never printed (owner, 2026-11-15).
 SENTENCE = {
-    "uz": "Aqua Element 18.9 L, 18,9 l (19 l) — narxi 17 345 so'm.",
-    "ru": "Aqua Element 18.9 L, 18,9 л (19 л) — цена 17 345 сум.",
-    "en": "Aqua Element 18.9 L, 18.9 L (19 L) — price 17 345 so'm (UZS).",
+    "uz": "Aqua Element 18.9 L, 18,9 l — narxi 17 345 so'm.",
+    "ru": "Aqua Element 18.9 L, 18,9 л — цена 17 345 сум.",
+    "en": "Aqua Element 18.9 L, 18.9 L — price 17 345 so'm (UZS).",
 }
 
 

@@ -197,10 +197,12 @@
 
                     {% if offer_product %}
                     <div class="features-grid shop-pd__facts">
+                        {% if offer_product.size_text %}
                         <div class="feature-card">
                             <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-tint"></i></span>
                             <div><strong>{{ offer_product.size_text[current_language] }}</strong><span>{{ 'web.shop.product.volume'|t }}</span></div>
                         </div>
+                        {% endif %}
                         <div class="feature-card">
                             <span class="ae-icon-tile ae-icon-tile--sm" aria-hidden="true"><i class="far fa-layer-group"></i></span>
                             <div><strong>{{ 'web.shop.product.units'|t(n=smallest_order) }}</strong><span>{{ 'web.shop.product.smallest_order'|t }}</span></div>

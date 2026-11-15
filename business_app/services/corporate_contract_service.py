@@ -18,6 +18,7 @@ from business_app.models.corporate import (
     CorporatePrepaymentBalance,
     CorporatePrepaymentEventType,
     CorporatePrepaymentLedger,
+    product_volume,
 )
 from business_app.models.order import Order, OrderItem
 from business_app.models.payment import CashCollectionEvent
@@ -2650,7 +2651,7 @@ class CorporateContractService:
                     "product_id": product_id,
                     "product_name": getattr(product, "name", None),
                     "product_sku": getattr(product, "sku", None),
-                    "product_size": getattr(getattr(product, "size", None), "value", getattr(product, "size", None)),
+                    "product_volume": product_volume(product),
                     "prepaid_units": 0.0,
                     "reserved_units": 0.0,
                     "consumed_units": 0.0,

@@ -4,6 +4,7 @@
     sizes and links from the Product rows (offer facts). Served as Markdown to agents: the copy stays in <main>. -#}
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
 {% from 'frontend/partials/info_ui.html' import key_facts, link_card, order_band with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_sized_label %}
 
 {% set meta_description = 'web.info.about.meta'|t %}
 
@@ -34,7 +35,7 @@
                 <figure class="info-intro__media">
                     {%- if about_product %}
                     <img src="{{ about_product.image or placeholder }}" data-fallback="{{ placeholder }}"
-                         alt="{{ 'web.home.hero.image_alt'|t(size=about_product.offer.size_text[lang]) }}"
+                         alt="{{ offer_sized_label('web.home.hero.image_alt', about_product.offer, lang) }}"
                          width="533" height="800" decoding="async">
                     {%- else %}
                     <img src="{{ placeholder }}" alt="" width="533" height="800" decoding="async">

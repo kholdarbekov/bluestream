@@ -10,7 +10,9 @@
     - product_href(p): an offer-facts product's page in the visitor's language (the product_url macro of index.html):
       the raw `p.path` dropped ?lang, so a shared link or a crawler landed on the Uzbek page.
     - order_band(facts): the navy band every info page ends with: the Telegram bot, then each product page by its live
-      size from the offer facts (the site's shop when no product is listed). -#}
+      size from the offer facts (its name when it records no volume; the site's shop when no product is listed). -#}
+
+{% from 'frontend/partials/offer_facts.html' import offer_sized_label %}
 
 {% set STAGE_COUNT = 11 %}
 {% set MINERAL_ROWS = 9 %}
@@ -83,7 +85,7 @@
             <div class="ae-band__actions">
                 <a class="ae-btn ae-btn--primary" href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer" data-info-cta="bot"><i class="fab fa-telegram-plane" aria-hidden="true"></i>{{ 'web.info.cta.bot'|t }}</a>
                 {%- for p in (facts.products if facts else []) %}
-                <a class="ae-btn ae-btn--on-dark" href="{{ product_href(p) }}" data-info-cta="product" data-product-id="{{ p.id }}">{{ 'web.info.cta.product'|t(size=p.size_text[lang]) }}</a>
+                <a class="ae-btn ae-btn--on-dark" href="{{ product_href(p) }}" data-info-cta="product" data-product-id="{{ p.id }}">{{ offer_sized_label('web.info.cta.product', p, lang) }}</a>
                 {%- else %}
                 <a class="ae-btn ae-btn--on-dark" href="{{ external_url_for_lang('frontend.shop') }}" data-info-cta="shop">{{ 'web.info.cta.shop'|t }}</a>
                 {%- endfor %}

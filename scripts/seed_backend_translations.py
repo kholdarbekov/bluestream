@@ -13141,6 +13141,13 @@ OFFER_BLOCK_TRANSLATIONS = {
         'uz': '{name}, {size} — narxi {price}.',  # NATIVE-READ
         'ru': '{name}, {size} — цена {price}.',  # NATIVE-READ
     },
+    # The price line of a product that records no volume: no size is printed (owner, 2026-11-15, the trade size is
+    # never shown), so it drops the size ("{name}, {name}" would name the product twice).
+    'landing.offer.price_line_no_size': {
+        'en': '{name} — price {price} (UZS).',
+        'uz': '{name} — narxi {price}.',
+        'ru': '{name} — цена {price}.',
+    },
     'landing.offer.heading': {
         'en': 'Aqua Element: price and delivery — normally same day or next day',
         'uz': 'Aqua Element: narx va yetkazib berish — odatda shu kuni yoki ertasiga',  # NATIVE-READ
@@ -13151,6 +13158,7 @@ OFFER_BLOCK_TRANSLATIONS = {
         'uz': 'Avvalgi narxi {price}.',  # NATIVE-READ
         'ru': 'Прежняя цена {price}.',  # NATIVE-READ
     },
+    # `{size}` is the product's label: its volume, or its name when it records no volume.
     'landing.offer.smallest_order': {
         'en': 'Smallest order: {qty} × {size} = {total}.',
         'uz': 'Eng kichik buyurtma: {qty} ta {size} — jami {total}.',  # NATIVE-READ

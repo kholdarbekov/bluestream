@@ -83,3 +83,52 @@ it('saves an emptied price as null, never as the catalogue figure', async () => 
     },
   ]));
 });
+
+// Owner, 2026-11-15: a product's size is its volume ("18.9 L"); the trade size field ("19L") is never shown.
+it('names each product by its volume, never by its trade size', async () => {
+  const volumeRow = { ...PRICE_ROW, product_name: 'Office water', product_volume: 18.9 };
+  adminService.getCorporateContract.mockResolvedValue({ data: { contract: { ...CONTRACT, prices: [volumeRow] } } });
+  adminService.getCorporateContractBalance.mockResolvedValue({
+    data: {
+      balance: {
+        products: [{
+          product_id: 3,
+          product_name: 'Office water',
+          product_volume: 18.9,
+          prepaid_units: 5,
+          reserved_units: 0,
+          consumed_units: 0,
+          available_units: 5,
+          debt_units: 0,
+        }],
+        summary: {},
+      },
+    },
+  });
+  render(<CorporateContracts />, { wrapper: createWrapper() });
+
+  // The balance table and the price table each print the volume under the name.
+  await waitFor(() => expect(screen.getAllByText('18.9 L')).toHaveLength(2));
+  expect(screen.queryByText(/19L/)).not.toBeInTheDocument();
+
+  // The top-up product picker names it the same way.
+  fireEvent.click(screen.getByRole('button', { name: 'Top Up' }));
+  expect(await screen.findByText('Office water (18.9 L)')).toBeInTheDocument();
+});
+
+it('prints no size for a product that records no volume', async () => {
+  const noVolumeRow = { ...PRICE_ROW, product_name: 'Spring water', product_volume: null };
+  adminService.getCorporateContract.mockResolvedValue({ data: { contract: { ...CONTRACT, prices: [noVolumeRow] } } });
+  render(<CorporateContracts />, { wrapper: createWrapper() });
+
+  const cell = (await screen.findByText('Spring water')).parentElement;
+  expect(cell.querySelector('small').textContent).toBe('');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Top Up' }));
+  const picked = await waitFor(() => {
+    const item = document.querySelector('.ant-modal .ant-select-selection-item');
+    expect(item).not.toBeNull();
+    return item;
+  });
+  expect(picked.textContent).toBe('Spring water');
+});

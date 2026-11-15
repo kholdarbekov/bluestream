@@ -47,6 +47,9 @@ const statusColors = {
 const isEntityUser = (user) => String(user?.user_type || '').toLowerCase() === 'entity';
 
 const formatUnits = (value) => Number(value || 0).toLocaleString();
+// A product's size is its volume, as the Products page prints it ("18.9 L"); nothing without one. The trade size
+// ("19L") is never shown.
+const formatProductVolume = (volume) => (volume ? `${volume} L` : '');
 const formatAmount = (value) => Number(value || 0).toLocaleString();
 
 const buildContractPayload = (values) => ({
@@ -886,7 +889,7 @@ const contractBalanceQuery = useQuery({
                       render: (_, record) => (
                         <div>
                           <div>{record.product_name || `#${record.product_id}`}</div>
-                          <small style={{ color: '#666' }}>{record.product_size || ''}</small>
+                          <small style={{ color: '#666' }}>{formatProductVolume(record.product_volume)}</small>
                         </div>
                       )
                     },
@@ -955,7 +958,7 @@ const contractBalanceQuery = useQuery({
                       render: (_, record) => (
                         <div>
                           <div>{record.product_name || `#${record.product_id}`}</div>
-                          <small style={{ color: '#666' }}>{record.product_size || ''}</small>
+                          <small style={{ color: '#666' }}>{formatProductVolume(record.product_volume)}</small>
                         </div>
                       )
                     },
@@ -1175,7 +1178,7 @@ const contractBalanceQuery = useQuery({
               {topupEligibleProducts.map((price) => (
                 <Option key={price.product_id} value={price.product_id}>
                   {price.product_name || `#${price.product_id}`}
-                  {price.product_size ? ` (${price.product_size})` : ''}
+                  {price.product_volume ? ` (${formatProductVolume(price.product_volume)})` : ''}
                 </Option>
               ))}
             </Select>

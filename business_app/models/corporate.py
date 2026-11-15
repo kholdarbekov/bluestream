@@ -28,6 +28,13 @@ def _optional_money(value):
     return float(value) if value is not None else None
 
 
+def product_volume(product) -> float | None:
+    """The product's volume in litres, as the admin prints a product's size ("18.9 L"), or None when it records none
+    (or there is no product). The trade size (`Product.size`, "19L") is never shown (owner, 2026-11-15)."""
+    volume = getattr(product, "volume", None)
+    return float(volume) if volume else None
+
+
 class CorporateContractStatus(Enum):
     DRAFT = "draft"
     ACTIVE = "active"
@@ -226,7 +233,7 @@ class CorporateContractProductPrice(db.Model, TimestampMixin):
             "product_id": self.product_id,
             "product_name": getattr(self.product, "name", None),
             "product_sku": getattr(self.product, "sku", None),
-            "product_size": getattr(getattr(self.product, "size", None), "value", getattr(self.product, "size", None)),
+            "product_volume": product_volume(self.product),
             "business_account_unit_price": _optional_money(self.business_account_unit_price),
             "cash_unit_price": _optional_money(self.cash_unit_price),
             "catalogue_unit_price": (float(self.product.catalogue_unit_price) if self.product is not None else None),
@@ -361,7 +368,7 @@ class CorporatePrepaymentBalance(db.Model, TimestampMixin):
             "product_id": self.product_id,
             "product_name": getattr(self.product, "name", None),
             "product_sku": getattr(self.product, "sku", None),
-            "product_size": getattr(getattr(self.product, "size", None), "value", getattr(self.product, "size", None)),
+            "product_volume": product_volume(self.product),
             "prepaid_units": float(self.prepaid_units or 0),
             "reserved_units": float(self.reserved_units or 0),
             "consumed_units": float(self.consumed_units or 0),

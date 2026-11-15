@@ -38,7 +38,9 @@
                             <li class="ss-price" data-product-id="{{ p.id }}">
                                 <span class="ss-price__thumb"><img src="{{ product_images.get(p.id) or placeholder }}" alt="" width="56" height="56" loading="lazy" decoding="async" data-fallback="{{ placeholder }}"></span>
                                 <span class="ss-price__name">
+                                    {%- if p.size_text %}
                                     <span class="ss-price__meta">{{ p.size_text[lang] }}</span>
+                                    {%- endif %}
                                     <a class="ss-price__link" href="{{ p.path }}">{{ p.name[lang] }}</a>
                                     <span class="ss-price__min">{{ offer_smallest_order_sentence(p, lang) }}</span>
                                 </span>

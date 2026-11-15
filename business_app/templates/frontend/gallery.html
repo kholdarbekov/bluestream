@@ -6,6 +6,7 @@
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
 {% from 'frontend/macros/ui.html' import empty_state %}
 {% from 'frontend/partials/info_ui.html' import product_href with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_sized_label %}
 
 {% set meta_description = 'web.info.gallery.meta'|t %}
 
@@ -28,15 +29,14 @@
             {%- endif %}
             <ul class="info-gallery">
                 {%- for p in photos %}
-                {%- set size = p.offer.size_text[lang] %}
                 <li class="info-gallery__item">
                     <a class="ae-card ae-card--link info-photo" href="{{ product_href(p.offer) }}" data-product-id="{{ p.offer.id }}">
                         <span class="info-photo__frame">
-                            <img src="{{ p.image }}" data-fallback="{{ placeholder }}" alt="{{ 'web.home.hero.image_alt'|t(size=size) }}"
+                            <img src="{{ p.image }}" data-fallback="{{ placeholder }}" alt="{{ offer_sized_label('web.home.hero.image_alt', p.offer, lang) }}"
                                  width="533" height="800" loading="lazy" decoding="async">
                         </span>
                         <span class="info-photo__caption">
-                            <span class="info-photo__title">{{ 'web.info.cta.product'|t(size=size) }}</span>
+                            <span class="info-photo__title">{{ offer_sized_label('web.info.cta.product', p.offer, lang) }}</span>
                             <span class="info-photo__more">{{ 'web.info.gallery.open_product'|t }}<i class="far fa-arrow-right" aria-hidden="true"></i></span>
                         </span>
                     </a>

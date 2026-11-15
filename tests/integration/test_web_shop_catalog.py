@@ -164,7 +164,9 @@ def test_search_matches_a_name_whatever_its_case_and_says_so_when_nothing_matche
     [
         ("вода", ["p19", "p10"]),  # the category, in Russian
         ("ВОДА 19 л", ["p19"]),  # category + the trade size, any case, any order
-        ("19 л", ["p19"]),  # the size as the card prints it ("18,9 л (19 л)")
+        ("19 л", ["p19"]),  # the trade size: searched, never printed (the card prints "18,9 л")
+        ("19 l", ["p19"]),  # the trade size in Uzbek and English letters
+        ("19", ["p19"]),
         ("18,9", ["p19"]),
         ("water", ["p19", "p10"]),  # the category, in English
         ("10 L", ["p10"]),

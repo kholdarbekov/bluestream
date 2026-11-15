@@ -28,6 +28,14 @@
 {%- endif %}
 {%- endmacro %}
 
+{#- A product photo's alt or a product link's label from copy with a {size} slot ("Aqua Element {size} bottle"): the
+    copy with the product's size, or the product's label alone when it records no volume (its name: the copy around
+    the slot would name it twice). The size printed is the volume only; the trade size never is (owner, 2026-11-15).
+    `p` is the product's offer facts. -#}
+{% macro offer_sized_label(key, p, language) -%}
+    {%- if p.size_text %}{{ key|t(language, size=p.size_text[language]) }}{% else %}{{ p.label[language] }}{% endif -%}
+{%- endmacro %}
+
 {#- "Prices as of 14 November 2026": people read the date in their language (web.integration.date_year with the
     month's name, the site's one full-date format), machines read the ISO date in <time datetime>. Without the
     date-format row the ISO date stands in. Every surface that dates the offer calls this (the offer block, /services). -#}

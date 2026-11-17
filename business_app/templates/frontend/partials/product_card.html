@@ -12,6 +12,7 @@
     Keeps the hooks pages and tests read: .shop-block, .lower-content > span (the size), .price with
     .old-price/.new-price or h6, .sale-tag, data-action + data-product-id. Words: landing.button.add_to_cart,
     landing.offer.* via offer_smallest_order_sentence (the SSOT sentence). -#}
+{% from 'frontend/partials/offer_facts.html' import offer_upcoming_price %}
 {% macro product_card(product, offer, language, url, image=None, action='add-to-cart-shop', heading_tag='h3') -%}
 {#- The name in the page's language: the offer publishes it per language; without an offer, the model's own
     translation (a plain dict has only its name). -#}
@@ -41,6 +42,7 @@
             <h6 class="new-price">{{ offer.price_text[language] }}</h6>
             {%- endif %}
         </div>
+        {{ offer_upcoming_price(offer, language) }}
         <p class="ae-product__note">{{ offer_smallest_order_sentence(offer, language) }}</p>
         {%- endif %}
         <div class="ae-product__actions">

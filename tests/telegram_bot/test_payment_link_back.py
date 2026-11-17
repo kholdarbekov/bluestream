@@ -84,7 +84,7 @@ async def place_card_order(bot, shop, user):
 async def test_back_under_the_payment_link_opens_that_order_and_pay_now_comes_back_to_it(bot, shop, user):
     order = await place_card_order(bot, shop, user)
     link = bot.telegram.last_shown()
-    assert link.text == f"Pay order BS-{order['id']}: 45,000 UZS"
+    assert link.text == f"Pay order BS-{order['id']}: 45,000 so'm"
     assert link.callback_data() == [f"order_{order['id']}"], (
         "Back must name the order it was placed for: `back_to_order_confirm` needs the "
         "checkout state confirm_order has just cleared"
@@ -112,7 +112,7 @@ async def test_back_under_the_payment_link_opens_that_order_and_pay_now_comes_ba
     await bot.send(user.tap(pay))
 
     relink = bot.telegram.last_shown()
-    assert relink.text == f"Pay order BS-{order['id']}: 45,000 UZS"
+    assert relink.text == f"Pay order BS-{order['id']}: 45,000 so'm"
     assert relink.callback_data() == [f"order_{order['id']}"]
     (paid,) = backend_calls(bot, "POST", f"/api/v1/orders/{order['id']}/retry-payment")
     assert paid.data == {"channel": "bot", "expected_amount": pay_action["expected_amount"]}
@@ -151,7 +151,7 @@ async def test_an_old_link_back_with_a_new_basket_opens_the_cart(bot, shop, user
     await bot.send(user.tap("back_to_order_confirm"))
 
     cart = bot.telegram.last_shown()
-    assert "🛒 Aqua Element 5L x 4 = 24,000 UZS" in cart.text
+    assert "🛒 Aqua Element 5L x 4 = 24,000 so'm" in cart.text
     # Both normal-mode cart keyboards carry cart_clear (keyboards.py:636-653) and edit mode does
     # not, so this holds whatever MIN_ORDER_AMOUNT is.
     assert "cart_clear" in cart.callback_data()
@@ -175,7 +175,7 @@ async def test_cart_edit_done_after_a_restart_opens_the_cart_not_an_alert(bot, s
     await bot.send(user.tap("back_to_order_confirm"))
 
     cart = bot.telegram.last_shown()
-    assert "🛒 Aqua Element 19L x 3 = 45,000 UZS" in cart.text
+    assert "🛒 Aqua Element 19L x 3 = 45,000 so'm" in cart.text
     assert "cart_clear" in cart.callback_data()
     assert f"cart_inc_{BOTTLE_19L}" not in cart.callback_data(), "edit mode ends with the checkout it served"
     assert alerts(bot) == []

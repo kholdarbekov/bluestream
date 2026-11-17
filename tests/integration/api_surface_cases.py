@@ -379,7 +379,6 @@ API_SURFACE_CASES = [
     ('POST', '/api/v1/delivery/driver/report-issue/1', 'delivery.report_delivery_issue'),
     ('POST', '/api/v1/delivery/driver/route-optimization', 'delivery.request_route_optimization'),
     ('POST', '/api/v1/delivery/driver/start-delivery/1', 'delivery.start_delivery'),
-    ('POST', '/api/v1/delivery/driver/update-location', 'delivery.update_driver_location'),
     ('POST', '/api/v1/delivery/estimate-delivery', 'delivery.estimate_delivery'),
     ('POST', '/api/v1/delivery/upload-photo', 'delivery.upload_delivery_photo'),
     ('POST', '/api/v1/loyalty/gift-points', 'loyalty.gift_points'),

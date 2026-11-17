@@ -130,9 +130,13 @@
         var placeholder = PAGE_DATA.image_placeholder || '/static/images/product-placeholder.svg';
         var name = item.product_display_name || item.product_name || '';
         var unit = window.AE ? window.AE.formatMoney(item.unit_price) : '';
+        // A courtesy line prints the split the API published (AE.linePriceText), never quantity x unit price beside
+        // the net total.
         var detail = item.is_reward
             ? '<span class="ae-badge ae-badge--gold">' + escapeHtml(I18N.reward) + '</span>'
-            : escapeHtml(fill(I18N.qty_price, { quantity: item.quantity, price: unit }));
+            : item.courtesy_quantity
+                ? escapeHtml(window.AE.linePriceText(item, { courtesy_part: I18N.courtesy_part }))
+                : escapeHtml(fill(I18N.qty_price, { quantity: item.quantity, price: unit }));
         return '<li class="ae-line modal-order-item">' +
             '<img class="ae-thumb ae-thumb--lg" src="' + escapeHtml(item.product_image || placeholder) + '" alt="" width="56" height="56" ' +
             'data-fallback="' + escapeHtml(placeholder) + '">' +

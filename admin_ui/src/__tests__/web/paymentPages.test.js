@@ -384,12 +384,13 @@ describe('checkout.js places a Click order and reads the answer', () => {
     <div id="payment-methods-container"></div><input id="selected-payment-method">
     <div class="address-card selected" data-address-id="1"><input type="radio"></div>
     <textarea id="order-notes"></textarea><input type="checkbox" id="agree-terms" checked>
-    <div id="summary-items"></div><span id="summary-subtotal"></span><span id="summary-delivery"></span>
+    <div id="summary-items"></div><p id="summary-courtesy" hidden></p><span id="summary-subtotal"></span><span id="summary-delivery"></span>
     <span id="summary-total"></span>
     <div id="summary-discount-row"><span id="summary-discount-label"></span><span id="summary-discount"></span></div>
     <div id="summary-reward-row"><span id="summary-reward-label"></span><span id="summary-reward"></span></div>
     <div id="summary-tier-row"><span id="summary-tier-label"></span><span id="summary-tier"></span></div>
     <div id="summary-cod-savings-row"><span id="summary-cod-savings"></span></div>
+    <p id="checkout-price-changed" hidden></p>
     <div id="min-order-warning"><span id="min-order-title"></span><span id="min-order-text"></span></div>
     <button id="place-order-btn" data-action="place-order">Place order</button>
     <div id="checkoutPaymentState" hidden></div>`;
@@ -420,7 +421,7 @@ describe('checkout.js places a Click order and reads the answer', () => {
     script: read('business_app/static/js/pages/checkout.js'),
     answers: {
       'GET /api/v1/payments/methods?context=order': ok({ success: true, data: { available_methods: [{ method: 'click', display_name: 'Click' }] } }),
-      'POST /api/v1/orders/cart/estimate': ok({ success: true, data: { items: [], pricing: { items_subtotal: 60000, delivery_fee: 0, final_total: 60000, tier_discount: 0 } } }),
+      'POST /api/v1/orders/cart/estimate': ok({ success: true, data: { items: [], pricing: { items_subtotal: 60000, delivery_fee: 0, final_total: exchangeOf('checkout_click_slow').body.expected_total, tier_discount: 0 } } }),
       [`POST ${ORDERS}`]: orderAnswers,
       ...extra,
     },

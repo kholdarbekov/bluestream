@@ -8,14 +8,18 @@ from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from flask import current_app
-from sqlalchemy import or_, func
+from sqlalchemy import func
 
-from business_app.models.product import Product, PriceRule
+from business_app.models.product import Product
 from business_app.models.user import User
 from business_app.models.order import Order, OrderItem
 from business_app.models.cart import Cart, CartItem
 from business_app.models.analytics import PromotionalCampaign
+from business_app.models.price_change import PriceCourtesy
+from business_app.serializers.price_courtesy_serializers import serialize_price_courtesy
 from business_app.utils.exceptions import ConflictError, ValidationError, NotFoundError
+from business_app.utils.line_money import line_money
+from business_app.utils.timezone_utils import get_utc_now
 from business_app.utils.order_totals import compute_order_total
 from shared.enums import OrderStatus, PaymentMethod
 from shared.payment_methods import is_cod_rail
@@ -136,18 +140,8 @@ class CartService:
                 )
                 continue
 
-            # Calculate price
-            unit_price = self._calculate_unit_price(product, quantity, user, payment_method)
-
-            validated_items.append(
-                {
-                    "product_id": product_id,
-                    "product": product,
-                    "quantity": quantity,
-                    "unit_price": unit_price,
-                    "subtotal": unit_price * quantity,
-                }
-            )
+            line = self._price_cart_line(product, quantity, user, payment_method)
+            validated_items.append({**line, "product": product, "subtotal": line["total_price"]})
 
         return validated_items, errors
 
@@ -199,11 +193,16 @@ class CartService:
         if errors:
             raise ValidationError(f"Cart validation failed: {'; '.join(errors)}")
 
+        # The courtesy lowers lines after they are priced and before anything is summed (a quote claims nothing).
+        price_courtesy = self._apply_courtesy(validated_items, user)
+        for item in validated_items:
+            item["subtotal"] = item["total_price"]
+
         # Calculate items subtotal
-        items_subtotal = sum(item["subtotal"] for item in validated_items)
+        items_subtotal = float(sum(item["total_price"] for item in validated_items))
 
         # Calculate delivery fee
-        delivery_fee = self._calculate_delivery_fee(items_subtotal, delivery_address_id, delivery_date, user)
+        delivery_fee = self._calculate_delivery_fee(items_subtotal)
 
         # Calculate promotional discount
         promo_discount = 0.0
@@ -304,16 +303,8 @@ class CartService:
         loyalty_points_earned = self._calculate_loyalty_points_earned(final_total, user)
 
         return {
-            "items": [
-                {
-                    "product_id": item["product_id"],
-                    "product_name": item["product"].name,
-                    "quantity": item["quantity"],
-                    "unit_price": item["unit_price"],
-                    "subtotal": item["subtotal"],
-                }
-                for item in validated_items
-            ],
+            "items": [{"product_name": item["product"].name, **self._published_line(item)} for item in validated_items],
+            "price_courtesy": serialize_price_courtesy(price_courtesy),
             "pricing": {
                 "items_subtotal": items_subtotal,
                 "delivery_fee": delivery_fee,
@@ -511,7 +502,7 @@ class CartService:
                     {
                         "product_id": product.id,
                         "product_name": product.name,
-                        "current_price": float(product.base_price),
+                        "current_price": float(product.catalogue_unit_price),
                         "suggested_quantity": suggested_quantity,
                         "order_frequency": item.order_count,
                         "total_ordered": item.total_quantity,
@@ -547,12 +538,17 @@ class CartService:
         if errors:
             raise ValidationError(f"Cart validation failed: {'; '.join(errors)}")
 
+        self._apply_courtesy(validated_items, user)
+        for item in validated_items:
+            item["subtotal"] = item["total_price"]
+
         # Check minimum order amount
-        items_subtotal = sum(item["subtotal"] for item in validated_items)
+        items_subtotal = float(sum(item["total_price"] for item in validated_items))
         if items_subtotal < self.min_order_amount:
             raise ValidationError(f"Minimum order amount is {self.min_order_amount} UZS")
 
-        return {"items": validated_items, "subtotal": items_subtotal, "ready_for_checkout": True, "warnings": []}
+        published_items = [{**item, **self._published_line(item)} for item in validated_items]
+        return {"items": published_items, "subtotal": items_subtotal, "ready_for_checkout": True, "warnings": []}
 
     def get_cart_by_user_id(self, user_id: int) -> Optional["Cart"]:
         """Retrieve cart for a given user"""
@@ -581,6 +577,8 @@ class CartService:
             cart_item["product"] = product_payload
             cart_item["unit_price"] = float(pricing.get("unit_price", 0) or 0)
             cart_item["total_price"] = float(pricing.get("total_price", 0) or 0)
+            for key in self.PUBLISHED_LINE_KEYS:
+                cart_item[key] = self._publishable(key, pricing.get(key))
             cart_item["in_stock"] = bool(pricing.get("in_stock", True))
             cart_item["stock_quantity"] = pricing.get("stock_quantity")
             cart_item["available_quantity"] = pricing.get("available_quantity")
@@ -588,6 +586,7 @@ class CartService:
             enriched_items.append(cart_item)
 
         cart_payload["cart_items"] = enriched_items
+        cart_payload["price_courtesy"] = summary.get("price_courtesy")
         cart_payload["item_count"] = int(summary.get("item_count", 0) or 0)
         cart_payload["subtotal"] = float(summary.get("subtotal", 0) or 0)
         cart_payload["estimated_delivery_fee"] = float(summary.get("estimated_delivery_fee", 0) or 0)
@@ -815,20 +814,22 @@ class CartService:
                 "estimated_delivery_fee": self.standard_delivery_fee,
                 "estimated_total": self.standard_delivery_fee,
                 "contract_price_at_checkout": False,
+                "price_courtesy": None,
             }
 
         user = User.query.get(user_id)
-        items_with_details = []
-        subtotal = 0
-
+        priced_lines = []
         for cart_item in cart.cart_items:
             product = cart_item.product
             if not product or not product.is_active:
                 continue
+            priced_lines.append((cart_item, product, self._price_cart_line(product, cart_item.quantity, user)))
 
-            unit_price, contract_price_at_checkout = self._price_cart_line(product, cart_item.quantity, user)
-            item_total = unit_price * cart_item.quantity
-            subtotal += item_total
+        price_courtesy = self._apply_courtesy([line for _, _, line in priced_lines], user)
+        items_with_details = []
+        subtotal = float(sum(line["total_price"] for _, _, line in priced_lines))
+
+        for cart_item, product, line in priced_lines:
             product_images = product.images or []
             product_image = product_images[0] if isinstance(product_images, list) and product_images else None
             # Routed through the SAME chokepoint as add/update/checkout
@@ -848,18 +849,17 @@ class CartService:
                     "product_name": product.name,
                     "product_image": product_image,
                     "quantity": cart_item.quantity,
-                    "unit_price": unit_price,
-                    "total_price": item_total,
+                    **self._published_line(line),
                     "in_stock": in_stock,
                     "stock_quantity": product.stock_quantity if product.track_inventory else None,
                     "available_quantity": available_quantity,
                     "reserved_quantity": reserved_quantity,
-                    "contract_price_at_checkout": contract_price_at_checkout,
+                    "contract_price_at_checkout": line["contract_price_at_checkout"],
                 }
             )
 
         # Calculate delivery fee
-        delivery_fee = self._calculate_delivery_fee(subtotal, None, None, user)
+        delivery_fee = self._calculate_delivery_fee(subtotal)
         # No discount applies to a cart summary, but the total goes through the
         # shared formula anyway so this screen cannot drift from checkout.
         estimated_total = float(
@@ -880,31 +880,64 @@ class CartService:
             "estimated_delivery_fee": delivery_fee,
             "estimated_total": estimated_total,
             "contract_price_at_checkout": any(item["contract_price_at_checkout"] for item in items_with_details),
+            "price_courtesy": serialize_price_courtesy(price_courtesy),
         }
 
     # Private helper methods
 
-    def _calculate_unit_price(
-        self, product: Product, quantity: int, user: Optional[User], payment_method: Optional[str] = None
-    ) -> float:
-        """Unit price for a cart line on `payment_method` (None: the pre-method catalogue)."""
-        return self._price_cart_line(product, quantity, user, payment_method)[0]
+    # The line keys the cart screen copies from the summary onto each `cart_items[]` entry.
+    # `upcoming_price` is already floats (`upcoming_price_block`), so `_MONEY_KEYS` leaves it as it is.
+    PUBLISHED_LINE_KEYS = (
+        "discount_amount",
+        "courtesy_quantity",
+        "courtesy_unit_price",
+        "regular_quantity",
+        "upcoming_price",
+    )
+    _MONEY_KEYS = frozenset({"unit_price", "subtotal", "total_price", "discount_amount", "courtesy_unit_price"})
+    _PUBLISHED_LINE_FIELDS = (
+        "product_id",
+        "quantity",
+        "unit_price",
+        "subtotal",
+        "total_price",
+        *PUBLISHED_LINE_KEYS,
+    )
+
+    @classmethod
+    def _publishable(cls, key: str, value: Any) -> Any:
+        """One line value as the wire carries it: a money figure is a float (None stays None), the rest is as it is."""
+        if key in cls._MONEY_KEYS and value is not None:
+            return float(value)
+        return value
+
+    @classmethod
+    def _published_line(cls, line: Dict[str, Any]) -> Dict[str, Any]:
+        """The line's published fields; a key the line does not carry is None when it is a courtesy key, else absent."""
+        return {
+            key: cls._publishable(key, line.get(key))
+            for key in cls._PUBLISHED_LINE_FIELDS
+            if key in line or key in cls.PUBLISHED_LINE_KEYS
+        }
+
+    def _apply_courtesy(self, lines: List[Dict[str, Any]], user: Optional[User]) -> Optional[PriceCourtesy]:
+        """Lower the person's courtesy lines in place (a quote: nothing is claimed). None for no user or no courtesy."""
+        if user is None:
+            return None
+        # Local import: the courtesy module reaches the order and contract services.
+        from business_app.services.price_change.courtesy import apply_courtesy
+
+        return apply_courtesy(lines, user_id=user.id, at=get_utc_now(), is_subscription_order=False, claim=False)
 
     def _price_cart_line(
         self, product: Product, quantity: int, user: Optional[User], payment_method: Optional[str] = None
-    ) -> Tuple[float, bool]:
-        """(unit price, a contract price waits at checkout) for one cart line.
+    ) -> Dict[str, Any]:
+        """One cart line as `apply_courtesy` reads it: the catalogue price (what an order is charged), then the contract
+        resolver's rule for `payment_method` (spec 2026-10-09 §4.1; before a method is chosen that is the catalogue)."""
+        from business_app.services.corporate_contract_service import PRICING_SOURCE_FALLBACK
 
-        Volume rules give the catalogue figure; the contract resolver then applies THE rule for
-        `payment_method` (spec 2026-10-09 §4.1). Before a method is chosen that is the catalogue.
-        """
-        base_price = float(product.discount_price if product.discount_price else product.base_price)
-        effective_price = base_price
-
-        price_rule = self._get_best_price_rule(product.id, quantity, user)
-        if price_rule:
-            discount = self._calculate_rule_discount(price_rule, base_price)
-            effective_price = max(0, base_price - discount)
+        unit_price = Decimal(str(product.calculate_price(quantity=quantity)))
+        contract_product_price_id, pricing_source, contract_price_at_checkout = None, PRICING_SOURCE_FALLBACK, False
 
         user_id = getattr(user, "id", None)
         if user_id:
@@ -914,10 +947,14 @@ class CartService:
                 resolution = get_corporate_contract_service().resolve_contract_pricing_for_user_product(
                     user_id=user_id,
                     product_id=product.id,
-                    fallback_price=Decimal(str(effective_price)),
+                    fallback_price=unit_price,
                     payment_method=payment_method,
                 )
-                return float(resolution["unit_price"]), bool(resolution["contract_price_at_checkout"])
+                row = resolution["contract_price_row"]
+                unit_price = Decimal(str(resolution["unit_price"]))
+                contract_product_price_id = row.id if row is not None else None
+                pricing_source = resolution["pricing_source"]
+                contract_price_at_checkout = bool(resolution["contract_price_at_checkout"])
             except ValidationError:
                 raise
             except Exception as exc:
@@ -928,7 +965,26 @@ class CartService:
                     exc,
                 )
 
-        return effective_price, False
+        # The coming catalogue price: a line priced on a chosen method reads its pricing source; a neutral quote
+        # (the bot's estimate, the cart) reads whether a contract price will apply at checkout.
+        from business_app.services.price_change.publication import upcoming_price_block
+
+        if payment_method is not None:
+            upcoming_price = upcoming_price_block(product.id, pricing_source=pricing_source)
+        else:
+            upcoming_price = upcoming_price_block(product.id, contract_price_at_checkout=contract_price_at_checkout)
+
+        return {
+            "product_id": product.id,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "contract_product_price_id": contract_product_price_id,
+            "pricing_source": pricing_source,
+            "contract_price_at_checkout": contract_price_at_checkout,
+            "upcoming_price": upcoming_price,
+            "is_reward_item": False,
+            **line_money(unit_price, quantity)._asdict(),
+        }
 
     def _product_availability_result(self, product: Product, requested_quantity: int):
         """The reservation-aware availability result, or None when stock does not gate.
@@ -979,56 +1035,14 @@ class CartService:
         if not is_available:
             raise ValidationError(f"Product {product.id} ({product.name}): {error_message}")
 
-    def _get_best_price_rule(self, product_id: int, quantity: int, user: Optional[User]) -> Optional[PriceRule]:
-        """Get best applicable price rule for product"""
-        query = PriceRule.query.filter_by(product_id=product_id, is_active=True)
-
-        # Filter by validity dates
-        now = datetime.now(UTC)
-        query = query.filter(
-            or_(PriceRule.valid_from == None, PriceRule.valid_from <= now),
-            or_(PriceRule.valid_until == None, PriceRule.valid_until >= now),
-        )
-
-        # Filter by quantity
-        query = query.filter(
-            PriceRule.min_quantity <= quantity, or_(PriceRule.max_quantity == None, PriceRule.max_quantity >= quantity)
-        )
-
-        # Filter by customer type
-        if user:
-            customer_type = "vip" if getattr(user, "is_premium", False) else "regular"
-            query = query.filter(or_(PriceRule.customer_type == None, PriceRule.customer_type == customer_type))
-
-        # Get rule with highest discount
-        rules = query.all()
-        return max(rules, key=lambda r: r.discount_value) if rules else None
-
-    def _calculate_rule_discount(self, rule: PriceRule, base_price: float) -> float:
-        """Calculate discount from price rule"""
-        if rule.discount_type == "percentage":
-            return base_price * (float(rule.discount_value) / 100)
-        else:  # fixed
-            return float(rule.discount_value)
-
-    def _calculate_delivery_fee(
-        self,
-        items_subtotal: float,
-        delivery_address_id: Optional[int],
-        delivery_date: Optional[str],
-        user: Optional[User],
-    ) -> float:
-        """Calculate delivery fee via DeliveryService (single source of truth)"""
+    def _calculate_delivery_fee(self, items_subtotal: float) -> float:
+        """The fee the order will be charged: `DeliveryService.order_delivery_fee`, the call `OrderService.price_order`
+        charges with, so the quote and the charge cannot disagree. No address is resolved here (the fee is flat and
+        reads none), and no customer has a fee rule of their own: the premium override the order never honoured is
+        gone."""
         from business_app.services.delivery_service import DeliveryService
 
-        delivery_service = DeliveryService()
-        # DeliveryService handles free-delivery threshold internally;
-        # premium-user override is cart-specific for now.
-        if user and getattr(user, "is_premium", False):
-            return 0.0
-        # Use 0,0 coordinates since we don't resolve the address here;
-        # DeliveryService currently returns 0 (free delivery campaign).
-        return float(delivery_service.calculate_delivery_fee(0, 0, int(items_subtotal)))
+        return float(DeliveryService().order_delivery_fee(None, Decimal(str(items_subtotal))))
 
     def _apply_promo_code(
         self, promo_code: str, cart_total: float, user_id: int

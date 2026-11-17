@@ -124,11 +124,11 @@ async def test_tapping_a_product_opens_its_quantity_screen_and_writes_nothing(bo
 
     assert body(screen) == (
         "🛒 Aqua Element 19L\n"
-        "💰 Narxi: 15,000 UZS (1 dona)\n"
+        "💰 Narxi: 15,000 so'm (1 dona)\n"
         "ℹ️ Minimal buyurtma: 2\n"
         "\n"
         "Soni: 2\n"
-        "Jami: 2 × 15,000 = 30,000 UZS\n"
+        "Jami: 2 × 15,000 = 30,000 so'm\n"
         "\n"
         "✏️ Yoki kerakli miqdorni yozing"
     )
@@ -145,10 +145,10 @@ async def test_presets_and_plus_minus_change_only_the_number_on_screen(bot, shop
     await open_product(bot, user)
 
     await bot.send(user.tap(pick(bot, f"qty_set_{BOTTLE_19L}_", "_12")))
-    assert "Soni: 12\nJami: 12 × 15,000 = 180,000 UZS" in body(bot.telegram.last_shown())
+    assert "Soni: 12\nJami: 12 × 15,000 = 180,000 so'm" in body(bot.telegram.last_shown())
 
     await bot.send(user.tap(f"qty_inc_{BOTTLE_19L}_12"))
-    assert "Soni: 13\nJami: 13 × 15,000 = 195,000 UZS" in body(bot.telegram.last_shown())
+    assert "Soni: 13\nJami: 13 × 15,000 = 195,000 so'm" in body(bot.telegram.last_shown())
 
     await bot.send(user.tap(f"qty_dec_{BOTTLE_19L}_13"))
     screen = bot.telegram.last_shown()
@@ -182,7 +182,7 @@ async def test_checkout_adds_the_shown_quantity_and_opens_checkout(bot, shop, us
 async def test_a_product_already_in_the_cart_is_changed_in_the_cart_as_the_customer_taps(bot, shop, user):
     shop.cart[BOTTLE_19L] = 10
     screen = await open_product(bot, user)
-    assert "Soni: 10\nJami: 10 × 15,000 = 150,000 UZS" in body(screen)
+    assert "Soni: 10\nJami: 10 × 15,000 = 150,000 so'm" in body(screen)
     assert cart_writes(bot) == []
 
     await bot.send(user.tap(pick(bot, f"qty_set_{BOTTLE_19L}_", "_15")))
@@ -191,7 +191,7 @@ async def test_a_product_already_in_the_cart_is_changed_in_the_cart_as_the_custo
     assert shop.cart == {BOTTLE_19L: 16}
     await bot.send(user.text("7"))
 
-    assert "Soni: 7\nJami: 7 × 15,000 = 105,000 UZS" in body(bot.telegram.last_shown())
+    assert "Soni: 7\nJami: 7 × 15,000 = 105,000 so'm" in body(bot.telegram.last_shown())
     assert cart_writes(bot) == [
         ("PUT", f"/api/v1/cart/items/{BOTTLE_19L}", {"quantity": 15}),
         ("PUT", f"/api/v1/cart/items/{BOTTLE_19L}", {"quantity": 16}),
@@ -308,7 +308,7 @@ async def test_a_typed_number_redraws_the_screen_and_checkout_adds_it(bot, shop,
 
     screen = bot.telegram.last_shown()
     assert screen.method == "sendMessage"
-    assert "Soni: 7\nJami: 7 × 15,000 = 105,000 UZS" in body(screen)
+    assert "Soni: 7\nJami: 7 × 15,000 = 105,000 so'm" in body(screen)
     assert cart_writes(bot) == []
 
     await bot.send(user.tap(f"buy_{BOTTLE_19L}_7"))
@@ -332,7 +332,7 @@ async def test_a_sold_out_product_says_so_and_offers_only_back(bot, shop, user):
 
     assert body(screen) == (
         "🛒 Aqua Element 5L\n"
-        "💰 Narxi: 6,000 UZS (1 dona)\n"
+        "💰 Narxi: 6,000 so'm (1 dona)\n"
         "\n"
         "❌ Tugagan"
     )
@@ -347,7 +347,7 @@ async def test_the_contract_price_note_sits_under_the_unit_price(bot, shop, user
 
     assert body(screen).startswith(
         "🛒 Aqua Element 19L\n"
-        "💰 Narxi: 15,000 UZS (1 dona)\n"
+        "💰 Narxi: 15,000 so'm (1 dona)\n"
         f"{uz('telegram.products.contract_price_at_checkout')}\n"
         "ℹ️ Minimal buyurtma: 2\n"
     )

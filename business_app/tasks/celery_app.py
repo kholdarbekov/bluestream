@@ -89,6 +89,7 @@ def make_celery(app=None):
             "business_app.tasks.heartbeat_tasks",
             "business_app.tasks.reorder_reminder_tasks",
             "business_app.tasks.seo_tasks",
+            "business_app.tasks.price_change_tasks",
         ],
     )
 
@@ -318,6 +319,13 @@ def make_celery(app=None):
             "task": "business_app.tasks.order_tasks.release_due_scheduled_orders",
             "schedule": crontab(minute=f"*/{business_config.SCHEDULED_RELEASE_SWEEP_MINUTES}"),
             "options": {"time_limit": 300},
+        },
+        # The price-change tick (spec §5.5): applies every announced change whose change instant has passed. Every five
+        # minutes, so a change lands within five minutes of 00:00 Tashkent. No run lock: the switch locks and re-checks.
+        "price-change-tick": {
+            "task": "price_change.tick",
+            "schedule": crontab(minute="*/5"),
+            "options": {"expires": 300, "time_limit": 600},
         },
         # Liveness canary: proves beat → broker → a free worker slot end to end.
         # CeleryHeartbeatStale and the worker healthcheck read what it writes.
@@ -595,6 +603,8 @@ celery.conf.task_annotations = {
     "business_app.tasks.payment_tasks.process_payment_webhook": {"rate_limit": "60/m"},
     # Reorder reminders: about ten sends a second per worker, well under Telegram's ~30 msg/s.
     "reminders.send_reminder": {"rate_limit": "10/s"},
+    # Price-change announcements and reminders: the same pace.
+    "price_change.send_notice": {"rate_limit": "10/s"},
 }
 
 

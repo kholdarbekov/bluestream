@@ -65,11 +65,27 @@ import useScheduleBounds from '../hooks/useScheduleBounds';
 import RescheduleOrderModal from '../components/orders/RescheduleOrderModal';
 import ChangeAddressModal from '../components/orders/ChangeAddressModal';
 import { formatAddressLabel } from '../utils/addressLabel';
+import OrderQuotePanel from '../components/orders/OrderQuotePanel';
+import { courtesyLineParts, priceChangedQuote } from '../utils/priceCourtesy';
 import CloseOrderDialog, {
   ADMIN_REASON_ERROR_MESSAGES,
   AdminReasonField,
   AwaitingNewDateNotice,
 } from '../components/orders/CloseOrderDialog';
+
+// The ONE builder of the pricing body: the quote asks it and the create's `expected_total` is drawn from the quote of
+// the same body, so the total the operator saw is the total of the basket that is sent. Null until a customer and
+// every row's product and quantity are chosen.
+export const orderPricingPayload = ({ user_id, delivery_address_id, payment_method, items }) => {
+  if (!user_id || !Array.isArray(items) || items.length === 0) return null;
+  if (!items.every((row) => row?.product_id && row?.quantity)) return null;
+  return {
+    user_id,
+    delivery_address_id,
+    payment_method: payment_method || 'cash',
+    items: items.map((row) => ({ product_id: row.product_id, quantity: row.quantity })),
+  };
+};
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -191,6 +207,8 @@ const Orders = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: DEFAULT_PAGE_SIZE });
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
+  // The create answered 409 and the panel was redrawn from the quote it carried: say so, calmly.
+  const [priceChangedNote, setPriceChangedNote] = useState(false);
   const [isPersonalCardModalVisible, setIsPersonalCardModalVisible] = useState(false);
   // Live projection of where the transfer lands. The amount can exceed this order's
   // outstanding, in which case the surplus pays the customer's other delivered COD
@@ -257,6 +275,8 @@ const Orders = () => {
   const [cashEditForm] = Form.useForm();
   const [paymentMethodForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
+  const watchedItems = Form.useWatch('items', createOrderForm);
+  const watchedAddressId = Form.useWatch('delivery_address_id', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
   const watchedBypassCodCheck = Form.useWatch('bypass_cod_check', paymentMethodForm);
 
@@ -362,6 +382,20 @@ const Orders = () => {
     enabled: isCreateModalVisible || isEditItemsModalVisible,
   });
 
+  // The server prices the basket being built (courtesy split, dated line, total); the modal prints it as sent.
+  const pricing = orderPricingPayload({
+    user_id: selectedUserId,
+    delivery_address_id: watchedAddressId,
+    payment_method: watchedPaymentMethod,
+    items: watchedItems,
+  });
+  const quoteQuery = useQuery({
+    queryKey: ['admin-order-quote', pricing],
+    queryFn: () => adminService.quoteAdminOrder(pricing),
+    enabled: isCreateModalVisible && Boolean(pricing),
+    retry: false,
+  });
+
   const { data: statusesData } = useQuery({
     queryKey: ['order-statuses'],
 
@@ -424,7 +458,7 @@ const Orders = () => {
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: (orderData) => adminService.createOrderForUser(orderData),
+    mutationFn: (orderData) => adminService.createOrderForUser(orderData, { handledErrorCodes: ['STATE_CHANGED'] }),
 
     onSuccess: (response) => {
       message.success(t('ui.orders.order_created_success', 'Order created successfully'));
@@ -434,6 +468,7 @@ const Orders = () => {
       setIsCreateModalVisible(false);
       createOrderForm.resetFields();
       setCreateOrderErrors([]);
+      setPriceChangedNote(false);
       setSelectedUserId(null);
       setUserAddresses([]);
       setUserPaymentMethods([]);
@@ -454,7 +489,14 @@ const Orders = () => {
       }
     },
 
-    onError: (error) => {
+    onError: (error, variables) => {
+      // The shown total no longer holds: redraw the panel from the quote the refusal carries and keep the modal open.
+      const freshQuote = priceChangedQuote(error);
+      if (freshQuote) {
+        queryClient.setQueryData(['admin-order-quote', orderPricingPayload(variables)], freshQuote);
+        setPriceChangedNote(true);
+        return;
+      }
       const errorMessages = extractApiErrorMessages(
         error,
         t('ui.orders.order_create_failed', 'Failed to create order'),
@@ -894,7 +936,10 @@ const Orders = () => {
       return;
     }
 
+    if (quoteQuery.isFetching) return;
+
     setCreateOrderErrors([]);
+    setPriceChangedNote(false);
     createOrderMutation.mutate({
       user_id: values.user_id,
       delivery_address_id: values.delivery_address_id,
@@ -905,6 +950,7 @@ const Orders = () => {
         product_id: item.product_id,
         quantity: item.quantity,
       })),
+      ...(quoteQuery.data ? { expected_total: quoteQuery.data.total_amount } : {}),
       ...buildSchedulePayload({
         preset: values.window_preset,
         date: values.delivery_date ? values.delivery_date.format('YYYY-MM-DD') : null,
@@ -1313,6 +1359,7 @@ const Orders = () => {
     setIsCreateModalVisible(false);
     createOrderForm.resetFields();
     setCreateOrderErrors([]);
+    setPriceChangedNote(false);
     setSelectedUserId(null);
     setUserAddresses([]);
     setUserPaymentMethods([]);
@@ -2012,7 +2059,11 @@ const Orders = () => {
                     render: (price, record) =>
                       record.standalone
                         ? <span style={{ color: '#52c41a', fontWeight: 600 }}>{t('ui.orders.free', 'Free')}</span>
-                        : `${formatMoney(price)} UZS`,
+                        : record.courtesy_quantity > 0
+                          ? courtesyLineParts(record)
+                            .map((part) => `${part.quantity} × ${formatMoney(part.unitPrice)} UZS`)
+                            .join(' + ')
+                          : `${formatMoney(price)} UZS`,
                   },
                   {
                     title: t('ui.orders.total_price', 'Total'),
@@ -2588,10 +2639,23 @@ const Orders = () => {
             <Input.TextArea rows={2} placeholder={t('ui.orders.delivery_notes_placeholder', 'Any special delivery instructions...')} />
           </Form.Item>
 
+          <OrderQuotePanel
+            quote={quoteQuery.data}
+            loading={quoteQuery.isFetching}
+            error={quoteQuery.error}
+            priceChanged={priceChangedNote}
+          />
+
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={createOrderReset}>{t('ui.common.cancel', 'Cancel')}</Button>
-              <AsyncButton type="primary" htmlType="submit" loading={createOrderMutation.isPending} icon={<ShoppingCartOutlined />}>
+              <AsyncButton
+                type="primary"
+                htmlType="submit"
+                loading={createOrderMutation.isPending}
+                disabled={quoteQuery.isFetching}
+                icon={<ShoppingCartOutlined />}
+              >
                 {t('ui.orders.create_order', 'Create Order')}
               </AsyncButton>
             </Space>

@@ -7,10 +7,9 @@
 from drifting: it never re-implements either, it compares one against the other
 over HTTP with the payloads the page actually sends.
 
-The basket deliberately carries NO PriceRule. `CartService._get_best_price_rule`
-applies volume rules that `OrderService._process_order_items` does not (design
-§10, out of scope) — a rule here would make this file fail for a reason that has
-nothing to do with the tier discount.
+The basket carries no PriceRule: the cart applies none since 2026-11-16 (it prices
+at `Product.calculate_price`, as `OrderService._process_order_items` does), so a rule
+here would change nothing and would only hide what this file compares.
 """
 
 from datetime import datetime, timezone

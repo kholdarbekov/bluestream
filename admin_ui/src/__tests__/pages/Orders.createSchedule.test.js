@@ -122,6 +122,7 @@ it('sends the picked day and window with the new order', async () => {
     data: { available_methods: [{ method: 'cash', name: 'Cash', is_default: true }], payment_restrictions: null },
   });
   adminService.createOrderForUser.mockResolvedValue({ success: true, data: {} });
+  adminService.quoteAdminOrder.mockResolvedValue({ items: [], total_amount: 15000 });
   render(<Orders />, { wrapper: createWrapper() });
   openCreateOrder();
   const dialog = await screen.findByRole('dialog', { name: 'Create Order' });
@@ -142,6 +143,8 @@ it('sends the picked day and window with the new order', async () => {
   await openDatePopup();
   fireEvent.click(cell(day(2)));
   fireEvent.click(within(dialog).getByRole('radio', { name: 'Evening' }));
+  await waitFor(() => expect(adminService.quoteAdminOrder).toHaveBeenCalled());
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: /create order/i })).toBeEnabled());
   fireEvent.click(within(dialog).getByRole('button', { name: /create order/i }));
 
   // The extracted picker still writes the same four fields into Create Order's own form.
@@ -155,5 +158,6 @@ it('sends the picked day and window with the new order', async () => {
     delivery_date: day(2),
     delivery_window_start: '18:00',
     delivery_window_end: '21:00',
-  }));
+    expected_total: 15000,
+  }, { handledErrorCodes: ['STATE_CHANGED'] }));
 });

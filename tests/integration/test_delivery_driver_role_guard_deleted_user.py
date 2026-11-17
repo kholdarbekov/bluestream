@@ -85,7 +85,6 @@ class TestDriverRoleGuardRaceWithGlobalJwtUserLookup:
         "method,path,json_body",
         [
             ("get", "/api/v1/delivery/driver/assignments", None),
-            ("post", "/api/v1/delivery/driver/update-location", {"lat": 41.3, "lng": 69.2}),
             ("post", "/api/v1/delivery/driver/start-delivery/1", None),
             ("post", "/api/v1/delivery/driver/arrive/1", None),
             ("post", "/api/v1/delivery/driver/complete/1", {"notes": "n/a"}),
@@ -95,7 +94,6 @@ class TestDriverRoleGuardRaceWithGlobalJwtUserLookup:
         ],
         ids=[
             "get_driver_assignments",
-            "update_driver_location",
             "start_delivery",
             "mark_arrived",
             "complete_delivery",

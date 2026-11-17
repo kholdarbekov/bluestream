@@ -9,6 +9,7 @@ Exposes the business-critical counters/gauges/summaries referenced by
 - payment_webhook_duplicates_total — idempotency-guard hits (replay or gateway retry)
 - payments_pending_total / _oldest_age_seconds / _on_closed_order_total — Gauges,
   refreshed on the /metrics scrape in the web process
+- price_change_overdue_seconds — Gauge, how long a due price change has gone unapplied
 - pg_pool_in_use / pg_pool_size — SQLAlchemy connection-pool Gauges
 
 Multiprocess: Flask runs under Gunicorn with preload_app=True + 2 workers + 3 gthreads.
@@ -84,6 +85,14 @@ payments_pending_oldest_age_seconds = Gauge(
 payments_pending_on_closed_order_total = Gauge(
     "payments_pending_on_closed_order_total",
     "PENDING electronic payments whose order is DELIVERED, CANCELLED or RETURNED.",
+    multiprocess_mode="liveall",
+)
+
+# Seconds the most overdue pending price change is past its instant (0 = none).
+# Read on the web process's scrape, so a dead worker or beat still pages.
+price_change_overdue_seconds = Gauge(
+    "bluestream_price_change_overdue_seconds",
+    "Seconds the most overdue SCHEDULED/ANNOUNCED price change is past its effective instant (0 when none).",
     multiprocess_mode="liveall",
 )
 
@@ -289,6 +298,7 @@ def setup_prometheus_metrics(app) -> PrometheusMetrics:
         if request.path == "/metrics":
             _refresh_backup_freshness_gauges()
             _refresh_pending_payment_gauges()
+            _refresh_price_change_gauge()
             _refresh_celery_heartbeat_gauge()
 
     return _flask_exporter
@@ -370,6 +380,45 @@ def _refresh_pending_payment_gauges(force: bool = False) -> None:
         payments_pending_oldest_age_seconds.set(oldest)
         payments_pending_on_closed_order_total.set(on_closed)
         _pending_payments_last_refresh = now
+    except Exception:  # noqa: BLE001
+        return
+
+
+_PRICE_CHANGE_TTL_SECONDS = 30.0
+_price_change_gauge_last_refresh = 0.0
+
+
+def _pending_price_change_instants() -> list:
+    """`effective_at` of every price change still SCHEDULED or ANNOUNCED.
+
+    Split out so tests can force a failure and prove the scrape survives it.
+    """
+    from business_app import db as _db
+    from business_app.models.price_change import PENDING_PRICE_CHANGE_STATUSES, PriceChange
+
+    changes = _db.session.query(PriceChange).filter(PriceChange.status.in_(PENDING_PRICE_CHANGE_STATUSES)).all()
+    return [change.effective_at for change in changes]
+
+
+def _refresh_price_change_gauge(force: bool = False) -> None:
+    """Recompute `price_change_overdue_seconds` from the DB.
+
+    TTL-throttled. Best-effort: on any error the previous value stays, because
+    a zero would read as "all clear" and mask the state this gauge surfaces.
+    """
+    global _price_change_gauge_last_refresh
+
+    now = time.time()
+    if not force and now - _price_change_gauge_last_refresh < _PRICE_CHANGE_TTL_SECONDS:
+        return
+
+    try:
+        instants = _pending_price_change_instants()
+        now_utc = datetime.now(timezone.utc)
+        aware = [t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in instants]
+        overdue = max([(now_utc - t).total_seconds() for t in aware if t <= now_utc], default=0)
+        price_change_overdue_seconds.set(overdue)
+        _price_change_gauge_last_refresh = now
     except Exception:  # noqa: BLE001
         return
 

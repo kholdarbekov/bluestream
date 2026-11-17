@@ -27,6 +27,8 @@ from business_app.services.session_revocation_service import SessionRevocationSe
 from business_app.utils.address_helpers import get_address_line
 from business_app.utils.delivery_window import window_slot_label
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
+from business_app.utils.line_money import line_money
+from business_app.utils.timezone_utils import get_utc_now
 from business_app.utils.order_totals import compute_order_total
 from business_app.utils.geo_validation import ensure_within_delivery_zone
 from business_app.utils.user_search import build_name_match_clause
@@ -2255,6 +2257,7 @@ class StaffService:
             from business_app.services.cash_collection_service import CashCollectionService
             from business_app.services.notification_service import NotificationService
             from business_app.utils.constants import NotificationChannel, NotificationType
+            from business_app.utils.translations import get_translation
             from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD
 
             # The cap is configuration, not copy — read it from the SSOT so the
@@ -2270,18 +2273,21 @@ class StaffService:
             if not context["cod_restricted"] or context["restriction_scope"] != "person":
                 return
 
-            net_total = context["cluster_net_open_cod_debt_total"]
-            subject = "Cash on delivery is restricted"
-            body = (
-                f"Your outstanding cash-on-delivery balance is {net_total:,.0f} UZS, over the "
-                f"{COD_DEBT_AMOUNT_THRESHOLD:,} UZS limit. Cash on delivery is unavailable for new "
-                f"orders until your balance drops back under {COD_DEBT_AMOUNT_THRESHOLD:,} UZS. "
-                "Please use a card payment method, or pay down your balance, until then."
-            )
+            # Same sentence, same figures (thousands-separated whole so'm) as the bot's checkout notice
+            # for the same restriction. NotificationService passes the customer's language to
+            # `get_translated`, so the subject and body are read in the language they read the bot in.
+            params = {
+                "net_debt_total": f"{context['cluster_net_open_cod_debt_total']:,.0f}",
+                "threshold": f"{COD_DEBT_AMOUNT_THRESHOLD:,.0f}",
+            }
             template = SimpleNamespace(
-                subject=subject,
-                content=body,
-                get_translated=lambda field_name, _language: (subject if field_name == "subject" else body),
+                subject=get_translation("telegram.orders.cod_restricted_subject", "en"),
+                content=get_translation("telegram.orders.cod_restricted_person", "en", **params),
+                get_translated=lambda field_name, language: (
+                    get_translation("telegram.orders.cod_restricted_subject", language)
+                    if field_name == "subject"
+                    else get_translation("telegram.orders.cod_restricted_person", language, **params)
+                ),
             )
             NotificationService().send_notification(
                 user_id,
@@ -2328,6 +2334,11 @@ class StaffService:
         The rule lives here rather than in the endpoint so every caller
         inherits it (CLAUDE.md: service layer first).
 
+        Side effect (owner decision 2026-11-17): after the location is saved, a share at the door of the driver's
+        nearest in-transit stop (within AUTO_ARRIVAL_RADIUS_METERS, accuracy known and within
+        AUTO_ARRIVAL_MAX_ACCURACY_METERS) marks that stop arrived and messages its customer, as the Arrived button
+        does (`DeliveryService.mark_arrived_from_driver_location`). It never fails the share.
+
         Returns the updated DeliveryPerson.
         """
         from business_app.services.route_optimization_service import (
@@ -2368,6 +2379,16 @@ class StaffService:
         dp.last_location_update = datetime.now(timezone.utc)
 
         db.session.commit()
+
+        # Owner decision 2026-11-17: a share at a stop's door marks it arrived. The location is already committed,
+        # so nothing the arrival does may fail the share.
+        try:
+            from business_app.services.delivery_service import DeliveryService
+
+            DeliveryService().mark_arrived_from_driver_location(user_id, lat, lng, accuracy_m)
+        except Exception:  # noqa: BLE001 -- non-critical
+            db.session.rollback()
+            current_app.logger.exception("auto-arrival from location failed for driver=%s", user_id)
         return dp
 
     @staticmethod
@@ -2749,6 +2770,8 @@ class StaffService:
         *,
         payment_method: Optional[str] = None,
         order_source: str,
+        claim: bool = False,
+        delivery_address: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """🔴 THE ONE PLACE A PHONE ORDER IS PRICED. Do not grow a second one.
 
@@ -2777,7 +2800,14 @@ class StaffService:
         next edit.
 
         Returns a dict of ``items`` (the exact rows ``OrderItem`` is built from),
-        ``subtotal``, ``delivery_fee`` and ``total_amount``, all ``Decimal``.
+        ``subtotal``, ``delivery_fee`` and ``total_amount``, all ``Decimal``, and
+        ``courtesy_entry``: the price-change courtesy entry that lowered a line, else None.
+
+        The courtesy (spec 2026-11-16 §5.6) is applied after the lines are priced and before the subtotal and the
+        tier quote. ``claim=True`` is order creation: ``apply_courtesy`` locks the person's entries, so the caller
+        hands ``courtesy_entry`` to ``mark_used`` in the same transaction with no commit between. ``claim=False``
+        (the estimate, the coverage call) writes and locks nothing. The lines are priced afresh on every call, so a
+        claim never runs on lines a preview already lowered.
 
         ``payment_method`` is OPTIONAL because not every caller knows the rail yet: the
         operator's order screen quotes a basket before the rail is picked, so it passes
@@ -2795,13 +2825,18 @@ class StaffService:
         priced (``phone`` for the operator, ``sales_agent`` for the agent's confirm screen); the
         tier discount is `quote_tier_discount`'s answer for it, which for every staff channel is
         none (spec 2026-10-23), so the quote equals the charge by the rule, not by a hard-coded zero.
+
+        The delivery fee is the payload's ``delivery_fee`` (the operator's phone order: quoted and charged
+        here alike, 0 when none is sent), unless ``delivery_address`` is given. That is the quote of an
+        order ``OrderService.create_order`` will charge (the sales agent's): its fee is then
+        ``DeliveryService.order_delivery_fee`` for that address, the call ``price_order`` charges with.
         """
         from business_app.models.product import Product
         from business_app.services.corporate_contract_service import CorporateContractService
+        from business_app.services.price_change.courtesy import apply_courtesy
 
         corporate_service = CorporateContractService()
         order_items: List[Dict[str, Any]] = []
-        subtotal = Decimal("0")
 
         for item in order_data.get("items") or []:
             product_id = item.get("product_id")
@@ -2822,8 +2857,7 @@ class StaffService:
                 payment_method=payment_method,
             )
             unit_price = Decimal(str(resolution["unit_price"]))
-            item_total = unit_price * Decimal(str(quantity))
-            subtotal += item_total
+            money = line_money(unit_price, quantity)
 
             order_items.append(
                 {
@@ -2835,12 +2869,25 @@ class StaffService:
                     ),
                     "quantity": quantity,
                     "unit_price": unit_price,
-                    "total_price": item_total,
+                    "discount_amount": money.discount_amount,
+                    "total_price": money.total_price,
+                    "is_reward_item": False,
                     "pricing_source": resolution["pricing_source"],
+                    "contract_price_at_checkout": bool(resolution["contract_price_at_checkout"]),
                 }
             )
 
-        delivery_fee = Decimal(str(order_data.get("delivery_fee", 0)))
+        courtesy_entry = apply_courtesy(
+            order_items, user_id=client_id, at=get_utc_now(), is_subscription_order=False, claim=claim
+        )
+        subtotal = sum((row["total_price"] for row in order_items), Decimal("0"))
+
+        if delivery_address is not None:
+            from business_app.services.delivery_service import DeliveryService
+
+            delivery_fee = DeliveryService().order_delivery_fee(delivery_address, subtotal)
+        else:
+            delivery_fee = Decimal(str(order_data.get("delivery_fee", 0)))
 
         # Phone orders carried NO discount term at all until the total was
         # collapsed onto `compute_order_total` (design spec §4.6). The three
@@ -2873,6 +2920,7 @@ class StaffService:
 
         return {
             "items": order_items,
+            "courtesy_entry": courtesy_entry,
             "subtotal": subtotal,
             "delivery_fee": delivery_fee,
             "discount_amount": discount_amount,
@@ -2910,6 +2958,7 @@ class StaffService:
         *,
         payment_method: Optional[str] = None,
         order_source: str,
+        delivery_address: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """READ-ONLY client-scoped quote for a phone-order basket.
 
@@ -2923,6 +2972,9 @@ class StaffService:
         and the COD cap. Those decide whether an order may be PLACED, not what
         it costs, and running them on a quote would make a read-only endpoint
         reject baskets the operator is still building.
+
+        ``delivery_address`` is for a quote of an order ``create_order`` charges (the sales
+        agent's): see :meth:`price_phone_order`. The operator's quote leaves it out.
         """
         client = User.query.get(client_id)
         if not client:
@@ -2932,10 +2984,32 @@ class StaffService:
         if not items_data:
             raise ValidationError("Order must contain at least one item", error_code="STAFF_ORDER_ITEMS_REQUIRED")
 
+        from business_app.serializers.price_courtesy_serializers import (
+            serialize_courtesy_status,
+            serialize_price_courtesy,
+        )
         from business_app.services.corporate_contract_service import PRICING_SOURCE_FALLBACK
+        from business_app.services.price_change.courtesy import courtesy_status
+        from business_app.services.price_change.publication import upcoming_price_block
+
+        def _money(value):
+            return None if value is None else float(value)
+
+        def _upcoming(row):
+            # Before a method is chosen a contract line is told nothing (the contract price may apply);
+            # on a chosen method the line's own `pricing_source` decides (Click charges the catalogue).
+            if payment_method is None:
+                return upcoming_price_block(
+                    row["product_id"], contract_price_at_checkout=row["contract_price_at_checkout"]
+                )
+            return upcoming_price_block(row["product_id"], pricing_source=row["pricing_source"])
 
         pricing = StaffService.price_phone_order(
-            client_id, order_data, payment_method=payment_method, order_source=order_source
+            client_id,
+            order_data,
+            payment_method=payment_method,
+            order_source=order_source,
+            delivery_address=delivery_address,
         )
 
         return {
@@ -2947,8 +3021,13 @@ class StaffService:
                     "product_name": row["product_name"],
                     "quantity": row["quantity"],
                     "unit_price": float(row["unit_price"]),
+                    "discount_amount": _money(row.get("discount_amount")),
+                    "courtesy_quantity": row.get("courtesy_quantity"),
+                    "courtesy_unit_price": _money(row.get("courtesy_unit_price")),
+                    "regular_quantity": row.get("regular_quantity"),
                     "total_price": float(row["total_price"]),
                     "is_contract_price": row["pricing_source"] != PRICING_SOURCE_FALLBACK,
+                    "upcoming_price": _upcoming(row),
                 }
                 for row in pricing["items"]
             ],
@@ -2958,7 +3037,40 @@ class StaffService:
             "loyalty_discount": float(pricing["loyalty_discount"]),
             "tier_discount": float(pricing["tier_discount"]),
             "total_amount": float(pricing["total_amount"]),
+            "price_courtesy": serialize_price_courtesy(pricing["courtesy_entry"]),
+            "courtesy_status": serialize_courtesy_status(courtesy_status(client_id, at=get_utc_now())),
         }
+
+    @staticmethod
+    def resolve_phone_order_method(
+        client: User, order_data: Dict[str, Any], coverage_lines: List[Dict[str, Any]]
+    ) -> Optional[PaymentMethod]:
+        """THE method a phone order is charged on: the explicit parse; when no method was sent at all,
+        ``BUSINESS_ACCOUNT`` for a qualifying workplace. An explicit but unrecognised method stays None."""
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        raw = order_data.get("payment_method")
+        payment_method = StaffService.parse_phone_order_method(raw)
+        if payment_method is None and not raw:
+            if CorporateContractService().order_qualifies_for_business_account(user=client, order_items=coverage_lines):
+                return PaymentMethod.BUSINESS_ACCOUNT
+        return payment_method
+
+    @staticmethod
+    def requote_phone_order(client_id: int, order_data: Dict[str, Any]) -> Dict[str, Any]:
+        """The quote a refused phone order is redrawn with: priced on the method the retry is charged on (the
+        default a qualifying workplace gets included), so posting its total back is accepted."""
+        client = User.query.get(client_id)
+        if not client:
+            raise NotFoundError("Client user not found", error_code="STAFF_CLIENT_NOT_FOUND")
+        coverage_lines = StaffService.price_phone_order(client_id, order_data, order_source="phone")["items"]
+        payment_method = StaffService.resolve_phone_order_method(client, order_data, coverage_lines)
+        return StaffService.estimate_phone_order(
+            client_id,
+            order_data,
+            payment_method=payment_method.value if payment_method is not None else None,
+            order_source="phone",
+        )
 
     @staticmethod
     def create_phone_order(operator_id: int, client_id: int, order_data: Dict[str, Any]) -> Order:
@@ -2977,6 +3089,10 @@ class StaffService:
             NotFoundError: If client not found
             ValidationError: If order data is invalid
         """
+        from business_app.services.price_change.honest_confirm import assert_expected_total, parse_expected_total
+
+        expected_total = parse_expected_total(order_data.get("expected_total"))
+
         client = User.query.get(client_id)
         if not client:
             raise NotFoundError("Client user not found", error_code="STAFF_CLIENT_NOT_FOUND")
@@ -3033,14 +3149,8 @@ class StaffService:
                 order_items=coverage_lines,
             )
 
-        # Default qualifying workplace phone orders to business-account settlement
-        # when the operator did not specify a method. Explicit choices respected.
-        if payment_method is None and not payment_method_str:
-            if corporate_service.order_qualifies_for_business_account(
-                user=client,
-                order_items=coverage_lines,
-            ):
-                payment_method = PaymentMethod.BUSINESS_ACCOUNT
+        # The method the order is charged on: the explicit choice, else the qualifying workplace's default.
+        payment_method = StaffService.resolve_phone_order_method(client, order_data, coverage_lines)
 
         # Then the price, on the method the order will carry. The pricing lives in
         # `price_phone_order`, the SAME call the operator's order-estimate endpoint makes (with the
@@ -3051,7 +3161,11 @@ class StaffService:
             order_data,
             payment_method=payment_method.value if payment_method is not None else None,
             order_source="phone",
+            claim=True,
         )
+        # The honest confirm: the total the operator read out is the total this order charges. A refusal rolls the
+        # whole write back (the claim's locks with it).
+        assert_expected_total(expected_total, pricing["total_amount"])
         order_items = pricing["items"]
         subtotal = pricing["subtotal"]
         delivery_fee = pricing["delivery_fee"]
@@ -3092,16 +3206,15 @@ class StaffService:
 
         # Add order items
         for item_data in order_items:
-            order_item = OrderItem(
-                order_id=order.id,
-                product_id=item_data["product_id"],
-                contract_id=item_data.get("contract_id"),
-                contract_product_price_id=item_data.get("contract_product_price_id"),
-                quantity=item_data["quantity"],
-                unit_price=item_data["unit_price"],
-                total_price=item_data["total_price"],
-            )
+            order_item = OrderItem.from_priced_line(order.id, item_data)
             db.session.add(order_item)
+        db.session.flush()
+
+        # The courtesy the pricing claimed is this order's now, in the claim's own transaction.
+        if pricing["courtesy_entry"] is not None:
+            from business_app.services.price_change.courtesy import mark_used
+
+            mark_used(pricing["courtesy_entry"], order)
 
         # Ensure order pool/accept flows always have a delivery record.
         delivery = Delivery(

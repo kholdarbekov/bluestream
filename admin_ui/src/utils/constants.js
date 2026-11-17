@@ -34,6 +34,10 @@ export const POLL_INTERVALS = {
 // and the Analytics cards read ONE cache entry, and the page's writes invalidate its prefix.
 export const LAPSED_CUSTOMERS_SUMMARY_KEY = ['lapsedCustomers', 'summary'];
 
+// Price changes (price-change spec §5.2): every price-change query key starts with this prefix, so a write
+// invalidates the whole family (list, detail, unreachable, exceptions) with one call.
+export const PRICE_CHANGES_KEY = ['priceChanges'];
+
 // Shared-place cases (the admin review queue): the nav badge reads the open
 // count, and every place-group / link write invalidates the whole prefix.
 export const SHARED_PLACE_CASES_KEY = ['sharedPlaceCases'];

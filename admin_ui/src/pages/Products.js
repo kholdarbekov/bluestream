@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import {
   Table,
@@ -45,7 +46,8 @@ import {
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
-import { formatLocalDate } from '../utils/dateUtils';
+import { formatLocalDate, formatCalendarDate } from '../utils/dateUtils';
+import { formatMoneyUZS } from '../utils/formatMoney';
 import { extractApiErrorMessages } from '../utils/apiError';
 
 const { Option } = Select;
@@ -684,10 +686,10 @@ const Products = () => {
     },
     {
       title: t('ui.products.price', 'Price'),
-      dataIndex: 'price',
+      dataIndex: 'catalogue_unit_price',
       key: 'price',
       width: 120,
-      render: (price) => <span style={{ fontWeight: 600, color: '#52c41a' }}>UZS {Number(price || 0).toLocaleString()}</span>,
+      render: (price) => <span style={{ fontWeight: 600, color: '#52c41a' }}>{formatMoneyUZS(price)}</span>,
     },
     {
       title: t('ui.products.stock', 'Stock'),
@@ -934,7 +936,7 @@ const Products = () => {
                       {categories.find((category) => category.id === selectedProduct.category_id)?.name || selectedProduct.category_id}
                     </Descriptions.Item>
                     <Descriptions.Item label={t('ui.products.price', 'Price')}>
-                      UZS {Number(selectedProduct.price || 0).toLocaleString()}
+                      {formatMoneyUZS(selectedProduct.catalogue_unit_price)}
                     </Descriptions.Item>
                     <Descriptions.Item label={t('ui.products.volume', 'Volume')}>
                       {selectedProduct.volume || '—'} {selectedProduct.volume_unit || ''}
@@ -1042,7 +1044,10 @@ const Products = () => {
 
   // scrollToFirstError: a failed required rule otherwise renders off-screen below
   // the Tabs, so the submit button reads as simply doing nothing.
-  const buildProductForm = (form, onFinish, fileList, setFileList, loading) => (
+  const buildProductForm = (form, onFinish, fileList, setFileList, loading) => {
+    // A product held by a pending price change takes its price from that change only (spec 2026-11-16 §5.2).
+    const priceLocked = form === editForm && Boolean(selectedProduct?.price_change_pending);
+    return (
     <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0, in_sales_stock_check: false }}>
       <Tabs
         defaultActiveKey="uz"
@@ -1137,8 +1142,18 @@ const Products = () => {
 
       <Row gutter={16}>
         <Col span={12}>
-          <Form.Item name="price" label={t('ui.products.price_label', 'Price')} rules={[{ required: true, message: t('ui.products.price_required', 'Price is required') }]}>
-            <InputNumber prefix="UZS" style={{ width: '100%' }} min={0} precision={2} />
+          <Form.Item
+            name="price"
+            label={t('ui.products.price_label', 'Price')}
+            rules={[{ required: true, message: t('ui.products.price_required', 'Price is required') }]}
+            extra={priceLocked ? (
+              <>
+                {t('ui.price_changes.product_locked', 'This price changes on {{date}} through a scheduled price change. Change it there.', { date: formatCalendarDate(selectedProduct.price_change_pending.change_on) })}{' '}
+                <Link to="/price-changes">{t('ui.price_changes.open', 'Open price changes')}</Link>
+              </>
+            ) : undefined}
+          >
+            <InputNumber prefix="UZS" style={{ width: '100%' }} min={0} precision={2} disabled={priceLocked} />
           </Form.Item>
         </Col>
         <Col span={12}>
@@ -1330,7 +1345,8 @@ const Products = () => {
         </Space>
       </Form.Item>
     </Form>
-  );
+    );
+  };
 
   return (
     <div>

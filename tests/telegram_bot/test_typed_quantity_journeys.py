@@ -76,7 +76,7 @@ TRANSLATIONS = {
     **CART_TRANSLATIONS,
     **MENU_LABEL_TRANSLATIONS,
     ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli miqdorni yozing",
-    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} UZS (1 dona)",
+    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} so'm (1 dona)",
     ("uz", "telegram.products.typed_quantity_below_min"): (
         "Bu mahsulot uchun eng kam buyurtma — {min_qty} ta. "
         "{min_qty} yoki undan ko'p son yozing."
@@ -303,7 +303,7 @@ async def test_a_typed_number_redraws_the_screen_at_exactly_that_number(bot, use
         f"ℹ️ {t('telegram.products.min_order_quantity_label', min_qty=WATER_MIN_QTY)}",
         "",
         f"{t('telegram.quantity')}: 7",
-        f"{t('telegram.total')}: 7 × 15,000 = 105,000 UZS",  # hand-computed
+        f"{t('telegram.total')}: 7 × 15,000 = 105,000 so'm",  # hand-computed
         "",
         t("telegram.products.type_quantity_hint"),
     ])

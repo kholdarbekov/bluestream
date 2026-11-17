@@ -1,8 +1,9 @@
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Mapping, Optional
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Integer,
     String,
@@ -268,6 +269,15 @@ class Order(db.Model, TimestampMixin):
 
 class OrderItem(db.Model):
     __tablename__ = "order_items"
+    __table_args__ = (
+        CheckConstraint(
+            "(courtesy_quantity IS NULL) = (courtesy_unit_price IS NULL)", name="ck_order_items_courtesy_pair"
+        ),
+        CheckConstraint(
+            "courtesy_quantity IS NULL OR (courtesy_quantity >= 1 AND courtesy_quantity <= quantity)",
+            name="ck_order_items_courtesy_quantity",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
@@ -283,6 +293,10 @@ class OrderItem(db.Model):
     # Loyalty free-product reward lines are flagged here so fiscalization /
     # marking-code accounting can skip them entirely (off the books).
     is_reward_item = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Price-change courtesy (spec 2026-11-16): how many of `quantity` were sold at the old price, and that price.
+    # NULL in both when the line has no courtesy, never 0.
+    courtesy_quantity = Column(Integer, nullable=True)
+    courtesy_unit_price = Column(Numeric(precision=10, scale=2), nullable=True)
 
     order = relationship("Order", back_populates="order_items")
     # Removed back_populates since Product model doesn't have order_items relationship
@@ -295,10 +309,26 @@ class OrderItem(db.Model):
         cascade="all, delete-orphan",
     )
 
-    def calculate_total(self):
-        """Calculate total price for this item"""
-        self.total_price = (self.unit_price * Decimal(str(self.quantity))) - self.discount_amount
-        return self.total_price
+    @classmethod
+    def from_priced_line(cls, order_id: int, line: Mapping[str, Any]) -> "OrderItem":
+        """Turn a priced line dict into a row: the one place an order constructor does it.
+
+        `create_order` and `create_phone_order` both build their rows here, so a figure a pricing path
+        adds to a line (the discount, the courtesy pair) reaches the row without either constructor
+        learning about it. Keys other than the ones read below are ignored.
+        """
+        return cls(
+            order_id=order_id,
+            product_id=line["product_id"],
+            contract_id=line.get("contract_id"),
+            contract_product_price_id=line.get("contract_product_price_id"),
+            quantity=line["quantity"],
+            unit_price=line["unit_price"],
+            discount_amount=line.get("discount_amount", Decimal("0.00")),
+            total_price=line["total_price"],
+            courtesy_quantity=line.get("courtesy_quantity"),
+            courtesy_unit_price=line.get("courtesy_unit_price"),
+        )
 
     def to_dict(self):
         return {
@@ -310,6 +340,8 @@ class OrderItem(db.Model):
             "unit_price": self.unit_price,
             "discount_amount": self.discount_amount,
             "total_price": self.total_price,
+            "courtesy_quantity": self.courtesy_quantity,
+            "courtesy_unit_price": self.courtesy_unit_price,
             "product": self.product.to_dict() if self.product else None,
         }
 

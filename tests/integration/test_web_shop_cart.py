@@ -10,23 +10,30 @@ empty cart's picks add the smallest order the backend publishes, and the request
 `PUT /api/v1/cart/items/<product_id> {quantity}`, remove, undo and clear, with the access cookie and `X-CSRF-TOKEN`
 — reach the database cart. The stepper's floor is the minimum `POST /api/v1/products/bulk` publishes, and the
 checkout's estimate refuses a line below it, so a cart held below its minimum elsewhere cannot be ordered.
+
+Signed in, cart.js draws the money `GET /api/v1/cart/` publishes (spec 2026-11-16 §5.8): the courtesy split, the line
+totals, the subtotal, the total and the courtesy block, read here off the real route after the switch.
 """
 
 import json
+import re
 
 import pytest
 from bs4 import BeautifulSoup
 from flask_jwt_extended import create_access_token
 
 from business_app.models.translation import Translation
+from business_app.services.price_change.courtesy import grant_exception
 from business_app.services.public_offer_service import get_public_offer_facts
 from business_app.utils import display_labels
 from scripts.seed_web_ui_shop_translations import CATEGORY, TRANSLATIONS as SHOP
+from tests.integration.price_courtesy_builders import BASKET, announced_change, switch, water
 from tests.integration.public_page_builders import (  # noqa: F401 -- offer_skus is a fixture
     flat,
     get_page,
     offer_skus,
     seed_copy,
+    shipped,
 )
 from tests.integration.test_web_password_reset_and_change import WEB_HEADERS, _logged_in_browser
 
@@ -63,7 +70,14 @@ HOOKS = (
     ".shop-cart__actions",
     "#cart-dropped",
     "#cart-error [data-action='retry-load']",
+    "#cart-courtesy",
 )
+# The words cart.js prints for the server's figures (Task 37), with the placeholders it fills.
+NEW_CART_WORDS = {
+    "web.shop.cart.calculating": [],
+    "web.shop.cart.courtesy_part": ["price", "qty"],
+    "web.shop.cart.courtesy_thanks": [],
+}
 # The English the old page printed in every language (audit "shop" findings 0 and 3); the page's visible text.
 OLD_ENGLISH = ("Shopping Cart", "Proceed to Checkout", "Loading cart...", "Your Items", "Cart Total", "UZS")
 
@@ -159,8 +173,13 @@ def test_the_cart_reads_in_the_visitors_language_and_carries_every_hook(app, db,
             "min_qty_line": "web.shop.cart.min_qty_line",
             "min_qty_hint": "web.shop.cart.min_qty_hint",
             "update_error": "web.shop.cart.update_error",
+            "calculating": "web.shop.cart.calculating",
+            "courtesy_part": "web.shop.cart.courtesy_part",
+            "courtesy_thanks": "web.shop.cart.courtesy_thanks",
         }.items()
-    }
+    } | {"upcoming_price": shipped("landing.offer.upcoming_price", lang)}
+    # The thank-you sentence waits for the server's figures: cart.js shows it.
+    assert soup.select_one("#cart-courtesy").has_attr("hidden")
     assert data["min_order_amount"] == app.config["MIN_ORDER_AMOUNT"]
     assert data["max_qty"] == app.config["MAX_QUANTITY_PER_ITEM"]
     assert data["current_language"] == lang
@@ -222,6 +241,15 @@ def test_the_signed_in_cart_checks_out_without_signing_in_again(app, db, offer_s
     assert flat(soup.select_one("#checkout-btn").get_text()) == _s(lang, "web.shop.cart.checkout")
     assert flat(soup.select_one("#cart-bar [data-checkout]").get_text()) == _s(lang, "web.shop.cart.checkout")
     assert soup.select(".shop-cart__actions a[href*='t.me']") == []
+
+
+def test_the_new_cart_words_have_the_same_placeholders_in_three_languages():
+    """cart.js fills `{qty}` and `{price}` into the courtesy part and nothing into the other two; no price is typed."""
+    for key, placeholders in NEW_CART_WORDS.items():
+        for lang in LANGS:
+            value = SHOP[lang][key]
+            assert sorted(re.findall(r"\{(\w+)\}", value)) == placeholders, (key, lang, value)
+            assert not re.search(r"\d", value), f"{key} ({lang}) types a digit: {value}"
 
 
 # --- the requests cart.js sends --------------------------------------------------------------------------------------
@@ -347,3 +375,35 @@ def test_the_stock_tags_cart_js_prints_are_the_apis_inventory_flags(app, db, off
     assert inventory[offer_skus.p19.id]["is_low_stock"] is True
     assert inventory[offer_skus.p19.id]["stock_quantity"] == 5
     assert inventory[offer_skus.p10.id]["is_in_stock"] is False
+
+
+def test_the_signed_in_cart_reads_its_courtesy_off_the_server_cart(app, db, sample_product, sample_user, admin_user):
+    """After the switch, a customer given the old price (a manager's exception) adds the basket the way base.js
+    addToCart does (`POST /api/v1/cart/items` with X-CSRF-TOKEN); the `GET /api/v1/cart/` cart.js draws from then
+    carries the kept units, both prices, the line total and the courtesy block, so the page multiplies nothing."""
+    product = water(db, sample_product)
+    change = announced_change(db, product, admin_user)
+    switch(db)
+    grant_exception(sample_user.id, "phone complaint", admin_user.id)
+    browser, csrf = _signed_in(app, sample_user)
+    line = json.dumps({"product_id": product.id, "quantity": BASKET})
+    added = browser.post("/api/v1/cart/items", headers={**WEB_HEADERS, "X-CSRF-TOKEN": csrf}, data=line)
+    assert added.status_code == 200, added.get_data(as_text=True)[:400]
+
+    response = browser.get("/api/v1/cart/", headers=WEB_HEADERS)
+
+    assert response.status_code == 200, response.get_data(as_text=True)[:400]
+    cart = response.get_json()["data"]["cart"]
+    (item,) = cart["cart_items"]
+    drawn = ("quantity", "courtesy_quantity", "courtesy_unit_price", "unit_price", "regular_quantity", "total_price")
+    assert {key: item[key] for key in drawn} == {
+        "quantity": 4,
+        "courtesy_quantity": 2,
+        "courtesy_unit_price": 18000.0,
+        "unit_price": 20000.0,
+        "regular_quantity": 2,
+        "total_price": 76000.0,
+    }
+    assert item["upcoming_price"] is None  # the change is applied: nothing is coming
+    assert cart["subtotal"] == cart["estimated_total"] == 76000.0
+    assert cart["price_courtesy"] == {"applied": True, "expires_on": change.courtesy_last_day.isoformat()}

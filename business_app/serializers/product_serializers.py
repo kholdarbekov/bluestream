@@ -290,7 +290,7 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
         product: Product model instance
         language: Language code for localized content
         user: Current user for personalized data
-        quantity: Quantity for bulk pricing calculations
+        quantity: Quantity the card prices
 
     Returns:
         Serialized product data
@@ -322,6 +322,7 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "currency": "UZS",
                 "is_discounted": current_price < base_price,
                 "contract_price_at_checkout": card_pricing["contract_price_at_checkout"],
+                "upcoming_price": card_pricing["upcoming_price"],
             },
             "media": {
                 "images": product.images,
@@ -405,9 +406,6 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "recommended_quantity": get_recommended_quantity(product, user),
             }
 
-        # Add applicable discounts
-        # product_data['discounts'] = get_applicable_discounts(product, user, quantity)
-
         return product_data
 
     except Exception as e:
@@ -480,35 +478,24 @@ def get_localized_field(obj, field_name: str, language: str) -> Optional[str]:
 
 
 def calculate_product_price(product, user, quantity: int) -> float:
-    """Catalogue price for a product card (bulk rules applied; never a contract price, D5)."""
+    """Catalogue price for a product card (never a contract price, D5)."""
     return resolve_product_pricing(product, user, quantity)["current_price"]
 
 
 def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
-    """Pre-method pricing for one product card (spec 2026-10-09 D5, §4.4).
+    """Pre-method pricing for one product card (spec 2026-10-09 D5, §4.4; spec 2026-11-16 §4.3).
 
-    ``current_price`` is the catalogue (bulk rules applied): a card is drawn before a payment
-    method exists. ``contract_price_at_checkout`` says a contract price will apply at checkout.
-    Both come from the contract resolver, called with no method, so the rule stays in one place.
+    Three keys. ``current_price`` is the catalogue: a card is drawn before a payment method exists,
+    and no price rule changes it. ``contract_price_at_checkout`` says a contract price will apply at
+    checkout. Both come from the contract resolver, called with no method, so the rule stays in one
+    place. ``upcoming_price`` is the announced coming price block (``upcoming_price_block``), or None.
 
-    The catalogue starts from ``Product.catalogue_unit_price``, what an order is charged for one
-    unit (the discount price when one is set), the same figure the server cart starts from
-    (``CartService._price_cart_line``); bulk rules apply to that figure, as there.
+    The catalogue is ``Product.catalogue_unit_price``, what an order is charged for one unit (the
+    discount price when one is set), the same figure the server cart starts from
+    (``CartService._price_cart_line``).
     """
     unit_price = float(product.catalogue_unit_price)
     effective_price = unit_price
-
-    # Apply bulk discounts
-    if hasattr(product, "price_rules") and product.price_rules:
-        for rule in product.price_rules:
-            if rule.is_active and quantity >= rule.min_quantity:
-                if rule.max_quantity is None or quantity <= rule.max_quantity:
-                    if rule.discount_type == "percentage":
-                        discount = unit_price * (float(rule.discount_value) / 100)
-                    else:
-                        discount = float(rule.discount_value)
-                    effective_price = max(0, unit_price - discount)
-                    break
 
     # NOTE: there is deliberately NO user-tier or VIP adjustment here. A
     # hardcoded {bronze:0, silver:2, gold:5, platinum:10} table plus a 5% VIP
@@ -540,7 +527,13 @@ def resolve_product_pricing(product, user, quantity: int) -> Dict[str, Any]:
                 exc,
             )
 
-    return {"current_price": effective_price, "contract_price_at_checkout": contract_price_at_checkout}
+    from business_app.services.price_change.publication import upcoming_price_block
+
+    return {
+        "current_price": effective_price,
+        "contract_price_at_checkout": contract_price_at_checkout,
+        "upcoming_price": upcoming_price_block(product.id, contract_price_at_checkout=contract_price_at_checkout),
+    }
 
 
 def _stock_is_derived(product) -> bool:
@@ -619,30 +612,3 @@ def get_recommended_quantity(product, user) -> int:
     """Get recommended quantity based on user history"""
     # This would use ML/analytics to suggest quantity
     return 1
-
-
-def get_applicable_discounts(product, user, quantity: int) -> List[Dict[str, Any]]:
-    """Get applicable discounts for the product"""
-    discounts = []
-
-    # Bulk discount
-    if hasattr(product, "price_rules") and product.price_rules:
-        for rule in product.price_rules:
-            if (
-                rule.is_active
-                and quantity >= rule.min_quantity
-                and (rule.max_quantity is None or quantity <= rule.max_quantity)
-            ):
-
-                discounts.append(
-                    {
-                        "type": "bulk",
-                        "name": rule.name,
-                        "description": rule.description,
-                        "discount_value": rule.discount_value,
-                        "discount_type": rule.discount_type,
-                        "conditions": f"Min quantity: {rule.min_quantity}",
-                    }
-                )
-
-    return discounts

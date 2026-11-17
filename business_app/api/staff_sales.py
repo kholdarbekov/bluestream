@@ -36,10 +36,10 @@ from business_app.services.sales.replenishment_service import ReplenishmentServi
 from business_app.services.sales.visit_service import VisitService
 from business_app.services.tryout_service import TryoutService
 from business_app.utils import local_windows
-from business_app.utils.api_responses import paginated_response, success_response
+from business_app.utils.api_responses import paginated_response, price_changed_response, success_response
 from business_app.utils.decorators import require_staff_roles
 from business_app.utils.error_handlers import handle_api_exception
-from business_app.utils.exceptions import NotFoundError
+from business_app.utils.exceptions import NotFoundError, StateChangedError
 from business_app.utils.local_windows import resolve_stats_period
 from business_app.utils.request_helpers import validated_json_payload
 
@@ -384,7 +384,11 @@ def place_visit_order(visit_id):
         return payload
     actor_id = _actor_id()
     visit = VisitService.get_owned(visit_id, actor_id)
-    order, state = VisitService.place_order(visit, payload, actor_id)
+    try:
+        order, state = VisitService.place_order(visit, payload, actor_id)
+    except StateChangedError as e:
+        # The shown total no longer holds: refuse with the quote the agent must read out now.
+        return price_changed_response(e, lambda: VisitService.requote(visit, payload), envelope="staff")
     # `serialize_order_placed` is built ON `serialize_order_brief` -- the same shaper the visit's
     # own `order` block uses -- plus the RESOLVED schedule, which no other surface publishes and
     # which the bot must not re-derive from the payload it sent (ruling 34 may have supplied or

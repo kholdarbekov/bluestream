@@ -63,7 +63,7 @@
 .ae-home .ae-home-prices__row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "size price" "note note";
+  grid-template-areas: "size price" "size upcoming" "note note";
   align-items: center;
   gap: 6px 16px;
   padding: 14px 0;
@@ -94,6 +94,7 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.ae-home .ae-home-prices__row .ae-upcoming-price { grid-area: upcoming; justify-self: end; margin: 0; text-align: right; }
 .ae-home .ae-home-prices__note { grid-area: note; color: var(--ae-ink-soft); font-size: 14px; line-height: 1.45; }
 
 .ae-home .ae-home-hero__actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }

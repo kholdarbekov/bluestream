@@ -66,7 +66,9 @@ _THE_IMPLEMENTATION = "business_app/utils/order_totals.py"
 
 _REQUIRED_CALL_SITES: Dict[Tuple[str, str], str] = {
     ("business_app.models.order", "Order.calculate_total"): "compute_order_total(",
-    ("business_app.services.order_service", "OrderService.create_order"): "compute_order_total(",
+    ("business_app.services.order_service", "OrderService.price_order"): "compute_order_total(",
+    # `create_order` charges what `price_order` decided; it holds no total of its own.
+    ("business_app.services.order_service", "OrderService.create_order"): "self.price_order(",
     (
         "business_app.services.order_edit_service",
         "OrderEditService._project_totals_after",
@@ -171,7 +173,7 @@ _TOTAL_ASSIGN_TERMS = ("total_amount", "grand_total", "final_total", "amount_due
 _LEDGER: Dict[Tuple[str, str, str], str] = {
     (
         "business_app/services/order_service.py",
-        "OrderService.create_order",
+        "OrderService.price_order",
         "subtotal + delivery_fee",
     ): (
         "NOT A TOTAL. The MIN_ORDER_AMOUNT floor is gated on the GROSS basket, "
@@ -199,7 +201,7 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
         "row, not an Order. It carries no delivery fee, no loyalty discount and "
         "no tier discount; the shared formula's parameters do not describe this "
         "entity. The ORDER total for a subscription-generated order is decided "
-        "separately, in `OrderService.create_order`: it reads "
+        "separately, in `OrderService.price_order` (which `create_order` charges): it reads "
         "`subscription.discount_percentage` off the row to derive its own "
         "`discount_amount` and calls `compute_order_total` directly -- the two "
         "expressions never read each other's output, so they cannot drift."
@@ -224,6 +226,16 @@ _LEDGER: Dict[Tuple[str, str, str], str] = {
         "NOT A TOTAL. Same `headroom` bound as above; the AST scanner also "
         "reports the outer subtraction of the chained expression as its own "
         "node. See the verdict directly above."
+    ),
+    (
+        "business_app/utils/line_money.py",
+        "line_money",
+        "gross - discount",
+    ): (
+        "NOT AN ORDER TOTAL. One order LINE's net charged figure (unit_price x "
+        "quantity minus the courtesy discount), the line-money SSOT of spec "
+        "2026-11-16 section 5.7. The ORDER total of every surface is still "
+        "compute_order_total, whose subtotal is the sum of the lines' total_price."
     ),
 }
 

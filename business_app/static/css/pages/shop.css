@@ -262,6 +262,8 @@
 .shop-page .shop-cart__name { padding: 12px 0; margin: -12px 0; color: var(--ae-ink); font-size: 17px; font-weight: 800; line-height: 1.35; text-decoration: none; overflow-wrap: anywhere; }
 .shop-page .shop-cart__name:hover { color: var(--ae-navy); text-decoration: underline; text-underline-offset: 3px; }
 .shop-page .shop-cart__unit { color: var(--ae-ink-soft); font-size: var(--ae-text-small); font-variant-numeric: tabular-nums; }
+/* The coming price under the line's money: plain, never struck through. */
+.shop-page .shop-cart__upcoming { color: var(--ae-ink-soft); font-size: var(--ae-text-small); font-weight: 500; font-variant-numeric: tabular-nums; }
 .shop-page .shop-cart__hint { color: var(--ae-warn); font-size: var(--ae-text-small); font-weight: 700; }
 .shop-page .shop-cart__qty { grid-area: qty; }
 .shop-page .shop-cart__qty .ae-qty__input { display: inline-block; }
@@ -321,6 +323,8 @@
 .shop-page .shop-cart__units { color: var(--ae-ink-soft); font-weight: 500; white-space: nowrap; }
 .shop-page .shop-cart__note { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--ae-text-small); line-height: 1.5; }
 .shop-page .shop-cart__note > i { flex: none; color: var(--ae-aqua-deep); }
+/* The thank-you for a kept old price, shown with the server's figures. */
+.shop-page .shop-cart__courtesy { margin: 0; color: var(--ae-ok); font-size: var(--ae-text-small); font-weight: 600; line-height: 1.5; }
 .shop-page .shop-cart__notice { margin: 0; }
 .shop-page .shop-cart__notice:focus-visible { outline: 3px solid var(--ae-navy); outline-offset: 2px; }
 .shop-page .shop-cart__violations { margin: 0; padding: 0; list-style: none; }

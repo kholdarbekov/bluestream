@@ -38,6 +38,13 @@ export const formatDateTime = (date, format = 'MMM DD, YYYY HH:mm') => {
   return toTashkent(date).format(format);
 };
 
+// A bare calendar day (`YYYY-MM-DD`: a price change's announce / change / reminder day). It names a day, not an
+// instant, so it is parsed and printed as written and never moved between zones.
+export const formatCalendarDate = (day) => {
+  if (!day) return '-';
+  return dayjs(day, 'YYYY-MM-DD').format('MMM DD, YYYY');
+};
+
 export const formatDateTimeShort = (date) => {
   if (!date) return '-';
   return toTashkent(date).format('YYYY-MM-DD HH:mm');

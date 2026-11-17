@@ -1,0 +1,44 @@
+{% extends "emails/base.html" %}
+{# NATIVE-READ: the title, every sentence and the column labels below. #}
+
+{% block title %}С {{ effective_date }} меняются наши цены - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>С {{ effective_date }} меняются наши цены</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>С {{ effective_date }} наша вода будет стоить:</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Товар</th>
+        <td><strong>Новая цена</strong></td>
+    </tr>
+    {% for price in prices %}
+    <tr>
+        <th>{{ price.name }}</th>
+        <td>{{ price.new_price }} сум</td>
+    </tr>
+    {% endfor %}
+</table>
+
+{# OWNER-APPROVE #}
+<p>Почему: доставлять вам воду стало дороже. Электроэнергия для очистки, топливо для доставки, зарплаты нашей команды и новые бутыли стоят больше, чем раньше.</p>
+<p>Без изменений: бесплатная доставка, обмен бутылей, ваши AquaCoins и скидка уровня.</p>
+<p>Все заказы, оформленные до {{ effective_date }}, сохраняют сегодняшнюю цену, даже если доставка будет позже.</p>
+{% if is_subscriber %}
+<p>Заказы по вашей подписке, созданные с {{ effective_date }}, будут по новой цене.</p>
+{% endif %}
+<p>Спасибо, что вы с нами.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Есть вопросы? Напишите нам в нашем Telegram-боте: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

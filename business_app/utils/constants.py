@@ -50,6 +50,9 @@ class NotificationType(Enum):
     SUBSCRIPTION_PAID_ORDER_KEPT = "subscription_paid_order_kept"
     ORDER_PAYMENT_EXPIRED = "order_payment_expired"
     PREPAYMENT_RETURNED = "prepayment_returned"
+    # The price-change announcement and its reminder (spec 2026-11-16 §5.3).
+    PRICE_CHANGE_ANNOUNCEMENT = "price_change_announcement"
+    PRICE_CHANGE_REMINDER = "price_change_reminder"
     # A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5). A VARCHAR(50) column:
     # no migration.
     SUBSCRIPTION_SCHEDULE_CHANGED = "subscription_schedule_changed"

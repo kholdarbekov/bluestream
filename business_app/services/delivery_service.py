@@ -4,6 +4,7 @@ Handles delivery scheduling, route optimization, and tracking
 """
 
 from datetime import datetime, timezone, timedelta, UTC
+from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 
@@ -25,6 +26,7 @@ from business_app.utils.helpers import (
     calculate_distance,
     get_time_slots,
 )
+from shared import business_config
 from shared.constants import TASHKENT_COORDINATES
 from business_app import db
 
@@ -380,8 +382,10 @@ class DeliveryService:
         this door, so it is where they are, whatever position is on record and
         however recent: a previous door, the depot's stamp or a shared pin. The
         next pin or live-location update overwrites it. Someone else's tap (an
-        admin's, from the office) or an automatic one stamps the row and leaves
-        the driver where they are.
+        admin's, from the office) stamps the row and leaves the driver where
+        they are. The decision is `history.changed_by == delivery_person_id`
+        alone: the automatic arrival from the driver's shared location is
+        recorded as the driver's own, so it moves the driver to the door too.
 
         `history.changed_by` is still the bot route's raw JWT identity here, a
         string, until the row is flushed.
@@ -461,6 +465,71 @@ class DeliveryService:
 
         return delivery
 
+    def mark_arrived_from_driver_location(
+        self, driver_user_id: int, lat: float, lng: float, accuracy_m: Optional[float]
+    ) -> Optional[Delivery]:
+        """Mark the driver's nearest in-transit stop arrived when a shared location puts them at its door.
+
+        Owner decision 2026-11-17: within AUTO_ARRIVAL_RADIUS_METERS of the stop, through the same step as the
+        Arrived button: the customer gets the usual message, and the arrival is recorded as the driver's own
+        (`changed_by` is the driver, `automatic` says it was not a tap) because the ETA engine counts only a driver's
+        own move. R1: an unreported accuracy, or one worse than AUTO_ARRIVAL_MAX_ACCURACY_METERS, never arrives (a
+        hand-placed pin proves nothing). R2: one stop per share, the nearest, a tie to the lower delivery id.
+        R3': the candidates are read without a lock, so a share never waits on the driver's other stops; only the
+        chosen row is locked, and re-read, so two simultaneous shares arrive it once (the second finds it ARRIVED).
+        A refusal is expected and logged, never raised.
+        """
+        if accuracy_m is None or accuracy_m > business_config.AUTO_ARRIVAL_MAX_ACCURACY_METERS:
+            return None
+
+        candidates = (
+            Delivery.query.join(Order, Delivery.order_id == Order.id)
+            .join(UserAddress, Order.delivery_address_id == UserAddress.id)
+            .filter(
+                Delivery.delivery_person_id == driver_user_id,
+                Delivery.status == DeliveryStatus.IN_TRANSIT,
+                UserAddress.latitude.isnot(None),
+                UserAddress.longitude.isnot(None),
+            )
+            .order_by(Delivery.id)
+            .all()
+        )
+        radius_km = business_config.AUTO_ARRIVAL_RADIUS_METERS / 1000
+        in_range = []
+        for candidate in candidates:
+            address = candidate.order.delivery_address
+            distance_km = calculate_distance(lat, lng, address.latitude, address.longitude)
+            if distance_km <= radius_km:
+                in_range.append((distance_km, candidate.id))
+        if not in_range:
+            db.session.rollback()
+            return None
+        _, delivery_id = min(in_range)
+
+        try:
+            chosen = Delivery.query.filter_by(id=delivery_id).with_for_update().populate_existing().one_or_none()
+            if (
+                chosen is None
+                or chosen.status != DeliveryStatus.IN_TRANSIT
+                or chosen.delivery_person_id != driver_user_id
+            ):
+                # A concurrent share (or a tap) moved it first.
+                db.session.rollback()
+                return None
+            return self.mark_delivery_arrived(
+                delivery_id,
+                actor_user_id=driver_user_id,
+                required_driver_id=driver_user_id,
+                notes="Automatically marked as arrived based on location tracking",
+                automatic=True,
+            )
+        except (ValidationError, NotFoundError) as exc:
+            current_app.logger.info(
+                "Auto-arrival of delivery %s refused: %s", delivery_id, getattr(exc, "error_code", None) or exc
+            )
+            db.session.rollback()
+            return None
+
     def calculate_delivery_fee(self, latitude: float, longitude: float, order_total: int) -> int:
         """Calculate the delivery fee for an order.
 
@@ -470,6 +539,19 @@ class DeliveryService:
         existing DELIVERY_ZONES / _get_delivery_zone infrastructure.
         """
         return self.default_delivery_fee
+
+    def order_delivery_fee(self, delivery_address: Optional[Dict[str, Any]], subtotal: Decimal) -> Decimal:
+        """THE delivery fee of an order: what `OrderService.price_order` charges and every quote of that order shows.
+
+        `delivery_address` is the dict an order is created with (its `latitude` / `longitude` are read), or None for a
+        quote that has no address yet (the cart); `subtotal` is the net line total. No quote keeps its own fee rule:
+        a premium override the cart once applied was never charged, so premium customers were quoted free delivery
+        and charged the fee.
+        """
+        address = delivery_address or {}
+        return Decimal(
+            str(self.calculate_delivery_fee(address.get("latitude", 0), address.get("longitude", 0), subtotal))
+        )
 
     def get_available_time_slots(
         self, date: datetime = None, delivery_type: DeliveryType = DeliveryType.STANDARD

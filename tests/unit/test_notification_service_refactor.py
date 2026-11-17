@@ -1277,7 +1277,7 @@ def test_payment_confirmation_case_a_exact_payment_states_amount_only(app, db, s
     service.telegram_bot_token = 'test-token'
     text = _send_and_capture_telegram_text(monkeypatch, service, payment.id)
 
-    assert 'Amount: 20,000 UZS' in text
+    assert "Amount: 20,000 so'm" in text
     assert 'Method: 💰 Cash on Delivery' in text
     # No trailing-.0 float, no raw enum value.
     assert '20000.0' not in text
@@ -1439,7 +1439,7 @@ def test_payment_confirmation_case_c_surplus_settles_named_debt(app, db, sample_
     service.telegram_bot_token = 'test-token'
     text = _send_and_capture_telegram_text(monkeypatch, service, this_payment.id)
 
-    assert 'Amount: 35,000 UZS' in text
+    assert "Amount: 35,000 so'm" in text
     assert 'TG_CASE_C_OLD_26' in text
     assert '5,000' in text
     assert '08/20/2026' in text  # en date format (helpers.format_datetime)
@@ -1520,7 +1520,7 @@ def test_payment_confirmation_case_c_surplus_settles_debt_with_remainder_reserve
     service.telegram_bot_token = 'test-token'
     text = _send_and_capture_telegram_text(monkeypatch, service, this_payment.id)
 
-    assert 'Amount: 13,000 UZS' in text
+    assert "Amount: 13,000 so'm" in text
     assert 'TG_CASE_C2_OLD_26' in text
     assert '2,000' in text
     assert 'saved as credit' in text
@@ -1573,7 +1573,7 @@ def test_payment_confirmation_case_d_shortfall_states_received_and_next_delivery
     service.telegram_bot_token = 'test-token'
     text = _send_and_capture_telegram_text(monkeypatch, service, payment.id)
 
-    assert 'Amount: 18,000 UZS' in text
+    assert "Amount: 18,000 so'm" in text
     assert '7,000' in text
     assert 'next delivery' in text
     # The payment is PARTIALLY_PAID, not COMPLETED — "Payment Confirmed!" would

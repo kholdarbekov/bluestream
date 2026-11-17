@@ -191,8 +191,8 @@ class TestProductHandlerWave2:
         await handler.quantity_handler(update, context)
 
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
-        assert "28,000 UZS" in text
-        assert "40,000 UZS" not in text
+        assert "28,000 telegram.currency.uzs:en" in text
+        assert "40,000 telegram.currency.uzs:en" not in text
 
     async def test_quantity_screen_prices_from_current_price(self, monkeypatch):
         handler = products_module.ProductHandlers()
@@ -209,7 +209,7 @@ class TestProductHandlerWave2:
             "en",
         )
 
-        assert "2 × 15,000 = 30,000 UZS" in text
+        assert "2 × 15,000 = 30,000 telegram.currency.uzs:en" in text
         assert "20,000" not in text
 
     async def test_show_cart_empty_cart(self, monkeypatch):

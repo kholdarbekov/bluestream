@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
-{% from 'frontend/partials/offer_facts.html' import offer_as_of with context %}
+{% from 'frontend/partials/offer_facts.html' import offer_as_of, offer_upcoming_price with context %}
 {% set meta_description = 'web.subs.services.meta'|t %}
 
 {#- What Aqua Element really does, and nothing else: water delivery (the public offer facts: live prices and the
@@ -45,6 +45,7 @@
                                     <span class="ss-price__min">{{ offer_smallest_order_sentence(p, lang) }}</span>
                                 </span>
                                 <span class="ss-price__value" data-price>{{ p.price_text[lang] }}</span>
+                                {{ offer_upcoming_price(p, lang) }}
                             </li>
                             {%- endfor %}
                         </ul>

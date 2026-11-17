@@ -171,8 +171,8 @@ class TestInventoryServiceBusinessRules:
         assert "Reservation failed" in response["reason"]
         assert release_calls == [303]
 
-    def test_release_reservations_returns_failure_without_redis(self, inventory_service):
-        inventory_service.redis_client = None
+    def test_release_reservations_returns_failure_without_redis(self, inventory_service, monkeypatch):
+        monkeypatch.setattr(inventory_service, "_get_redis_client", lambda: None)
         result = inventory_service.release_reservations(order_id=404)
         assert result == {"success": False, "reason": "Reservation system not available"}
 

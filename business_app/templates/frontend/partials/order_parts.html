@@ -39,6 +39,11 @@
             <span class="ae-co-line__name item-name">{{ item.product_display_name }}</span>
             {%- if item.is_reward %}
             <span><span class="ae-badge ae-badge--gold">{{ 'web.cabinet.orders.reward'|t }}</span></span>
+            {%- elif item.courtesy_quantity %}
+            {#- A courtesy line: its kept units first, then the units at today's price. The published split, no arithmetic
+                (AE.linePriceText prints the same words in the scripts). -#}
+            <span class="ae-co-line__qty">{{ 'web.shop.cart.courtesy_part'|t(qty=item.courtesy_quantity, price=item.courtesy_unit_price|format_price) }}
+                {%- if item.regular_quantity %} + {{ 'web.cabinet.orders.qty_price'|t(quantity=item.regular_quantity, price=item.unit_price|format_price) }}{% endif %}</span>
             {%- else %}
             <span class="ae-co-line__qty">{{ 'web.cabinet.orders.qty_price'|t(quantity=item.quantity, price=item.unit_price|format_price) }}</span>
             {%- endif %}

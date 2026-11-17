@@ -161,7 +161,11 @@
   text-align: right;
   white-space: nowrap;
 }
+/* The dated coming price is a sibling of the price (a script that refreshes [data-price] would wipe a nested one):
+   it sits under the price, in the price's column, and may wrap. */
+.ss-page .ss-price .ae-upcoming-price { grid-column: 2 / -1; margin: 0; text-align: right; }
 @media (max-width: 479px) {
+  .ss-page .ss-price .ae-upcoming-price { grid-column: 2; text-align: left; }
   .ss-page .ss-price { grid-template-columns: 48px minmax(0, 1fr); gap: 4px var(--ae-s3); padding: 14px 16px; }
   .ss-page .ss-price__thumb { width: 48px; height: 48px; grid-row: span 2; align-self: start; }
   .ss-page .ss-price__value { grid-column: 2; font-size: 20px; text-align: left; }

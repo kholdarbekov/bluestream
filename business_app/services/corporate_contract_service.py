@@ -605,19 +605,62 @@ class CorporateContractService:
                 .joinedload(CorporatePrepaymentAccount.product_balances)
                 .joinedload(CorporatePrepaymentBalance.product),
             )
-            .filter(
-                CorporateContract.user_id == user_id,
-                CorporateContract.is_active.is_(True),
-                CorporateContract.status == CorporateContractStatus.ACTIVE,
-                CorporateContract.start_date <= effective_at,
-                or_(
-                    CorporateContract.end_date.is_(None),
-                    CorporateContract.end_date >= effective_at,
-                ),
-            )
+            .filter(CorporateContract.user_id == user_id, *self._active_contract_criteria(effective_at))
             .order_by(CorporateContract.start_date.desc(), CorporateContract.created_at.desc())
             .all()
         )
+
+    @staticmethod
+    def _active_contract_criteria(effective_at: datetime) -> tuple:
+        """THE SQL expression of "a contract is in force at ``effective_at``" (pass it normalised)."""
+        return (
+            CorporateContract.is_active.is_(True),
+            CorporateContract.status == CorporateContractStatus.ACTIVE,
+            CorporateContract.start_date <= effective_at,
+            or_(
+                CorporateContract.end_date.is_(None),
+                CorporateContract.end_date >= effective_at,
+            ),
+        )
+
+    def has_active_contract(self, user_id: int, *, effective_at: Optional[datetime] = None) -> bool:
+        """True when the account is a legal entity with a contract in force at ``effective_at``."""
+        if not self._is_legal_entity_user(User.query.get(user_id)):
+            return False
+        effective_at = self._normalize_effective_at(effective_at)
+        return bool(
+            db.session.query(
+                exists().where(
+                    CorporateContract.user_id == user_id,
+                    *self._active_contract_criteria(effective_at),
+                )
+            ).scalar()
+        )
+
+    def user_ids_with_active_contract(
+        self,
+        user_ids: Optional[Iterable[int]] = None,
+        *,
+        effective_at: Optional[datetime] = None,
+    ) -> set[int]:
+        """The ids ``has_active_contract`` would accept: all of them, or those among ``user_ids``."""
+        effective_at = self._normalize_effective_at(effective_at)
+        query = db.session.query(CorporateContract.user_id).filter(*self._active_contract_criteria(effective_at))
+        if user_ids is None:
+            candidates = {row[0] for row in query.distinct()}
+        else:
+            wanted = sorted(set(user_ids))
+            candidates = set()
+            for start in range(0, len(wanted), 500):
+                chunk = wanted[start : start + 500]
+                candidates.update(row[0] for row in query.filter(CorporateContract.user_id.in_(chunk)).distinct())
+        if not candidates:
+            return set()
+        accounts = []
+        ordered = sorted(candidates)
+        for start in range(0, len(ordered), 500):
+            accounts.extend(User.query.filter(User.id.in_(ordered[start : start + 500])).all())
+        return {user.id for user in accounts if self._is_legal_entity_user(user)}
 
     def resolve_contract_pricing_for_user_product(
         self,

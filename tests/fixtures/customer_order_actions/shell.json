@@ -5,6 +5,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "delivery_address": "Delivery Address",
      "delivery_fee": "Delivery Fee",
      "delivery_location": "Delivery Location",
@@ -77,6 +78,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "more_items": "+{count} more",
      "next": "Next page",
      "order_number": "Order {number}",
@@ -192,6 +194,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "delivery_address": "Delivery Address",
      "delivery_fee": "Плата за доставку",
      "delivery_location": "Delivery Location",
@@ -264,6 +267,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "more_items": "и ещё {count}",
      "next": "Следующая страница",
      "order_number": "Заказ № {number}",
@@ -379,6 +383,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "delivery_address": "Delivery Address",
      "delivery_fee": "Yetkazib berish narxi",
      "delivery_location": "Delivery Location",
@@ -451,6 +456,7 @@
    "island": {
     "cart_url": "/cart",
     "i18n": {
+     "courtesy_part": "web.shop.cart.courtesy_part",
      "more_items": "yana {count} ta",
      "next": "Keyingi sahifa",
      "order_number": "Buyurtma № {number}",

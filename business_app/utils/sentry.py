@@ -5,7 +5,9 @@ Reuses the `sanitize_request_data` redaction logic from error_handlers.py so
 Sentry sees the same SENSITIVE_KEYS redaction policy that structured logs do.
 `send_default_pii=False` on init already scrubs request headers/cookies at the
 SDK level; this hook catches anything that ends up in event extras, breadcrumbs,
-or exception frame locals.
+or exception frame locals. A URL's password has no key, so `before_send` ends
+with `shared.url_redaction.redact_event_urls`, which masks it in every string of
+the event; both bots apply the same function.
 
 Transactions (performance traces) never pass through `before_send`, but the SDK
 puts the request's raw query string on them too, so `before_send_transaction`
@@ -18,6 +20,7 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from business_app.utils.error_handlers import sanitize_request_data
 from shared.telegram_login import TELEGRAM_LOGIN_PATH, loggable_login_url
+from shared.url_redaction import redact_event_urls
 
 
 _SENSITIVE_SUBSTRINGS = (
@@ -62,7 +65,8 @@ def _redact_sign_in_request(request: Dict[str, Any]) -> None:
 
 
 def before_send(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """Redact sensitive keys from event payloads before they leave the process."""
+    """Redact sensitive keys from event payloads before they leave the process, then every URL's password
+    (`redact_event_urls`, the one rule the bots apply too)."""
     for section in ("extra", "contexts", "tags"):
         if section in event and isinstance(event[section], dict):
             event[section] = _scrub_value(event[section])
@@ -85,7 +89,7 @@ def before_send(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) ->
         if isinstance(crumb.get("data"), dict):
             crumb["data"] = sanitize_request_data(crumb["data"])
 
-    return event
+    return redact_event_urls(event)
 
 
 def before_send_transaction(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:

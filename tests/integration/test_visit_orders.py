@@ -221,15 +221,29 @@ def test_payment_methods_offers_only_the_two_rails_an_agent_may_take(db, approve
 def test_order_estimate_quotes_the_basket_through_the_operator_estimator(
     db, approved_outlet, stock_product, monkeypatch
 ):
-    """The money the agent reads out is the operator quote, called with the outlet's own customer."""
+    """The money the agent reads out is the operator quote, called with the outlet's own customer and the outlet's
+    delivery address the order will carry (its delivery fee is the one `create_order` charges)."""
     calls = []
     real_estimate = StaffService.estimate_phone_order
 
-    def spy(client_id, order_data, *, payment_method=None, order_source):
-        calls.append((client_id, order_data, payment_method, order_source))
-        return real_estimate(client_id, order_data, payment_method=payment_method, order_source=order_source)
+    def spy(client_id, order_data, *, payment_method=None, order_source, delivery_address=None):
+        calls.append((client_id, order_data, payment_method, order_source, delivery_address))
+        return real_estimate(
+            client_id,
+            order_data,
+            payment_method=payment_method,
+            order_source=order_source,
+            delivery_address=delivery_address,
+        )
 
     monkeypatch.setattr(StaffService, "estimate_phone_order", staticmethod(spy))
+    address = approved_outlet.address
+    outlet_address = {
+        "delivery_address_id": address.id,
+        "street": address.street_address,
+        "latitude": address.latitude,
+        "longitude": address.longitude,
+    }
 
     payload = OrderEstimatePayload(**{"items": [{"product_id": stock_product.id, "quantity": 8}]})
     estimate = VisitService.order_estimate(approved_outlet, payload.model_dump()["items"])
@@ -237,7 +251,13 @@ def test_order_estimate_quotes_the_basket_through_the_operator_estimator(
     # No rail named: the quote keeps the rail-less pricing every operator phone-order caller gets,
     # priced as the agent order it quotes, so the one tier decision sees the order's own channel.
     assert calls == [
-        (approved_outlet.user_id, {"items": [{"product_id": stock_product.id, "quantity": 8}]}, None, "sales_agent")
+        (
+            approved_outlet.user_id,
+            {"items": [{"product_id": stock_product.id, "quantity": 8}]},
+            None,
+            "sales_agent",
+            outlet_address,
+        )
     ]
 
     # ...and a rail the agent chose travels all the way down to the estimator (C27).
@@ -247,7 +267,7 @@ def test_order_estimate_quotes_the_basket_through_the_operator_estimator(
     VisitService.order_estimate(
         approved_outlet, with_rail.model_dump()["items"], with_rail.model_dump()["payment_method"]
     )
-    assert calls[-1][2:] == ("cash", "sales_agent")
+    assert calls[-1][2:] == ("cash", "sales_agent", outlet_address)
     assert estimate["client_id"] == approved_outlet.user_id
     assert [(i["product_id"], i["quantity"]) for i in estimate["items"]] == [(stock_product.id, 8)]
     assert isinstance(estimate["total_amount"], float)

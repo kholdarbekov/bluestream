@@ -117,6 +117,9 @@
       "loyalty_points_used": 0,
       "order_items": [
        {
+        "courtesy_quantity": null,
+        "courtesy_unit_price": null,
+        "discount_amount": 0.0,
         "id": 1,
         "is_reward": false,
         "product_display_name": "Pure Water 19L",
@@ -125,10 +128,14 @@
         "product_name": "Pure Water 19L",
         "product_sku": null,
         "quantity": 2,
+        "regular_quantity": null,
         "total_price": 30000.0,
         "unit_price": 15000.0
        },
        {
+        "courtesy_quantity": null,
+        "courtesy_unit_price": null,
+        "discount_amount": 0.0,
         "id": 2,
         "is_reward": false,
         "product_display_name": "Spring water 5L",
@@ -137,6 +144,7 @@
         "product_name": "Spring water 5L",
         "product_sku": null,
         "quantity": 1,
+        "regular_quantity": null,
         "total_price": 5000.0,
         "unit_price": 5000.0
        }
@@ -286,6 +294,9 @@
        "loyalty_points_used": 0,
        "order_items": [
         {
+         "courtesy_quantity": null,
+         "courtesy_unit_price": null,
+         "discount_amount": 0.0,
          "id": 1,
          "is_reward": false,
          "product_display_name": "Pure Water 19L",
@@ -294,10 +305,14 @@
          "product_name": "Pure Water 19L",
          "product_sku": null,
          "quantity": 2,
+         "regular_quantity": null,
          "total_price": 30000.0,
          "unit_price": 15000.0
         },
         {
+         "courtesy_quantity": null,
+         "courtesy_unit_price": null,
+         "discount_amount": 0.0,
          "id": 2,
          "is_reward": false,
          "product_display_name": "Spring water 5L",
@@ -306,6 +321,7 @@
          "product_name": "Spring water 5L",
          "product_sku": null,
          "quantity": 1,
+         "regular_quantity": null,
          "total_price": 5000.0,
          "unit_price": 5000.0
         }
@@ -434,6 +450,9 @@
        "loyalty_points_used": 0,
        "order_items": [
         {
+         "courtesy_quantity": null,
+         "courtesy_unit_price": null,
+         "discount_amount": 0.0,
          "id": 1,
          "is_reward": false,
          "product_display_name": "Pure Water 19L",
@@ -442,10 +461,14 @@
          "product_name": "Pure Water 19L",
          "product_sku": null,
          "quantity": 2,
+         "regular_quantity": null,
          "total_price": 30000.0,
          "unit_price": 15000.0
         },
         {
+         "courtesy_quantity": null,
+         "courtesy_unit_price": null,
+         "discount_amount": 0.0,
          "id": 2,
          "is_reward": false,
          "product_display_name": "Spring water 5L",
@@ -454,6 +477,7 @@
          "product_name": "Spring water 5L",
          "product_sku": null,
          "quantity": 1,
+         "regular_quantity": null,
          "total_price": 5000.0,
          "unit_price": 5000.0
         }

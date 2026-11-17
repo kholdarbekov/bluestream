@@ -11,6 +11,7 @@ from staff_bot.api_client import api_client
 from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.utils.formatters import format_currency, escape_html
+from staff_bot.utils.price_lines import courtesy_line, courtesy_status_lines, price_changed_quote, upcoming_price_line
 from staff_bot.utils.search import detect_search_type
 from staff_bot.permissions import require_auth, require_operator
 from staff_bot.i18n import i18n
@@ -30,6 +31,8 @@ class CreateOrderHandler(BaseHandler):
     # never be confused: `price` is what the keyboard renders, this is where it
     # came from.
     CLIENT_QUOTE_KEY = 'client_unit_price'
+    # The server's dated coming-price block for the same quoted line, stamped beside the quote.
+    CLIENT_UPCOMING_KEY = 'client_upcoming_price'
 
     @staticmethod
     def _display_unit_price(product: dict) -> float:
@@ -61,7 +64,7 @@ class CreateOrderHandler(BaseHandler):
         leaked their own discount into the quote. The client-scoped figure comes
         from ``POST /staff/operator/users/<id>/order-estimate``, which replays
         the very loop ``StaffService.create_phone_order`` charges from
-        (:meth:`_client_unit_prices`). The catalogue candidates below survive
+        (:meth:`_client_quote_lines`). The catalogue candidates below survive
         only as the 0-UZS guard they were written as — they must never be what a
         screen quotes when a client is known.
         """
@@ -83,7 +86,7 @@ class CreateOrderHandler(BaseHandler):
         return 0.0
 
     @classmethod
-    def _with_display_price(cls, products: list, client_unit_prices: dict = None) -> list:
+    def _with_display_price(cls, products: list, client_quote_lines: dict = None) -> list:
         """Stamp the client-scoped unit price onto each product as ``price``.
 
         ``OperatorKeyboards.product_list`` renders ``product.get('price', 0)``
@@ -91,27 +94,32 @@ class CreateOrderHandler(BaseHandler):
         screen and the cart all render the SAME resolved number without three
         modules each re-deriving it from the nested payload.
 
-        ``client_unit_prices`` maps ``product_id -> unit_price`` and comes off
+        ``client_quote_lines`` maps ``product_id -> quoted line`` and comes off
         the order-estimate endpoint, i.e. off the loop that will CHARGE this
-        client. It is stamped under :attr:`CLIENT_QUOTE_KEY`, which
-        :meth:`_display_unit_price` reads before any catalogue field, so a
-        contract client's screen states the contract price.
+        client. The line's ``unit_price`` is stamped under
+        :attr:`CLIENT_QUOTE_KEY`, which :meth:`_display_unit_price` reads before
+        any catalogue field, so a contract client's screen states the contract
+        price; its ``upcoming_price`` block is stamped under
+        :attr:`CLIENT_UPCOMING_KEY` for the dated line.
         """
-        quotes = client_unit_prices or {}
+        quotes = client_quote_lines or {}
         stamped = []
         for product in (products or []):
             row = {**(product or {})}
-            quoted = quotes.get(row.get('id'))
-            if quoted is not None:
-                row[cls.CLIENT_QUOTE_KEY] = quoted
+            quoted_line = quotes.get(row.get('id')) or {}
+            if quoted_line.get('unit_price') is not None:
+                row[cls.CLIENT_QUOTE_KEY] = quoted_line['unit_price']
+            if quoted_line.get('upcoming_price'):
+                row[cls.CLIENT_UPCOMING_KEY] = quoted_line['upcoming_price']
             row['price'] = cls._display_unit_price(row)
             stamped.append(row)
         return stamped
 
-    async def _client_unit_prices(self, token: str, client_id, products: list):
+    async def _client_quote_lines(self, token: str, client_id, products: list):
         """Ask the server what THIS CLIENT pays per unit, for the whole catalogue.
 
-        Returns ``(prices_by_product_id, error_response_or_None)``. On failure it
+        Returns ``(quoted_line_by_product_id, error_response_or_None)``; a line
+        carries the unit price and the dated coming price. On failure it
         returns NO prices rather than the catalogue's own — falling back to
         operator-scoped money is the defect this endpoint exists to remove, and a
         plausible wrong number read down the phone with confidence is worse than
@@ -134,7 +142,7 @@ class CreateOrderHandler(BaseHandler):
             return {}, response
 
         lines = (response.data or {}).get('items') or []
-        return {line.get('product_id'): line.get('unit_price') for line in lines}, None
+        return {line.get('product_id'): line for line in lines}, None
 
     async def _quote_cart(self, context, token, *, payment_method=None):
         """Re-price the CART server-side and store the quote for the screens.
@@ -363,13 +371,13 @@ class CreateOrderHandler(BaseHandler):
 
             # Resolve the price ONCE, here, before anything renders it — and
             # resolve it FOR THE CLIENT, not for the operator holding the token.
-            client_prices, quote_error = await self._client_unit_prices(
+            client_lines, quote_error = await self._client_quote_lines(
                 token, context.user_data.get('new_order', {}).get('client_id'), products,
             )
             if quote_error is not None:
                 await self._handle_api_response_error(update, quote_error, language)
                 return
-            products = self._with_display_price(products, client_prices)
+            products = self._with_display_price(products, client_lines)
 
             # Store products for reference
             context.user_data['available_products'] = {
@@ -408,9 +416,11 @@ class CreateOrderHandler(BaseHandler):
 
             context.user_data['selecting_product_id'] = product_id
 
+            upcoming = upcoming_price_line(product.get(self.CLIENT_UPCOMING_KEY), language)
             text = (
                 f"📦 <b>{escape_html(product.get('name', ''))}</b>\n"
-                f"💰 {format_currency(self._display_unit_price(product), language=language)}\n\n"
+                f"💰 {format_currency(self._display_unit_price(product), language=language)}\n"
+                f"{upcoming + chr(10) if upcoming else ''}\n"
                 f"{i18n.get('staff.operator.select_quantity', language)}"
             )
 
@@ -645,10 +655,12 @@ class CreateOrderHandler(BaseHandler):
         await self._show_order_summary(update, context, language)
         return CONFIRM_ORDER
 
-    async def _show_order_summary(self, update, context, language):
-        """Show order summary for confirmation"""
+    async def _show_order_summary(self, update, context, language, *, notice: str | None = None):
+        """Show order summary for confirmation; `notice` is a line printed above it (a price update)."""
         order_data = context.user_data.get('new_order', {})
         text = self._format_cart_summary(context, language)
+        if notice:
+            text = f"{notice}\n\n{text}"
 
         payment = order_data.get('payment_method', 'cash')
         payment_label = i18n.get(f'staff.operator.payment_{payment}', language)
@@ -705,11 +717,23 @@ class CreateOrderHandler(BaseHandler):
                 'payment_method': order_data.get('payment_method', 'cash'),
                 'delivery_notes': order_data.get('delivery_notes'),
             }
+            estimate = order_data.get('estimate')
+            if estimate:
+                # The total the summary showed: the server refuses the order if it moved since.
+                request_data['expected_total'] = estimate['total_amount']
 
             async with api_client as client:
                 response = await client.create_order_for_client(token, request_data)
 
             if not response.success:
+                quote = price_changed_quote(response)
+                if quote is not None:
+                    order_data['estimate'] = quote
+                    await self._show_order_summary(
+                        update, context, language,
+                        notice=i18n.get('staff.price_change.price_changed_note', language),
+                    )
+                    return CONFIRM_ORDER
                 await self._handle_api_response_error(update, response, language)
                 return CONFIRM_ORDER
 
@@ -771,11 +795,15 @@ class CreateOrderHandler(BaseHandler):
                 f"  • {name} x{qty} — "
                 f"{format_currency(quoted.get('total_price'), language=language)}"
             )
+            for sub_line in (courtesy_line(quoted, language), upcoming_price_line(quoted.get('upcoming_price'), language)):
+                if sub_line:
+                    lines.append(f"    {sub_line}")
 
         lines.append(
             f"\n💰 {i18n.get('staff.operator.subtotal', language)}: "
             f"{format_currency((order_data.get('estimate') or {}).get('subtotal'), language=language)}"
         )
+        lines.extend(courtesy_status_lines((order_data.get('estimate') or {}).get('courtesy_status'), language))
 
         return '\n'.join(lines)
 

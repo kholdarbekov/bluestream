@@ -78,7 +78,7 @@ TRANSLATIONS = {
     "telegram.subscription.weekday_4": "Friday",
     "telegram.subscription.weekday_5": "Saturday",
     "telegram.subscription.weekday_6": "Sunday",
-    "telegram.currency.uzs": "UZS",
+    "telegram.currency.uzs": "so'm",
     "telegram.back": "Back",
     "telegram.cancel": "Cancel",
     "telegram.continue": "Continue",

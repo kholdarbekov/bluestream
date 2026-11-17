@@ -2616,6 +2616,43 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yetkazib berish hisobingiz faolsizlantirilgan. Iltimos, administrator bilan bog'laning.",
         "ru": "Ваша учётная запись курьера деактивирована. Пожалуйста, свяжитесь с администратором.",
     },
+    # Price-change lines on the operator's product, cart and confirm screens (staff_bot/utils/price_lines.py).
+    # Prices, quantities and dates are placeholders the server fills; no digit is typed in the copy.
+    "staff.price_change.upcoming_line": {
+        "en": "From {date}: {price} each",
+        "uz": "{date} dan boshlab: {price} (1 dona)",  # NATIVE-READ
+        "ru": "С {date}: {price} за 1 шт.",  # NATIVE-READ
+    },
+    "staff.price_change.courtesy_split": {
+        "en": "{courtesy_qty} × {courtesy_price} (old price kept) + {regular_qty} × {regular_price}",
+        "uz": "{courtesy_qty} × {courtesy_price} (eski narx saqlangan) + {regular_qty} × {regular_price}",  # NATIVE-READ
+        "ru": "{courtesy_qty} × {courtesy_price} (старая цена сохранена) + {regular_qty} × {regular_price}",  # NATIVE-READ
+    },
+    "staff.price_change.courtesy_only": {
+        "en": "{courtesy_qty} × {courtesy_price} (old price kept)",
+        "uz": "{courtesy_qty} × {courtesy_price} (eski narx saqlangan)",  # NATIVE-READ
+        "ru": "{courtesy_qty} × {courtesy_price} (старая цена сохранена)",  # NATIVE-READ
+    },
+    "staff.price_change.status_available": {
+        "en": "Old price kept for this customer until {date}:",
+        "uz": "Bu mijoz uchun eski narx {date} gacha saqlanadi:",  # NATIVE-READ
+        "ru": "Для этого клиента старая цена сохраняется до {date}:",  # NATIVE-READ
+    },
+    "staff.price_change.status_cap_line": {
+        "en": "{product}: up to {cap}",
+        "uz": "{product}: {cap} tagacha",  # NATIVE-READ
+        "ru": "{product}: до {cap} шт.",  # NATIVE-READ
+    },
+    "staff.price_change.status_used": {
+        "en": "Old price already used on order {order_number}",
+        "uz": "Eski narx {order_number} buyurtmasida ishlatilgan",  # NATIVE-READ
+        "ru": "Старая цена уже использована в заказе {order_number}",  # NATIVE-READ
+    },
+    "staff.price_change.price_changed_note": {
+        "en": "⚠️ The total changed after this screen was drawn (a price update). Read the new total to the customer and confirm again.",
+        "uz": "⚠️ Bu oyna chizilgandan keyin summa o'zgardi (narx yangilandi). Yangi summani mijozga ayting va qayta tasdiqlang.",  # NATIVE-READ
+        "ru": "⚠️ Сумма изменилась после того, как экран был показан (обновление цены). Назовите клиенту новую сумму и подтвердите ещё раз.",  # NATIVE-READ
+    },
 }
 
 

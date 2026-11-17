@@ -220,6 +220,8 @@ def install_cart_backend(backend, cart: ServerCart) -> None:
 # ---------------------------------------------------------------------------
 
 TRANSLATIONS = {
+    ("uz", "telegram.currency.uzs"): "so'm",
+    ("ru", "telegram.currency.uzs"): "сум",
     ("uz", "telegram.cart_title"): "Savatingiz",
     ("ru", "telegram.cart_title"): "Ваша корзина",
     ("uz", "telegram.cart_empty"): "Savat bo'sh",
@@ -229,10 +231,10 @@ TRANSLATIONS = {
     ("uz", "telegram.cart_ready_checkout"): "Buyurtmaga tayyor",
     ("ru", "telegram.cart_ready_checkout"): "Готово к заказу",
     ("uz", "telegram.cart_min_order_warning"): (
-        "Eng kam buyurtma {min_amount} UZS. Yana {remaining} UZS qo'shing"
+        "Eng kam buyurtma {min_amount} so'm. Yana {remaining} so'm qo'shing"
     ),
     ("ru", "telegram.cart_min_order_warning"): (
-        "Минимальный заказ {min_amount} UZS. Добавьте ещё {remaining} UZS"
+        "Минимальный заказ {min_amount} сум. Добавьте ещё {remaining} сум"
     ),
     ("uz", "telegram.cart_min_qty_warning"): (
         "{product_name}: eng kami {min_qty} dona, yana {remaining} dona"
@@ -255,7 +257,7 @@ TRANSLATIONS = {
     ("uz", "telegram.total"): "Jami",
     ("ru", "telegram.total"): "Итого",
     ("uz", "telegram.products.min_order_quantity_label"): "Eng kam miqdor: {min_qty}",
-    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} UZS (1 dona)",
+    ("uz", "telegram.products.unit_price_label"): "Narxi: {price} so'm (1 dona)",
     ("uz", "telegram.products.type_quantity_hint"): "✏️ Yoki kerakli miqdorni yozing",
     ("uz", "telegram.products.cart_cleared"): "Savat tozalandi",
     ("uz", "telegram.products.out_of_stock"): "Tugagan",
@@ -512,7 +514,7 @@ async def test_a_preset_redraws_the_screen_at_its_number_and_checkout_writes_exa
         "",
         f"{t('telegram.quantity')}: {target}",
         f"{t('telegram.total')}: {target} × {format_price(WATER_UNIT_PRICE)}"
-        f" = {format_price(WATER_UNIT_PRICE * target)} UZS",
+        f" = {format_price(WATER_UNIT_PRICE * target)} so'm",
         "",
         t("telegram.products.type_quantity_hint"),
     ])
@@ -1074,12 +1076,12 @@ async def test_the_cart_total_is_the_servers_subtotal_not_a_client_side_sum(
     await bot.send(user.tap("cart_view"))
     text = bot.telegram.last_shown().text
 
-    assert f"🛒 {WATER_NAME} x 2 = {format_price(server_subtotal)} UZS" in text
-    assert f"🛒 {SPORT_NAME} x 2 = {format_price(0)} UZS" in text, (
+    assert f"🛒 {WATER_NAME} x 2 = {format_price(server_subtotal)} so'm" in text
+    assert f"🛒 {SPORT_NAME} x 2 = {format_price(0)} so'm" in text, (
         "a server-dropped line contributes 0, which is what the order gets"
     )
     assert (
-        f"💰 {t('telegram.cart_total')}: {format_price(server_subtotal)} UZS" in text
+        f"💰 {t('telegram.cart_total')}: {format_price(server_subtotal)} so'm" in text
     )
     for forbidden in (
         format_price(client_side_sum),  # 90 000 — the re-multiplied total
@@ -1198,7 +1200,7 @@ async def test_a_telegram_edit_failure_still_shows_the_customer_the_edited_cart(
     assert replacement.method == "sendMessage", (
         "a failed edit must be replaced by a new message, not swallowed"
     )
-    assert f"🛒 {SPORT_NAME} x 3 = {format_price(SPORT_UNIT_PRICE * 3)} UZS" in (
+    assert f"🛒 {SPORT_NAME} x 3 = {format_price(SPORT_UNIT_PRICE * 3)} so'm" in (
         replacement.text
     )
     assert f"cart_inc_{SPORT_ID}" in replacement.callback_data(), (

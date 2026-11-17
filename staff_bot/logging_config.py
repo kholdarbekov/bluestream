@@ -6,6 +6,8 @@ import logging.config
 import sys
 from pathlib import Path
 
+from shared.url_redaction import redact_bot_token, redact_url_credentials
+
 
 def setup_logging(log_level="INFO", log_to_file=False, log_file_path="staff_bot.log"):
     """Setup logging configuration for the staff bot"""
@@ -118,10 +120,11 @@ def log_bot_startup_info():
 
     from staff_bot.config import config
 
-    logger.info(f"Bot Token: {'*' * 20}...{config.telegram.bot_token[-10:] if config.telegram.bot_token else 'NOT SET'}")
+    # Only the bot id, the text before the first ':', is public
+    logger.info(f"Bot Token: {redact_bot_token(config.telegram.bot_token)}")
     logger.info(f"Webhook URL: {config.telegram.webhook_url or 'POLLING MODE'}")
     logger.info(f"Business API URL: {config.business_api.base_url}")
-    logger.info(f"Database URL: {config.database.url.split('@')[0] if config.database.url else 'NOT SET'}@...")
+    logger.info(f"Database URL: {redact_url_credentials(config.database.url) if config.database.url else 'NOT SET'}")
     logger.info(f"Default Language: {config.localization.default_language}")
     logger.info(f"Supported Languages: {config.localization.supported_languages}")
     logger.info(f"Max Active Deliveries: {config.staff.max_active_deliveries_per_person}")

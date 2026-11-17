@@ -81,6 +81,7 @@ def register_blueprints(app: Flask):
     from business_app.api.admin_reorder_reminders import admin_reorder_reminders_bp
     from business_app.api.admin_eta import admin_eta_bp
     from business_app.api.admin_shared_place import admin_shared_place_bp
+    from business_app.api.admin_price_changes import admin_price_changes_bp
     from business_app.frontend import frontend_bp
 
     # API blueprints
@@ -114,6 +115,7 @@ def register_blueprints(app: Flask):
     app.register_blueprint(admin_reorder_reminders_bp, url_prefix=f"{api_prefix}/admin")
     app.register_blueprint(admin_eta_bp, url_prefix=f"{api_prefix}/admin")
     app.register_blueprint(admin_shared_place_bp, url_prefix=f"{api_prefix}/admin")
+    app.register_blueprint(admin_price_changes_bp, url_prefix=f"{api_prefix}/admin")
     app.register_blueprint(frontend_bp)
 
 

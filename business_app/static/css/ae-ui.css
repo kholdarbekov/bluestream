@@ -2302,6 +2302,8 @@ body .page-title .bread-crumb li a:hover { color: var(--ae-navy); text-decoratio
   background: var(--ae-surface);
   list-style: none;
 }
+/* The dated coming price: plain muted text under the price, never struck through or tagged. */
+.ae-upcoming-price { display: block; white-space: normal; margin: 2px 0 0; color: var(--ae-muted); font-family: var(--ae-font); font-size: 13px; font-weight: 500; line-height: 1.4; text-decoration: none; font-variant-numeric: tabular-nums; }
 .ae-facts [data-offer-line] { display: block; margin: 0; font-family: var(--ae-font); }
 .ae-facts [data-offer-line="price"] { color: var(--ae-ink); font-size: 17px; font-weight: 800; line-height: 1.4; font-variant-numeric: tabular-nums; }
 .ae-facts [data-offer-line="list-price"] { color: var(--ae-ink-soft); font-size: 14px; line-height: 1.45; text-decoration: line-through; text-decoration-color: rgba(65, 96, 124, .6); }

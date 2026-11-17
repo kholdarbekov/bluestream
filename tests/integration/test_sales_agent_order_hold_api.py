@@ -819,22 +819,13 @@ def test_t_hold_12_the_stock_hold_and_its_stored_expiry_move_to_the_approval_win
     assert redis.hget(details, "expires_at").decode("utf-8") == (t0 + timedelta(hours=12)).isoformat()
 
     # 01:10 local the next night is at most 11 hours on for a hold placed after 14:10. This half
-    # is vacuous while the cleanup deletes nothing; the strict-xfail control below makes that
-    # visible and flips the day the cleanup is repaired (PR16).
+    # is vacuous unless the cleanup deletes a lapsed hold; the control below proves that it does.
     monkeypatch.setattr(inventory_service_module, "datetime", _frozen_datetime(t0 + timedelta(hours=11)))
     cleanup_expired_inventory_reservations.run()
 
     assert redis.exists(key) == 1 and redis.exists(details) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "cleanup_expired_reservations checks a str key against the bytes-keyed hgetall, "
-        "so it deletes nothing (owner follow-up, handover)"
-    ),
-)
 def test_t_hold_12_control_the_cleanup_deletes_a_lapsed_reservation(
     client, db, sales_agent_auth_headers, operator_auth_headers, sample_product, spies, monkeypatch
 ):
@@ -842,11 +833,9 @@ def test_t_hold_12_control_the_cleanup_deletes_a_lapsed_reservation(
     `expires_at` has passed, is deleted by the cleanup run.
 
     Without this, "the cleanup at +11 h keeps the hold" would pass just as well against a cleanup
-    that never deletes anything, which is today's: `cleanup_expired_reservations` tests the str
-    `"expires_at"` against the bytes keys `hgetall` returns. So this is a strict xfail. When the
-    owner repairs the cleanup, it passes, the strict marker turns it red, and the marker comes
-    off; from then on the keep-assertion above proves something. `raises=AssertionError` keeps
-    a broken setup (no reservation hash: an `AttributeError`) a real failure, not an xfail.
+    that never deletes anything. `cleanup_expired_reservations` used to test the str `"expires_at"`
+    against the bytes keys `hgetall` returns and so deleted nothing; Task Y1 repaired it, so this was
+    a strict xfail until then and the keep-assertion above now proves something.
     """
     outlet = _store(client, db, sales_agent_auth_headers, operator_auth_headers)
     place_visit_order(client, sales_agent_auth_headers, outlet, _items(sample_product), "cash")

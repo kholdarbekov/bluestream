@@ -46,9 +46,13 @@
 
     function itemLine(item) {
         var name = item.product_display_name || item.product_name || '';
+        // A courtesy line prints the split the API published (AE.linePriceText), never quantity x unit price beside
+        // the net total.
         var detail = item.is_reward
             ? '<span class="ae-badge ae-badge--gold">' + escapeHtml(I18N.reward) + '</span>'
-            : escapeHtml(fill(I18N.qty_price, { quantity: item.quantity, price: money(item.unit_price) }));
+            : item.courtesy_quantity
+                ? escapeHtml(window.AE.linePriceText(item, { courtesy_part: I18N.courtesy_part }))
+                : escapeHtml(fill(I18N.qty_price, { quantity: item.quantity, price: money(item.unit_price) }));
         return '<li class="ae-line">' + thumb(item) +
             '<span class="ae-line__text"><span class="ae-line__name">' + escapeHtml(name) + '</span>' +
             '<span class="ae-line__meta">' + detail + '</span></span>' +

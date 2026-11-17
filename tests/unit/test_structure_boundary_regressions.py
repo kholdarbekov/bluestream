@@ -20,6 +20,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "admin_bottles.py": 0,
     "admin_dispatch.py": 0,
     "admin_eta.py": 0,
+    "admin_price_changes.py": 0,
     "admin_reorder_reminders.py": 0,
     "admin_sales.py": 0,
     "admin_sales_pay.py": 0,

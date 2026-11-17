@@ -1,10 +1,15 @@
 """Sentry PII scrubbing for the Telegram bot process.
 
-Mirrors business_app/utils/sentry.py but standalone to keep the bot container
-free of backend imports. Scrubs the same SENSITIVE_KEYS plus Telegram-specific
-identifiers (phone, username, telegram_id) that are PII in our threat model.
+Key scrubbing mirrors business_app/utils/sentry.py but standalone to keep the
+bot container free of backend imports. Scrubs the same SENSITIVE_KEYS plus
+Telegram-specific identifiers (phone, username, telegram_id) that are PII in our
+threat model. A URL's password has no key, so `before_send` ends with
+`shared.url_redaction.redact_event_urls`, the same function the backend applies,
+which masks it in every string of the event (breadcrumb messages included).
 """
 from typing import Any, Dict, Optional
+
+from shared.url_redaction import redact_event_urls
 
 
 _SENSITIVE_SUBSTRINGS = (
@@ -55,4 +60,4 @@ def before_send(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) ->
         if isinstance(crumb.get('data'), dict):
             crumb['data'] = _scrub(crumb['data'])
 
-    return event
+    return redact_event_urls(event)

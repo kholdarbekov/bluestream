@@ -30,6 +30,7 @@ from business_app.services.public_offer_service import (
     public_price_range,
     size_search_terms,
     smallest_order_sentence,
+    upcoming_price_template,
 )
 from business_app.services.public_urls_service import STATIC_PUBLIC_PATHS, public_blog_paths, public_product_paths
 from business_app.services.token_service import TokenService
@@ -2761,6 +2762,7 @@ def public_loyalty_feed():
 # One composer per fact sentence: templates call the service's functions, they never fill the keys themselves.
 frontend_bp.add_app_template_global(price_sentence, name="offer_price_sentence")
 frontend_bp.add_app_template_global(smallest_order_sentence, name="offer_smallest_order_sentence")
+frontend_bp.add_app_template_global(upcoming_price_template, name="offer_upcoming_price_template")
 
 
 @frontend_bp.app_template_filter("format_price")

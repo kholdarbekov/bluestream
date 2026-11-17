@@ -24,7 +24,7 @@ from business_app.utils.payment_projection import (
 from business_app.models.order import Order, OrderItem, is_free_reward_item
 from business_app.utils.constants import SELF_SERVICE_ORDER_SOURCES
 from business_app.serializers.subscription_serializers import SkipReasonFields
-from business_app.serializers.types import MoneyFloat
+from business_app.serializers.types import ExpectedTotal, MoneyFloat
 
 
 class OrderItemSchema(BaseModel):
@@ -171,6 +171,8 @@ class CreateOrderRequest(BaseModel):
     loyalty_points_used: int = Field(default=0, ge=0)
     promo_code: Optional[str] = None
     reward_id: Optional[int] = Field(default=None, ge=1)
+    # `pricing.final_total` of the estimate the screen showed; a different total is refused 409 `price_changed`.
+    expected_total: Optional[ExpectedTotal] = None
     source: str = Field(default="web")
     special_instructions: Optional[str] = None
 
@@ -539,6 +541,29 @@ def format_order_items_summary(order: Optional[Order], limit: int = ORDER_ITEMS_
     return rendered
 
 
+def order_item_split(order_item: OrderItem) -> Dict[str, Any]:
+    """THE publisher of a stored order line's money (spec 2026-11-16 §5.7): `unit_price`, `discount_amount`,
+    `courtesy_quantity`, `courtesy_unit_price`, `regular_quantity` and `total_price`, as floats (or None).
+
+    Every surface that shows a stored line reads it (the order API, the order-edit history; an admin order detail that
+    shows the split must read it too), so a new or renamed field moves everywhere at once. It reads the STORED columns
+    and never recomputes them: a stored row is a fact, so a read publishes it even when `line_money` would refuse it,
+    and never fails. On a courtesy line `unit_price` x `quantity` is not `total_price`, so a client prints these and
+    never subtracts: `regular_quantity` is published for that reason.
+    """
+    courtesy_quantity = order_item.courtesy_quantity
+    return {
+        "unit_price": float(order_item.unit_price or 0),
+        "discount_amount": float(order_item.discount_amount or 0),
+        "courtesy_quantity": courtesy_quantity,
+        "courtesy_unit_price": (
+            float(order_item.courtesy_unit_price) if order_item.courtesy_unit_price is not None else None
+        ),
+        "regular_quantity": int(order_item.quantity) - courtesy_quantity if courtesy_quantity is not None else None,
+        "total_price": float(order_item.total_price or 0),
+    }
+
+
 def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
     """Serialize order item object"""
     try:
@@ -555,8 +580,7 @@ def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
             "product_image": images[0] if images else None,
             "product_sku": product.sku,
             "quantity": order_item.quantity,
-            "unit_price": float(order_item.unit_price),
-            "total_price": float(order_item.total_price),
+            **order_item_split(order_item),
             "is_reward": is_free_reward_item(order_item),
         }
     except Exception:
@@ -564,8 +588,7 @@ def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
             "id": order_item.id,
             "product_id": order_item.product_id,
             "quantity": order_item.quantity,
-            "unit_price": float(order_item.unit_price),
-            "total_price": float(order_item.total_price),
+            **order_item_split(order_item),
             "is_reward": is_free_reward_item(order_item),
         }
 
@@ -735,6 +758,45 @@ def serialize_order_statistics(stats_data: Dict[str, Any], period: str) -> Dict[
         "orders_by_status": stats_data.get("orders_by_status", {}),
         "top_products": stats_data.get("top_products", []),
         "monthly_spending_trend": {k: float(v) for k, v in stats_data.get("monthly_spending_trend", {}).items()},
+    }
+
+
+def serialize_order_quote(priced, *, courtesy_status) -> Dict[str, Any]:
+    """The admin basket quote: the priced lines with the courtesy split, the totals, the courtesy block and the
+    person's courtesy status. Every figure is the server's (a client prints, never subtracts)."""
+    from business_app.serializers.price_courtesy_serializers import serialize_courtesy_status, serialize_price_courtesy
+    from business_app.services.corporate_contract_service import PRICING_SOURCE_FALLBACK
+    from business_app.services.price_change.publication import upcoming_price_block
+
+    def _money(value):
+        return None if value is None else float(value)
+
+    return {
+        "items": [
+            {
+                "product_id": line["product_id"],
+                "product_name": line["product_name"],
+                "quantity": line["quantity"],
+                "unit_price": _money(line["unit_price"]),
+                "discount_amount": _money(line.get("discount_amount")),
+                "courtesy_quantity": line.get("courtesy_quantity"),
+                "courtesy_unit_price": _money(line.get("courtesy_unit_price")),
+                "regular_quantity": line.get("regular_quantity"),
+                "total_price": _money(line["total_price"]),
+                "is_contract_price": line["pricing_source"] != PRICING_SOURCE_FALLBACK,
+                # `PricedOrder.payment_method` is always resolved, so the line's own source decides.
+                "upcoming_price": upcoming_price_block(line["product_id"], pricing_source=line["pricing_source"]),
+            }
+            for line in priced.items
+        ],
+        "payment_method": priced.payment_method.value if priced.payment_method is not None else None,
+        "subtotal": _money(priced.subtotal),
+        "delivery_fee": _money(priced.delivery_fee),
+        "discount_amount": _money(priced.discount_amount),
+        "tier_discount": _money(priced.tier_discount),
+        "total_amount": _money(priced.total_amount),
+        "price_courtesy": serialize_price_courtesy(priced.courtesy_entry),
+        "courtesy_status": serialize_courtesy_status(courtesy_status),
     }
 
 

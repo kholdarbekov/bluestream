@@ -134,6 +134,7 @@
                             <span class="ae-co-line__body"><span class="ae-skeleton ae-skeleton--text"></span><span class="ae-skeleton ae-skeleton--text"></span></span>
                         </li>
                     </ul>
+                    <p class="ae-co__courtesy" id="summary-courtesy" hidden></p>
 
                     <dl class="ae-dl ae-dl--end ae-co__totals" aria-live="polite">
                         <div class="ae-dl__row">
@@ -165,6 +166,9 @@
                     <p class="ae-co__perk" id="summary-cod-savings-row" style="display: none;">
                         <i class="far fa-badge-percent" aria-hidden="true"></i><span id="summary-cod-savings"></span>
                     </p>
+
+                    {# The total moved while the page was open: checkout.js draws the new quote and says so here. #}
+                    <p class="ae-alert ae-alert--warn ae-co__notice" id="checkout-price-changed" role="status" tabindex="-1" hidden></p>
 
                     <div class="ae-alert ae-alert--warn ae-co__notice" id="min-order-warning" role="status" style="display: none;">
                         <span class="ae-alert__icon" aria-hidden="true"><i class="far fa-info-circle"></i></span>
@@ -233,6 +237,9 @@
     'i18n': {
         'free': 'web.checkout.co.free' | t,
         'calculating': 'web.checkout.co.calculating' | t,
+        'courtesy_part': 'web.shop.cart.courtesy_part' | t,
+        'courtesy_thanks': 'web.shop.cart.courtesy_thanks' | t,
+        'upcoming_price': offer_upcoming_price_template(current_language),
         'untitled_address': 'web.checkout.co.untitled_address' | t,
         'min_amount_title': 'web.checkout.co.min_amount_title' | t,
         'min_amount_text': 'web.checkout.co.min_amount_text' | t,
@@ -249,6 +256,7 @@
         'schedule_other': 'web.checkout.co.schedule_other' | t,
         'agree_terms': 'web.checkout.co.terms_error' | t,
         'place_order_failed': 'web.checkout.co.place_failed' | t,
+        'price_changed': 'web.checkout.co.price_changed' | t,
         'window_anytime': 'api.subscriptions.time.any_time' | t,
         'window_morning': 'web.checkout.window_morning' | t,
         'window_afternoon': 'web.checkout.window_afternoon' | t,

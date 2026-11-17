@@ -734,24 +734,24 @@ BACKEND_TRANSLATIONS = {
     # come from a cancelled CARD order, so calling the balance itself "COD" is
     # wrong at its source. Where it can be SPENT is the note above's job.
     'telegram.cart.cod_prepaid_balance': {
-        'en': '💳 Prepaid balance: {available_balance} UZS',
+        'en': '💳 Prepaid balance: {available_balance} so\'m',
         'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
         'ru': '💳 Предоплаченный остаток: {available_balance} сум'
     },
     'telegram.orders.cod_prepaid_balance': {
-        'en': '💳 Prepaid balance: {available_balance} UZS',
+        'en': '💳 Prepaid balance: {available_balance} so\'m',
         'uz': '💳 Oldindan to\'langan qoldiq: {available_balance} so\'m',
         'ru': '💳 Предоплаченный остаток: {available_balance} сум'
     },
     'telegram.cart.cod_prepaid_auto_applied_next': {
-        'en': '🔁 Applied automatically if you choose cash on delivery: {potential_applied} UZS',
+        'en': '🔁 Applied automatically if you choose cash on delivery: {potential_applied} so\'m',
         'uz': '🔁 Yetkazib berishda naqd to\'lashni tanlasangiz, avtomatik hisobga olinadi: '
               '{potential_applied} so\'m',
         'ru': '🔁 Будет зачтено автоматически, если выбрать оплату наличными при доставке: '
               '{potential_applied} сум'
     },
     'telegram.cart.cod_estimated_payable': {
-        'en': '🧾 Then you pay on delivery: {payable_after} UZS',
+        'en': '🧾 Then you pay on delivery: {payable_after} so\'m',
         'uz': '🧾 Shunda yetkazib berishda to\'laysiz: {payable_after} so\'m',
         'ru': '🧾 Тогда при доставке вы платите: {payable_after} сум'
     },
@@ -3889,9 +3889,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Вернуться в меню'
     },
     'telegram.payment.pay_message': {
-        'en': 'Order #{order_number}\nAmount: {amount} UZS\n\nPlease pay using the button below:',
-        'uz': 'Buyurtma №{order_number}\nMiqdor: {amount} UZS\n\nIltimos, quyidagi tugma orqali to\'lovni amalga oshiring:',
-        'ru': 'Заказ №{order_number}\nСумма: {amount} UZS\n\nПожалуйста, оплатите с помощью кнопки ниже:'
+        'en': 'Order #{order_number}\nAmount: {amount} so\'m\n\nPlease pay using the button below:',
+        'uz': 'Buyurtma №{order_number}\nMiqdor: {amount} so\'m\n\nIltimos, quyidagi tugma orqali to\'lovni amalga oshiring:',  # NATIVE-READ
+        'ru': 'Заказ №{order_number}\nСумма: {amount} сум\n\nПожалуйста, оплатите с помощью кнопки ниже:'  # NATIVE-READ
     },
     'telegram.payment.pay_btn': {
         'en': '💳 Pay',
@@ -4013,9 +4013,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Заказ #{0}'
     },
     'telegram.order.total': {
-        'en': 'Total: {0} UZS',
-        'uz': 'Jami: {0} UZS',
-        'ru': 'Итого: {0} UZS'
+        'en': 'Total: {0} so\'m',
+        'uz': 'Jami: {0} so\'m',  # NATIVE-READ
+        'ru': 'Итого: {0} сум'  # NATIVE-READ
     },
 
     # ============================================================================
@@ -4300,52 +4300,52 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Способ оплаты'
     },
     'telegram.orders.delivery_fee': {
-        'en': 'Delivery fee: {amount} UZS',
-        'uz': 'Yetkazib berish narxi: {amount} UZS',
-        'ru': 'Стоимость доставки: {amount} UZS'
+        'en': 'Delivery fee: {amount} so\'m',
+        'uz': 'Yetkazib berish narxi: {amount} so\'m',  # NATIVE-READ
+        'ru': 'Стоимость доставки: {amount} сум'  # NATIVE-READ
     },
     'telegram.orders.grand_total': {
-        'en': 'Grand total: {amount} UZS',
-        'uz': 'Umumiy summa: {amount} UZS',
-        'ru': 'Итого к оплате: {amount} UZS'
+        'en': 'Grand total: {amount} so\'m',
+        'uz': 'Umumiy summa: {amount} so\'m',  # NATIVE-READ
+        'ru': 'Итого к оплате: {amount} сум'  # NATIVE-READ
     },
 
     # Checkout quote block. Every figure is the server's; the RATE is always a
     # parameter, never literal copy — see docs/superpowers/specs/
     # 2026-08-27-loyalty-tier-cod-discount-design.md §2.
     'telegram.orders.estimate_discount_line': {
-        'en': 'Discount: −{amount} UZS',
-        'uz': 'Chegirma: −{amount} UZS',
-        'ru': 'Скидка: −{amount} UZS'
+        'en': 'Discount: −{amount} so\'m',
+        'uz': 'Chegirma: −{amount} so\'m',  # NATIVE-READ
+        'ru': 'Скидка: −{amount} сум'  # NATIVE-READ
     },
     'telegram.orders.estimate_reward_line': {
-        'en': 'Reward: −{amount} UZS',
-        'uz': 'Mukofot: −{amount} UZS',
-        'ru': 'Награда: −{amount} UZS'
+        'en': 'Reward: −{amount} so\'m',
+        'uz': 'Mukofot: −{amount} so\'m',  # NATIVE-READ
+        'ru': 'Награда: −{amount} сум'  # NATIVE-READ
     },
     'telegram.orders.estimate_tier_line': {
-        'en': '{tier_name} bot discount −{percentage}% 🏷 — −{amount} UZS',
-        'uz': '{tier_name} bot chegirmasi −{percentage}% 🏷 — −{amount} UZS',
-        'ru': 'Скидка {tier_name} в боте −{percentage}% 🏷 — −{amount} UZS'
+        'en': '{tier_name} bot discount −{percentage}% 🏷 — −{amount} so\'m',
+        'uz': '{tier_name} bot chegirmasi −{percentage}% 🏷 — −{amount} so\'m',  # NATIVE-READ
+        'ru': 'Скидка {tier_name} в боте −{percentage}% 🏷 — −{amount} сум'  # NATIVE-READ
     },
     # Order-details / order-placed screens (MessageBuilder.build_order_summary).
     # The order payload carries tier_discount but not tier_name or
     # tier_discount_percentage (see business_app/serializers/order_serializers.py),
     # so — unlike estimate_tier_line above — this line needs only the amount.
     'telegram.orders.order_tier_discount_line': {
-        'en': '🏷 Tier discount (bot & website perk) — −{amount} UZS',
-        'uz': '🏷 Daraja chegirmasi (bot va sayt bonusi) — −{amount} UZS',
-        'ru': '🏷 Скидка уровня (бонус бота и сайта) — −{amount} UZS'
+        'en': '🏷 Tier discount (bot & website perk) — −{amount} so\'m',
+        'uz': '🏷 Daraja chegirmasi (bot va sayt bonusi) — −{amount} so\'m',  # NATIVE-READ
+        'ru': '🏷 Скидка уровня (бонус бота и сайта) — −{amount} сум'  # NATIVE-READ
     },
     'telegram.orders.detail_paid_line': {
-        'en': '✅ Paid: {amount} UZS',
-        'uz': '✅ To\'langan: {amount} UZS',
-        'ru': '✅ Оплачено: {amount} UZS'
+        'en': '✅ Paid: {amount} so\'m',
+        'uz': '✅ To\'langan: {amount} so\'m',  # NATIVE-READ
+        'ru': '✅ Оплачено: {amount} сум'  # NATIVE-READ
     },
     'telegram.orders.detail_to_pay_line': {
-        'en': '💵 To pay: {amount} UZS',
-        'uz': '💵 To\'lash kerak: {amount} UZS',
-        'ru': '💵 К оплате: {amount} UZS'
+        'en': '💵 To pay: {amount} so\'m',
+        'uz': '💵 To\'lash kerak: {amount} so\'m',  # NATIVE-READ
+        'ru': '💵 К оплате: {amount} сум'  # NATIVE-READ
     },
     # `{icon}` is presentation, chosen by the rail (💰 cash / 💳 card /
     # 🏦 bank transfer) — never the rail's NAME. The name is already stated
@@ -4355,27 +4355,27 @@ BACKEND_TRANSLATIONS = {
     # The confirm screen's prepaid balance (owner 2026-10-23): a deduction under the discounts,
     # and what is left of the balance after the order. Same term as telegram.orders.cod_prepaid_balance.
     'telegram.orders.estimate_prepaid_line': {
-        'en': 'Prepaid balance — −{amount} UZS',
-        'uz': 'Oldindan to\'langan qoldiq — −{amount} UZS',
-        'ru': 'Предоплаченный остаток — −{amount} UZS'
+        'en': 'Prepaid balance — −{amount} so\'m',
+        'uz': 'Oldindan to\'langan qoldiq — −{amount} so\'m',  # NATIVE-READ
+        'ru': 'Предоплаченный остаток — −{amount} сум'  # NATIVE-READ
     },
     'telegram.orders.estimate_prepaid_balance_after': {
-        'en': '💳 Prepaid balance after this order: {amount} UZS',
-        'uz': '💳 Ushbu buyurtmadan so\'ng oldindan to\'langan qoldiq: {amount} UZS',
-        'ru': '💳 Предоплаченный остаток после этого заказа: {amount} UZS'
+        'en': '💳 Prepaid balance after this order: {amount} so\'m',
+        'uz': '💳 Ushbu buyurtmadan so\'ng oldindan to\'langan qoldiq: {amount} so\'m',  # NATIVE-READ
+        'ru': '💳 Предоплаченный остаток после этого заказа: {amount} сум'  # NATIVE-READ
     },
     'telegram.orders.estimate_payable': {
-        'en': '{icon} To pay: {amount} UZS',
-        'uz': '{icon} To\'lash: {amount} UZS',
-        'ru': '{icon} К оплате: {amount} UZS'
+        'en': '{icon} To pay: {amount} so\'m',
+        'uz': '{icon} To\'lash: {amount} so\'m',  # NATIVE-READ
+        'ru': '{icon} К оплате: {amount} сум'  # NATIVE-READ
     },
     # The payment-method PICKER's neutral total (owner screenshot review): the
     # basket's plain, undiscounted total, shown before any rail is chosen —
     # never the discounted `estimate_payable` figure.
     'telegram.orders.estimate_neutral_total': {
-        'en': 'Total: {amount} UZS',
-        'uz': 'Jami: {amount} UZS',
-        'ru': 'Итого: {amount} UZS'
+        'en': 'Total: {amount} so\'m',
+        'uz': 'Jami: {amount} so\'m',  # NATIVE-READ
+        'ru': 'Итого: {amount} сум'  # NATIVE-READ
     },
     # UNUSED as of the owner's screenshot review: the card confirm screen no
     # longer renders this pitch (it read as confusing after the rail was
@@ -4383,9 +4383,9 @@ BACKEND_TRANSLATIONS = {
     # instead. Row left in place — seeding is a deploy step, not a code
     # change, and this key stays harmless if some future screen wants it.
     'telegram.orders.estimate_cod_savings': {
-        'en': '💵 Pay cash on delivery and save {amount} UZS',
-        'uz': '💵 Yetkazib berishda naqd to\'lasangiz {amount} UZS tejaysiz',
-        'ru': '💵 Оплатите наличными при доставке и сэкономьте {amount} UZS'
+        'en': '💵 Pay cash on delivery and save {amount} so\'m',
+        'uz': '💵 Yetkazib berishda naqd to\'lasangiz {amount} so\'m tejaysiz',  # NATIVE-READ
+        'ru': '💵 Оплатите наличными при доставке и сэкономьте {amount} сум'  # NATIVE-READ
     },
 
     # Web checkout summary. These are English SOURCE strings: the `| t` filter in
@@ -5939,9 +5939,9 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Ваша корзина пуста. Добавьте воду, чтобы начать!'
     },
     'telegram.cart_min_order_warning': {
-        'en': 'Minimum order is {min_amount} UZS. Add {remaining} UZS more to check out.',
-        'uz': 'Eng kam buyurtma {min_amount} UZS. Buyurtma berish uchun yana {remaining} UZS qo\'shing.',
-        'ru': 'Минимальный заказ — {min_amount} UZS. Добавьте ещё {remaining} UZS для оформления.'
+        'en': 'Minimum order is {min_amount} so\'m. Add {remaining} so\'m more to check out.',
+        'uz': 'Eng kam buyurtma {min_amount} so\'m. Buyurtma berish uchun yana {remaining} so\'m qo\'shing.',  # NATIVE-READ
+        'ru': 'Минимальный заказ — {min_amount} сум. Добавьте ещё {remaining} сум для оформления.'  # NATIVE-READ
     },
     'telegram.cart_min_qty_warning': {
         'en': '{product_name}: minimum order quantity is {min_qty}, add {remaining} more',
@@ -5956,9 +5956,9 @@ BACKEND_TRANSLATIONS = {
     # The quantity screen's price line: the price of ONE item, so it is never read as the total
     # shown under the quantity (owner 2026-10-22).
     'telegram.products.unit_price_label': {
-        'en': 'Price: {price} UZS each',
-        'uz': 'Narxi: {price} UZS (1 dona)',
-        'ru': 'Цена: {price} UZS за 1 шт.'
+        'en': 'Price: {price} so\'m each',
+        'uz': 'Narxi: {price} so\'m (1 dona)',  # NATIVE-READ
+        'ru': 'Цена: {price} сум за 1 шт.'  # NATIVE-READ
     },
     'telegram.products.min_order_quantity_label': {
         'en': 'Minimum order: {min_qty}',
@@ -6012,7 +6012,7 @@ BACKEND_TRANSLATIONS = {
         'ru': 'Продолжить'
     },
     'telegram.currency.uzs': {
-        'en': 'UZS',
+        'en': 'so\'m',
         'uz': 'so\'m',
         'ru': 'сум'
     },
@@ -6235,7 +6235,7 @@ BACKEND_TRANSLATIONS = {
         'ru': 'нужно ещё +{points} AquaCoins'
     },
     'telegram.loyalty.lock_add_order': {
-        'en': 'add +{amount} UZS to your order',
+        'en': 'add +{amount} so\'m to your order',
         'uz': "buyurtmaga +{amount} so'm qo'shing",
         'ru': 'добавьте +{amount} сум к заказу'
     },
@@ -6751,7 +6751,7 @@ BACKEND_TRANSLATIONS = {
         'en': '🧾 <b>Order proposal {order_number}</b>\n\n'
               '{agent_name} prepared this order for <b>{outlet_name}</b>:\n'
               '📍 {address}\n{items}\n\n'
-              '💰 Total: {total} UZS\n🚚 Delivery: {delivery_date}\n\n'
+              '💰 Total: {total} so\'m\n🚚 Delivery: {delivery_date}\n\n'
               'Please confirm or decline.',
         'uz': '🧾 <b>{order_number} — buyurtma taklifi</b>\n\n'
               '{agent_name} <b>{outlet_name}</b> uchun quyidagi buyurtmani tayyorladi:\n'
@@ -6815,7 +6815,7 @@ BACKEND_TRANSLATIONS = {
     'telegram.customer_notice.order_created': {
         'en': '🗓 <b>Your subscription order {order_number} is placed</b>\n\n'
               '🚚 Delivery: {delivery}\n{items}\n\n'
-              '💰 Total: {total} UZS\n{payment}',
+              '💰 Total: {total} so\'m\n{payment}',
         'uz': '🗓 <b>Obuna bo\'yicha {order_number} buyurtmangiz yaratildi</b>\n\n'
               '🚚 Yetkazib berish: {delivery}\n{items}\n\n'
               '💰 Jami: {total} so\'m\n{payment}',
@@ -6853,12 +6853,12 @@ BACKEND_TRANSLATIONS = {
         'ru': '⚠️ Не включено: {name} (больше недоступно)'
     },
     'telegram.customer_notice.pay_cash': {
-        'en': '💵 Pay {amount} UZS to the driver at the door.',
+        'en': '💵 Pay {amount} so\'m to the driver at the door.',
         'uz': '💵 Kuryerga eshik oldida {amount} so\'m to\'laysiz.',
         'ru': '💵 Оплата курьеру при получении: {amount} сум.'
     },
     'telegram.customer_notice.pay_cash_prepaid': {
-        'en': '💳 {amount} UZS of your prepaid balance is applied.',
+        'en': '💳 {amount} so\'m of your prepaid balance is applied.',
         'uz': '💳 Oldindan to\'lov balansingizdan {amount} so\'m hisobga olindi.',
         'ru': '💳 Учтено {amount} сум с вашего предоплаченного баланса.'
     },
@@ -6938,12 +6938,66 @@ BACKEND_TRANSLATIONS = {
     },
     # A prepaid-balance return recorded by an admin (spec 2026-11-10 P8). No buttons.
     'telegram.customer_notice.prepayment_returned': {
-        'en': '✅ We returned {amount} UZS of your prepaid balance to you.\n'
-              '💳 Prepaid balance now: {balance} UZS',
+        'en': '✅ We returned {amount} so\'m of your prepaid balance to you.\n'
+              '💳 Prepaid balance now: {balance} so\'m',
         'uz': '✅ Oldindan to\'langan qoldig\'ingizdan {amount} so\'m sizga qaytarildi.\n'
               '💳 Oldindan to\'langan qoldiq endi: {balance} so\'m',
         'ru': '✅ Мы вернули вам {amount} сум из предоплаченного остатка.\n'
               '💳 Предоплаченный остаток теперь: {balance} сум'
+    },
+    # The price change (spec 2026-11-16 §5.3): the announcement, its reminder, one price line, the subscriber
+    # sentence. No buttons, no digits, no courtesy mention; "so'm" / "сум" is typed beside {price} because the
+    # bot's format_price prints only the number. Orders placed before the date keep today's price.
+    # OWNER-APPROVE: the "Why" sentence (a true reason) in all three languages. NATIVE-READ: uz and ru.
+    'telegram.customer_notice.price_change_announcement': {
+        'en': '💧 <b>Our prices change on {date}</b>\n\n'
+              'From {date}, our water will cost:\n{items}\n\n'
+              'Why: it costs us more to bring you your water. Electricity for purification, fuel for delivery, '  # OWNER-APPROVE
+              'our team\'s wages and new bottles all cost more than they did.\n\n'  # OWNER-APPROVE
+              'What stays the same: free delivery, the bottle exchange, your AquaCoins and your tier discount.\n\n'
+              'Every order placed before {date} keeps today\'s price, even if it is delivered later.\n\n'
+              'Thank you for staying with us.',
+        'uz': '💧 <b>{date} dan narxlarimiz o\'zgaradi</b>\n\n'  # NATIVE-READ
+              '{date} dan boshlab suvimiz narxi:\n{items}\n\n'  # NATIVE-READ
+              'Sababi: suvni sizga yetkazib berish bizga qimmatroq tushmoqda. Tozalash uchun elektr energiyasi, '  # NATIVE-READ OWNER-APPROVE
+              'yetkazib berish uchun yoqilg\'i, jamoamiz ish haqi va yangi idishlar avvalgidan qimmatlashdi.\n\n'  # NATIVE-READ OWNER-APPROVE
+              'O\'zgarmaydi: bepul yetkazib berish, idish almashinuvi, AquaCoins va daraja chegirmangiz.\n\n'  # NATIVE-READ
+              '{date} dan oldin berilgan har bir buyurtma, keyinroq yetkazilsa ham, bugungi narxda qoladi.\n\n'  # NATIVE-READ
+              'Biz bilan qolganingiz uchun rahmat.',  # NATIVE-READ
+        'ru': '💧 <b>С {date} меняются наши цены</b>\n\n'  # NATIVE-READ
+              'С {date} наша вода будет стоить:\n{items}\n\n'  # NATIVE-READ
+              'Почему: доставлять вам воду стало дороже. Электроэнергия для очистки, топливо для доставки, '  # NATIVE-READ OWNER-APPROVE
+              'зарплаты нашей команды и новые бутыли стоят больше, чем раньше.\n\n'  # NATIVE-READ OWNER-APPROVE
+              'Без изменений: бесплатная доставка, обмен бутылей, ваши AquaCoins и скидка уровня.\n\n'  # NATIVE-READ
+              'Все заказы, оформленные до {date}, сохраняют сегодняшнюю цену, даже если доставка будет позже.\n\n'  # NATIVE-READ
+              'Спасибо, что вы с нами.'  # NATIVE-READ
+    },
+    'telegram.customer_notice.price_change_reminder': {
+        'en': '💧 <b>A reminder: our prices change on {date}</b>\n\n'
+              'From {date}, our water will cost:\n{items}\n\n'
+              'Orders placed before {date} keep today\'s price. Free delivery, the bottle exchange, your AquaCoins '
+              'and your tier discount stay as they are.\n\n'
+              'Thank you for staying with us.',
+        'uz': '💧 <b>Eslatma: {date} dan narxlarimiz o\'zgaradi</b>\n\n'  # NATIVE-READ
+              '{date} dan boshlab suvimiz narxi:\n{items}\n\n'  # NATIVE-READ
+              '{date} dan oldin berilgan buyurtmalar bugungi narxda qoladi. Bepul yetkazib berish, idish '  # NATIVE-READ
+              'almashinuvi, AquaCoins va daraja chegirmangiz o\'zgarmaydi.\n\n'  # NATIVE-READ
+              'Biz bilan qolganingiz uchun rahmat.',  # NATIVE-READ
+        'ru': '💧 <b>Напоминаем: с {date} меняются наши цены</b>\n\n'  # NATIVE-READ
+              'С {date} наша вода будет стоить:\n{items}\n\n'  # NATIVE-READ
+              'Заказы, оформленные до {date}, сохраняют сегодняшнюю цену. Бесплатная доставка, обмен бутылей, '  # NATIVE-READ
+              'ваши AquaCoins и скидка уровня остаются прежними.\n\n'  # NATIVE-READ
+              'Спасибо, что вы с нами.'  # NATIVE-READ
+    },
+    'telegram.customer_notice.price_change_item': {
+        'en': '• {name}: {price} so\'m',
+        'uz': '• {name}: {price} so\'m',  # NATIVE-READ
+        'ru': '• {name}: {price} сум'  # NATIVE-READ
+    },
+    'telegram.customer_notice.price_change_subscriber': {
+        'en': '🔁 For your subscription, orders created from {date} are at the new price.',
+        'uz': '🔁 Obunangiz bo\'yicha {date} dan boshlab yaratiladigan buyurtmalar yangi narxda bo\'ladi.',  # NATIVE-READ
+        'ru': '🔁 Заказы по вашей подписке, созданные с {date}, будут по новой цене.'  # NATIVE-READ
     },
 
 }
@@ -13169,6 +13223,11 @@ OFFER_BLOCK_TRANSLATIONS = {
         'uz': 'Qaytariladigan idish uchun garov puli yo‘q: bo‘sh idishni kuryer keyingi yetkazib berishda almashtirib oladi.',  # NATIVE-READ
         'ru': 'Залога за возвратную бутыль нет: пустую бутыль курьер заберёт при следующей доставке.',  # NATIVE-READ
     },
+    'landing.offer.upcoming_price': {
+        'en': 'From {date}: {price}.',
+        'uz': '{date}dan boshlab: {price}.',  # NATIVE-READ
+        'ru': 'С {date}: {price}.',  # NATIVE-READ
+    },
     'landing.offer.free_delivery': {
         'en': 'Delivery is free.',
         'uz': 'Yetkazib berish bepul.',  # NATIVE-READ
@@ -13368,6 +13427,524 @@ ORDER_AND_TERMS_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(ORDER_AND_TERMS_TRANSLATIONS)
+
+# The customer bot's price-change copy (Tasks 45-47). Prices and dates are placeholders the server's
+# fields fill; no digit, no typed currency word, no pressure.
+PRICE_CHANGE_BOT_TRANSLATIONS = {
+    'telegram.price_change.upcoming_line': {
+        'en': 'From {date}: {price} each',
+        'uz': '{date} dan boshlab: {price} (1 dona)',  # NATIVE-READ
+        'ru': 'С {date}: {price} за 1 шт.',  # NATIVE-READ
+    },
+    'telegram.price_change.courtesy_split': {
+        'en': '{courtesy_qty} × {courtesy_price} (your price, kept for you) + {regular_qty} × {regular_price}',
+        'uz': '{courtesy_qty} × {courtesy_price} (sizning narxingiz, siz uchun saqlab qoldik) + {regular_qty} × {regular_price}',  # NATIVE-READ
+        'ru': '{courtesy_qty} × {courtesy_price} (ваша цена, сохранили для вас) + {regular_qty} × {regular_price}',  # NATIVE-READ
+    },
+    'telegram.price_change.courtesy_only': {
+        'en': '{courtesy_qty} × {courtesy_price} (your price, kept for you)',
+        'uz': '{courtesy_qty} × {courtesy_price} (sizning narxingiz, siz uchun saqlab qoldik)',  # NATIVE-READ
+        'ru': '{courtesy_qty} × {courtesy_price} (ваша цена, сохранили для вас)',  # NATIVE-READ
+    },
+    'telegram.price_change.courtesy_thanks': {
+        'en': '💙 Thank you for staying with us: we kept your earlier price for this order.',
+        'uz': '💙 Biz bilan qolganingiz uchun rahmat: bu buyurtma uchun avvalgi narxingizni saqlab qoldik.',  # NATIVE-READ
+        'ru': '💙 Спасибо, что вы с нами: для этого заказа мы сохранили вашу прежнюю цену.',  # NATIVE-READ
+    },
+    'telegram.price_change.price_changed_note': {
+        'en': 'ℹ️ Your order total was updated while this screen was open. Please check the figures below and confirm.',
+        'uz': "ℹ️ Bu oyna ochiq turganda buyurtmangiz summasi yangilandi. Quyidagi raqamlarni tekshirib, tasdiqlang.",  # NATIVE-READ
+        'ru': 'ℹ️ Пока этот экран был открыт, сумма заказа обновилась. Проверьте цифры ниже и подтвердите.',  # NATIVE-READ
+    },
+}
+BACKEND_TRANSLATIONS.update(PRICE_CHANGE_BOT_TRANSLATIONS)
+
+# The price-change admin UI's copy (Tasks 53-57), one dict: the page, its drawer and the menu item. Every English
+# line is the call site's fallback byte for byte; prices and dates arrive from the server, so no copy types a price
+# or a currency word.
+ADMIN_UI_PRICE_CHANGE_TRANSLATIONS = {
+    'ui.nav.price_changes': _ui_tr(
+        'Price changes',
+        "Narx o'zgarishlari",  # NATIVE-READ
+        'Изменения цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.title': _ui_tr(
+        'Price changes',
+        "Narx o'zgarishlari",  # NATIVE-READ
+        'Изменения цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.hint': _ui_tr(
+        'Schedule a price change and tell customers ahead of time. New prices start at 00:00 Tashkent time on the change date.',
+        "Narx o'zgarishini rejalashtiring va mijozlarga oldindan xabar bering. Yangi narxlar o'zgarish sanasida Toshkent vaqti bilan 00:00 da kuchga kiradi.",  # NATIVE-READ
+        'Запланируйте изменение цен и заранее сообщите клиентам. Новые цены начинают действовать в 00:00 по ташкентскому времени в день изменения.',  # NATIVE-READ
+    ),
+    'ui.price_changes.empty': _ui_tr(
+        'No price changes yet',
+        "Hozircha narx o'zgarishlari yo'q",  # NATIVE-READ
+        'Изменений цен пока нет',  # NATIVE-READ
+    ),
+    'ui.price_changes.list_failed': _ui_tr(
+        'Could not load the price changes',
+        "Narx o'zgarishlarini yuklab bo'lmadi",  # NATIVE-READ
+        'Не удалось загрузить изменения цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.load_failed': _ui_tr(
+        'Could not load this price change',
+        "Bu narx o'zgarishini yuklab bo'lmadi",  # NATIVE-READ
+        'Не удалось загрузить это изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.details': _ui_tr(
+        'Details',
+        'Batafsil',  # NATIVE-READ
+        'Подробнее',  # NATIVE-READ
+    ),
+    'ui.price_changes.drawer_title': _ui_tr(
+        'Price change',
+        "Narx o'zgarishi",  # NATIVE-READ
+        'Изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_stage': _ui_tr(
+        'Stage',
+        'Bosqich',  # NATIVE-READ
+        'Этап',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_announce_on': _ui_tr(
+        'Announcement',
+        "E'lon",  # NATIVE-READ
+        'Объявление',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_change_on': _ui_tr(
+        'New prices from',
+        'Yangi narxlar',  # NATIVE-READ
+        'Новые цены с',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_products': _ui_tr(
+        'Products',
+        'Mahsulotlar',  # NATIVE-READ
+        'Товары',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.scheduled': _ui_tr(
+        'Scheduled',
+        'Rejalashtirilgan',  # NATIVE-READ
+        'Запланировано',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.announcing': _ui_tr(
+        'Announcing',
+        "E'lon qilinmoqda",  # NATIVE-READ
+        'Объявляется',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.announced': _ui_tr(
+        'Announced',
+        "E'lon qilingan",  # NATIVE-READ
+        'Объявлено',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.reminded': _ui_tr(
+        'Reminder sent',
+        'Eslatma yuborilgan',  # NATIVE-READ
+        'Напоминание отправлено',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.applied': _ui_tr(
+        'New prices in effect',
+        'Yangi narxlar kuchda',  # NATIVE-READ
+        'Новые цены действуют',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.window_closed': _ui_tr(
+        'Old-price window closed',
+        'Eski narx muddati tugagan',  # NATIVE-READ
+        'Срок старой цены закрыт',  # NATIVE-READ
+    ),
+    'ui.price_changes.stage.cancelled': _ui_tr(
+        'Cancelled',
+        'Bekor qilingan',  # NATIVE-READ
+        'Отменено',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancelled_by': _ui_tr(
+        'Cancelled by {{name}} on {{at}}',
+        '{{name}} tomonidan {{at}} da bekor qilingan',  # NATIVE-READ
+        'Отменил(а) {{name}}, {{at}}',  # NATIVE-READ
+    ),
+    'ui.price_changes.timeline': _ui_tr(
+        'Timeline',
+        'Jadval',  # NATIVE-READ
+        'Хронология',  # NATIVE-READ
+    ),
+    'ui.price_changes.step_announcement': _ui_tr(
+        'Announcement',
+        "E'lon",  # NATIVE-READ
+        'Объявление',  # NATIVE-READ
+    ),
+    'ui.price_changes.step_reminder': _ui_tr(
+        'Reminder',
+        'Eslatma',  # NATIVE-READ
+        'Напоминание',  # NATIVE-READ
+    ),
+    'ui.price_changes.step_new_prices': _ui_tr(
+        'New prices',
+        'Yangi narxlar',  # NATIVE-READ
+        'Новые цены',  # NATIVE-READ
+    ),
+    'ui.price_changes.step_old_price_orders': _ui_tr(
+        'Old-price orders until',
+        'Eski narxdagi buyurtmalar muddati',  # NATIVE-READ
+        'Заказы по старой цене до',  # NATIVE-READ
+    ),
+    'ui.price_changes.step_done': _ui_tr(
+        'Done {{at}}',
+        'Bajarildi: {{at}}',  # NATIVE-READ
+        'Выполнено: {{at}}',  # NATIVE-READ
+    ),
+    'ui.price_changes.products': _ui_tr(
+        'Products',
+        'Mahsulotlar',  # NATIVE-READ
+        'Товары',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_product': _ui_tr(
+        'Product',
+        'Mahsulot',  # NATIVE-READ
+        'Товар',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_price_now': _ui_tr(
+        'Price now',
+        'Hozirgi narx',  # NATIVE-READ
+        'Цена сейчас',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_new_price': _ui_tr(
+        'New price',
+        'Yangi narx',  # NATIVE-READ
+        'Новая цена',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_old_price': _ui_tr(
+        'Old price',
+        'Eski narx',  # NATIVE-READ
+        'Старая цена',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_cap': _ui_tr(
+        'Old-price units per order',
+        'Bir buyurtmada eski narxdagi dona',  # NATIVE-READ
+        'Единиц по старой цене в заказе',  # NATIVE-READ
+    ),
+    'ui.price_changes.notices': _ui_tr(
+        'Notices',
+        'Xabarlar',  # NATIVE-READ
+        'Уведомления',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_notice': _ui_tr(
+        'Notice',
+        'Xabar',  # NATIVE-READ
+        'Уведомление',  # NATIVE-READ
+    ),
+    'ui.price_changes.notice_announcement': _ui_tr(
+        'Announcement',
+        "E'lon",  # NATIVE-READ
+        'Объявление',  # NATIVE-READ
+    ),
+    'ui.price_changes.notice_reminder': _ui_tr(
+        'Reminder',
+        'Eslatma',  # NATIVE-READ
+        'Напоминание',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_telegram': _ui_tr(
+        'Telegram',
+        'Telegram',  # NATIVE-READ
+        'Telegram',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_email': _ui_tr(
+        'Email',
+        'Email',  # NATIVE-READ
+        'Email',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_none': _ui_tr(
+        'Could not reach',
+        "Yetkazib bo'lmadi",  # NATIVE-READ
+        'Не удалось связаться',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_queued': _ui_tr(
+        'Waiting to send',
+        'Yuborilishi kutilmoqda',  # NATIVE-READ
+        'Ожидает отправки',  # NATIVE-READ
+    ),
+    'ui.price_changes.eligible': _ui_tr(
+        'Customers who keep their price',
+        'Narxi saqlanadigan mijozlar',  # NATIVE-READ
+        'Клиенты, сохраняющие цену',  # NATIVE-READ
+    ),
+    'ui.price_changes.courtesy_used': _ui_tr(
+        'Orders that used it',
+        'Undan foydalangan buyurtmalar',  # NATIVE-READ
+        'Заказы, использовавшие её',  # NATIVE-READ
+    ),
+    'ui.price_changes.exceptions': _ui_tr(
+        'Exceptions granted',
+        'Berilgan istisnolar',  # NATIVE-READ
+        'Предоставлено исключений',  # NATIVE-READ
+    ),
+    'ui.price_changes.unreachable': _ui_tr(
+        'Customers we could not reach',
+        'Xabar yetmagan mijozlar',  # NATIVE-READ
+        'Клиенты, до которых не дошли',  # NATIVE-READ
+    ),
+    'ui.price_changes.unreachable_hint': _ui_tr(
+        'Call them between 09:00 and 18:00, or ask the driver to tell them at the door.',
+        "Ularga 09:00 va 18:00 oralig'ida qo'ng'iroq qiling yoki haydovchidan eshik oldida aytishini so'rang.",  # NATIVE-READ
+        'Позвоните им с 09:00 до 18:00 или попросите водителя сообщить у двери.',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_name': _ui_tr(
+        'Name',
+        'Ism',  # NATIVE-READ
+        'Имя',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_phone': _ui_tr(
+        'Phone',
+        'Telefon',  # NATIVE-READ
+        'Телефон',  # NATIVE-READ
+    ),
+    'ui.price_changes.exceptions_title': _ui_tr(
+        'Manager exceptions',
+        'Menejer istisnolari',  # NATIVE-READ
+        'Исключения менеджера',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_customer': _ui_tr(
+        'Customer',
+        'Mijoz',  # NATIVE-READ
+        'Клиент',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_reason': _ui_tr(
+        'Reason',
+        'Sabab',  # NATIVE-READ
+        'Причина',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_granted_by': _ui_tr(
+        'Granted by',
+        'Bergan shaxs',  # NATIVE-READ
+        'Кто предоставил',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_granted_at': _ui_tr(
+        'Granted',
+        'Berilgan vaqt',  # NATIVE-READ
+        'Когда предоставлено',  # NATIVE-READ
+    ),
+    'ui.price_changes.col_used_order': _ui_tr(
+        'Used by order',
+        'Ishlatgan buyurtma',  # NATIVE-READ
+        'Использовано в заказе',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_change': _ui_tr(
+        'Cancel change',
+        "O'zgarishni bekor qilish",  # NATIVE-READ
+        'Отменить изменение',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_failed': _ui_tr(
+        'Could not cancel the price change',
+        "Narx o'zgarishini bekor qilib bo'lmadi",  # NATIVE-READ
+        'Не удалось отменить изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_keep': _ui_tr(
+        'Keep it',
+        'Qoldirish',  # NATIVE-READ
+        'Оставить',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_not_told': _ui_tr(
+        'Prices stay as they are. No customer has been told yet.',
+        "Narxlar o'zgarishsiz qoladi. Mijozlarga hali xabar berilmagan.",  # NATIVE-READ
+        'Цены останутся прежними. Клиентам ещё ничего не сообщали.',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_title': _ui_tr(
+        'Cancel this price change?',
+        "Bu narx o'zgarishini bekor qilasizmi?",  # NATIVE-READ
+        'Отменить это изменение цен?',  # NATIVE-READ
+    ),
+    'ui.price_changes.cancel_told': _ui_tr(
+        'Customers were already told about this change. Cancelling it sends them nothing, and prices stay as they are.',
+        "Mijozlarga bu o'zgarish haqida allaqachon xabar berilgan. Bekor qilish ularga hech narsa yubormaydi, narxlar esa o'zgarishsiz qoladi.",  # NATIVE-READ
+        'Клиентам уже сообщили об этом изменении. Отмена ничего им не отправит, а цены останутся прежними.',  # NATIVE-READ
+    ),
+    'ui.price_changes.edit': _ui_tr(
+        'Edit',
+        'Tahrirlash',  # NATIVE-READ
+        'Изменить',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.add_product': _ui_tr(
+        'Add product',
+        "Mahsulot qo'shish",  # NATIVE-READ
+        'Добавить товар',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.announce_on': _ui_tr(
+        'Announcement date',
+        'Xabar berish sanasi',  # NATIVE-READ
+        'Дата объявления',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.change_on': _ui_tr(
+        'New prices from',
+        'Yangi narxlar boshlanadigan sana',  # NATIVE-READ
+        'Новые цены с',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.courtesy_cap': _ui_tr(
+        'Old-price units per order',
+        'Bir buyurtmada eski narxdagi miqdor',  # NATIVE-READ
+        'Штук по старой цене в одном заказе',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.courtesy_days': _ui_tr(
+        'Old-price days after the change',
+        "O'zgarishdan keyin eski narx amal qiladigan kunlar",  # NATIVE-READ
+        'Дней старой цены после изменения',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.new_price': _ui_tr(
+        'New price',
+        'Yangi narx',  # NATIVE-READ
+        'Новая цена',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.product': _ui_tr(
+        'Product',
+        'Mahsulot',  # NATIVE-READ
+        'Товар',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.reminder_lead_days': _ui_tr(
+        'Reminder days before the change',
+        "O'zgarishdan necha kun oldin eslatma",  # NATIVE-READ
+        'За сколько дней до изменения напомнить',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.remove_product': _ui_tr(
+        'Remove',
+        "O'chirish",  # NATIVE-READ
+        'Удалить',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.required': _ui_tr(
+        'Required',
+        'Majburiy',  # NATIVE-READ
+        'Обязательно',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.save': _ui_tr(
+        'Save',
+        'Saqlash',  # NATIVE-READ
+        'Сохранить',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.save_failed': _ui_tr(
+        'Could not save the price change',
+        "Narx o'zgarishini saqlab bo'lmadi",  # NATIVE-READ
+        'Не удалось сохранить изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.form.title_edit': _ui_tr(
+        'Edit price change',
+        "Narx o'zgarishini tahrirlash",  # NATIVE-READ
+        'Изменить изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_changes.new': _ui_tr(
+        'New price change',
+        "Yangi narx o'zgarishi",  # NATIVE-READ
+        'Новое изменение цен',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.available': _ui_tr(
+        'Old price kept for this customer until {{date}}: {{caps}}',
+        'Bu mijoz uchun eski narx {{date}} gacha saqlanadi: {{caps}}',  # NATIVE-READ
+        'Для этого клиента старая цена сохраняется до {{date}}: {{caps}}',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.cap': _ui_tr(
+        'up to {{cap}} × {{product}}',
+        '{{cap}} tagacha × {{product}}',  # NATIVE-READ
+        'до {{cap}} × {{product}}',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.used': _ui_tr(
+        'Already used on order {{order_number}}',
+        'Allaqachon {{order_number}} buyurtmada ishlatilgan',  # NATIVE-READ
+        'Уже использовано в заказе {{order_number}}',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.title': _ui_tr(
+        'Old-price order',
+        'Eski narxdagi buyurtma',  # NATIVE-READ
+        'Заказ по старой цене',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.none': _ui_tr(
+        'No old-price order for this customer',
+        "Bu mijozda eski narxdagi buyurtma yo'q",  # NATIVE-READ
+        'У этого клиента нет заказа по старой цене',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.grant': _ui_tr(
+        'Give the old-price order',
+        'Eski narxdagi buyurtmani berish',  # NATIVE-READ
+        'Дать заказ по старой цене',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.grant_body': _ui_tr(
+        'One order at the old price, with the same limits and until the same day as everyone else. It works in every channel. Each customer can be given it once.',
+        'Eski narxda bitta buyurtma, boshqalar bilan bir xil cheklovlar va bir xil kungacha. U barcha kanallarda ishlaydi. Har bir mijozga uni faqat bir marta berish mumkin.',  # NATIVE-READ
+        'Один заказ по старой цене, с теми же ограничениями и до того же дня, что и у всех. Работает во всех каналах. Каждому клиенту его можно дать один раз.',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.reason': _ui_tr(
+        'Reason',
+        'Sabab',  # NATIVE-READ
+        'Причина',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.reason_placeholder': _ui_tr(
+        'Why this customer gets it',
+        'Nima uchun bu mijozga beriladi',  # NATIVE-READ
+        'Почему этот клиент получает его',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.granted': _ui_tr(
+        'Old-price order given',
+        'Eski narxdagi buyurtma berildi',  # NATIVE-READ
+        'Заказ по старой цене выдан',  # NATIVE-READ
+    ),
+    'ui.price_courtesy.grant_failed': _ui_tr(
+        'Could not give the old-price order',
+        "Eski narxdagi buyurtmani berib bo'lmadi",  # NATIVE-READ
+        'Не удалось дать заказ по старой цене',  # NATIVE-READ
+    ),
+    'ui.order_quote.upcoming': _ui_tr(
+        'From {{date}}: {{price}}',
+        '{{date}} dan: {{price}}',  # NATIVE-READ
+        'С {{date}}: {{price}}',  # NATIVE-READ
+    ),
+    'ui.order_quote.subtotal': _ui_tr(
+        'Subtotal',
+        'Oraliq summa',  # NATIVE-READ
+        'Подытог',  # NATIVE-READ
+    ),
+    'ui.order_quote.delivery_fee': _ui_tr(
+        'Delivery fee',
+        'Yetkazib berish haqi',  # NATIVE-READ
+        'Стоимость доставки',  # NATIVE-READ
+    ),
+    'ui.order_quote.tier_discount': _ui_tr(
+        'Tier discount',
+        'Daraja chegirmasi',  # NATIVE-READ
+        'Скидка по уровню',  # NATIVE-READ
+    ),
+    'ui.order_quote.total': _ui_tr(
+        'Total',
+        'Jami',  # NATIVE-READ
+        'Итого',  # NATIVE-READ
+    ),
+    'ui.order_quote.courtesy_applied': _ui_tr(
+        'The old price is kept on this order.',
+        'Bu buyurtmada eski narx saqlanadi.',  # NATIVE-READ
+        'В этом заказе сохраняется старая цена.',  # NATIVE-READ
+    ),
+    'ui.order_quote.price_changed': _ui_tr(
+        'The price changed since this screen was drawn. Check the new total, then create the order again.',
+        "Bu ekran chizilganidan beri narx o'zgardi. Yangi jami summani tekshiring, so'ng buyurtmani qayta yarating.",  # NATIVE-READ
+        'С момента отрисовки этого экрана цена изменилась. Проверьте новый итог и создайте заказ ещё раз.',  # NATIVE-READ
+    ),
+    'ui.order_quote.loading': _ui_tr(
+        'Pricing…',
+        'Narx hisoblanmoqda…',  # NATIVE-READ
+        'Расчёт цены…',  # NATIVE-READ
+    ),
+    'ui.order_quote.failed': _ui_tr(
+        'Could not price this basket',
+        "Bu savat narxini hisoblab bo'lmadi",  # NATIVE-READ
+        'Не удалось рассчитать цену этой корзины',  # NATIVE-READ
+    ),
+    'ui.price_changes.product_locked': _ui_tr(
+        'This price changes on {{date}} through a scheduled price change. Change it there.',
+        "Bu narx {{date}} sanasida rejalashtirilgan narx o'zgarishi orqali o'zgaradi. Uni o'sha yerda o'zgartiring.",  # NATIVE-READ
+        'Эта цена изменится {{date}} через запланированное изменение цен. Меняйте её там.',  # NATIVE-READ
+    ),
+    'ui.price_changes.open': _ui_tr(
+        'Open price changes',
+        "Narx o'zgarishlarini ochish",  # NATIVE-READ
+        'Открыть изменения цен',  # NATIVE-READ
+    ),
+}
+BACKEND_TRANSLATIONS.update(ADMIN_UI_PRICE_CHANGE_TRANSLATIONS)
 
 
 def main():

@@ -1,0 +1,43 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Our prices change on {{ effective_date }} - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Our prices change on {{ effective_date }}</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>From {{ effective_date }}, our water will cost:</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Product</th>
+        <td><strong>New price</strong></td>
+    </tr>
+    {% for price in prices %}
+    <tr>
+        <th>{{ price.name }}</th>
+        <td>{{ price.new_price }} so'm</td>
+    </tr>
+    {% endfor %}
+</table>
+
+{# OWNER-APPROVE #}
+<p>Why: it costs us more to bring you your water. Electricity for purification, fuel for delivery, our team's wages and new bottles all cost more than they did.</p>
+<p>What stays the same: free delivery, the bottle exchange, your AquaCoins and your tier discount.</p>
+<p>Every order placed before {{ effective_date }} keeps today's price, even if it is delivered later.</p>
+{% if is_subscriber %}
+<p>For your subscription, orders created from {{ effective_date }} are at the new price.</p>
+{% endif %}
+<p>Thank you for staying with us.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Questions? Message us in our Telegram bot: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

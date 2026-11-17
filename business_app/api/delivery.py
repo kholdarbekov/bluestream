@@ -23,11 +23,9 @@ from business_app.serializers.delivery_serializers import (
     serialize_delivery,
     serialize_delivery_list,
 )
-from business_app.utils.decorators import validate_json, rate_limit
+from business_app.utils.decorators import validate_json
 from shared.enums import DeliveryStatus, UserRole
 from business_app.tasks.delivery_tasks import (
-    track_delivery_location_task,
-    calculate_delivery_eta_task,
     handle_delivery_exception_task,
     process_delivery_confirmation_task,
 )
@@ -425,51 +423,6 @@ def get_driver_assignments():
     except Exception as e:
         current_app.logger.error(f"Get driver assignments error: {e}")
         return jsonify({"error": get_translation("api.delivery.error.get_assignments_failed")}), 500
-
-
-@delivery_bp.route("/driver/update-location", methods=["POST"])
-@jwt_required()
-@validate_json(["lat", "lng"])
-@rate_limit(30, 60)  # Allow frequent location updates (30 requests per 60 seconds)
-def update_driver_location():
-    """Update driver's current location"""
-    try:
-        current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
-        if not user:
-            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
-
-        role_value = user.role.value if hasattr(user.role, "value") else user.role
-        if role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({"error": get_translation("api.delivery.error.driver_role_required")}), 403
-
-        data = request.get_json()
-        lat = data.get("lat")
-        lng = data.get("lng")
-
-        # Validate coordinates
-        if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-            return jsonify({"error": get_translation("api.delivery.error.invalid_coordinates")}), 400
-
-        # Get active deliveries for this driver
-        active_deliveries = (
-            Delivery.query.filter_by(delivery_person_id=current_user_id)
-            .filter(Delivery.status.in_([DeliveryStatus.ASSIGNED, DeliveryStatus.IN_TRANSIT]))
-            .all()
-        )
-
-        # Update location for all active deliveries
-        for delivery in active_deliveries:
-            track_delivery_location_task.delay(delivery.id, lat, lng)
-
-            # Calculate new ETA
-            calculate_delivery_eta_task.delay(delivery.id)
-
-        return jsonify({"message": get_translation("api.delivery.location_updated_successfully")})
-
-    except Exception as e:
-        current_app.logger.error(f"Update driver location error: {e}")
-        return jsonify({"error": get_translation("api.delivery.error.update_location_failed")}), 500
 
 
 @delivery_bp.route("/driver/start-delivery/<int:delivery_id>", methods=["POST"])

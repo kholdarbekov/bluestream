@@ -9,7 +9,7 @@ import ipaddress
 import logging
 import math
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from aiohttp import web
@@ -59,6 +59,13 @@ _NOTICE_PAID_ORDER_KEPT = 'subscription_paid_order_kept'
 _NOTICE_PAYMENT_EXPIRED = 'order_payment_expired'
 _NOTICE_SCHEDULE_CHANGED = 'subscription_schedule_changed'
 _NOTICE_PREPAYMENT_RETURNED = 'prepayment_returned'
+# The price-change announcement and its reminder (spec 2026-11-16 §5.3): one body, two copies. No buttons.
+_NOTICE_PRICE_CHANGE_ANNOUNCEMENT = 'price_change_announcement'
+_NOTICE_PRICE_CHANGE_REMINDER = 'price_change_reminder'
+_PRICE_CHANGE_KEYS = {
+    _NOTICE_PRICE_CHANGE_ANNOUNCEMENT: 'telegram.customer_notice.price_change_announcement',
+    _NOTICE_PRICE_CHANGE_REMINDER: 'telegram.customer_notice.price_change_reminder',
+}
 _CUSTOMER_NOTICE_KINDS = frozenset(
     {
         _NOTICE_ORDER_CREATED,
@@ -67,6 +74,8 @@ _CUSTOMER_NOTICE_KINDS = frozenset(
         _NOTICE_PAYMENT_EXPIRED,
         _NOTICE_SCHEDULE_CHANGED,
         _NOTICE_PREPAYMENT_RETURNED,
+        _NOTICE_PRICE_CHANGE_ANNOUNCEMENT,
+        _NOTICE_PRICE_CHANGE_REMINDER,
     }
 )
 # A paid order that stays: one copy per action that kept it (spec 2026-10-23 §2.7).
@@ -200,6 +209,8 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         for field in ('amount', 'balance'):
             if not _is_number(data.get(field)):
                 return f"{field} must be a number, not {data.get(field)!r}"
+    if data['kind'] in _PRICE_CHANGE_KEYS:
+        return _price_change_problem(data)
     if data['kind'] == _NOTICE_PAID_ORDER_KEPT and data.get('trigger') not in _PAID_ORDER_KEPT_KEYS:
         return f"Unknown trigger: {data.get('trigger')!r}"
     if data['kind'] == _NOTICE_SCHEDULE_CHANGED:
@@ -215,6 +226,23 @@ def _customer_notice_problem(data: dict) -> Optional[str]:
         removed = data.get('removed_weekdays', [])
         if not isinstance(removed, list) or not all(_is_weekday(day) for day in removed):
             return f"removed_weekdays must be a list of weekdays 0-6, not {removed!r}"
+    return None
+
+
+def _price_change_problem(data: dict) -> Optional[str]:
+    """Why a price-change payload cannot be rendered, or None: a date the bot can print, at least one product
+    with a numeric new price, and the subscriber answer as a real boolean."""
+    try:
+        date.fromisoformat(str(data.get('effective_date')))
+    except ValueError:
+        return f"effective_date must be an ISO date, not {data.get('effective_date')!r}"
+    prices = data.get('prices')
+    if not isinstance(prices, list) or not prices or not all(
+        isinstance(item, dict) and _is_number(item.get('new_price')) for item in prices
+    ):
+        return f"prices must be a list of {{name, new_price}} with numeric prices, not {prices!r}"
+    if not isinstance(data.get('is_subscriber'), bool):
+        return f"is_subscriber must be true or false, not {data.get('is_subscriber')!r}"
     return None
 
 
@@ -382,6 +410,19 @@ def _customer_notice_text(language: str, data: dict) -> str:
             amount=format_price(float(data['amount'])),
             balance=format_price(float(data['balance'])),
         )
+    if kind in _PRICE_CHANGE_KEYS:
+        when = format_date(data['effective_date'])
+        items = '\n'.join(
+            i18n.get(
+                'telegram.customer_notice.price_change_item', language,
+                name=_html_escaped(item.get('name')), price=format_price(float(item['new_price'])),
+            )
+            for item in data['prices']
+        )
+        text = i18n.get(_PRICE_CHANGE_KEYS[kind], language, date=when, items=items)
+        if data['is_subscriber']:
+            text = f"{text}\n\n" + i18n.get('telegram.customer_notice.price_change_subscriber', language, date=when)
+        return text
     return i18n.get(
         'telegram.customer_notice.payment_expired', language,
         order_number=_html_escaped(data.get('order_number')),
@@ -804,7 +845,6 @@ class WebhookServer:
             order_id = data.get('order_id')
             order_number = data.get('order_number')
             amount = data.get('amount')
-            currency = data.get('currency', 'UZS')
 
             if not user_id or not order_id:
                 return web.json_response({
@@ -852,7 +892,7 @@ class WebhookServer:
                     language,
                     order_number=order_number or str(order_id),
                     amount=f"{amount:,.0f}",
-                    currency=currency
+                    currency=i18n.get('telegram.currency.uzs', language)
                 )
                 # The constant's whole sentences, plain text: `OrderHandlers._delivery_statement_block`'s expression,
                 # written inline because this server does not import the handlers.
@@ -1449,7 +1489,8 @@ class WebhookServer:
             "notice_id": "subscription-log:41",   # stable across the backend's retries: one message per id
             "kind": "subscription_order_created", # | subscription_delivery_skipped | subscription_paid_order_kept
                                                   # | order_payment_expired | subscription_schedule_changed
-                                                  # | prepayment_returned (no buttons)
+                                                  # | prepayment_returned | price_change_announcement
+                                                  # | price_change_reminder (no buttons)
             "telegram_id": "810000001",
             "language": "ru",                     # resolved by the backend; never read from the customer here
             ... the kind's facts (business_app/services/customer_notices.py documents each set) ...

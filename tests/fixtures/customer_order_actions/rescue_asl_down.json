@@ -7,6 +7,7 @@
    "delivery_notes": null,
    "delivery_window_end": null,
    "delivery_window_start": null,
+   "expected_total": 30000.0,
    "items": [
     {
      "product_id": 1,

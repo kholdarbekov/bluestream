@@ -13,6 +13,10 @@
 // open today) are page data `schedule` (delivery_window.schedule_date_bounds / checkout_windows). The quote carries
 // the day and window and refuses a schedule the order would refuse (`error_code` SCHEDULE_*); the page says it at
 // the field and holds the order back. It keeps no clock and no window table of its own.
+//
+// The order carries `expected_total`, the quote's `pricing.final_total` the customer was looking at (the cash rescue
+// sends none). When the total moved while the page was open the server refuses with 409 `price_changed` and the new
+// quote: the page draws that quote, says so, and leaves the order to a new tap, which sends the new total.
 (function () {
     var PAGE_DATA = getPageData();
     var I18N = PAGE_DATA.i18n || {};
@@ -181,14 +185,22 @@
             var productImages = (product.media && product.media.images) || product.images || [];
             var productImage = productImages.length > 0 ? productImages[0] : PAGE_DATA.default_image;
             var name = product.name || line.product_name;
-            var qty = quoted ? line.quantity + ' × ' + formatPrice(line.unit_price) : '× ' + line.quantity;
+            // The server's figures only: the units as it priced them (a courtesy line names its kept units) and its
+            // line total; the dated coming price, when one is published, sits under the line.
+            var qty = quoted
+                ? window.AE.linePriceText(line, { courtesy_part: I18N.courtesy_part })
+                : '× ' + line.quantity;
+            var upcoming = quoted ? window.AE.upcomingPriceText(line.upcoming_price, I18N.upcoming_price) : '';
             return '<li class="ae-co-line">' +
                 '<img class="ae-co-line__thumb" src="' + escapeHtml(productImage) + '" alt="" width="56" height="56" loading="lazy" data-fallback>' +
                 '<span class="ae-co-line__body">' +
                 '<span class="ae-co-line__name">' + escapeHtml(name) + '</span>' +
                 '<span class="ae-co-line__qty">' + escapeHtml(qty) + '</span>' +
+                (upcoming
+                    ? '<span class="ae-co-line__upcoming" data-upcoming-price="' + escapeHtml(line.product_id) + '">' + escapeHtml(upcoming) + '</span>'
+                    : '') +
                 '</span>' +
-                '<span class="ae-co-line__total">' + (quoted ? escapeHtml(formatPrice(line.subtotal)) : '') + '</span>' +
+                '<span class="ae-co-line__total">' + (quoted ? escapeHtml(formatPrice(line.total_price)) : '') + '</span>' +
                 '</li>';
         }).join('');
         container.removeAttribute('aria-busy');
@@ -211,8 +223,17 @@
             .replace('{percent}', pricing.tier_discount_percentage);
     }
 
+    // The thank-you sentence when the server's quote kept the customer's earlier price (`price_courtesy.applied`).
+    function renderCourtesy() {
+        var note = $('summary-courtesy');
+        var applied = !!(currentEstimate && currentEstimate.price_courtesy && currentEstimate.price_courtesy.applied);
+        note.hidden = !applied;
+        note.textContent = applied ? I18N.courtesy_thanks : '';
+    }
+
     function renderEstimate() {
         renderSummaryItems();
+        renderCourtesy();
 
         var pricing = (currentEstimate && currentEstimate.pricing) || null;
         var unknown = '—';
@@ -514,7 +535,7 @@
     // ------------------------------------------------------------------ place the order
 
     function orderBody(method) {
-        return {
+        var body = {
             items: cartItems,
             delivery_address_id: selectedAddress,
             delivery_date: deliveryDate,
@@ -524,6 +545,9 @@
             delivery_notes: $('order-notes').value || null,
             source: 'web'
         };
+        // The total the customer is looking at; an order is only placeable on a quote, so it is always there.
+        if (currentEstimate && currentEstimate.pricing) body.expected_total = currentEstimate.pricing.final_total;
+        return body;
     }
 
     function releaseButton() {
@@ -546,7 +570,7 @@
             if (data.success) {
                 await clearCartAfterOrder();
                 window.location.href = '/order-confirmation?order_id=' + data.data.order.id;
-            } else if (!refusedSchedule(data)) {
+            } else if (!refusedSchedule(data) && !refusedPriceChange(data)) {
                 throw new Error(refusalMessage(data));
             }
         } catch (error) {
@@ -564,6 +588,24 @@
         renderOrderGate(null);
         var field = problem.field === 'date' ? $('delivery-date') : document.querySelector('#time-slots-container input:not(:disabled)');
         refuse('delivery-time-section', problem.field === 'date' ? 'delivery-date-error' : 'delivery-window-error', problem.text, field);
+        return true;
+    }
+
+    // The total moved since the quote on screen (the change took effect, or a courtesy was used up): the order is not
+    // placed. The refusal carries the new quote; it is drawn, the page says so, and a new tap sends the new total.
+    function refusedPriceChange(data) {
+        var refusal = data && data.data;
+        if (!refusal || refusal.reason_code !== 'STATE_CHANGED' || refusal.reason !== 'price_changed' || !refusal.quote) return false;
+        estimateSeq += 1;   // a quote still on its way is older than this one
+        currentEstimate = refusal.quote;
+        quoteRefusal = null;
+        renderEstimate();
+        showOverlay(false);
+        setPlaceDisabled(!orderAllowed);
+        var note = $('checkout-price-changed');
+        note.textContent = I18N.price_changed;
+        note.hidden = false;
+        if (note.focus) note.focus({ preventScroll: false });
         return true;
     }
 
@@ -602,7 +644,7 @@
                     words: PAGE_DATA.order_actions,
                     onRetry: placeOrderWithClick
                 });
-            } else if (!refusedSchedule(data)) {
+            } else if (!refusedSchedule(data) && !refusedPriceChange(data)) {
                 throw new Error(refusalMessage(data));
             }
         } catch (error) {
@@ -644,6 +686,7 @@
             return;
         }
 
+        $('checkout-price-changed').hidden = true;
         if (selectedPaymentMethod === 'click') {
             await placeOrderWithClick();
         } else {

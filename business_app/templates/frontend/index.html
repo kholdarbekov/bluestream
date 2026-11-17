@@ -4,7 +4,7 @@
     calm. Prices, sizes and smallest orders are the offer facts' (never typed here), and the delivery sentences are
     the SSOT's, printed whole. Styles: static/css/pages/home.css (scoped to .ae-home) and, for the subscription
     builder, static/css/subscription-constructor.css (scoped to #subscription-constructor). -#}
-{% from "frontend/partials/offer_facts.html" import offer_facts_block, offer_sized_label %}
+{% from "frontend/partials/offer_facts.html" import offer_facts_block, offer_sized_label, offer_upcoming_price %}
 {% from "frontend/partials/product_card.html" import product_card %}
 {#- Sign-in that brings the visitor back to the builder (login's `next`); the builder's note and script use it. #}
 {% set builder_sign_in_url = url_for('frontend.login', next=url_for('frontend.index') ~ '#subscription-constructor') %}
@@ -73,6 +73,7 @@
                         <span class="ae-home-prices__size">{{ p.size_text[lang] }}</span>
                         {%- endif %}
                         <span class="ae-home-prices__price ae-num">{{ p.price_text[lang] }}</span>
+                        {{ offer_upcoming_price(p, lang) }}
                         <span class="ae-home-prices__note">{{ offer_smallest_order_sentence(p, lang) }}</span>
                     </li>
                     {%- endfor %}

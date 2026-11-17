@@ -253,6 +253,13 @@ KEYS = (
     # now survives (a 5xx's `service_unavailable` is above).
     "staff.sales.error.mobile_required", "staff.sales.phone.closed",
     "staff.error.api.rate_limited",
+    # The announced price change on the visit's confirm card (tests/staff_bot/
+    # test_sales_visit_price_change_journey.py): the dated coming price, the
+    # kept-price split of a line and the outlet's courtesy status.
+    "staff.price_change.upcoming_line", "staff.price_change.courtesy_split",
+    "staff.price_change.courtesy_only", "staff.price_change.status_available",
+    "staff.price_change.status_cap_line", "staff.price_change.status_used",
+    "staff.price_change.price_changed_note",
 )
 
 

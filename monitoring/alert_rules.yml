@@ -224,6 +224,24 @@ groups:
             and the order is invisible to every debtor surface. Check the payment
             against the gateway, then settle or convert the rail.
 
+      # A due price change that is still SCHEDULED/ANNOUNCED ten minutes after its
+      # instant (00:00 Tashkent on change_on) was not applied. Measured on the web
+      # process's /metrics scrape, so a dead worker or beat still pages.
+      - alert: PriceChangeSwitchLate
+        expr: max(bluestream_price_change_overdue_seconds) > 600
+        for: 5m
+        labels:
+          severity: critical
+          area: pricing
+        annotations:
+          summary: "A due price change was not applied"
+          description: >-
+            A price change is past its change instant and still pending. Look for
+            price_change_apply_failed in the business_app/celery logs, and check
+            CeleryHeartbeatStale (a dead worker or beat applies nothing). A change
+            still scheduled was never announced and is held back: cancel or
+            reschedule it on the admin Price changes page.
+
       # Webhook idempotency hit rate too high = replay flood or misconfigured gateway.
       - alert: WebhookDuplicateFlood
         expr: rate(payment_webhook_duplicates_total[5m]) > rate(payment_webhook_total[5m]) * 0.5

@@ -36,6 +36,7 @@ from business_app.models import sales_visits  # noqa: F401, E402
 from business_app.models import sales_pay  # noqa: F401, E402
 from business_app.models import reorder_reminder  # noqa: F401, E402
 from business_app.models import shared_place_case  # noqa: F401, E402
+from business_app.models import price_change  # noqa: F401, E402
 from business_app.models.customer_link import (  # noqa: F401, E402
     AddressGroup,
     CanonicalCustomer,

@@ -237,7 +237,7 @@ class TestProductHandlerDeepFlows:
             chat_id=update.effective_user.id,
             text=(
                 "🛒 Water\n💰 telegram.products.unit_price_label:en\n"
-                "\ntelegram.quantity:en: 1\ntelegram.total:en: 1 × 15,000 = 15,000 UZS"
+                "\ntelegram.quantity:en: 1\ntelegram.total:en: 1 × 15,000 = 15,000 telegram.currency.uzs:en"
                 # An orderable product invites a typed quantity.
                 "\n\ntelegram.products.type_quantity_hint:en"
             ),

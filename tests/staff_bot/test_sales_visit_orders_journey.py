@@ -252,6 +252,7 @@ async def test_the_suggested_order_walks_straight_to_the_backend_body(monkeypatc
         "delivery_window_start": None,
         "delivery_window_end": None,
         "delivery_notes": None,
+        "expected_total": 300000.0,
     }]
     created = harness.telegram.shown[-2]
     assert "SA_000413_26" in created.text
@@ -381,6 +382,7 @@ async def test_changing_a_line_sends_the_changed_basket(monkeypatch):
         "delivery_window_start": None,
         "delivery_window_end": None,
         "delivery_notes": "Ring the side door",
+        "expected_total": 390000.0,
     }]
     assert _curated("staff.sales.visit.order_confirmed") in harness.telegram.shown[-2].text
 

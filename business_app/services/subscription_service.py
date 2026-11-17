@@ -1042,6 +1042,38 @@ class SubscriptionService:
         still priced when they are created."""
         return product.catalogue_unit_price
 
+    def reprice_items_for_products(self, product_ids: Iterable[int]) -> int:
+        """Bring the stored prices of live plans (ACTIVE, PAUSED) holding any of `product_ids` to the product's
+        customer price, after a price change moved it: the item's unit and total, then the plan's billing amount
+        (its discount stays in), the three steps an item edit takes. Cancelled and expired plans keep their figures.
+
+        The plans are locked FOR UPDATE by id (Postgres refuses FOR UPDATE with DISTINCT), and the caller commits.
+        Returns the number of plans refreshed."""
+        ids = {int(product_id) for product_id in product_ids}
+        if not ids:
+            return 0
+        holding = db.session.query(SubscriptionItem.subscription_id).filter(SubscriptionItem.product_id.in_(ids))
+        plans = (
+            Subscription.query.filter(
+                Subscription.id.in_(holding.distinct()), Subscription.status.in_(LIVE_SUBSCRIPTION_STATUSES)
+            )
+            .order_by(Subscription.id)
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        now = datetime.now(UTC)
+        for plan in plans:
+            for item in plan.subscription_items:
+                if item.product_id in ids:
+                    item.unit_price = self.customer_unit_price(item.product)
+                    item.calculate_total()
+            db.session.flush()
+            plan.billing_amount = plan.get_total_value()
+            plan.updated_at = now
+        db.session.flush()
+        return len(plans)
+
     @classmethod
     def line_labels(cls, product: Optional[Product], quantity: int) -> Dict[str, Any]:
         """One item line as the website shows it, saved (`subscription_items[]`) or drafted (the preview's

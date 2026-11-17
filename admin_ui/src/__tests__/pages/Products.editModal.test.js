@@ -70,6 +70,8 @@ const productRow = (overrides = {}) => ({
   category_id: 8,
   price: 18000,
   base_price: 18000,
+  catalogue_unit_price: 18000,
+  price_change_pending: null,
   stock_quantity: 24,
   min_order_quantity: 1,
   volume: 18.9,

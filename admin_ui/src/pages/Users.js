@@ -49,6 +49,7 @@ import staffService from '../services/staffService';
 import PayoutRows from '../components/prepayments/PayoutRows';
 import ReturnPrepaymentModal from '../components/prepayments/ReturnPrepaymentModal';
 import LinkedAccountsPanel from '../components/LinkedAccountsPanel';
+import PriceCourtesyPanel from '../components/priceChange/PriceCourtesyPanel';
 import PlaceGroupPanel from '../components/PlaceGroupPanel';
 import GroupedAddressesPanel from '../components/GroupedAddressesPanel';
 import SharedPlaceReportsPanel from '../components/sharedPlace/SharedPlaceReportsPanel';
@@ -1304,6 +1305,9 @@ const Users = () => {
 
             {/* Linked accounts (multi-phone customer linking) — the WHO axis */}
             <LinkedAccountsPanel user={selectedUser} />
+
+            {/* The old-price order kept after a price change (customers only) */}
+            {selectedUser.role === 'customer' && <PriceCourtesyPanel key={selectedUser.id} user={selectedUser} />}
 
             {/* Place groups (same physical place, may span customers) — the WHERE axis */}
             <PlaceGroupPanel

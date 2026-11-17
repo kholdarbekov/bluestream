@@ -24,7 +24,7 @@ class AdminBulkActionService:
     VALID_ACTIONS = {
         "user": ["activate", "deactivate", "suspend", "delete", "send_email", "assign_role"],
         "order": ["cancel", "confirm", "process", "mark_delivered"],
-        "product": ["activate", "deactivate", "delete", "update_stock", "update_price"],
+        "product": ["activate", "deactivate", "delete", "update_stock"],
         "review": ["approve", "reject", "delete", "feature"],
         "subscription": ["pause", "resume", "cancel"],
         "delivery": ["assign_driver", "mark_in_transit", "mark_delivered"],
@@ -267,15 +267,6 @@ class AdminBulkActionService:
                         product.stock_quantity = new_stock
                     else:
                         product.stock_quantity = (product.stock_quantity or 0) + stock_adjustment
-
-                elif action == "update_price":
-                    new_price = parameters.get("new_price")
-                    price_adjustment = parameters.get("price_adjustment", 0)
-
-                    if new_price is not None:
-                        product.price = new_price
-                    elif price_adjustment != 0:
-                        product.price = product.price + price_adjustment
 
                 db.session.commit()
                 success_count += 1

@@ -118,6 +118,7 @@ from business_app.utils.exceptions import (
     ConflictError,
     NotFoundError,
     ForbiddenError,
+    StateChangedError,
     AttachmentTooLargeError,
     AttachmentUnavailableError,
 )
@@ -131,6 +132,7 @@ from business_app.utils.api_responses import (
     internal_error_response,
     forbidden_response,
     conflict_response,
+    price_changed_response,
 )
 from business_app.utils.bot_webhook import trigger_translation_reload
 from business_app.utils.pydantic_helpers import dump_changes, validate_json_with_model
@@ -825,13 +827,13 @@ def get_admin_dashboard():
                 Product.id,
                 Product.name,
                 func.sum(OrderItem.quantity).label("units_sold"),
-                func.sum(OrderItem.unit_price * OrderItem.quantity).label("revenue"),
+                func.sum(OrderItem.total_price).label("revenue"),
             )
             .join(OrderItem, OrderItem.product_id == Product.id)
             .join(Order, Order.id == OrderItem.order_id)
             .filter(and_(Order.created_at >= current_start, Order.status != OrderStatus.CANCELLED.value))
             .group_by(Product.id, Product.name)
-            .order_by(func.sum(OrderItem.unit_price * OrderItem.quantity).desc())
+            .order_by(func.sum(OrderItem.total_price).desc())
             .limit(10)
             .all()
         )
@@ -1970,6 +1972,68 @@ def get_orders():
         return internal_error_response("Failed to get orders")
 
 
+_NO_ADDRESS = {"delivery_address_id": None, "street": None, "latitude": 0, "longitude": 0}
+
+
+def _admin_order_request(data, *, require_address: bool):
+    """The order an operator's body describes, or the refusal response: `(order_data, None)` / `(None, response)`.
+
+    ONE reading of the create body for `create_order_for_user` and the basket quote, so the quote prices exactly the
+    order the create would place. A quote (`require_address=False`) may have no address yet and prices on a placeholder
+    one; an address that is given must still belong to the user. Schedule keys are the create route's alone."""
+    user_id = data.get("user_id")
+    items = data.get("items", [])
+    delivery_address_id = data.get("delivery_address_id")
+
+    user = User.query.get(user_id)
+    if not user:
+        return None, not_found_response(resource_type="User")
+
+    status_value = user.status.value if hasattr(user.status, "value") else user.status
+    if status_value != UserStatus.ACTIVE.value:
+        return None, validation_error_response("Cannot create order for inactive user")
+
+    delivery_address = dict(_NO_ADDRESS)
+    if require_address or delivery_address_id is not None:
+        address: UserAddress = UserAddress.query.filter_by(id=delivery_address_id, user_id=user_id).first()
+        if not address:
+            return None, validation_error_response("Invalid delivery address for this user")
+        delivery_address = {
+            "delivery_address_id": delivery_address_id,
+            "street": address.street_address,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+        }
+
+    if not items or len(items) == 0:
+        return None, validation_error_response("At least one item is required")
+
+    order_data = {
+        "items": items,
+        "delivery_address": delivery_address,
+        # No hardcoded default: create_order resolves an unspecified method
+        # (business_account for qualifying workplace orders, else None).
+        "payment_method": data.get("payment_method"),
+        "consume_marking_codes": bool(data.get("consume_marking_codes", False)),
+        "delivery_notes": data.get("delivery_notes", ""),
+        "expected_total": data.get("expected_total"),
+        "order_source": "admin",
+    }
+    return order_data, None
+
+
+def _admin_quote_payload(user_id, order_data) -> dict:
+    """The quote the operator screen shows for `order_data`: priced by the one pricing the create charges, plus the
+    person's courtesy status."""
+    from business_app.serializers.order_serializers import serialize_order_quote
+    from business_app.services.order_service import OrderService
+    from business_app.services.price_change.courtesy import courtesy_status
+    from business_app.utils.timezone_utils import get_utc_now
+
+    priced = OrderService().quote_order(user_id, order_data)
+    return serialize_order_quote(priced, courtesy_status=courtesy_status(user_id, at=get_utc_now()))
+
+
 @admin_bp.route("/orders", methods=["POST"])
 @jwt_required()
 @staff_or_higher_required
@@ -1991,19 +2055,14 @@ def create_order_for_user():
       workplace orders, otherwise None)
     - delivery_notes: Special delivery instructions
     - consume_marking_codes: only applies to business_account orders; default false
+    - expected_total: the total the screen showed (the quote's `total_amount`); a different total is refused
+      409 STATE_CHANGED with the new quote
     """
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
 
         user_id = data.get("user_id")
-        items = data.get("items", [])
-        delivery_address_id = data.get("delivery_address_id")
-        # No hardcoded default: create_order resolves an unspecified method
-        # (business_account for qualifying workplace orders, else None).
-        payment_method = data.get("payment_method")
-        delivery_notes = data.get("delivery_notes", "")
-        consume_marking_codes = bool(data.get("consume_marking_codes", False))
 
         # A future date + an open-ended window. Parsed and validated by the one
         # helper the web checkout uses too, so the operator screen and the web
@@ -2018,47 +2077,24 @@ def create_order_for_user():
         if schedule_errors:
             return validation_error_response(schedule_errors)
 
-        # Validate user exists
-        user = User.query.get(user_id)
-        if not user:
-            return not_found_response(resource_type="User")
-
-        # Validate user status
-        status_value = user.status.value if hasattr(user.status, "value") else user.status
-        if status_value != UserStatus.ACTIVE.value:
-            return validation_error_response("Cannot create order for inactive user")
-
-        # Validate address exists and belongs to user
-        address: UserAddress = UserAddress.query.filter_by(id=delivery_address_id, user_id=user_id).first()
-        if not address:
-            return validation_error_response("Invalid delivery address for this user")
-
-        # Validate items
-        if not items or len(items) == 0:
-            return validation_error_response("At least one item is required")
+        order_data, refusal = _admin_order_request(data, require_address=True)
+        if refusal is not None:
+            return refusal
 
         # Use OrderService to create the order
         from business_app.services.order_service import OrderService
 
         order_service = OrderService()
 
-        order_data = {
-            "items": items,
-            "delivery_address": {
-                "delivery_address_id": delivery_address_id,
-                "street": address.street_address,
-                "latitude": address.latitude,
-                "longitude": address.longitude,
-            },
-            "payment_method": payment_method,
-            "consume_marking_codes": consume_marking_codes,
-            "delivery_notes": delivery_notes,
-            "delivery_date": delivery_date,
-            "delivery_window_start": window_start,
-            "delivery_window_end": window_end,
-            "order_source": "admin",
-            "created_by_staff_id": current_user_id,
-        }
+        order_data.update(
+            {
+                "delivery_date": delivery_date,
+                "delivery_window_start": window_start,
+                "delivery_window_end": window_end,
+                "created_by_staff_id": current_user_id,
+            }
+        )
+        payment_method = order_data["payment_method"]
 
         order = order_service.create_order(user_id, order_data)
 
@@ -2079,10 +2115,35 @@ def create_order_for_user():
         # fields such as min_amount, published for the staff bot), which the
         # admin modal would show verbatim as "min_amount: 20000.0".
         return validation_error_response(e.validation_errors or [e.message], error_code=e.error_code)
+    except StateChangedError as e:
+        # The shown total no longer holds: refuse, with the quote the screen must show now. The helper rolls back.
+        return price_changed_response(e, lambda: _admin_quote_payload(user_id, order_data), envelope="staff")
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create order for user error: {e}")
         return internal_error_response(f"Failed to create order: {str(e)}")
+
+
+@admin_bp.route("/orders/quote", methods=["POST"])
+@jwt_required()
+@staff_or_higher_required
+@validate_json(["user_id", "items"])
+def create_order_quote():
+    """Quote the basket an operator is building: the lines with the price-change courtesy split, the totals and the
+    person's courtesy status. Writes and locks nothing. Body: the create body; `delivery_address_id` is optional and
+    the schedule keys are ignored. Refusals are the create route's."""
+    try:
+        data = request.get_json()
+        order_data, refusal = _admin_order_request(data, require_address=False)
+        if refusal is not None:
+            return refusal
+        return success_response(data=_admin_quote_payload(data.get("user_id"), order_data))
+    except ValidationError as e:
+        return validation_error_response(e.validation_errors or [e.message], error_code=e.error_code)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create order quote error: {e}")
+        return internal_error_response(f"Failed to quote order: {str(e)}")
 
 
 @admin_bp.route("/orders/<int:order_id>/status", methods=["PUT"])
@@ -2874,7 +2935,7 @@ def get_order_details(order_id):
         order_data["items"] = []
         order_data["items_summary"] = []  # For backward compatibility
         if order.order_items:
-            from business_app.serializers.order_serializers import is_free_reward_item
+            from business_app.serializers.order_serializers import is_free_reward_item, order_item_split
 
             for item in order.order_items:
                 item_data = {
@@ -2883,8 +2944,9 @@ def get_order_details(order_id):
                     "product_name": item.product.name if item.product else "Unknown",
                     "product_sku": item.product.sku if item.product else None,
                     "quantity": item.quantity,
-                    "unit_price": float(item.unit_price),
-                    "total_price": float(item.total_price),
+                    # The stored line's money, from its one publisher: unit_price, discount_amount, the courtesy
+                    # split (courtesy_quantity, courtesy_unit_price, regular_quantity) and total_price.
+                    **order_item_split(item),
                     "is_reward": is_free_reward_item(item),
                 }
                 order_data["items"].append(item_data)
@@ -3317,6 +3379,21 @@ def update_product(product_id):
         # it reads the value the request is establishing, not the one it is
         # replacing -- a payload that turns marking codes off frees the stock field
         # in that same submit.
+        # A product held by a pending price change takes its price from that change only
+        # (spec 2026-11-16 §5.2). The modal echoes `price` on every save, so only an ACTUAL
+        # change is refused; a rename with the price echoed back still saves.
+        from business_app.services.price_change.schedule import (
+            PRICE_LOCKED_MESSAGE,
+            PRODUCT_PRICE_LOCKED_BY_PRICE_CHANGE,
+            PriceChangeService,
+            price_fields_changed,
+        )
+
+        if price_fields_changed(product, data) and PriceChangeService().blocks_direct_price_edit(product.id):
+            return validation_error_response(
+                errors={"price": PRICE_LOCKED_MESSAGE}, error_code=PRODUCT_PRICE_LOCKED_BY_PRICE_CHANGE
+            )
+
         stock_is_derived = ProductFiscalService.is_stock_derived(
             product, requires_marking_codes=data.get("requires_marking_codes")
         )

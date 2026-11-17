@@ -6,10 +6,8 @@ from unittest.mock import Mock, patch
 from flask_jwt_extended import create_access_token
 
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
-from business_app.models.user import UserAddress
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
 from business_app.services.staff_service import StaffService
-from business_app.tasks import delivery_tasks
 from shared.enums import DeliveryStatus
 def _driver_headers(app, user_id: int) -> dict:
     with app.app_context():
@@ -132,44 +130,3 @@ def test_admin_bulk_mark_in_transit_uses_delivery_service(db, admin_user, sample
     )
     assert result['success_count'] == 1
     assert result['failed_count'] == 0
-
-
-def test_track_delivery_location_task_marks_arrived_via_delivery_service(app, db, sample_order):
-    address = UserAddress(
-        user_id=sample_order.user_id,
-        title='Office',
-        full_address='Tashkent, Test Street 1',
-        street_address='Test Street 1',
-        latitude=41.31,
-        longitude=69.24,
-        is_default=True,
-    )
-    db.session.add(address)
-    db.session.flush()
-    sample_order.delivery_address_id = address.id
-    delivery = Delivery(
-        order_id=sample_order.id,
-        status=DeliveryStatus.IN_TRANSIT,
-        scheduled_date=datetime.now(UTC),
-        scheduled_time_slot='09:00-12:00',
-    )
-    db.session.add(delivery)
-    db.session.commit()
-
-    with (
-        app.app_context(),
-        patch('business_app.tasks.delivery_tasks.MapsService') as maps_service_cls,
-        patch('business_app.tasks.delivery_tasks.DeliveryService') as delivery_service_cls,
-    ):
-        maps_service_cls.return_value.calculate_distance.return_value = 0.05
-        delivery_service_cls.return_value.mark_delivery_arrived.return_value = delivery
-
-        result = delivery_tasks.track_delivery_location_task.run(delivery.id, 41.30, 69.20)
-
-    delivery_service_cls.return_value.mark_delivery_arrived.assert_called_once_with(
-        delivery.id,
-        actor_user_id=None,
-        notes='Automatically marked as arrived based on location tracking',
-        automatic=True,
-    )
-    assert result['success'] is True

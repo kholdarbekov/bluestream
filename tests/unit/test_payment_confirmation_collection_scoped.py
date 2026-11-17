@@ -165,9 +165,9 @@ def test_a_later_collection_on_the_same_order_quotes_only_itself(
 
     assert len(dispatched) == 2
     text = _run_task_and_capture_text(monkeypatch, dispatched[1])
-    assert "Amount: 40,000 UZS" in text
+    assert "Amount: 40,000 so'm" in text
     assert "Payment Confirmed!" in text
-    assert "60,000 UZS of the order was covered by your earlier payments." in text
+    assert "60,000 so'm of the order was covered by your earlier payments." in text
 
 
 def test_breakdown_without_an_event_describes_the_latest_collection(db, sample_user, admin_user, dispatched):

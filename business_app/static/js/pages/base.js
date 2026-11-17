@@ -488,6 +488,26 @@
         }
     }
 
+    // A line's units and unit money as the server priced it (a cart or quote line): "4 × 20 000 сум". A courtesy line
+    // names its kept units first, in `words.courtesy_part` ("{qty} × {price} (your price, kept for you)"), then the
+    // units at today's price. Server fields only (`regular_quantity` is published): nothing is subtracted here.
+    function linePriceText(line, words) {
+        if (!line.courtesy_quantity) return line.quantity + ' × ' + formatMoney(line.unit_price);
+        var kept = fill(words.courtesy_part, { qty: line.courtesy_quantity, price: formatMoney(line.courtesy_unit_price) });
+        return kept + (line.regular_quantity > 0 ? ' + ' + line.regular_quantity + ' × ' + formatMoney(line.unit_price) : '');
+    }
+
+    // The dated coming price ("From 1 February: 20 000 so'm.") from a price block the API served
+    // ({new_price, effective_date}), in `template` (landing.offer.upcoming_price, the server's own sentence); '' when
+    // no change is coming.
+    function upcomingPriceText(upcoming, template) {
+        if (!upcoming) return '';
+        return fill(template, {
+            date: formatDate(upcoming.effective_date, { year: undefined }),
+            price: formatMoney(upcoming.new_price)
+        });
+    }
+
     // A status pill's HTML (.ae-status). The label is the backend's published wording; the tone is its colour.
     function statusPill(label, tone) {
         var cssTone = STATUS_TONES[tone] || 'muted';
@@ -506,6 +526,8 @@
         fill: fill,
         formatMoney: formatMoney,
         formatDate: formatDate,
+        linePriceText: linePriceText,
+        upcomingPriceText: upcomingPriceText,
         statusPill: statusPill,
         imgFallback: imgFallback
     });

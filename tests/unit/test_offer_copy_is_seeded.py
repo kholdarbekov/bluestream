@@ -86,10 +86,16 @@ def test_no_offer_copy_types_a_digit():
 
 
 def test_two_fact_sentences_are_composed_only_in_the_service():
-    for literal in ("landing.offer.price_line", "landing.offer.smallest_order"):
+    for literal in ("landing.offer.price_line", "landing.offer.smallest_order", "landing.offer.upcoming_price"):
         owners = [
             path
             for path in [*TEMPLATES.rglob("*"), *(ROOT / "business_app").rglob("*.py")]
             if path.is_file() and path.suffix in {".html", ".txt", ".py"} and literal in path.read_text(encoding="utf-8")
         ]
         assert owners == [SERVICE], f"{literal} is composed in {owners}"
+
+
+def test_the_upcoming_price_line_is_seeded_with_date_and_price():
+    row = _offer_rows()["landing.offer.upcoming_price"]
+    for language in LANGS:
+        assert re.findall(r"{(\w+)}", row[language]) == ["date", "price"], language

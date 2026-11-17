@@ -142,6 +142,10 @@ fi
 # regenerate it (tests/contract/test_openapi_snapshot.py:21) simply would not
 # work through this runner. Empty means "not set": the test compares
 # `os.environ.get('UPDATE_API_SNAPSHOT') == '1'`, so forwarding "" is a no-op.
+# UPDATE_WEB_FIXTURES, UPDATE_CUSTOMER_ORDER_ACTIONS_FIXTURES, UPDATE_WEB_SUBSCRIPTION_FIXTURES,
+# UPDATE_CUSTOMER_NOTICE_FIXTURES and UPDATE_ACCOUNT_LOYALTY_FIXTURES (the fixture regenerators) are forwarded the
+# same way. tests/unit/test_test_runner_forwards_fixture_flags.py fails when a test reads an UPDATE_* name
+# this runner does not forward.
 #
 # SENTRY_DSN and SLACK_WEBHOOK_URL are blanked because tests never report to the
 # real Sentry or post to the real Slack alerts channel (owner rule 2026-11-10).
@@ -210,6 +214,11 @@ docker run --rm --init \
     -e SLACK_WEBHOOK_URL= \
     -e PLACE_COD_COLLECTION_ENABLED="${PLACE_COD_COLLECTION_ENABLED:-}" \
     -e UPDATE_API_SNAPSHOT="${UPDATE_API_SNAPSHOT:-}" \
+    -e UPDATE_WEB_FIXTURES="${UPDATE_WEB_FIXTURES:-}" \
+    -e UPDATE_CUSTOMER_ORDER_ACTIONS_FIXTURES="${UPDATE_CUSTOMER_ORDER_ACTIONS_FIXTURES:-}" \
+    -e UPDATE_WEB_SUBSCRIPTION_FIXTURES="${UPDATE_WEB_SUBSCRIPTION_FIXTURES:-}" \
+    -e UPDATE_CUSTOMER_NOTICE_FIXTURES="${UPDATE_CUSTOMER_NOTICE_FIXTURES:-}" \
+    -e UPDATE_ACCOUNT_LOYALTY_FIXTURES="${UPDATE_ACCOUNT_LOYALTY_FIXTURES:-}" \
     "${image}" \
     sh -c "python -c 'import xdist' 2>/dev/null || pip install -q pytest-xdist==3.6.1 pytest-timeout==2.3.1 >&2; pytest ${pytest_args}" \
     2>&1 | tee -a "${log_file}"

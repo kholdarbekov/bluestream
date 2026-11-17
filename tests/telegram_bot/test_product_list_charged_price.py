@@ -29,7 +29,7 @@ async def test_the_product_list_prints_the_discount_price_the_order_charges(
 ):
     set_price(db, offer_skus.p19, base=BASE, discount=Decimal("15000"))
     charged = float(offer_skus.p19.catalogue_unit_price)
-    bot = await build_bot_harness(monkeypatch)
+    bot = await build_bot_harness(monkeypatch, translations={("uz", "telegram.currency.uzs"): "so'm"})
     served: list[dict] = []
 
     def real_route(call):
@@ -47,7 +47,7 @@ async def test_the_product_list_prints_the_discount_price_the_order_charges(
     [product] = served
     assert product["pricing"]["current_price"] == charged == 15000.0
     shown = bot.telegram.last_shown()
-    assert f"💰 {format_price(charged)} UZS" in shown.text, shown.text
-    assert f"{product['name']} - {product['pricing']['current_price']} UZS" in shown.button_labels()
+    assert f"💰 {format_price(charged)} so'm" in shown.text, shown.text
+    assert f"{product['name']} - {format_price(product['pricing']['current_price'])} so'm" in shown.button_labels()
     for listed in (shown.text, *shown.button_labels()):
         assert format_price(float(BASE)) not in listed and str(float(BASE)) not in listed, listed

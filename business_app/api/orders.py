@@ -65,6 +65,7 @@ from business_app.utils.api_responses import (
     forbidden_response,
     internal_error_response,
     state_changed_response,
+    price_changed_response,
 )
 from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 from business_app import db
@@ -413,9 +414,14 @@ def create_order():
     try:
         current_user_id = get_jwt_identity()
 
+        # A body that is not a JSON object is the client's mistake, not a server fault
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return error_response(message=get_translation("api.orders.error.invalid_request_data"), status_code=400)
+
         # Validate request with Pydantic
         try:
-            order_request = CreateOrderRequest(**request.get_json())
+            order_request = CreateOrderRequest(**payload)
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
 
@@ -456,6 +462,7 @@ def create_order():
             "loyalty_points_used": order_request.loyalty_points_used,
             "promo_code": order_request.promo_code,
             "reward_id": order_request.reward_id,
+            "expected_total": order_request.expected_total,
             "order_source": order_request.source,
         }
 
@@ -575,6 +582,20 @@ def create_order():
 
     except NotFoundError:
         return not_found_response(message=get_translation("error.not_found"))
+    except StateChangedError as e:
+        # The total the screen showed has moved: the 409 carries the quote it must show now. The helper rolls back.
+        return price_changed_response(
+            e,
+            lambda: get_cart_service().calculate_cart_estimate(
+                user_id=current_user_id,
+                items=order_request.items,
+                delivery_address_id=order_request.delivery_address_id,
+                delivery_date=order_request.delivery_date,
+                payment_method=order_request.payment_method,
+                reward_id=order_request.reward_id,
+            ),
+            envelope="customer",
+        )
     except ValidationError as e:
         _rollback_session()
         return error_response(message=e.message, status_code=400)

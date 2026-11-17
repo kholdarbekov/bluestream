@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from business_app.services.order_edit_service import OrderEditService
+from business_app.utils.line_money import line_money
 
 
 @pytest.mark.unit
@@ -30,7 +31,15 @@ def test_order_edit_projection_is_rewards_only(app):
             tier_discount=Decimal("0"),
             loyalty_points_used=5,
         )
-        changes = [SimpleNamespace(direction="add", unit_price=Decimal("1000"), new_quantity=3)]
+        # A real _ItemChange also answers money() (Task 4's line-money rule); the stand-in delegates to the real one.
+        changes = [
+            SimpleNamespace(
+                direction="add",
+                unit_price=Decimal("1000"),
+                new_quantity=3,
+                money=lambda: line_money(Decimal("1000"), 3),
+            )
+        ]
 
         totals = svc._project_totals_after(order, changes)
 

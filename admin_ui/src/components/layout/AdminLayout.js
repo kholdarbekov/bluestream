@@ -32,7 +32,8 @@ import {
   MessageOutlined,
   ShopOutlined,
   SyncOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  RiseOutlined
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
@@ -82,6 +83,7 @@ const AdminLayout = ({ children }) => {
   const pendingApprovals = orderApprovalsBadge?.pending_count || 0;
   const canManageLapsedCustomers = hasPermission('can_manage_lapsed_customers');
   const canViewEtaAccuracy = hasPermission('can_view_eta_accuracy');
+  const canViewPriceChanges = hasPermission('can_view_price_changes');
   // Reorder-reminders spec §9.1: the badge is `summary.counts.follow_up`. It shares the page's
   // summary query key, so an outcome recorded there refreshes the badge too; polled every minute.
   const { data: lapsedSummary } = useQuery({
@@ -178,6 +180,11 @@ const AdminLayout = ({ children }) => {
       icon: <ProductOutlined />,
       label: t('ui.nav.products')
     },
+    ...(canViewPriceChanges ? [{
+      key: '/price-changes',
+      icon: <RiseOutlined />,
+      label: t('ui.nav.price_changes', 'Price changes')
+    }] : []),
     {
       key: '/marking-codes',
       icon: <BarcodeOutlined />,

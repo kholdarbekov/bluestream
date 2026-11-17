@@ -80,6 +80,9 @@ TRANSLATIONS = {
         "web.shop.cart.units_one": "{n} item",
         "web.shop.cart.units_other": "{n} items",
         "web.shop.cart.unit_price": "{price} each",
+        "web.shop.cart.calculating": "Calculating…",
+        "web.shop.cart.courtesy_part": "{qty} × {price} (your price, kept for you)",
+        "web.shop.cart.courtesy_thanks": "Thank you for staying with us: we kept your earlier price for this order.",
         "web.shop.cart.qty_label": "Quantity of {name}",
         "web.shop.cart.remove": "Remove {name}",
         "web.shop.cart.removed": "{name} was removed from your cart.",
@@ -167,6 +170,9 @@ TRANSLATIONS = {
         "web.shop.cart.units_one": "{n} шт.",
         "web.shop.cart.units_other": "{n} шт.",
         "web.shop.cart.unit_price": "{price} за шт.",
+        "web.shop.cart.calculating": "Считаем…",  # NATIVE-READ
+        "web.shop.cart.courtesy_part": "{qty} × {price} (ваша цена, сохранили для вас)",  # NATIVE-READ
+        "web.shop.cart.courtesy_thanks": "Спасибо, что вы с нами: для этого заказа мы сохранили вашу прежнюю цену.",  # NATIVE-READ
         "web.shop.cart.qty_label": "Количество: {name}",
         "web.shop.cart.remove": "Убрать «{name}»",
         "web.shop.cart.removed": "«{name}» убрали из корзины.",
@@ -254,6 +260,9 @@ TRANSLATIONS = {
         "web.shop.cart.units_one": "{n} dona",
         "web.shop.cart.units_other": "{n} dona",
         "web.shop.cart.unit_price": "Donasi {price}",
+        "web.shop.cart.calculating": "Hisoblanmoqda…",  # NATIVE-READ
+        "web.shop.cart.courtesy_part": "{qty} × {price} (sizning narxingiz, siz uchun saqlab qoldik)",  # NATIVE-READ
+        "web.shop.cart.courtesy_thanks": "Biz bilan qolganingiz uchun rahmat: bu buyurtma uchun avvalgi narxingizni saqlab qoldik.",  # NATIVE-READ
         "web.shop.cart.qty_label": "Miqdor: {name}",
         "web.shop.cart.remove": "«{name}»ni olib tashlash",
         "web.shop.cart.removed": "«{name}» savatdan olib tashlandi.",

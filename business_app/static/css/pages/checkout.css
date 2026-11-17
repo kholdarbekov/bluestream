@@ -184,6 +184,8 @@
 .ae-co-line__body { display: grid; gap: 2px; min-width: 0; }
 .ae-co-line__name { color: var(--ae-ink); font-size: 15px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .ae-co-line__qty { color: var(--ae-ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ae-co-line__upcoming { color: var(--ae-ink-soft); font-size: 13px; }
+.ae-co__courtesy { margin: 0 0 12px; color: var(--ae-ink-soft); font-size: 13px; line-height: 1.45; }
 .ae-co-line__total { color: var(--ae-ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ae-co-line--skeleton .ae-skeleton--text { width: 70%; }
 .ae-co__totals .ae-dl__row { grid-template-columns: minmax(0, 1fr) auto; }

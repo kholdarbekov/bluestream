@@ -29,6 +29,11 @@ from shared.validators import (
     normalize_phone_number,
 )
 from business_app.services.session_revocation_service import REVOKED_BY_PASSWORD_RESET, SessionRevocationService
+from business_app.services.price_change.permissions import (
+    PRICE_CHANGE_CANCEL_ANNOUNCED_PERMISSIONS,
+    PRICE_CHANGE_MANAGE_PERMISSIONS,
+    PRICE_CHANGE_VIEW_PERMISSIONS,
+)
 from business_app.services.shared_place.permissions import SHARED_PLACE_REVIEW_PERMISSIONS
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
 from business_app.utils.decorators import has_admin_permission
@@ -1642,6 +1647,10 @@ class AuthService:
             "can_view_eta_accuracy": False,
             # Shared-place reports (spec 2026-11-10 §4.7): derived below, never set by a role branch.
             "can_review_shared_places": False,
+            # Price changes (spec 2026-11-16 §5.2): derived below from the route guards' own tuples.
+            "can_view_price_changes": False,
+            "can_manage_price_changes": False,
+            "can_cancel_announced_price_changes": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1691,6 +1700,13 @@ class AuthService:
         # - can_review_shared_places: the Users page's Driver reports tab and the Users menu badge read it;
         #   `validate_admin_action(list(SHARED_PLACE_REVIEW_PERMISSIONS))` guards every /admin/shared-place-cases route.
         permissions["can_review_shared_places"] = has_admin_permission(user, SHARED_PLACE_REVIEW_PERMISSIONS)
+        # - the price-change flags: the Price changes page, its schedule/edit/cancel buttons and the announced-change
+        #   cancel read them; `validate_admin_action` over the same tuples guards every /admin/price-changes route.
+        permissions["can_view_price_changes"] = has_admin_permission(user, PRICE_CHANGE_VIEW_PERMISSIONS)
+        permissions["can_manage_price_changes"] = has_admin_permission(user, PRICE_CHANGE_MANAGE_PERMISSIONS)
+        permissions["can_cancel_announced_price_changes"] = has_admin_permission(
+            user, PRICE_CHANGE_CANCEL_ANNOUNCED_PERMISSIONS
+        )
 
         return permissions
 

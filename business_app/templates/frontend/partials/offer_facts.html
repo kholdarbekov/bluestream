@@ -13,6 +13,7 @@
             {%- if p.list_price_text %}
             <span data-offer-line="list-price">{{ 'landing.offer.list_price'|t(language, price=p.list_price_text[language]) }}</span>
             {%- endif %}
+            {{ offer_upcoming_price(p, language) }}
             <span data-offer-line="smallest-order">{{ offer_smallest_order_sentence(p, language) }}</span>
             {%- if p.no_deposit %}
             <span data-offer-line="no-deposit">{{ 'landing.offer.no_deposit'|t(language) }}</span>
@@ -26,6 +27,12 @@
     <p data-offer-line="as-of">{{ offer_as_of(facts.as_of, language) }}</p>
 </section>
 {%- endif %}
+{%- endmacro %}
+
+{#- The dated coming price ("From 1 February: 20 000 so'm."), only while a change is announced for the product: the
+    sentence is composed by the server (`upcoming_line` in the offer facts). Plain text, never struck through. -#}
+{% macro offer_upcoming_price(p, language) -%}
+    {%- if p.upcoming_line %}<span class="ae-upcoming-price" data-upcoming-price="{{ p.id }}">{{ p.upcoming_line[language] }}</span>{% endif -%}
 {%- endmacro %}
 
 {#- A product photo's alt or a product link's label from copy with a {size} slot ("Aqua Element {size} bottle"): the

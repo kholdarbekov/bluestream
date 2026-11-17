@@ -183,9 +183,15 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     def vat_percent(self):
         return self.fiscal_profile.vat_percent if self.fiscal_profile else None
 
+    @property
+    def charges_discount_price(self) -> bool:
+        """THE rule "a discount price is charged": the charge (`calculate_price`) and the price change's scheduling and
+        switch (a new base price would not move what such a product costs) all read it, never a copy of it."""
+        return bool(self.discount_price)
+
     def calculate_price(self, user=None, quantity=1):
         """Calculate dynamic price based on user and quantity"""
-        final_price = self.discount_price if self.discount_price else self.base_price
+        final_price = self.discount_price if self.charges_discount_price else self.base_price
         return max(final_price, 0)
 
     @property

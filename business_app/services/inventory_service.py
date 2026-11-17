@@ -319,26 +319,27 @@ class InventoryService:
         Returns:
             Dictionary with release details
         """
-        if not self.redis_client:
+        # Obtain the client through the lazy getter: an instance that never reserved in this process
+        # (a fresh one, or the singleton in a worker that only cancels) has `self.redis_client` unset.
+        redis_client = self._get_redis_client()
+        if not redis_client:
             return {"success": False, "reason": "Reservation system not available"}
 
         try:
             released_items = []
 
             # Find all reservation keys for this order
-            redis_client = self._get_redis_client()
-            if redis_client:
-                reservation_pattern = RedisKeyspace.inventory_reservation_pattern(order_id)
-                reservation_keys = redis_client.keys(reservation_pattern)
+            reservation_pattern = RedisKeyspace.inventory_reservation_pattern(order_id)
+            reservation_keys = redis_client.keys(reservation_pattern)
 
-                details_pattern = RedisKeyspace.reservation_details_pattern(order_id)
-                details_keys = redis_client.keys(details_pattern)
+            details_pattern = RedisKeyspace.reservation_details_pattern(order_id)
+            details_keys = redis_client.keys(details_pattern)
 
-                # Delete all reservations
-                if reservation_keys:
-                    redis_client.delete(*reservation_keys)
-                if details_keys:
-                    redis_client.delete(*details_keys)
+            # Delete all reservations
+            if reservation_keys:
+                redis_client.delete(*reservation_keys)
+            if details_keys:
+                redis_client.delete(*details_keys)
 
             # Extract product IDs for logging
             for key in reservation_keys:
@@ -681,7 +682,8 @@ class InventoryService:
         Returns:
             Dictionary with cleanup results
         """
-        if not self.redis_client:
+        redis_client = self._get_redis_client()
+        if not redis_client:
             return {"success": False, "reason": "Redis not available"}
 
         try:
@@ -689,15 +691,19 @@ class InventoryService:
 
             # Redis TTL should handle most cleanup, but this is a safety net
             pattern = RedisKeyspace.all_reservation_details_pattern()
-            keys = self.redis_client.keys(pattern)
+            keys = redis_client.keys(pattern)
 
             current_time = datetime.now(timezone.utc)
 
             for key in keys:
                 try:
-                    details = self.redis_client.hgetall(key)
-                    if details and "expires_at" in details:
-                        expires_at = datetime.fromisoformat(details["expires_at"].decode("utf-8"))
+                    details = redis_client.hgetall(key)
+                    # The client returns bytes (no decode_responses), so the field name is b"expires_at".
+                    raw_expires_at = (details or {}).get(b"expires_at", (details or {}).get("expires_at"))
+                    if raw_expires_at:
+                        if isinstance(raw_expires_at, bytes):
+                            raw_expires_at = raw_expires_at.decode("utf-8")
+                        expires_at = datetime.fromisoformat(raw_expires_at)
                         if current_time > expires_at:
                             # Extract order_id and product_id from key
                             key_str = key.decode("utf-8") if isinstance(key, bytes) else key
@@ -706,8 +712,8 @@ class InventoryService:
                                 order_id, product_id = parts[1], parts[2]
 
                                 # Delete expired reservation
-                                self.redis_client.delete(key)
-                                self.redis_client.delete(RedisKeyspace.inventory_reservation(order_id, product_id))
+                                redis_client.delete(key)
+                                redis_client.delete(RedisKeyspace.inventory_reservation(order_id, product_id))
                                 cleaned_count += 1
 
                 except Exception:

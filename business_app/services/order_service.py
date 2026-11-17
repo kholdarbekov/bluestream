@@ -3,6 +3,7 @@ Order service for the Water Business Platform
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
@@ -18,12 +19,20 @@ logger = logging.getLogger(__name__)
 
 from business_app.models.order import Order, OrderItem, is_free_reward_item  # noqa: E402
 from business_app.models.payment import Payment  # noqa: E402
+from business_app.models.price_change import PriceCourtesy  # noqa: E402
 from business_app.models.product import Product  # noqa: E402
 from business_app.utils.order_totals import compute_order_total  # noqa: E402
+from business_app.utils.line_money import line_money  # noqa: E402
 from business_app.utils.order_timing import delivered_order_instants_select  # noqa: E402
 from business_app.models.subscription import Subscription  # noqa: E402
 from business_app.models.user import User, UserAddress  # noqa: E402
-from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError  # noqa: E402
+from business_app.utils.exceptions import (  # noqa: E402
+    ValidationError,
+    NotFoundError,
+    ConflictError,
+    ForbiddenError,
+    StateChangedError,
+)
 from shared.enums import (  # noqa: E402
     OrderStatus,
     PaymentStatus,
@@ -120,6 +129,23 @@ ADMIN_REASON_REQUIRED_STATUSES = frozenset({OrderStatus.CANCELLED, OrderStatus.R
 # A subscription order with no delivery window may be paid until its delivery day is over (spec 2026-10-23
 # §4.5): the last minute of that day, local, which reads as the end of the day wherever it is quoted.
 _END_OF_DELIVERY_DAY = time(23, 59)
+
+
+@dataclass(frozen=True)
+class PricedOrder:
+    """An order priced and not yet written: `OrderService.price_order`'s answer, which `create_order` charges and a
+    quote shows. Each line carries the `line_money` fields, the courtesy pair when the courtesy lowered it,
+    `product_name`, `is_reward_item` and its `pricing_source`."""
+
+    items: List[Dict[str, Any]]
+    payment_method: PaymentMethod
+    order_source: str
+    subtotal: Decimal  # the sum of the NET line totals, after the courtesy
+    delivery_fee: Decimal
+    discount_amount: Decimal  # order-level: the subscription's percentage
+    tier_discount: Decimal  # quoted on the net subtotal
+    total_amount: Decimal  # before a redeemed reward, which `create_order` applies inside its transaction
+    courtesy_entry: Optional[PriceCourtesy]  # set only when the courtesy lowered a line; locked when claimed
 
 
 class OrderService:
@@ -253,6 +279,9 @@ class OrderService:
         """
         # Validate order data
         self._validate_order_data(order_data)
+        from business_app.services.price_change.honest_confirm import assert_expected_total, parse_expected_total
+
+        expected_total = parse_expected_total(order_data.get("expected_total"))
 
         # A subscription order's creation is told by its own notice (subscription_notices, spec 2026-10-23 §9),
         # sent after the subscription engine commits. The generic creation-time messages would say it twice: the
@@ -285,120 +314,33 @@ class OrderService:
         if refusal is not None:
             raise ValidationError(refusal)
 
-        # Validate and calculate order items
+        # The request's lines and whether it asks for cash: the stock reservation below gates on them.
         items_data = order_data["items"]
         is_cash_order = self._requested_method_is_cash(order_data)
-        # Coverage first (spec 2026-10-09 §4.2): each line's covering contract row, priced at the
-        # catalogue. The business-account default and its validator read contract_id /
-        # contract_product_price_id, which do not depend on the method. The PRICE does.
-        order_items, _catalogue_subtotal = self._process_order_items(
-            items_data, user_id=user_id, is_cash_order=is_cash_order
+        # Priced by the one method a quote uses too. The claim locks the person's courtesy entries here, before
+        # `Order(...)` takes the `order_sequences` row (courtesy lock first), and nothing commits before the
+        # transaction below marks the entry used.
+        priced = self.price_order(
+            user, order_data, subscription=subscription, bypass_cod_check=bypass_cod_check, claim=True
         )
-
-        # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED: a contract line's price and the
-        # loyalty tier discount (`LoyaltyService.quote_tier_discount`) both follow it.
-        # `_resolve_payment_method` reads only the payload and the lines' coverage, never a total.
-        payment_method = self._resolve_payment_method(
-            order_data,
-            user=user,
-            order_items=order_items,
-            bypass_cod_check=bypass_cod_check,
-        )
-        order_items, subtotal = self._price_items_for_method(order_items, payment_method)
-
-        # Calculate delivery fee via DeliveryService (single source of truth).
-        delivery_address = order_data["delivery_address"]
-        delivery_fee = self.delivery_service.calculate_delivery_fee(
-            delivery_address.get("latitude", 0),
-            delivery_address.get("longitude", 0),
-            subtotal,
-        )
-
-        # The MIN_ORDER_AMOUNT floor is checked against the GROSS basket. A
-        # subscription discount is a merchant concession, not a smaller order —
-        # gating on the net would hard-fail billing for any discounted
-        # subscription whose basket sits just above the floor.
-        gross_amount = subtotal + delivery_fee
-        if gross_amount < self.min_order_amount:
-            raise ValidationError(
-                f"Minimum order amount is {self.min_order_amount}",
-                error_code="ORDER_MIN_AMOUNT",
-                details={"min_amount": float(self.min_order_amount)},
-            )
-
-        discount_amount = Decimal("0.00")
-        if subscription is not None and subscription.discount_percentage:
-            percentage = Decimal(str(subscription.discount_percentage))
-            discount_amount = (subtotal * percentage / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            if discount_amount > subtotal:
-                raise ValidationError("Subscription discount cannot exceed the order subtotal")
-
-        # The channel is part of the price, so it is read before the quote: the tier discount
-        # follows it (spec 2026-10-23).
-        order_source = order_data.get("order_source", "web")
-
-        # Loyalty tier discount — the customer's own bot or website order on the
-        # COD rail, never a subscription order. LoyaltyService is the ONE
-        # place that decides whether it applies and at what live rate; this
-        # method never holds a percentage. The basis is the full subtotal
-        # (design §4.3), and the result is clamped LAST so no combination of
-        # independently-configurable rates can drive the total negative or
-        # violate ck_orders_tier_discount_nonneg. loyalty_discount is zero at
-        # this point — a redeemed reward is applied further down, inside the
-        # transaction, and re-clamps there.
-        from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
-
-        tier_discount = clamp_tier_discount(
-            LoyaltyService()
-            .quote_tier_discount(
-                user,
-                subtotal,
-                payment_method,
-                order_source=order_source,
-                is_subscription_order=subscription is not None,
-            )
-            .amount,
-            subtotal=subtotal,
-            discount_amount=discount_amount,
-            loyalty_discount=Decimal("0.00"),
-        )
-
-        # `Order.calculate_total()` cannot be used here: no Order row exists yet
-        # and this total GATES its own creation (the `<= 0` check below). Both
-        # call `compute_order_total`, so they cannot disagree.
-        total_amount = compute_order_total(
-            subtotal=subtotal,
-            discount_amount=discount_amount,
-            delivery_fee=Decimal(str(delivery_fee)),
-            # Rewards are redeemed against an EXISTING order
-            # (LoyaltyService.apply_reward_to_order); none can be attached yet.
-            loyalty_discount=Decimal("0.00"),
-            tier_discount=tier_discount,
-        )
-
-        # A zero-total order is degenerate: there is nothing to charge, nothing
-        # for a driver to collect, and initialize_order_payment cannot mint a
-        # zero-amount Payment. Reject it rather than persisting the row.
-        if total_amount <= 0:
-            raise ValidationError("Order total must be positive after discounts")
 
         # Create order
         created_by_staff_id = order_data.get("created_by_staff_id")
         # ARCH-006: staff-channel orders must record the creating operator.
         assert_order_creator_for_source(
-            order_source=order_source,
+            order_source=priced.order_source,
             created_by_staff_id=created_by_staff_id,
         )
         order = Order(
             user_id=user_id,
             status=OrderStatus.PENDING,
-            subtotal=subtotal,
-            discount_amount=discount_amount,
-            delivery_fee=delivery_fee,
-            tier_discount=tier_discount,
-            total_amount=total_amount,
-            delivery_address_id=delivery_address["delivery_address_id"],
-            payment_method=payment_method,
+            subtotal=priced.subtotal,
+            discount_amount=priced.discount_amount,
+            delivery_fee=priced.delivery_fee,
+            tier_discount=priced.tier_discount,
+            total_amount=priced.total_amount,
+            delivery_address_id=order_data["delivery_address"]["delivery_address_id"],
+            payment_method=priced.payment_method,
             # A subscription-generated order is an ordinary order that happens to
             # carry a subscription_id — nothing downstream may branch on origin. Two exceptions:
             # `OrderService.can_reorder` (R8), a subscription order is never repeated by a reorder;
@@ -413,7 +355,7 @@ class OrderService:
             is_urgent=bool(order_data.get("is_urgent", False)),
             # Points redeem only via rewards; orders never consume points directly.
             loyalty_points_used=0,
-            order_source=order_source,
+            order_source=priced.order_source,
             created_by_staff_id=created_by_staff_id,
             # The sales visit this order belongs to, when the caller has one. Set HERE and
             # not by the caller afterwards, because `uq_orders_visit_id` is only a real
@@ -450,18 +392,16 @@ class OrderService:
                 db.session.flush()  # Get order ID inside the transaction
 
                 # Add order items
-                for item_data in order_items:
-                    order_item = OrderItem(
-                        order_id=order.id,
-                        product_id=item_data["product_id"],
-                        contract_id=item_data.get("contract_id"),
-                        contract_product_price_id=item_data.get("contract_product_price_id"),
-                        quantity=item_data["quantity"],
-                        unit_price=item_data["unit_price"],  # Use current price at order time
-                        total_price=item_data["total_price"],
-                    )
+                for item_data in priced.items:
+                    order_item = OrderItem.from_priced_line(order.id, item_data)
                     db.session.add(order_item)
                 db.session.flush()
+
+                # The courtesy the pricing claimed is this order's now, in the claim's own transaction.
+                if priced.courtesy_entry is not None:
+                    from business_app.services.price_change.courtesy import mark_used
+
+                    mark_used(priced.courtesy_entry, order)
 
                 # Apply a redeemed loyalty reward (discount or free product) to this
                 # order, atomically within the order transaction. Adjusts
@@ -484,6 +424,10 @@ class OrderService:
                         _free_reward = LoyaltyReward.query.get(_redemption.reward_id)
                         _free_qty = (_free_reward.free_product_quantity or 1) if _free_reward else 1
                         items_data = items_data + [{"product_id": _redemption.free_product_id, "quantity": _free_qty}]
+
+                # The honest confirm: the total the customer's screen showed must be the total this order charges,
+                # read after the reward and before anything is reserved (a refusal rolls the whole write back).
+                assert_expected_total(expected_total, order.total_amount)
 
                 # Reserve inventory (Redis-backed). Surface a failure as
                 # ValidationError so the outer transaction rolls back DB state
@@ -536,7 +480,7 @@ class OrderService:
                     notify_confirmation=announce_creation,
                 )
 
-                if payment_method == PaymentMethod.CASH and payment:
+                if priced.payment_method == PaymentMethod.CASH and payment:
                     from business_app.services.cash_collection_service import CashCollectionService
 
                     cash_collection_service = CashCollectionService()
@@ -565,10 +509,17 @@ class OrderService:
                     "order_number": order.order_number,
                     "reservation_expires_at": reservation_result.get("expires_at") if reservation_result else None,
                     "items_count": len(items_data),
+                    # The charged figures, after the courtesy and the tier discount: the one money record of the order.
+                    "subtotal": float(order.subtotal),
+                    "total_amount": float(order.total_amount),
                 },
             )
             logger.info("CREATE ORDER: FINISHED")
 
+        except StateChangedError:
+            # The honest confirm's refusal: the route answers it 409, so the blanket arm below must not rewrap it
+            # as a 400. Raised before anything is reserved, and the transaction has rolled back.
+            raise
         except (ValidationError, IntegrityError) as exc:
             # DB already rolled back by atomic_transaction. Release Redis
             # reservation if we got past inventory step.
@@ -611,7 +562,7 @@ class OrderService:
         # failing — e.g. DeliveryService.create_delivery's own commit — can leave
         # the order legitimately CONFIRMED; that is a correct outcome, so the log
         # below does not assert the order is still PENDING.)
-        if payment_method == PaymentMethod.CASH:
+        if priced.payment_method == PaymentMethod.CASH:
             try:
                 from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 
@@ -633,6 +584,153 @@ class OrderService:
                 )
 
         return order
+
+    def quote_order(self, user_id: int, order_data: Dict[str, Any]) -> PricedOrder:
+        """READ-ONLY quote of an order for `user_id`: `price_order` with no claim and no COD cap. The cap decides
+        whether an order may be PLACED, not what it costs (`StaffService.estimate_phone_order`'s precedent), so a
+        quote never refuses a basket the operator is still building. Writes and locks nothing."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+        self._validate_order_data(order_data)
+        return self.price_order(user, order_data, claim=False, bypass_cod_check=True)
+
+    def price_order(
+        self,
+        user: User,
+        order_data: Dict[str, Any],
+        *,
+        subscription: Optional[Subscription] = None,
+        bypass_cod_check: bool = False,
+        claim: bool,
+    ) -> PricedOrder:
+        """Price `order_data` for `user`: the ONE pricing of an order, which `create_order` charges and a quote shows.
+
+        In order: the lines and their contract coverage, the rail, the rail's price, the price-change courtesy, the
+        subtotal (the net line totals), the delivery fee, the minimum, the subscription discount, the channel, the tier
+        discount and the total, which must be positive. Raises every refusal `create_order` answers before it writes.
+
+        `claim=True` is order creation: the stock check is audited and `apply_courtesy` locks every courtesy entry of
+        the person, so the caller must hand `courtesy_entry` to `mark_used` in the same transaction with no commit in
+        between. `claim=False` is a quote: it writes nothing and locks nothing. The lines are priced afresh on every
+        call, so a claim never runs on lines a preview already lowered: when the claim finds the courtesy used, every
+        line keeps its full price.
+        """
+        from business_app.services.loyalty_service import LoyaltyService, clamp_tier_discount
+        from business_app.services.price_change.courtesy import apply_courtesy
+
+        # Coverage first (spec 2026-10-09 §4.2): each line's covering contract row, priced at the
+        # catalogue. The business-account default and its validator read contract_id /
+        # contract_product_price_id, which do not depend on the method. The PRICE does.
+        items, _catalogue_subtotal = self._process_order_items(
+            order_data["items"],
+            user_id=user.id,
+            is_cash_order=self._requested_method_is_cash(order_data),
+            record_audit=claim,
+        )
+
+        # THE RAIL MUST BE KNOWN BEFORE THE ORDER CAN BE PRICED: a contract line's price and the
+        # loyalty tier discount (`LoyaltyService.quote_tier_discount`) both follow it.
+        # `_resolve_payment_method` reads only the payload and the lines' coverage, never a total.
+        payment_method = self._resolve_payment_method(
+            order_data,
+            user=user,
+            order_items=items,
+            bypass_cod_check=bypass_cod_check,
+        )
+        items = self._price_items_for_method(items, payment_method)
+
+        # The courtesy lowers lines the rail priced (spec 2026-11-16 §5.6); the subtotal and the tier quote read the
+        # lowered lines, so they come after it.
+        courtesy_entry = apply_courtesy(
+            items,
+            user_id=user.id,
+            at=get_utc_now(),
+            is_subscription_order=subscription is not None,
+            claim=claim,
+        )
+        subtotal = sum((item["total_price"] for item in items), Decimal("0.00"))
+
+        # The delivery fee is DeliveryService's one decision; every quote of this order reads the same call.
+        delivery_fee = self.delivery_service.order_delivery_fee(order_data["delivery_address"], subtotal)
+
+        # The MIN_ORDER_AMOUNT floor is checked against the GROSS basket. A
+        # subscription discount is a merchant concession, not a smaller order —
+        # gating on the net would hard-fail billing for any discounted
+        # subscription whose basket sits just above the floor.
+        gross_amount = subtotal + delivery_fee
+        if gross_amount < self.min_order_amount:
+            raise ValidationError(
+                f"Minimum order amount is {self.min_order_amount}",
+                error_code="ORDER_MIN_AMOUNT",
+                details={"min_amount": float(self.min_order_amount)},
+            )
+
+        discount_amount = Decimal("0.00")
+        if subscription is not None and subscription.discount_percentage:
+            percentage = Decimal(str(subscription.discount_percentage))
+            discount_amount = (subtotal * percentage / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if discount_amount > subtotal:
+                raise ValidationError("Subscription discount cannot exceed the order subtotal")
+
+        # The channel is part of the price, so it is read before the quote: the tier discount
+        # follows it (spec 2026-10-23).
+        order_source = order_data.get("order_source", "web")
+
+        # Loyalty tier discount — the customer's own bot or website order on the
+        # COD rail, never a subscription order. LoyaltyService is the ONE
+        # place that decides whether it applies and at what live rate; this
+        # method never holds a percentage. The basis is the full (net) subtotal
+        # (design §4.3), and the result is clamped LAST so no combination of
+        # independently-configurable rates can drive the total negative or
+        # violate ck_orders_tier_discount_nonneg. loyalty_discount is zero at
+        # this point — a redeemed reward is applied inside `create_order`'s
+        # transaction, and re-clamps there.
+        tier_discount = clamp_tier_discount(
+            LoyaltyService()
+            .quote_tier_discount(
+                user,
+                subtotal,
+                payment_method,
+                order_source=order_source,
+                is_subscription_order=subscription is not None,
+            )
+            .amount,
+            subtotal=subtotal,
+            discount_amount=discount_amount,
+            loyalty_discount=Decimal("0.00"),
+        )
+
+        # `Order.calculate_total()` cannot be used here: no Order row exists yet
+        # and this total GATES its own creation (the `<= 0` check below). Both
+        # call `compute_order_total`, so they cannot disagree.
+        total_amount = compute_order_total(
+            subtotal=subtotal,
+            discount_amount=discount_amount,
+            delivery_fee=delivery_fee,
+            # Rewards are redeemed against an EXISTING order
+            # (LoyaltyService.apply_reward_to_order); none can be attached yet.
+            loyalty_discount=Decimal("0.00"),
+            tier_discount=tier_discount,
+        )
+
+        # A zero-total order is degenerate: there is nothing to charge, nothing
+        # for a driver to collect, and initialize_order_payment cannot mint a
+        # zero-amount Payment. Reject it rather than persisting the row.
+        if total_amount <= 0:
+            raise ValidationError("Order total must be positive after discounts")
+
+        return PricedOrder(
+            items=items,
+            payment_method=payment_method,
+            order_source=order_source,
+            subtotal=subtotal,
+            delivery_fee=delivery_fee,
+            discount_amount=discount_amount,
+            tier_discount=tier_discount,
+            total_amount=total_amount,
+            courtesy_entry=courtesy_entry,
+        )
 
     def get_order(self, order_id: int, user_id: int = None) -> Order:
         """Get order by ID"""
@@ -2125,8 +2223,10 @@ class OrderService:
         user_id: int,
         order_id: Optional[int] = None,
         is_cash_order: bool = False,
+        record_audit: bool = True,
     ) -> Tuple[List[Dict[str, Any]], Decimal]:
-        """Process and validate order items with comprehensive inventory checks"""
+        """Process and validate order items with comprehensive inventory checks. `record_audit=False` (a quote) writes
+        no audit row."""
         processed_items = []
         subtotal = Decimal("0.00")
 
@@ -2204,11 +2304,12 @@ class OrderService:
                 fallback_price=fallback_price,
             )
             unit_price = Decimal(str(resolution["unit_price"]))
-            total_price = Decimal(str(unit_price)) * Decimal(str(quantity))
+            total_price = line_money(unit_price, quantity).total_price
 
             processed_items.append(
                 {
                     "product_id": product.id,
+                    "product_name": product.name,
                     "contract_id": resolution["contract"].id if resolution["contract"] else None,
                     "contract_product_price_id": (
                         resolution["contract_price_row"].id if resolution["contract_price_row"] else None
@@ -2218,48 +2319,48 @@ class OrderService:
                     "total_price": total_price,
                     "contract_price_row": resolution["contract_price_row"],
                     "catalogue_unit_price": fallback_price,
+                    # A free reward line is added by the reward step, never here.
+                    "is_reward_item": False,
                 }
             )
 
             subtotal += total_price
 
         # Log inventory check for audit
-        audit_logger.log_event(
-            event_type=AuditEventType.ORDER_CREATED,
-            action="order_inventory_validated",
-            severity=AuditSeverity.MEDIUM,
-            resource_type="order_inventory",
-            description=f"Inventory validated for {len(processed_items)} items",
-            additional_data={
-                "items_count": len(processed_items),
-                "total_quantity": sum(item["quantity"] for item in processed_items),
-                "subtotal": float(subtotal),
-            },
-        )
+        if record_audit:
+            audit_logger.log_event(
+                event_type=AuditEventType.ORDER_CREATED,
+                action="order_inventory_validated",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="order_inventory",
+                description=f"Inventory validated for {len(processed_items)} items",
+                additional_data={
+                    "items_count": len(processed_items),
+                    "total_quantity": sum(item["quantity"] for item in processed_items),
+                },
+            )
 
         return processed_items, subtotal
 
     @staticmethod
-    def _price_items_for_method(
-        order_items: List[Dict[str, Any]], payment_method
-    ) -> Tuple[List[Dict[str, Any]], Decimal]:
+    def _price_items_for_method(order_items: List[Dict[str, Any]], payment_method) -> List[Dict[str, Any]]:
         """Price coverage-resolved lines for the order's method, without a second lookup.
 
         `_process_order_items` already attached each line's covering row and catalogue price;
-        `contract_price_for_method` is the one rule that turns them into the charged price.
+        `contract_price_for_method` is the one rule that turns them into the charged price and names its
+        `pricing_source`. Each line gets the `line_money` fields. No subtotal is returned: the courtesy may still
+        lower a line, so the caller sums `total_price` after `apply_courtesy`.
         """
         from business_app.services.corporate_contract_service import contract_price_for_method
 
         priced: List[Dict[str, Any]] = []
-        subtotal = Decimal("0.00")
         for item in order_items:
-            unit_price, _source = contract_price_for_method(
+            unit_price, pricing_source = contract_price_for_method(
                 item["contract_price_row"], payment_method, item["catalogue_unit_price"]
             )
-            total_price = unit_price * Decimal(str(item["quantity"]))
-            priced.append({**item, "unit_price": unit_price, "total_price": total_price})
-            subtotal += total_price
-        return priced, subtotal
+            money = line_money(unit_price, item["quantity"])
+            priced.append({**item, "unit_price": unit_price, "pricing_source": pricing_source, **money._asdict()})
+        return priced
 
     def _is_valid_status_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
         """Check if status transition is valid (delegates to shared.status_transitions)."""
@@ -2559,6 +2660,15 @@ class OrderService:
                 from business_app.services.sales.agent_order_approval_service import AgentOrderApprovalService
 
                 hold_closed = AgentOrderApprovalService.close_on_cancel(order, actor_id=updated_by)
+
+                # The old-price courtesy the order used goes back to the person (spec §6). Here for the
+                # reason above: every cancellation reaches this block, and no writer sets CANCELLED
+                # directly. A failed delivery never gets here (the order waits for a new date), and the
+                # release is a no-op for an order that used nothing. It flushes; `update_order_status`
+                # commits (or the caller, when `commit=False`).
+                from business_app.services.price_change.courtesy import release_for_order
+
+                release_for_order(order.id)
 
             if commit and (settled or delivery_cancelled or hold_closed):
                 db.session.commit()

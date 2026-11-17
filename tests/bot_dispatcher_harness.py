@@ -34,6 +34,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Optional
 from urllib.parse import urlsplit
 
+from flask.testing import FlaskClient
 from telegram import Update
 from telegram.request import BaseRequest, RequestData
 
@@ -733,12 +734,26 @@ class UpdateFactory:
         })
 
 
+class _BodyReplayingClient(FlaskClient):
+    """Follows a 307/308 with the request's own body, as httpx does.
+
+    werkzeug sends the first request's input stream again, and by then a `before_request` hook that
+    read the JSON (`TimezoneMiddleware`) has drained it: the redirected POST would arrive empty.
+    """
+
+    def resolve_redirect(self, response, buffered=False):
+        response.request.environ["wsgi.input"].seek(0)
+        return super().resolve_redirect(response, buffered=buffered)
+
+
 class FlaskBackend:
     """A bot's HTTP client, answered by the REAL Flask app: every request the bot's own
     `_make_request` builds (headers, signature, body bytes) reaches the real routes.
 
     Speaks both clients' httpx calls: the customer bot's `get` / `post` and the staff
-    bot's `request`. `seen` records (method, path, status, Authorization header).
+    bot's `request`. Follows redirects, as both bots' httpx clients do (`POST /api/v1/orders`
+    answers 308 to `/api/v1/orders/`). `seen` records (method, path, status, Authorization
+    header), with the path the bot asked for and the status after any redirect.
     """
 
     def __init__(self, app):
@@ -748,7 +763,9 @@ class FlaskBackend:
     async def request(self, method, url, headers=None, params=None, cookies=None, json=None, content=None):
         path = urlsplit(url).path
         body = {"json": json} if json is not None else {"data": content}
-        resp = self.app.test_client().open(path, method=method, headers=headers, query_string=params, **body)
+        resp = _BodyReplayingClient(self.app, self.app.response_class).open(
+            path, method=method, headers=headers, query_string=params, follow_redirects=True, **body
+        )
         self.seen.append((method, path, resp.status_code, (headers or {}).get("Authorization")))
         return _FlaskResponse(resp, method)
 

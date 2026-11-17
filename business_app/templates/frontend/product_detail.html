@@ -5,7 +5,7 @@
     sizes as shared product cards. Words: web.shop.* (scripts/seed_web_ui_shop_translations.py) and landing.* rows. -#}
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
 {% from 'frontend/partials/product_card.html' import product_card with context %}
-{% from 'frontend/partials/offer_facts.html' import offer_facts_block %}
+{% from 'frontend/partials/offer_facts.html' import offer_facts_block, offer_upcoming_price %}
 {% set product_description = product.meta_description or product.short_description or product.description or offer_price_sentence(offer_product, current_language) %}
 {% set meta_description = [offer_price_sentence(offer_product, current_language), product.meta_description or product.short_description or product.description]|select|join(' ') %}
 {% set refund_answer = 'web.shop.product.refund_a'|t %}
@@ -151,6 +151,7 @@
                             {% endif %}
                         </div>
                         <span class="shop-pd__per">{{ 'web.shop.product.per_unit'|t }}</span>
+                        {{ offer_upcoming_price(offer_product, current_language) }}
                     </div>
                     {% endif %}
 

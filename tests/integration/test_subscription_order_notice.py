@@ -1318,6 +1318,14 @@ class TestDiscontinuedProductsAreLeftOut:
 
 
 
+_PRICE_CHANGE_FACTS = {
+    "price_change_id": 4,
+    "effective_date": "2027-02-01",
+    "prices": [{"name": "Pure Water 19L", "new_price": 20000.0}],
+    "is_subscriber": True,
+}
+
+
 @pytest.mark.parametrize("language", ["en", "uz", "ru"])
 @pytest.mark.parametrize("kind", sorted(customer_notices.NOTICE_KINDS))
 def test_every_notice_has_an_email_template_and_subject_in_every_language(app, kind, language):
@@ -1380,6 +1388,8 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
             "time_kind": "window",
         },
         "prepayment_returned": {"payout_id": 5, "amount": 35000.0, "balance": 0.0},
+        "price_change_announcement": _PRICE_CHANGE_FACTS,
+        "price_change_reminder": _PRICE_CHANGE_FACTS,
     }[kind]
 
     with app.app_context():
@@ -1401,6 +1411,8 @@ def test_every_notice_has_an_email_template_and_subject_in_every_language(app, k
         assert f'href="{site}/my-subscriptions?sub={sub_id}"' in content
     assert (f'href="{site}/order-tracking?order_id=7"' in content) == ("order_id" in facts)
     assert has_pay == (content.count('class="btn-primary"') == 1)
+    if kind.startswith("price_change_"):
+        assert "Pure Water 19L" in content and "20,000" in content and "UZS" not in content
     if kind == "prepayment_returned":
         assert "<strong>35,000</strong>" in content and "<strong>0</strong>" in content
     if kind == "subscription_order_created":

@@ -94,6 +94,13 @@ def super_admin_required(f):
     return decorated_function
 
 
+def has_manager_or_higher_claim() -> bool:
+    """True when the verified JWT's role claim is manager or admin. The claim half of `manager_or_higher_required`,
+    for a handler that serves staff and tells managers more (the decorator still checks the account row)."""
+    role = get_jwt().get("role")
+    return role in (UserRole.ADMIN.value, UserRole.MANAGER.value)
+
+
 def manager_or_higher_required(f):
     """Require manager or higher role with additional safety checks"""
 
@@ -111,7 +118,7 @@ def manager_or_higher_required(f):
         except (ValueError, TypeError):
             raise ForbiddenError("Invalid user role")
 
-        if role_enum.value not in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
+        if not has_manager_or_higher_claim():
             raise ForbiddenError("Manager or admin access required")
 
         # Additional validation
@@ -181,7 +188,8 @@ def staff_or_higher_required(f):
 def admin_role_permissions(role_value: str) -> Tuple[str, ...]:
     """The permission names an admin-panel role holds. Any other role holds none.
 
-    "edit_collected_cash", "edit_order_payment_method" and "return_customer_prepayment" are
+    "edit_collected_cash", "edit_order_payment_method", "return_customer_prepayment" and
+    "cancel_announced_price_change" are
     intentionally Admin-only: they are not granted to MANAGER/OPERATOR, so only the ADMIN "all"
     wildcard satisfies them.
     """

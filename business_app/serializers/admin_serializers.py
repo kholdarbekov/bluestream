@@ -795,6 +795,16 @@ def serialize_order_admin(order: Order, *, awaiting_staff_approval: Optional[boo
         }
 
 
+def _price_change_pending(product: Product) -> Optional[Dict[str, Any]]:
+    """`{"price_change_id", "change_on"}` of the pending price change holding the product, else None."""
+    from business_app.services.price_change.schedule import PriceChangeService
+
+    price_change = PriceChangeService().pending_for_product(product.id)
+    if price_change is None:
+        return None
+    return {"price_change_id": price_change.id, "change_on": price_change.change_on.isoformat()}
+
+
 def _admin_stock_quantity(product: Product, marking_code_counts: Dict[str, int]) -> Optional[int]:
     """The stock value to publish for the admin listing/edit views.
 
@@ -845,7 +855,11 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "base_price": float(product.base_price),
             "price": float(product.base_price),  # Frontend expects 'price'
             "discount_price": float(product.discount_price) if product.discount_price else None,
-            "current_price": float(getattr(product, "current_price", product.base_price)),
+            # The price a customer is charged for one unit (discount price when set), the one SSOT
+            # `catalogue_unit_price`; `price` above stays the stored base price the modal PUTs back.
+            "current_price": float(product.catalogue_unit_price),
+            # The pending price change holding this product, or None: the edit modal locks the price on it.
+            "price_change_pending": _price_change_pending(product),
             "catalogue_unit_price": float(product.catalogue_unit_price),
             "category_id": product.category_id,
             "volume": product.volume,

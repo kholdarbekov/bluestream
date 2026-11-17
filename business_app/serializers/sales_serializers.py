@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from business_app.models.sales_visits import AGENT_ORDER_APPROVAL_STATUSES
+from business_app.serializers.types import ExpectedTotal
 from business_app.utils.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from business_app.utils.local_windows import parse_date_range
 from business_app.utils.timezone_utils import ensure_utc
@@ -226,6 +227,8 @@ class PlaceOrderPayload(_Payload):
     delivery_window_start: Optional[str] = None
     delivery_window_end: Optional[str] = None
     delivery_notes: Optional[str] = None
+    # The total the agent's screen showed (the order-estimate's `total_amount`); a different charge is refused.
+    expected_total: Optional[ExpectedTotal] = None
 
 
 class FieldTryoutPayload(_Payload):

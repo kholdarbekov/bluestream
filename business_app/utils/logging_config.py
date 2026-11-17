@@ -18,6 +18,7 @@ import sys
 from flask import g, request, has_request_context
 
 from shared.telegram_login import LOGIN_QUERY_REDACTED, loggable_request_url, redact_login_query
+from shared.url_redaction import redact_url_credentials
 
 
 class StructuredFormatter(logging.Formatter):
@@ -147,6 +148,7 @@ class SecuritySensitiveFilter(logging.Filter):
         skipped."""
         if not login_redacted:
             message = redact_login_query(message)  # a sign-in link's query: its hash and the customer's names
+        message = redact_url_credentials(message)  # `redis://:password@host`: a URL's password has no key to match
         message_lower = message.lower()
         for sensitive_key in self.SENSITIVE_KEYS:
             if sensitive_key in message_lower:

@@ -172,6 +172,7 @@ def test_the_checkout_page_renders_in_each_language_with_the_main_address_select
         "#order-notes",
         "#agree-terms",
         "#summary-items",
+        "#summary-courtesy[hidden]",
         "#summary-total",
         "#min-order-warning #min-order-title",
         "#checkoutPaymentState[role=status]",
@@ -191,6 +192,9 @@ def test_the_checkout_page_renders_in_each_language_with_the_main_address_select
     }
     for name, value in island["i18n"].items():
         assert value and not value.startswith(("web.", "api.")), (name, value)
+    assert island["i18n"]["courtesy_part"] == SHOP[lang]["web.shop.cart.courtesy_part"]
+    assert island["i18n"]["courtesy_thanks"] == SHOP[lang]["web.shop.cart.courtesy_thanks"]
+    assert island["i18n"]["upcoming_price"] == BACKEND_TRANSLATIONS["landing.offer.upcoming_price"][lang]
     assert "{minimum}" in island["i18n"]["min_amount_title"]
     assert "{remaining}" in island["i18n"]["min_amount_text"]
 

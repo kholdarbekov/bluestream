@@ -30,7 +30,7 @@ def mock_i18n(monkeypatch):
     tr.translations = {
         "en": {
             "telegram.order.number": "Number",
-            "telegram.order.total": "Total: {0} UZS",
+            "telegram.order.total": "Total: {0} so'm",
             "telegram.orders.estimate_discount_line": "Discount: {amount}",
             "telegram.orders.estimate_reward_line": "Loyalty rewards: {amount}",
             "telegram.orders.order_tier_discount_line": "Tier discount (bot & website perk): {amount}",
@@ -67,7 +67,7 @@ def test_no_breakdown_when_nothing_is_discounted(app, mock_i18n):
     summary = MessageBuilder.build_order_summary(_order(), "en")
 
     assert "810" not in summary
-    # Total amount should appear in the output (54,000 UZS)
+    # Total amount should appear in the output (54,000 so'm)
     assert "54,000" in summary
     # None of the discount/reward/tier line labels should render either —
     # a regression that unconditionally emits a zero-valued line would pass

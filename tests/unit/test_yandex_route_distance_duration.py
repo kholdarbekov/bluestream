@@ -168,11 +168,7 @@ class TestYandexGetRouteDistanceDuration:
         assert result["duration_minutes"] == pytest.approx(50 / 60)
 
     def test_calculate_travel_time_reflects_the_same_fix(self, app, monkeypatch):
-        """`calculate_travel_time` (used by `calculate_delivery_eta_task`) is
-        built directly on `get_route()` — lock in that the ETA task actually
-        gets real minutes now, not the silent 0 that used to flow through
-        `travel_time.get('duration_minutes', 30)` (0 is truthy-absent so the
-        `30` default never even kicked in)."""
+        """`calculate_travel_time` is built directly on `get_route()`: it reports the route's real minutes, not 0."""
         mock_request = MagicMock(return_value=_fake_response(_multi_leg_multi_step_route()))
         monkeypatch.setattr(http_client_module.requests, "request", mock_request)
 

@@ -359,6 +359,11 @@ ROWS = {
         "Не удалось оформить заказ. Попробуйте ещё раз.",
         "Buyurtmani rasmiylashtirib bo‘lmadi. Qayta urinib ko‘ring.",
     ),
+    "web.checkout.co.price_changed": (
+        "Your order total changed while this page was open. Here is the new total: check it and place the order again.",
+        "Сумма заказа изменилась, пока страница была открыта. Вот новая сумма: проверьте её и оформите заказ ещё раз.",  # NATIVE-READ
+        "Sahifa ochiq turganda buyurtma summasi o‘zgardi. Mana yangi summa: tekshirib, buyurtmani qaytadan bering.",  # NATIVE-READ
+    ),
     # ---- Payment return pages (/payment/success, /payment/cancel), unit "checkout-flow" ---------------------------
     "web.checkout.pay.crumb": ("Payment", "Оплата", "To‘lov"),
     "web.checkout.pay.pending_title": ("Checking your payment", "Проверяем оплату", "To‘lovni tekshiryapmiz"),

@@ -33,6 +33,12 @@ def mocked_cart_service():
                 "quantity": 2,
                 "unit_price": 15000,
                 "subtotal": 30000,
+                "total_price": 28000,
+                "discount_amount": 2000,
+                "courtesy_quantity": 1,
+                "courtesy_unit_price": 13000,
+                "regular_quantity": 1,
+                "upcoming_price": None,
             }
         ],
         "subtotal": 30000,
@@ -104,4 +110,7 @@ class TestCartAPI:
         validate_body = validate.get_json()["data"]
         assert validate_body["valid"] is True
         assert validate_body["items"][0]["product_name"] == "Pure Water 19L"
+        line = validate_body["items"][0]
+        assert (line["total_price"], line["discount_amount"], line["courtesy_quantity"]) == (28000, 2000, 1)
+        assert (line["courtesy_unit_price"], line["regular_quantity"]) == (13000, 1)
         assert validate_body["subtotal"] == 30000

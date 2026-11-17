@@ -16,8 +16,8 @@ from business_app.utils.address_helpers import door_fields, get_address_label, g
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
 from business_app.utils.delivery_window import format_delivery_window, parse_schedule
 from business_app.utils.error_handlers import handle_api_exception
-from business_app.utils.api_responses import success_response
-from business_app.utils.exceptions import ValidationError
+from business_app.utils.api_responses import price_changed_response, success_response
+from business_app.utils.exceptions import StateChangedError, ValidationError
 from business_app.utils.timezone_utils import ensure_utc
 
 staff_bp = Blueprint("staff", __name__)
@@ -288,6 +288,9 @@ def update_my_location():
     Enqueues a debounced route re-optimization and returns the active-
     deliveries payload (same shape as GET /delivery/active) sorted by the
     last persisted route.
+
+    A share (one-shot or live edit) within the arrival radius of the driver's nearest in-transit stop, with a
+    known good accuracy, also marks that stop arrived and messages the customer (owner decision 2026-11-17).
     """
     current_user_id = int(get_jwt_identity())
     data = request.get_json() or {}
@@ -997,7 +1000,11 @@ def create_order_for_client():
     if not client_id:
         raise ValidationError("client_id is required", error_code="STAFF_CLIENT_ID_REQUIRED")
 
-    order = StaffService.create_phone_order(current_user_id, client_id, data)
+    try:
+        order = StaffService.create_phone_order(current_user_id, client_id, data)
+    except StateChangedError as e:
+        # The shown total no longer holds: refuse with the quote the screen must read out now.
+        return price_changed_response(e, lambda: StaffService.requote_phone_order(client_id, data), envelope="staff")
 
     return success_response(
         {

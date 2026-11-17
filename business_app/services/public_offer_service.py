@@ -25,6 +25,7 @@ from urllib.parse import quote
 from flask import current_app
 
 from business_app.models.product import Product
+from business_app.services.price_change.schedule import PriceChangeService
 from business_app.utils import display_labels
 from business_app.utils.local_windows import local_date
 from business_app.utils.translations import get_translation
@@ -41,6 +42,8 @@ PRICE_LINE_KEY = "landing.offer.price_line"
 SMALLEST_ORDER_KEY = "landing.offer.smallest_order"
 # The price line of a product that records no volume: it drops the size ("<name>, <size>" would name it twice).
 PRICE_LINE_NO_SIZE_KEY = "landing.offer.price_line_no_size"
+# The announced change, as one sentence: "From {date}: {price}." (the date and the new price come from the change row).
+UPCOMING_PRICE_KEY = "landing.offer.upcoming_price"
 HOME_META_KEY = "landing.offer.meta_home"
 FAQ_KEY = "landing.offer.faq."
 NO_DEPOSIT_KEY = "landing.offer.no_deposit"
@@ -103,7 +106,14 @@ def size_search_terms(product_facts: dict, languages=LANGUAGES) -> list[str]:
 
 
 def product_offer_facts(product, languages=LANGUAGES) -> dict:
-    """One product's offer facts. Callers pass active rows; the function itself does not filter."""
+    """One product's offer facts. Callers pass active rows; the function itself does not filter.
+
+    The facts state an announced price change: `price_valid_until` (the day before the change date, the last day
+    today's price holds) and `upcoming_line` (the sentence naming the change date and the new price, per language),
+    both None while no change is announced for the product. That costs one `PriceChangeService().upcoming_price`
+    call per product, and still no memo. Public pages are anonymous, so no contract rule applies.
+    """
+    upcoming = PriceChangeService().upcoming_price(product.id)
     unit_price = product.catalogue_unit_price
     base_price = Decimal(str(product.base_price or 0))
     # A list price only when the charged price is below it: a discount at zero or above the base price is not one.
@@ -144,7 +154,27 @@ def product_offer_facts(product, languages=LANGUAGES) -> dict:
         "no_deposit": returnable,
         # A marking-code product's stock is its code pool, which gates only code-consuming rails.
         "available": not product.stock_caps_purchase() or (product.stock_quantity or 0) > 0,
+        "price_valid_until": upcoming.price_valid_until if upcoming else None,
+        "upcoming_line": _upcoming_line(upcoming, languages) if upcoming else None,
     }
+
+
+def _upcoming_line(upcoming, languages) -> dict:
+    return {
+        language: get_translation(
+            UPCOMING_PRICE_KEY,
+            language,
+            date=display_labels.day_month(upcoming.change_on, language),
+            price=display_labels.money(upcoming.new_price, language),
+        )
+        for language in languages
+    }
+
+
+def upcoming_price_template(language: str) -> str:
+    """The coming-price sentence as shipped, `{date}` and `{price}` unfilled, for page scripts that fill it from a
+    price block the API served."""
+    return get_translation(UPCOMING_PRICE_KEY, language)
 
 
 def price_sentence(product_facts: dict, language: str) -> str:
@@ -245,13 +275,14 @@ def get_public_offer_facts(languages=LANGUAGES) -> dict:
 
 
 def build_offer_jsonld(product_facts: dict, *, url: str) -> dict:
-    """The schema.org `Offer` for one product's facts, in plain JSON numbers.
+    """The schema.org `Offer` for one product's facts, in plain JSON numbers; `priceValidUntil` only while a change
+    is announced (the day before the change date).
 
     It carries no `shippingDetails`. Google's merchant-listing guide lists `deliveryTime` among the required
     properties of `OfferShippingDetails`, and no JSON-LD of this site states a delivery time, so shipping details
     would be ineligible; the fee reaches visitors in the delivery line (`facts["delivery"]["line"]`) instead.
     """
-    return {
+    offer = {
         "@type": "Offer",
         "priceCurrency": CURRENCY,
         "price": _json_number(product_facts["unit_price"]),
@@ -259,6 +290,10 @@ def build_offer_jsonld(product_facts: dict, *, url: str) -> dict:
         "url": url,
         "eligibleQuantity": {"@type": "QuantitativeValue", "minValue": product_facts["smallest_order_quantity"]},
     }
+    # While a change is announced, today's price holds through the day before it: `priceValidUntil`, on every Offer.
+    if product_facts["price_valid_until"] is not None:
+        offer["priceValidUntil"] = product_facts["price_valid_until"].isoformat()
+    return offer
 
 
 def public_price_range() -> str | None:

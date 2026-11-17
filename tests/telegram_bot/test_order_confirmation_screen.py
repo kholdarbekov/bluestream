@@ -112,14 +112,14 @@ async def test_a_cash_order_covered_by_the_prepaid_balance_reads_as_one_sum(bot,
         "\n"
         "<b>To'lov usuli:</b> 💰 Naqd pul\n"
         "\n"
-        "• Aqua Element 19L × 8 — 120,000 UZS\n"
+        "• Aqua Element 19L × 8 — 120,000 so'm\n"
         + uz("telegram.orders.estimate_tier_line", tier_name="Gold", percentage=3, amount="3,600")
         + "\n"
-        "Oldindan to'langan qoldiq — −116,400 UZS\n"
+        "Oldindan to'langan qoldiq — −116,400 so'm\n"
         "────────────────\n"
-        "<b>💰 To'lash: 0 UZS</b>\n"
+        "<b>💰 To'lash: 0 so'm</b>\n"
         "\n"
-        "💳 Ushbu buyurtmadan so'ng oldindan to'langan qoldiq: 97,100 UZS"
+        "💳 Ushbu buyurtmadan so'ng oldindan to'langan qoldiq: 97,100 so'm"
     )
 
 
@@ -134,9 +134,9 @@ async def test_a_balance_that_covers_part_leaves_no_balance_after_line(bot, shop
     assert bot.telegram.last_shown().text.endswith(
         uz("telegram.orders.estimate_tier_line", tier_name="Gold", percentage=3, amount="3,600")
         + "\n"
-        "Oldindan to'langan qoldiq — −50,000 UZS\n"
+        "Oldindan to'langan qoldiq — −50,000 so'm\n"
         "────────────────\n"
-        "<b>💰 To'lash: 66,400 UZS</b>"
+        "<b>💰 To'lash: 66,400 so'm</b>"
     )
 
 
@@ -149,7 +149,7 @@ async def test_a_cash_order_with_no_prepaid_balance_has_no_prepaid_lines(bot, sh
     await reach_confirmation(bot, user, HOME, "cash")
 
     text = bot.telegram.last_shown().text
-    assert text.endswith("────────────────\n<b>💰 To'lash: 116,400 UZS</b>")
+    assert text.endswith("────────────────\n<b>💰 To'lash: 116,400 so'm</b>")
     assert "Oldindan to'langan qoldiq" not in text
 
 
@@ -164,7 +164,7 @@ async def test_a_card_order_never_shows_the_prepaid_balance(bot, shop, user):
 
     text = bot.telegram.last_shown().text
     assert "<b>To'lov usuli:</b> 💳 Karta\n" in text
-    assert text.endswith("────────────────\n<b>💳 To'lash: 116,400 UZS</b>")
+    assert text.endswith("────────────────\n<b>💳 To'lash: 116,400 so'm</b>")
     assert "qoldiq" not in text
 
 
@@ -209,4 +209,4 @@ async def test_names_that_look_like_html_are_shown_as_typed(bot, shop, user):
     screen = bot.telegram.last_shown()
     assert screen.refused is None, screen.refused
     assert "<b>Yetkazib berish manzili:</b> Uy &lt;2&gt;\nChilonzor &amp; Co, 9-kvartal\n" in screen.text
-    assert "• Suv &lt;19L&gt; &amp; co × 8 — 120,000 UZS\n" in screen.text
+    assert "• Suv &lt;19L&gt; &amp; co × 8 — 120,000 so'm\n" in screen.text

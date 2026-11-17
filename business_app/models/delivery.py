@@ -2,6 +2,7 @@ from datetime import date, datetime, time, timedelta, UTC
 from decimal import Decimal
 from typing import Optional, Tuple
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 import uuid
 from business_app import db
@@ -53,7 +54,10 @@ class Delivery(db.Model, TimestampMixin):
     actual_delivery_time = Column(DateTime(timezone=True), nullable=True)
 
     # Route and tracking
-    route_data = Column(JSON, default={})  # Optimized route information
+    # Optimized route information plus the step times. MutableDict tracks top-level key writes (a plain JSON column
+    # never saw `route_data["k"] = v` and silently dropped it); a nested mutation is still untracked, so reassign it.
+    # `default=dict` is a callable: `default={}` would hand one shared dict to every insert.
+    route_data = Column(MutableDict.as_mutable(JSON), default=dict)
     tracking_number = Column(String(50), unique=True, nullable=True, index=True)
     distance_km = Column(Float, nullable=True)
     estimated_duration_minutes = Column(Integer, nullable=True)

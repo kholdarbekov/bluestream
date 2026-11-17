@@ -32,6 +32,7 @@ from business_app.services.corporate_contract_service import CorporateContractSe
 from business_app.services.inventory_service import InventoryService
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.line_money import LineMoney, line_money
 from business_app.utils.order_totals import compute_order_total
 from business_app.utils.payment_projection import has_open_receivable
 from business_app.utils.transactions import atomic_transaction
@@ -94,6 +95,27 @@ class _ItemChange:
     direction: str  # "add" | "remove" | "increase" | "decrease" | "unchanged"
     contract_id: Optional[int] = None
     contract_product_price_id: Optional[int] = None
+    # The price-change courtesy this line keeps after the edit (spec 2026-11-16 §5.7): the stored pair
+    # clamped to the new quantity for an existing line, None for a new line, a removed line, or a line
+    # that never had one.
+    courtesy_quantity: Optional[int] = None
+    courtesy_unit_price: Optional[Decimal] = None
+
+    def money(self) -> LineMoney:
+        """The line's discount, total and regular unit count after the edit (the one line-money formula)."""
+        return line_money(self.unit_price, self.new_quantity, self.courtesy_quantity, self.courtesy_unit_price)
+
+
+def _courtesy_after_edit(item: Optional[OrderItem], new_quantity: int) -> Tuple[Optional[int], Optional[Decimal]]:
+    """The courtesy pair a line keeps when its quantity becomes `new_quantity`.
+
+    Raising adds units at the line's `unit_price`, so the courtesy count stays; lowering shrinks it with the
+    line. 0 units, a removed line, a new line or a line that never had a courtesy keep none.
+    Removing a courtesy line never gives the courtesy back; only a cancellation does.
+    """
+    if item is None or item.courtesy_quantity is None or new_quantity <= 0:
+        return None, None
+    return min(int(item.courtesy_quantity), new_quantity), Decimal(str(item.courtesy_unit_price))
 
 
 @dataclass
@@ -561,6 +583,7 @@ class OrderEditService:
                 contract_id = row.contract_id if row is not None else None
                 contract_product_price_id = row.id if row is not None else None
 
+            courtesy_quantity, courtesy_unit_price = _courtesy_after_edit(existing_item, new_qty)
             changes.append(
                 _ItemChange(
                     product_id=product.id,
@@ -573,6 +596,8 @@ class OrderEditService:
                     direction=direction,
                     contract_id=contract_id,
                     contract_product_price_id=contract_product_price_id,
+                    courtesy_quantity=courtesy_quantity,
+                    courtesy_unit_price=courtesy_unit_price,
                 )
             )
 
@@ -590,6 +615,10 @@ class OrderEditService:
                     unit_price=Decimal(str(item.unit_price)),
                     existing_item=item,
                     direction="unchanged",
+                    courtesy_quantity=item.courtesy_quantity,
+                    courtesy_unit_price=(
+                        Decimal(str(item.courtesy_unit_price)) if item.courtesy_unit_price is not None else None
+                    ),
                 )
             )
 
@@ -604,6 +633,7 @@ class OrderEditService:
         for change in changes:
             if change.direction == "remove":
                 continue
+            money = change.money()
             out.append(
                 {
                     "order_item_id": change.existing_item.id if change.existing_item else None,
@@ -611,7 +641,13 @@ class OrderEditService:
                     "product_name": change.product.name if change.product else None,
                     "quantity": change.new_quantity,
                     "unit_price": float(change.unit_price),
-                    "total_price": float(change.unit_price * Decimal(change.new_quantity)),
+                    "total_price": float(money.total_price),
+                    "discount_amount": float(money.discount_amount),
+                    "courtesy_quantity": change.courtesy_quantity,
+                    "courtesy_unit_price": (
+                        float(change.courtesy_unit_price) if change.courtesy_unit_price is not None else None
+                    ),
+                    "regular_quantity": money.regular_quantity,
                 }
             )
         return out
@@ -621,7 +657,7 @@ class OrderEditService:
         for change in changes:
             if change.direction == "remove":
                 continue
-            subtotal += change.unit_price * Decimal(change.new_quantity)
+            subtotal += change.money().total_price
         discount = Decimal(str(order.discount_amount or 0))
         delivery_fee = Decimal(str(order.delivery_fee or 0))
         # Loyalty POINTS are rewards-only: they are NEVER converted to a UZS
@@ -668,18 +704,19 @@ class OrderEditService:
 
         OrderItem.to_dict() returns Decimal values for unit_price /
         discount_amount / total_price, which PostgreSQL's JSON serializer
-        cannot encode. We coerce numeric fields to float here so the dict
+        cannot encode. The line's money comes from `order_item_split`, the one
+        publisher of a stored line (floats, read as stored), so the dict
         round-trips through the OrderEditHistory.diff JSONB column.
         """
+        from business_app.serializers.order_serializers import order_item_split
+
         return {
             "id": item.id,
             "product_id": item.product_id,
             "product_name": item.product.name if item.product else None,
             "contract_id": item.contract_id,
             "quantity": int(item.quantity),
-            "unit_price": float(item.unit_price or 0),
-            "discount_amount": float(item.discount_amount or 0),
-            "total_price": float(item.total_price or 0),
+            **order_item_split(item),
         }
 
     def _delivered_at(self, order: Order) -> Optional[datetime]:
@@ -821,15 +858,20 @@ class OrderEditService:
                 order.order_items.remove(change.existing_item)
                 continue
             if change.direction == "add":
-                new_item = OrderItem(
-                    order_id=order.id,
-                    product_id=change.product_id,
-                    quantity=change.new_quantity,
-                    unit_price=change.unit_price,
-                    discount_amount=Decimal("0.00"),
-                    total_price=change.unit_price * Decimal(change.new_quantity),
-                    contract_id=change.contract_id,
-                    contract_product_price_id=change.contract_product_price_id,
+                money = change.money()
+                new_item = OrderItem.from_priced_line(
+                    order.id,
+                    {
+                        "product_id": change.product_id,
+                        "quantity": change.new_quantity,
+                        "unit_price": change.unit_price,
+                        "discount_amount": money.discount_amount,
+                        "total_price": money.total_price,
+                        "contract_id": change.contract_id,
+                        "contract_product_price_id": change.contract_product_price_id,
+                        "courtesy_quantity": change.courtesy_quantity,
+                        "courtesy_unit_price": change.courtesy_unit_price,
+                    },
                 )
                 # Through the loaded collection, not a bare `session.add`: `_recompute_totals`
                 # sums `order.order_items`, which already holds the pre-edit lines and would
@@ -840,8 +882,12 @@ class OrderEditService:
                 change.existing_item = new_item
                 continue
             # increase / decrease
+            money = change.money()
             change.existing_item.quantity = change.new_quantity
-            change.existing_item.total_price = change.unit_price * Decimal(change.new_quantity)
+            change.existing_item.discount_amount = money.discount_amount
+            change.existing_item.total_price = money.total_price
+            change.existing_item.courtesy_quantity = change.courtesy_quantity
+            change.existing_item.courtesy_unit_price = change.courtesy_unit_price
         db.session.flush()
 
     def _cascade_inventory(self, order: Order, plan: OrderEditPlan) -> None:

@@ -34,6 +34,7 @@ import SalesCompensation from './pages/SalesCompensation';
 import PenaltyProposals from './pages/PenaltyProposals';
 import SalesOrderApprovals from './pages/SalesOrderApprovals';
 import LapsedCustomers from './pages/LapsedCustomers';
+import PriceChanges from './pages/PriceChanges';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
 import MarkingCodeOperations from './pages/MarkingCodeOperations';
@@ -76,6 +77,14 @@ function App() {
                   <Route path="/subscriptions" element={<Subscriptions />} />
                   <Route path="/corporate-contracts" element={<CorporateContracts />} />
                   <Route path="/products" element={<Products />} />
+                  <Route
+                    path="/price-changes"
+                    element={(
+                      <PermissionGuard permission="can_view_price_changes" fallback={<Navigate to="/dashboard" replace />}>
+                        <PriceChanges />
+                      </PermissionGuard>
+                    )}
+                  />
                   <Route path="/product-categories" element={<ProductCategories />} />
                   <Route path="/delivery" element={<Delivery />} />
                   <Route path="/delivery/reports" element={<DeliveryReports />} />

@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 # Initialize Sentry before any other imports
 import sentry_sdk
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from shared.url_redaction import redact_event_urls  # imports only re/typing, safe before the rest
 
 _sentry_dsn = os.environ.get('SENTRY_DSN')
 if _sentry_dsn:
@@ -26,6 +27,8 @@ if _sentry_dsn:
         debug=os.environ.get('SENTRY_DEBUG', 'false').lower() == 'true',
         integrations=[AsyncioIntegration()],
         release=os.environ.get('APP_VERSION', 'staff-bot@1.0.0'),
+        # URL credentials only: staff_bot has no key scrubber (telegram_bot/sentry_scrub.py has one).
+        before_send=redact_event_urls,
     )
 
 from telegram import Update, BotCommand, ReplyKeyboardRemove

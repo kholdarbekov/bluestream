@@ -13,6 +13,7 @@ import jwt
 
 from business_app.models.user import User
 from shared.enums import UserRole
+from shared.url_redaction import redact_url_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +77,12 @@ class TokenService:
             self.redis_available = True
             # Only log on initial connection or reconnection
             if not hasattr(self, "_redis_connected"):
-                logger.info(f"Redis connected successfully to {redis_url}")
+                logger.info(f"Redis connected successfully to {redact_url_credentials(redis_url)}")
                 self._redis_connected = True
         except Exception as e:
             # Only log if this is first connection attempt or status changed
             if not hasattr(self, "_redis_connected") or self.redis_available:
-                logger.warning(f"Redis not available, using in-memory blacklist: {e}")
+                logger.warning(f"Redis not available, using in-memory blacklist: {redact_url_credentials(str(e))}")
             self.redis_available = False
             self.redis_client = None
             self._redis_connected = False

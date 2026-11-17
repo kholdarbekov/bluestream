@@ -3311,7 +3311,17 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # Unrelated to place-merge; only the estate-wide count moved.
     # 662 -> 661: POST /api/v1/loyalty/earn-points (loyalty.earn_points) removed (owner decision 2026-11-13): it let a
     # customer award themselves any number of AquaCoins. Unrelated to place-merge; only the estate-wide count moved.
-    assert len(routes) == 661
+    # 661 -> 669: the price-change transition plan (2026-11-16) added eight routes -- Task 8's admin price-change
+    # CRUD on the new `admin_price_changes` blueprint (POST and GET /api/v1/admin/price-changes, GET and PUT
+    # /api/v1/admin/price-changes/<int:price_change_id>, POST .../cancel), Task 10's report reads (GET
+    # .../<id>/exceptions and GET .../<id>/unreachable) and Task 25's POST /api/v1/admin/orders/quote
+    # (admin.create_order_quote). Unrelated to place-merge; only the estate-wide count moved.
+    # 669 -> 671: Task 29 added the customer's courtesy status and the manager exception, GET and POST
+    # /api/v1/admin/customers/<int:user_id>/price-courtesy. Unrelated to place-merge; only the count moved.
+    # 671 -> 670: POST /api/v1/delivery/driver/update-location (delivery.update_driver_location) removed (Task Z1,
+    # 2026-11-17): no client called it and both jobs it published were broken; the staff bot's shared location now
+    # marks the stop arrived. Unrelated to place-merge; only the count moved.
+    assert len(routes) == 670
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

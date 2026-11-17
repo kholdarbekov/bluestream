@@ -526,6 +526,11 @@ class CrossPlatformSyncService:
                 {case_column: primary_id}, synchronize_session=False
             )
 
+        # Price-change courtesies, notices and actor stamps (RESTRICT FKs to users).
+        from business_app.services.price_change.merge import on_users_merged
+
+        on_users_merged(primary_id, secondary_id)
+
         db.session.flush()
         logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")
 

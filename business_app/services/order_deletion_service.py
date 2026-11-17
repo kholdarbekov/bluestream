@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from decimal import Decimal
-from typing import Any, Dict, List, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import MetaData, delete, select, tuple_
 
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 RowKey = Tuple[Any, ...]
 
 BOTTLE_LEDGER_TABLE_NAME = "bottle_ledger"
+COURTESY_TABLE_NAME = "price_courtesies"
 
 # Tables whose rows make an order undeletable: the walk below would delete them with the order,
 # and for these it must not. A pay ledger line is commission the business already owes an
@@ -41,12 +42,16 @@ class OrderDeletionService:
     ROOT_TABLE_NAME = "orders"
     ROOT_ORDER_NUMBER_COLUMN = "order_number"
 
-    def build_deletion_plan(self, order_number: str) -> Dict[str, Any]:
-        """Build a deletion plan for one order number without mutating data."""
+    def build_deletion_plan(self, order_number: str, *, metadata: Optional[MetaData] = None) -> Dict[str, Any]:
+        """Build a deletion plan for one order number without mutating data.
+
+        `metadata` is the reflected schema when the caller already holds it: reflecting borrows an engine
+        connection, which on a single-connection test database ends the session's open transaction, so a
+        rebuild that follows an uncommitted write must not reflect again."""
         if not str(order_number or "").strip():
             raise ValueError("order_number is required")
 
-        metadata = self._reflect_metadata()
+        metadata = metadata if metadata is not None else self._reflect_metadata()
         root_table = metadata.tables.get(self.ROOT_TABLE_NAME)
         if root_table is None:
             raise RuntimeError(f"'{self.ROOT_TABLE_NAME}' table was not found")
@@ -133,6 +138,7 @@ class OrderDeletionService:
             # plan and executes it directly, so a fence placed one level up would
             # be skipped by the exact path an operator actually uses.
             plan = self._plan_with_bottle_ledger_reversed(plan)
+            plan = self._plan_with_courtesy_released(plan, metadata)
             # The rebuilt plan is read again: a pay line posted since the preview refuses as well,
             # and the rollback below undoes the reversal just written.
             self._refuse_protected(plan)
@@ -212,6 +218,24 @@ class OrderDeletionService:
         """Raise the plan's refusal, if it has one (`PROTECTED_TABLES`)."""
         if plan.get("refused"):
             raise RuntimeError(plan["refused"])
+
+    def _plan_with_courtesy_released(self, plan: Dict[str, Any], metadata: MetaData) -> Dict[str, Any]:
+        """Give back the old-price courtesy the deleted orders used, then rebuild the plan around it.
+
+        The plan is reflection-driven, so ``price_courtesies.order_id`` makes the person's entry a child of the
+        order and it would be deleted with it, erasing the one old-price entry the person has (one per person).
+        Released first, the entry no longer references the order, the rebuilt plan leaves it out, and it
+        survives unused for the rest of the window. Flushes; the walk's commit (or rollback) decides.
+        """
+        row_keys_by_table: Dict[str, List[RowKey]] = plan.get("_row_keys_by_table") or {}
+        if not row_keys_by_table.get(COURTESY_TABLE_NAME):
+            return plan
+
+        from business_app.services.price_change.courtesy import release_for_order
+
+        for row_key in row_keys_by_table[self.ROOT_TABLE_NAME]:
+            release_for_order(row_key[0])
+        return self.build_deletion_plan(plan["order_number"], metadata=metadata)
 
     def _plan_with_bottle_ledger_reversed(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         """Reverse the plan's bottle-ledger rows, then rebuild the plan around them.

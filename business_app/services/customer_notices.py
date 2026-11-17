@@ -24,6 +24,8 @@ customer_notice_builders.py::CONTRACT_KEYS and tests/telegram_bot/test_webhook_c
                                   new_weekday, added_weekdays, removed_weekdays, next_delivery_date,
                                   kept_order_note, time_kind
     prepayment_returned           payout_id, amount, balance (money floats; the balance is read when sent)
+    price_change_announcement     price_change_id, effective_date, prices [{name, new_price}], is_subscriber
+    price_change_reminder         (the same facts as the announcement)
 `subscription_id` is None for an ordinary order. `actions` is `customer_actions(order)`, the backend's published
 answers (pay, cancel, confirm): the bot draws Pay from `actions["pay"]` and the email links the website page, and
 neither re-derives the rule.
@@ -74,6 +76,9 @@ SUBSCRIPTION_PAID_ORDER_KEPT = NotificationType.SUBSCRIPTION_PAID_ORDER_KEPT.val
 ORDER_PAYMENT_EXPIRED = NotificationType.ORDER_PAYMENT_EXPIRED.value
 SUBSCRIPTION_SCHEDULE_CHANGED = NotificationType.SUBSCRIPTION_SCHEDULE_CHANGED.value
 PREPAYMENT_RETURNED = NotificationType.PREPAYMENT_RETURNED.value
+PRICE_CHANGE_ANNOUNCEMENT = NotificationType.PRICE_CHANGE_ANNOUNCEMENT.value
+PRICE_CHANGE_REMINDER = NotificationType.PRICE_CHANGE_REMINDER.value
+PRICE_CHANGE_KINDS = frozenset({PRICE_CHANGE_ANNOUNCEMENT, PRICE_CHANGE_REMINDER})
 # The facts a schedule change carries, as `SubscriptionService.reconcile_with_slots` records them. The next delivery
 # and its kept-order note are read when the notice is sent (`send_schedule_changed`).
 _SCHEDULE_CHANGED_FACTS = (
@@ -96,6 +101,8 @@ NOTICE_KINDS = frozenset(
         ORDER_PAYMENT_EXPIRED,
         SUBSCRIPTION_SCHEDULE_CHANGED,
         PREPAYMENT_RETURNED,
+        PRICE_CHANGE_ANNOUNCEMENT,
+        PRICE_CHANGE_REMINDER,
     }
 )
 
@@ -223,6 +230,32 @@ def send_prepayment_returned(payout_id: int) -> str:
     )
 
 
+def send_price_change(price_change, user: User, kind: str, *, is_subscriber: bool, notice_id: str) -> str:
+    """The announcement or the reminder of a price change (spec 2026-11-16 §5.3), to one person. The prices are the
+    change's items in id order, each product named in the notice's language; `is_subscriber` is the caller's answer
+    and only adds the subscription sentence. `notice_id` is stable across retries (the bot sends one message per id)."""
+    if kind not in PRICE_CHANGE_KINDS:
+        raise ValueError(f"{kind!r} is not a price-change notice kind")
+    language = _language(user)
+    return _send(
+        user,
+        kind,
+        {
+            "price_change_id": price_change.id,
+            "effective_date": price_change.change_on.isoformat(),
+            "prices": [
+                {
+                    "name": _product_name(item.product, item.product_id, language),
+                    "new_price": float(item.new_price),
+                }
+                for item in price_change.items
+            ],
+            "is_subscriber": is_subscriber,
+        },
+        notice_id=notice_id,
+    )
+
+
 # --------------------------------------------------------------------------- facts
 
 
@@ -309,6 +342,11 @@ def email_template_data(kind: str, facts: Dict[str, Any], language: str) -> Dict
     data: Dict[str, Any] = dict(facts)
     for key in ("delivery_date", "next_delivery_date"):
         data[key] = _email_date(facts.get(key), language)
+    data["effective_date"] = _email_date_in_words(facts.get("effective_date"), language)
+    data["prices"] = [
+        {"name": price["name"], "new_price": NotificationService._format_money(price["new_price"])}
+        for price in facts.get("prices") or []
+    ]
     data["skipped_dates"] = ", ".join(_email_date(day, language) for day in facts.get("skipped_dates") or [])
     data["deadline"] = (
         format_datetime(datetime.fromisoformat(facts["deadline"]), "datetime", language)
@@ -349,6 +387,16 @@ def _email_time_label(facts: Dict[str, Any], language: str) -> str:
 
 def _email_weekday(value: Optional[int], language: str) -> Optional[str]:
     return display_labels.weekday_name(value, language) if value is not None else None
+
+
+def _email_date_in_words(value: Optional[str], language: str) -> Optional[str]:
+    """A date the reader must not misread, as words with the year: "1 February 2027" / "1 февраля 2027" /
+    "1-fevral 2027" (`display_labels.day_month`, the website's own wording). The price notices state a date the
+    customer plans around, and the en email's numeric form (02/01/2027) reads as 2 January in a day-first country."""
+    if not value:
+        return None
+    day = date.fromisoformat(value)
+    return f"{display_labels.day_month(day, language)} {day.year}"
 
 
 def _email_date(value: Optional[str], language: str) -> Optional[str]:

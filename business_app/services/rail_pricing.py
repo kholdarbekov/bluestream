@@ -15,7 +15,11 @@ Which lines move:
   * covered now                -> THE contract rule for the method (`contract_price_for_method`);
   * covered when placed, not now -> the live catalogue price (the contract no longer prices it);
   * never covered              -> unchanged (a regular customer's price never depended on the method);
-  * loyalty reward line        -> unchanged (a gift at 0 must never be billed).
+  * loyalty reward line        -> unchanged (a gift at 0 must never be billed);
+  * price-change courtesy line -> unchanged: it was sold at the old price, and a contract never prices
+    a courtesy line (the courtesy refuses contract-priced lines), so it keeps its charged price and
+    its stored split; a contract price written beside the old courtesy pair would be a line no
+    formula agrees with.
 The subtotal moves by the changed lines only; `delivery_fee` and `discount_amount` stay as stored.
 The tier discount is re-quoted by `loyalty_service.tier_discount_for_rail` with the order's own
 channel: a move onto cash grants it only to the customer's own bot or website order, never to a
@@ -106,7 +110,7 @@ def quote_order_for_rail(order: Order, payment_method: PaymentMethodLike) -> Rai
             contract_product_price_id=item.contract_product_price_id,
             pricing_source="reward" if item.is_reward_item else PRICING_SOURCE_FALLBACK,
         )
-        if item.is_reward_item:
+        if item.is_reward_item or item.courtesy_quantity is not None:
             lines.append(unchanged)
             continue
 

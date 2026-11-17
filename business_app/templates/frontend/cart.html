@@ -1,7 +1,9 @@
 {% extends "frontend/base.html" %}
 {#- /cart (website redesign step 3, group "shop"). cart.js renders the lines from the local cart (synced from the
-    database cart when signed in) with prices from POST /api/v1/products/bulk (pricing.current_price, the charged
-    price). Steppers stop at each product's published minimum; the summary's delivery row is the offer facts' answer.
+    database cart when signed in). The money: signed in, GET /api/v1/cart/'s (the server's lines, a kept old price
+    included, the subtotal, the total and #cart-courtesy's thank-you); signed out, the public card price from
+    POST /api/v1/products/bulk (pricing.current_price). Each line dates a coming price (the offer service's upcoming-price sentence, via offer_upcoming_price_template).
+    Steppers stop at each product's published minimum; the summary's delivery row is the offer facts' answer.
     Words: web.shop.* (scripts/seed_web_ui_shop_translations.py); the delivery words are the offer facts'. -#}
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
 {% from 'frontend/partials/product_card.html' import product_card with context %}
@@ -108,6 +110,7 @@
                             <dd id="summary-total"></dd>
                         </div>
                     </dl>
+                    <p class="shop-cart__courtesy" id="cart-courtesy" hidden></p>
                     <p class="shop-cart__note"><i class="far fa-calendar-check" aria-hidden="true"></i>{{ offer_facts.delivery.every_day[current_language] }}</p>
 
                     <div class="ae-alert ae-alert--warn shop-cart__notice" id="min-order-warning" tabindex="-1" hidden>
@@ -198,6 +201,10 @@
         'min_qty_line': 'web.shop.cart.min_qty_line'|t,
         'min_qty_hint': 'web.shop.cart.min_qty_hint'|t,
         'update_error': 'web.shop.cart.update_error'|t,
+        'calculating': 'web.shop.cart.calculating'|t,
+        'courtesy_part': 'web.shop.cart.courtesy_part'|t,
+        'courtesy_thanks': 'web.shop.cart.courtesy_thanks'|t,
+        'upcoming_price': offer_upcoming_price_template(current_language),
     },
 }) }}
 <script src="{{ asset_url('js/pages/cart.js') }}"></script>

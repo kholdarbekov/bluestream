@@ -181,6 +181,13 @@ COPY_KEYS = (
     "staff.common.not_available",
     "staff.addresses",
     "staff.orders",
+    "staff.price_change.upcoming_line",
+    "staff.price_change.courtesy_split",
+    "staff.price_change.courtesy_only",
+    "staff.price_change.status_available",
+    "staff.price_change.status_cap_line",
+    "staff.price_change.status_used",
+    "staff.price_change.price_changed_note",
 )
 
 
@@ -335,7 +342,7 @@ def _estimate(call):
                 "total_price": total,
             }
         )
-    return {"items": lines, "subtotal": subtotal}
+    return {"items": lines, "subtotal": subtotal, "total_amount": subtotal}
 
 
 def wire_backend(harness, world: OperatorWorld):
@@ -1066,6 +1073,7 @@ async def test_an_operator_takes_an_order_end_to_end_and_the_backend_gets_the_ch
         "delivery_address_id": EXISTING_ADDRESS_ID,
         "payment_method": "cash",
         "delivery_notes": "Eshik oldiga qoldiring",
+        "expected_total": 81000.0,
     }
 
     done = last_screen(operator)
@@ -1087,6 +1095,7 @@ def _estimate_priced_on_the_method(call):
             line["unit_price"] = 26000.0
             line["total_price"] = 26000.0 * line["quantity"]
         body["subtotal"] = sum(line["total_price"] for line in body["items"])
+        body["total_amount"] = body["subtotal"]
     return body
 
 

@@ -54,6 +54,9 @@ CONTRACT_KEYS = {
     | {"order_id", "order_number", "delivery_date", "trigger", "next_delivery_date", "subscription_id", "actions"},
     "order_payment_expired": ENVELOPE | {"order_id", "order_number", "deadline", "subscription_id", "actions"},
     "prepayment_returned": ENVELOPE | {"payout_id", "amount", "balance"},
+    # The price-change announcement and reminder (price-change plan Task 41).
+    "price_change_announcement": ENVELOPE | {"price_change_id", "effective_date", "prices", "is_subscriber"},
+    "price_change_reminder": ENVELOPE | {"price_change_id", "effective_date", "prices", "is_subscriber"},
     # A slot write changed the subscription's delivery time or day (spec 2026-10-27 §6.5).
     "subscription_schedule_changed": ENVELOPE
     | {

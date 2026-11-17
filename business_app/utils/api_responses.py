@@ -3,11 +3,11 @@ Standardized API Response Helpers
 Provides type-safe, consistent response formats for all API endpoints
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 from flask import jsonify
 from pydantic import BaseModel, Field, ConfigDict
 
-from business_app.utils.exceptions import STATE_CHANGED_MESSAGE_KEY
+from business_app.utils.exceptions import STATE_CHANGED_MESSAGE_KEY, StateChangedError
 
 
 class APIResponse(BaseModel):
@@ -294,15 +294,47 @@ def conflict_response(message: str = "Resource already exists"):
     return error_response(message=message, status_code=409)
 
 
-def state_changed_response():
+def state_changed_response(details: Optional[Dict[str, Any]] = None):
     """409 for a customer write whose screen is stale (`exceptions.StateChangedError`, spec 2026-10-27 §16 M2):
     "This changed. Refresh to see the latest." in the request's language, and `data.reason_code` STATE_CHANGED for
-    the clients to branch on."""
+    the clients to branch on. `details` (the error's `reason`, a `quote`) joins `data` beside it."""
     from business_app.utils.translations import get_translation
 
     return error_response(
-        message=get_translation(STATE_CHANGED_MESSAGE_KEY), status_code=409, data={"reason_code": "STATE_CHANGED"}
+        message=get_translation(STATE_CHANGED_MESSAGE_KEY),
+        status_code=409,
+        data={"reason_code": "STATE_CHANGED", **(details or {})},
     )
+
+
+def price_changed_response(exc: StateChangedError, requote: Callable[[], Dict[str, Any]], *, envelope: str):
+    """409 for a create whose shown total no longer holds: the refusal plus the quote the screen must show now.
+
+    Rolls the session back FIRST (the refused write must leave nothing behind, not even the courtesy claim), then
+    asks `requote` for the estimate of the same checkout; a quote that cannot be drawn (`ValidationError`) is `None`.
+    `envelope` is the shape the caller's clients parse: "customer" is the data envelope (`data.reason_code`,
+    `data.reason`, `data.quote`), "staff" the top-level one (`error_code`, `details.reason`, `details.quote`)."""
+    from business_app import db
+    from business_app.utils.error_handlers import ErrorResponse
+    from business_app.utils.exceptions import ValidationError
+    from business_app.utils.translations import get_translation
+
+    db.session.rollback()
+    try:
+        quote = requote()
+    except ValidationError:
+        quote = None
+    details = {**(exc.details or {}), "quote": quote}
+    if envelope == "customer":
+        return state_changed_response(details)
+    body, status = ErrorResponse.build_error_response(
+        "CONFLICT",
+        get_translation(STATE_CHANGED_MESSAGE_KEY),
+        details=details,
+        error_code="STATE_CHANGED",
+        status_code=409,
+    )
+    return jsonify(body), status
 
 
 def internal_error_response(message: str = "Internal server error", error_id: str = None):
@@ -338,5 +370,6 @@ __all__ = [
     "validation_error_response",
     "conflict_response",
     "state_changed_response",
+    "price_changed_response",
     "internal_error_response",
 ]

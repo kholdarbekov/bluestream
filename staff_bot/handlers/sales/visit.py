@@ -41,6 +41,7 @@ from staff_bot.keyboards.sales import (
 from staff_bot.permissions import require_auth, require_sales_agent
 from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_currency, format_local_date
+from staff_bot.utils.price_lines import courtesy_line, courtesy_status_lines, price_changed_quote, upcoming_price_line
 # The answers `POST /visits/<id>/order` can give for `confirmation.state`, and the vocabulary
 # `_order_state_line` gates on: the backend's own tuple, never a copy (compensation spec §7.6).
 from shared.staff_constants import SALES_AGENT_ORDER_STATES as ORDER_STATES
@@ -1551,14 +1552,14 @@ class VisitHandler(SalesHubHandler):
         return ((response.data or {}).get('estimate') or {}), None
 
     def _confirm_rows(self, flow: Dict, estimate: Optional[Dict]) -> List[Dict]:
+        """The quote's own rows (so the price-change fields reach the card), else the basket's."""
         rows = (estimate or {}).get('items') or []
         if rows:
-            return [{'product_name': row.get('product_name') or '', 'quantity': row.get('quantity') or 0}
-                    for row in rows]
+            return list(rows)
         return [{'product_name': self._product_name(flow, row['product_id']), 'quantity': row['quantity']}
                 for row in self._basket_rows(flow) if row['quantity'] > 0]
 
-    def _confirm_text(self, flow: Dict, estimate: Optional[Dict], language: str) -> str:
+    def _confirm_text(self, flow: Dict, estimate: Optional[Dict], language: str, *, notice: Optional[str] = None) -> str:
         """The last screen before money moves: what, how much, how paid, when.
 
         The total renders through `format_currency` -- the same helper the
@@ -1566,14 +1567,18 @@ class VisitHandler(SalesHubHandler):
         (controller ruling 24), and the day through `format_local_date`, the
         bot's one date renderer.
         """
-        lines = [f"<b>{i18n.get('staff.sales.visit.confirm_title', language)}</b>"]
+        lines = [notice, ""] if notice else []
+        lines.append(f"<b>{i18n.get('staff.sales.visit.confirm_title', language)}</b>")
         if flow.get('outlet_name'):
             lines.append(f"🏪 {escape_html(flow['outlet_name'])}")
         for row in self._confirm_rows(flow, estimate):
-            lines.append(f"• {escape_html(row['product_name'])} × {row['quantity']}")
+            lines.append(f"• {escape_html(row.get('product_name') or '')} × {row.get('quantity') or 0}")
+            lines.extend(sub for sub in (courtesy_line(row, language),
+                                         upcoming_price_line(row.get('upcoming_price'), language)) if sub)
         total = (estimate or {}).get('total_amount')
         if total is not None:
             lines.append(f"💰 {format_currency(total, language=language)}")
+        lines.extend(courtesy_status_lines((estimate or {}).get('courtesy_status'), language))
         method = flow.get('payment_method')
         if method in PAY_METHODS:
             lines.append(f"💳 {i18n.get(f'staff.sales.visit.pay.{method}', language)}")
@@ -1583,14 +1588,14 @@ class VisitHandler(SalesHubHandler):
             lines.append(f"📝 {escape_html(flow['delivery_notes'])}")
         return "\n".join(lines)
 
-    async def _show_confirm(self, update: Update, flow: Dict, language: str) -> int:
+    async def _show_confirm(self, update: Update, flow: Dict, language: str, *, notice: Optional[str] = None) -> int:
         """Re-draw the confirm screen from the LAST quote -- no second pricing.
 
         Used after a refused send: the basket did not change, so asking the
         backend to price it again would be a second call whose only possible
         effect is a different number under an unchanged list.
         """
-        await self._say(update, self._confirm_text(flow, flow.get('estimate'), language),
+        await self._say(update, self._confirm_text(flow, flow.get('estimate'), language, notice=notice),
                         SalesKeyboards.order_confirm(language))
         return V_CONFIRM
 
@@ -1735,6 +1740,8 @@ class VisitHandler(SalesHubHandler):
             'delivery_window_start': None,
             'delivery_window_end': None,
             'delivery_notes': flow.get('delivery_notes'),
+            # The total the confirm card showed: the server refuses the order if it moved since.
+            'expected_total': (flow.get('estimate') or {}).get('total_amount'),
         }
         async with api_client as client:
             response = await client.sales_place_order(token, visit_id, payload)
@@ -1765,6 +1772,13 @@ class VisitHandler(SalesHubHandler):
                 )
                 context.user_data.pop(FLOW_KEY, None)
                 return ConversationHandler.END
+            quote = price_changed_quote(response)
+            if quote is not None:
+                flow['estimate'] = quote
+                return await self._show_confirm(
+                    update, flow, language,
+                    notice=i18n.get('staff.price_change.price_changed_note', language),
+                )
             await self._handle_api_response_error(update, response, language)
             if self._visit_is_gone(context, response):
                 return ConversationHandler.END

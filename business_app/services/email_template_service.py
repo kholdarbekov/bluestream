@@ -53,6 +53,8 @@ class EmailTemplateService:
         "order_payment_expired": "order_payment_expired",
         "prepayment_returned": "prepayment_returned",
         "subscription_schedule_changed": "subscription_schedule_changed",
+        "price_change_announcement": "price_change_announcement",
+        "price_change_reminder": "price_change_reminder",
     }
 
     # Email subjects by template and language
@@ -214,6 +216,17 @@ class EmailTemplateService:
             "uz": "Yetkazib berish jadvalingiz o'zgardi - {company_name}",
             "en": "Your delivery schedule changed - {company_name}",
             "ru": "Расписание доставки изменилось - {company_name}",
+        },
+        # The price-change notices (spec 2026-11-16 §5.3). uz/ru: NATIVE-READ.
+        "price_change_announcement": {
+            "uz": "{effective_date} dan narxlarimiz o'zgaradi - {company_name}",
+            "en": "Our prices change on {effective_date} - {company_name}",
+            "ru": "С {effective_date} меняются наши цены - {company_name}",
+        },
+        "price_change_reminder": {
+            "uz": "Eslatma: {effective_date} dan narxlarimiz o'zgaradi - {company_name}",
+            "en": "Reminder: our prices change on {effective_date} - {company_name}",
+            "ru": "Напоминаем: с {effective_date} меняются наши цены - {company_name}",
         },
     }
 

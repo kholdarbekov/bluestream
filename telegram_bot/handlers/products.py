@@ -21,7 +21,8 @@ from keyboards import (
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, format_price, get_auth_token
+from utils import user_middleware, format_price, format_money, get_auth_token
+from price_change_lines import courtesy_thanks, price_line_sub_lines, upcoming_price_line
 from handlers.base import BaseHandler
 from shared.business_config import MAX_QUANTITY_PER_ITEM, MIN_ORDER_AMOUNT
 from handlers.quick_order import quick_order_handlers
@@ -647,6 +648,9 @@ class ProductHandlers(BaseHandler):
             f"🛒 {product['name']}",
             f"💰 {i18n.get('telegram.products.unit_price_label', language, price=format_price(unit_price))}",
         ]
+        coming = upcoming_price_line((product.get('pricing') or {}).get('upcoming_price'), language)
+        if coming:
+            lines.append(coming)
         hint = self._contract_price_hint(
             bool((product.get('pricing') or {}).get('contract_price_at_checkout')), language, markdown_v2=False
         )
@@ -664,7 +668,7 @@ class ProductHandlers(BaseHandler):
             "",
             f"{i18n.get('telegram.quantity', language)}: {quantity}",
             f"{i18n.get('telegram.total', language)}: "
-            f"{quantity} × {format_price(unit_price)} = {format_price(unit_price * quantity)} UZS",
+            f"{quantity} × {format_price(unit_price)} = {format_money(unit_price * quantity, language)}",
             "",
             i18n.get('telegram.products.type_quantity_hint', language),
         ]
@@ -1194,7 +1198,7 @@ class ProductHandlers(BaseHandler):
 
         formatted_lines = []
         for product in products:
-            price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
+            price_str = escape_markdown(format_money(self._get_effective_unit_price(product), language), version=2)
             # The badge is a PROMISE about the next tap, so it comes from the
             # same resolver that tap obeys — never from the raw stock figure,
             # which says nothing about the product's own minimum.
@@ -1202,8 +1206,11 @@ class ProductHandlers(BaseHandler):
 
             formatted_lines.append(
                 f"{stock_indicator} *{escape_markdown(product['name'], version=2)}*\n"
-                f"   💰 {price_str} UZS \\| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
+                f"   💰 {price_str} \\| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
             )
+            coming = upcoming_price_line((product.get('pricing') or {}).get('upcoming_price'), language)
+            if coming:
+                formatted_lines[-1] += "\n   " + escape_markdown(coming, version=2)
 
         hint = self._contract_price_hint(
             any((product.get('pricing') or {}).get('contract_price_at_checkout') for product in products),
@@ -1283,8 +1290,9 @@ class ProductHandlers(BaseHandler):
                 line_total = float(item.get('total_price') or 0)
 
                 lines.append(
-                    f"🛒 {product['name']} x {quantity} = {format_price(line_total)} UZS"
+                    f"🛒 {product['name']} x {quantity} = {format_money(line_total, language)}"
                 )
+                lines.extend(price_line_sub_lines(item, language))
 
                 # Per-product purchase minimum (mirrors backend rule), read
                 # from the one resolver every quantity surface uses.
@@ -1295,12 +1303,15 @@ class ProductHandlers(BaseHandler):
                         'min_qty': min_qty,
                         'remaining': min_qty - quantity,
                     })
-            lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(subtotal)} UZS")
+            lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_money(subtotal, language)}")
             # The cart is drawn before a method exists, so it states the catalogue (D5); say a
             # contract price will apply at checkout. Plain text here, like the rest of this screen.
             hint = self._contract_price_hint(bool(cart.get('contract_price_at_checkout')), language, markdown_v2=False)
             if hint:
                 lines.append(hint)
+            thanks = courtesy_thanks(cart.get('price_courtesy'), language)
+            if thanks:
+                lines.append(thanks)
 
             cod_prepayment = cart.get('cod_prepayment') or {}
             available_balance = float(cod_prepayment.get('available_balance') or 0)

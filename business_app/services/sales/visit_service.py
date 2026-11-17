@@ -505,14 +505,37 @@ class VisitService:
         charged. Optional because the bot may quote before the rail step; validated by the same
         gate the order uses when it is supplied. The quote carries the `sales_agent` source the
         order will carry, so the tier decision gives it no tier discount, exactly as it gives the
-        order none (spec 2026-10-23).
+        order none (spec 2026-10-23). It also carries the outlet's delivery address the order will
+        carry, so its delivery fee is the one `create_order` charges (`DeliveryService`'s), never the
+        operator's payload fee of 0.
         """
         VisitService._assert_orderable(outlet)
         VisitService._assert_line_quantities(items)
         rail = VisitService._rail(payment_method) if payment_method is not None else None
         return StaffService.estimate_phone_order(
-            outlet.user_id, {"items": items}, payment_method=rail, order_source=ORDER_SOURCE_SALES_AGENT
+            outlet.user_id,
+            {"items": items},
+            payment_method=rail,
+            order_source=ORDER_SOURCE_SALES_AGENT,
+            delivery_address=VisitService._delivery_address(outlet.address),
         )
+
+    @staticmethod
+    def _delivery_address(address) -> Dict[str, Any]:
+        """The outlet's delivery address as an order carries it: the quote prices its delivery fee from the same dict
+        `place_order` hands `create_order`."""
+        return {
+            "delivery_address_id": address.id,
+            "street": address.street_address,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+        }
+
+    @staticmethod
+    def requote(visit: Visit, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The quote a refused order is redrawn with: the estimate of the same basket on the same rail, so posting
+        its total back is accepted."""
+        return VisitService.order_estimate(visit.outlet, payload["items"], payload.get("payment_method"))
 
     @staticmethod
     def place_order(visit: Visit, payload: Dict[str, Any], agent_user_id: int) -> Tuple[Order, str]:
@@ -629,17 +652,13 @@ class VisitService:
                 user.id,
                 {
                     "items": items,
-                    "delivery_address": {
-                        "delivery_address_id": address.id,
-                        "street": address.street_address,
-                        "latitude": address.latitude,
-                        "longitude": address.longitude,
-                    },
+                    "delivery_address": VisitService._delivery_address(address),
                     "payment_method": payment_method,
                     "delivery_date": delivery_date,
                     "delivery_window_start": window_start,
                     "delivery_window_end": window_end,
                     "delivery_notes": payload.get("delivery_notes"),
+                    "expected_total": payload.get("expected_total"),
                     "order_source": ORDER_SOURCE_SALES_AGENT,
                     "created_by_staff_id": agent_user_id,
                     # The idempotency key travels WITH the order so `uq_orders_visit_id` is

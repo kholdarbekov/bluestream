@@ -363,20 +363,20 @@ class NotificationService:
             ),
         },
         "en": {
-            "covered_elsewhere": "{amount} UZS of the order was covered by your earlier payments.",
+            "covered_elsewhere": "{amount} so'm of the order was covered by your earlier payments.",
             "reserved": (
-                "Your order total was {order_total} UZS; the extra {reserved} UZS has been "
+                "Your order total was {order_total} so'm; the extra {reserved} so'm has been "
                 "saved as credit for your future orders."
             ),
             "debt_single": (
-                "{amount} UZS of this payment was used to settle the outstanding balance on "
+                "{amount} so'm of this payment was used to settle the outstanding balance on "
                 "order #{order_number} ({date})."
             ),
             "debt_intro": "This payment settled the outstanding balance on:",
-            "debt_item": "• #{order_number} ({date}): {amount} UZS",
-            "debt_remainder": ("The remaining {reserved} UZS has been saved as credit for your future orders."),
+            "debt_item": "• #{order_number} ({date}): {amount} so'm",
+            "debt_remainder": ("The remaining {reserved} so'm has been saved as credit for your future orders."),
             "shortfall": (
-                "{shortfall} UZS short of the order total; we'll collect the remaining balance "
+                "{shortfall} so'm short of the order total; we'll collect the remaining balance "
                 "on your next delivery."
             ),
         },
@@ -4796,7 +4796,7 @@ Xaridingiz uchun rahmat!"""
                 "content": """{payment_status_header}
 
 Order: #{order_number}
-Amount: {payment_amount} UZS
+Amount: {payment_amount} so'm
 Method: {payment_method}{payment_details}
 
 {payment_follow_up_message}
@@ -4842,7 +4842,7 @@ Thank you for your purchase!"""
                 "content": "Buyurtma {order_number} uchun {amount} so'mlik karta to'lovingiz buyurtma allaqachon to'langanidan keyin keldi. Ushbu summa hisobingizga oldindan to'lov sifatida qo'shildi va keyingi buyurtmangizga avtomatik qo'llaniladi.",  # noqa: E501
             },
             "en": {
-                "content": "Your card payment of {amount} UZS for order {order_number} arrived after the order was already settled. The amount has been added to your account as prepaid credit and will apply to your next order automatically.",  # noqa: E501
+                "content": "Your card payment of {amount} so'm for order {order_number} arrived after the order was already settled. The amount has been added to your account as prepaid credit and will apply to your next order automatically.",  # noqa: E501
             },
             "ru": {
                 "content": "Ваш платёж картой на {amount} сум за заказ {order_number} поступил после того, как заказ уже был оплачен. Сумма зачислена на ваш счёт как предоплата и автоматически применится к следующему заказу.",  # noqa: E501

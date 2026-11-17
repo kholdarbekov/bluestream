@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from config import config
 from shared.loyalty_eligibility import LOYALTY_ELIGIBLE_SQL
+from shared.url_redaction import redact_url_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class DatabaseManager:
 
     async def connect(self):
         """Establish database connection pool"""
-        logger.info(f"DB connect: {config.database.url[-10:]}, {config.database.pool_size}, {config.database.pool_timeout}")
+        logger.info(f"DB connect: {redact_url_credentials(config.database.url)[-10:]}, {config.database.pool_size}, {config.database.pool_timeout}")
         try:
             self.pool = await asyncpg.create_pool(
                 config.database.url,

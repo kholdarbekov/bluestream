@@ -1,0 +1,41 @@
+{% extends "emails/base.html" %}
+{# NATIVE-READ: the title, every sentence and the column labels below. #}
+
+{% block title %}Eslatma: {{ effective_date }} dan narxlarimiz o'zgaradi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Eslatma: {{ effective_date }} dan narxlarimiz o'zgaradi</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum{% if user_name %}, {{ user_name }}{% endif %}!</h2>
+
+<div class="info-box">
+    <p>{{ effective_date }} dan boshlab suvimiz narxi:</p>
+</div>
+
+<table class="details-table">
+    <tr>
+        <th>Mahsulot</th>
+        <td><strong>Yangi narx</strong></td>
+    </tr>
+    {% for price in prices %}
+    <tr>
+        <th>{{ price.name }}</th>
+        <td>{{ price.new_price }} so'm</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<p>{{ effective_date }} dan oldin berilgan buyurtmalar bugungi narxda qoladi. Bepul yetkazib berish, idish almashinuvi, AquaCoins va daraja chegirmangiz o'zgarmaydi.</p>
+{% if is_subscriber %}
+<p>Obunangiz bo'yicha {{ effective_date }} dan boshlab yaratiladigan buyurtmalar yangi narxda bo'ladi.</p>
+{% endif %}
+<p>Biz bilan qolganingiz uchun rahmat.</p>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p>Savollaringiz bormi? Telegram botimizga yozing: <a href="{{ company_telegram_bot_url }}">{{ company_telegram_bot_url }}</a></p>
+</div>
+{% endblock %}

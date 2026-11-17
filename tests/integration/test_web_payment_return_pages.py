@@ -365,17 +365,24 @@ def test_the_pending_page_names_the_payment_method_as_every_order_page_does(worl
 # --------------------------------------------------------------------------- checkout
 
 
-def _click_order_body(world) -> dict:
-    """The body checkout.js `placeOrderWithClick` sends."""
-    return {
+def _click_order_body(world, rail: str = "click") -> dict:
+    """The body checkout.js `orderBody` sends on `rail`: the estimate for the same checkout answers `expected_total`
+    (the COD tier discount can make the cash total differ from the Click one)."""
+    body = {
         "items": [{"product_id": world.water.id, "quantity": 2}],
         "delivery_address_id": world.address.id,
         "delivery_date": local_date(world.now.astimezone(UTC)).isoformat(),
         "delivery_window_start": None,
         "delivery_window_end": None,
-        "payment_method": "click",
+        "payment_method": rail,
+    }
+    estimate = world.web.post("/api/v1/orders/cart/estimate", body)
+    assert estimate.status_code == 200, estimate.get_json()
+    return {
+        **body,
         "delivery_notes": None,
         "source": "web",
+        "expected_total": estimate.get_json()["data"]["pricing"]["final_total"],
     }
 
 
@@ -414,7 +421,7 @@ def test_a_fast_path_click_checkout_has_no_wait(world):
 
 
 def test_a_cash_checkout_publishes_no_wait(world):
-    body = {**_click_order_body(world), "payment_method": "cash"}
+    body = _click_order_body(world, "cash")
     resp = _place(world, body)
     assert resp.status_code == 201, resp.get_json()
     assert "payment_ready_in_seconds" not in resp.get_json()["data"]

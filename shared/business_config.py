@@ -116,6 +116,12 @@ SCHEDULED_RELEASE_SWEEP_MINUTES = _int("SCHEDULED_RELEASE_SWEEP_MINUTES", 5)
 # Counted in Redis per Tashkent day (RedisKeyspace.google_routes_calls).
 GOOGLE_ROUTES_DAILY_CAP = _int("GOOGLE_ROUTES_DAILY_CAP", 150)
 
+# ─── Delivery: automatic arrival ────────────────────────────────────────
+# A driver's shared location within this many metres of an in-transit stop marks it arrived (owner decision 2026-11-17).
+AUTO_ARRIVAL_RADIUS_METERS = _int("AUTO_ARRIVAL_RADIUS_METERS", 100)
+# Readings whose reported GPS accuracy is worse than this many metres (or unreported) never mark a stop arrived.
+AUTO_ARRIVAL_MAX_ACCURACY_METERS = _int("AUTO_ARRIVAL_MAX_ACCURACY_METERS", 100)
+
 # ─── Delivery ETA: the "on the way" promise ─────────────────────────────
 # Spec 2026-11-03 §4.8 S2. Read only by DeliveryEtaService. When the driver taps `in_transit` to a stop, the
 # customer is promised "by tap + ETA_OFF_ROAD_MINUTES + headroom x G", G being Google's live-traffic drive time

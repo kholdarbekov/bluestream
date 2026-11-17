@@ -1,7 +1,7 @@
 {% extends "frontend/base.html" %}
 {% from 'frontend/partials/page_hero.html' import page_hero with context %}
 {% from 'frontend/partials/content_ui.html' import post_card, post_date, order_actions with context %}
-{% from 'frontend/partials/offer_facts.html' import offer_facts_block %}
+{% from 'frontend/partials/offer_facts.html' import offer_facts_block, offer_upcoming_price %}
 
 {% set post_title = post.get_translated('title', current_language) %}
 {% set meta_title = post.get_translated('meta_title', current_language) or post_title %}
@@ -92,7 +92,7 @@
                         <span class="ct-product__thumb"><img src="{{ product.images[0] if product.images else placeholder }}" alt="" width="64" height="64" loading="lazy" decoding="async" data-fallback="{{ placeholder }}"></span>
                         <span class="ct-product__body">
                             <a class="ct-product__name" href="{{ product_url }}">{{ offer.name[current_language] if offer else product.name }}</a>
-                            <span class="post-date ct-product__price" data-sidebar-price="{{ product.id }}">{{ 'landing.offer.price_label'|t }} <span data-price>{% if offer %}{{ offer.price_text[current_language] }}{% endif %}</span></span>
+                            <span class="post-date ct-product__price" data-sidebar-price="{{ product.id }}">{{ 'landing.offer.price_label'|t }} <span data-price>{% if offer %}{{ offer.price_text[current_language] }}{% endif %}</span>{% if offer %}{{ offer_upcoming_price(offer, current_language) }}{% endif %}</span>
                         </span>
                     </li>
                     {%- endfor %}

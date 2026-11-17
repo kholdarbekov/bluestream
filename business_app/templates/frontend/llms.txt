@@ -18,6 +18,11 @@ Prices are read from the live product catalogue each time this file is served. T
 - {{ offer_price_sentence(p, 'en') }} Numeric price: {{ offer_facts.currency }} {{ p.unit_price|json_number }}. {{ offer_smallest_order_sentence(p, 'en') }}{% if p.no_deposit %} {{ 'landing.offer.no_deposit'|t('en') }}{% endif %}
   - In Uzbek: {{ offer_price_sentence(p, 'uz') }}
   - In Russian: {{ offer_price_sentence(p, 'ru') }}
+{%- if p.upcoming_line %}
+  - {{ p.upcoming_line.en }}
+  - In Uzbek: {{ p.upcoming_line.uz }}
+  - In Russian: {{ p.upcoming_line.ru }}
+{%- endif %}
 {%- endfor %}
 
 {{ offer_facts.delivery.line.en }}

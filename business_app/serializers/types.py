@@ -22,9 +22,9 @@ always received floats. ``"always"`` keeps both ``model_dump()`` and
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import PlainSerializer
+from pydantic import Field, PlainSerializer
 
-__all__ = ["MoneyFloat"]
+__all__ = ["ExpectedTotal", "MoneyFloat"]
 
 # Money: stored as Decimal, serialized as float in both python and json modes.
 # Use ``Optional[MoneyFloat]`` for nullable money fields (the Optional wrapper
@@ -34,3 +34,6 @@ MoneyFloat = Annotated[
     Decimal,
     PlainSerializer(lambda v: float(v), return_type=float, when_used="always"),
 ]
+
+# The total a customer's screen showed and the write echoes back (`expected_total`): non-negative, two decimals at most.
+ExpectedTotal = Annotated[Decimal, Field(ge=0, max_digits=10, decimal_places=2)]

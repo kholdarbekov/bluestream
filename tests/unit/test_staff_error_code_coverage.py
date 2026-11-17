@@ -195,6 +195,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SHARED_PLACE_RESOLVE_INVALID": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
     "SHARED_PLACE_NOT_VERIFIED": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
     "SHARED_PLACE_RESOLUTION_CONFLICT": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
+    # Price-change transition (spec 2026-11-16): switch runs in Celery; courtesy routes are admin-UI only.
+    "PRICE_CHANGE_PRODUCT_DISCOUNTED": f"{_NOT_ON_ROUTE} (price_change/switch.py: raised inside the Celery switch, "
+    "logged, never answered over HTTP)",
+    "PRICE_COURTESY_ALREADY_USED": f"{_NOT_ON_ROUTE} (price_change/courtesy.py mark_used: internal guard, a "
+    "ConflictError clients never reach)",
+    "PRICE_COURTESY_REASON_REQUIRED": f"{_NOT_ON_ROUTE} (price_change/courtesy.py grant_exception: answered by the "
+    "admin-UI route POST /api/v1/admin/customers/<id>/price-courtesy)",
     # Admin dispatch map.
     "DISPATCH_DUPLICATE_STOP": f"{_NOT_ON_ROUTE} (route_edit_service.py:75: admin dispatch)",
     "DISPATCH_ROUTE_NOT_FOUND": f"{_NOT_ON_ROUTE} (route_edit_service.py:80: admin dispatch)",

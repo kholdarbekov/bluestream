@@ -38,8 +38,16 @@ const GEO = {
   districts: [{ key: 'chilanzar', name: 'Chilanzar' }],
 };
 const QUOTE = {
-  items: [{ product_id: 5, product_name: '19 litrlik suv', quantity: 2, unit_price: 18000, subtotal: 36000 }],
+  items: [{ product_id: 5, product_name: '19 litrlik suv', quantity: 2, unit_price: 18000, subtotal: 36000, total_price: 36000 }],
   pricing: { items_subtotal: 36000, delivery_fee: 0, discount_amount: 0, loyalty_discount: 0, tier_discount: 0, cod_savings: 0, final_total: 36000 },
+};
+const QUOTE_NEW = {
+  items: [{ product_id: 5, product_name: '19 litrlik suv', quantity: 2, unit_price: 20000, subtotal: 40000, total_price: 40000 }],
+  pricing: { items_subtotal: 40000, delivery_fee: 0, discount_amount: 0, loyalty_discount: 0, tier_discount: 0, cod_savings: 0, final_total: 40000 },
+};
+const PRICE_CHANGED = {
+  status: 409,
+  body: { success: false, message: 'x', data: { reason_code: 'STATE_CHANGED', reason: 'price_changed', quote: QUOTE_NEW } },
 };
 const METHODS = { available_methods: [{ method: 'cash', display_name: 'Cash on Delivery' }, { method: 'click', display_name: 'Click' }] };
 const PRODUCTS = { products: [{ id: 5, name: 'Pure water 19 L', min_order_quantity: 1, inventory: { min_order_quantity: 1 }, media: { images: ['/p.png'] } }] };
@@ -124,6 +132,47 @@ describe('/checkout', () => {
     expect($1('#summary-total').textContent).toBe('36 000 UZS');
     expect($1('#checkout-bar-total').textContent).toBe('36 000 UZS');
     expect($1('#place-order-btn').disabled).toBe(false);
+  });
+
+  // The quote a courtesy order gets: 2 units kept at the old price, 2 at today's (Task 22); the lines are the server's.
+  const COURTESY_QUOTE = {
+    items: [{
+      product_id: 5, product_name: '19 litrlik suv', quantity: 4, unit_price: 20000, courtesy_quantity: 2,
+      courtesy_unit_price: 18000, regular_quantity: 2, subtotal: 76000, total_price: 76000, upcoming_price: null,
+    }],
+    pricing: { items_subtotal: 76000, delivery_fee: 0, discount_amount: 0, loyalty_discount: 0, tier_discount: 0, cod_savings: 0, final_total: 76000 },
+    price_courtesy: { applied: true, expires_on: '2027-02-14' },
+  };
+  const flat = (text) => text.replace(/\s/g, ' ');
+
+  it('draws a courtesy line, its total and the thank-you sentence from the quote', async () => {
+    const { $1, island, window } = await boot({ [ESTIMATE]: ok(COURTESY_QUOTE) });
+
+    const words = { courtesy_part: island.i18n.courtesy_part };
+    expect(flat($1('#summary-items .ae-co-line__qty').textContent)).toBe(flat(window.AE.linePriceText(COURTESY_QUOTE.items[0], words)));
+    expect(flat($1('#summary-items .ae-co-line__qty').textContent)).toBe('2 × 18 000 UZS (your price, kept for you) + 2 × 20 000 UZS');
+    expect(flat($1('#summary-items .ae-co-line__total').textContent)).toBe('76 000 UZS');
+    expect($1('#summary-courtesy').hidden).toBe(false);
+    expect($1('#summary-courtesy').textContent).toBe(island.i18n.courtesy_thanks);
+  });
+
+  it('a quote without a courtesy shows no thank-you sentence', async () => {
+    const { $1 } = await boot();
+
+    expect($1('#summary-courtesy').hidden).toBe(true);
+    expect($1('#summary-courtesy').textContent).toBe('');
+    expect(flat($1('#summary-items .ae-co-line__total').textContent)).toBe('36 000 UZS');
+  });
+
+  it('states the coming price under its line', async () => {
+    const upcoming = { new_price: 20000, effective_date: '2027-02-01' };
+    const quote = { ...QUOTE, items: [{ ...QUOTE.items[0], upcoming_price: upcoming }] };
+    const { $1, $$, island, window } = await boot({ [ESTIMATE]: ok(quote) });
+
+    const line = $1('#summary-items .ae-co-line__upcoming[data-upcoming-price="5"]');
+    expect(line.textContent).toBe(window.AE.upcomingPriceText(upcoming, island.i18n.upcoming_price));
+    expect(line.textContent).not.toBe('');
+    expect($$('#summary-items .ae-co-line__upcoming')).toHaveLength(1);
   });
 
   it('names the product in the visitor’s language and the ways to pay in the page’s words', async () => {
@@ -251,8 +300,51 @@ describe('/checkout', () => {
     await click('#checkout-bar [data-action="place-order"]');
     expect(sent(ORDERS).map((r) => r.body)).toEqual([{
       items: CART, delivery_address_id: 101, delivery_date: $1('#delivery-date').value, delivery_window_start: null,
-      delivery_window_end: null, payment_method: 'cash', delivery_notes: null, source: 'web',
+      delivery_window_end: null, payment_method: 'cash', delivery_notes: null, source: 'web', expected_total: 36000,
     }]);
+  });
+
+  it('an order refused because the total changed redraws the quote, says so, and the next tap sends the new total', async () => {
+    const { $1, sent, island, window } = await boot({ [ORDERS]: [PRICE_CHANGED, ok({ order: { id: 55 } }, 201)] });
+    $1('#agree-terms').click();
+
+    await click_(window, $1('#place-order-btn'));
+
+    expect(sent(ORDERS)).toHaveLength(1);
+    expect($1('#summary-total').textContent).toBe('40 000 UZS');
+    expect($1('#checkout-price-changed').hidden).toBe(false);
+    expect($1('#checkout-price-changed').textContent).toContain(island.i18n.price_changed);
+    expect(window.document.activeElement).toBe($1('#checkout-price-changed'));
+    expect($1('#place-order-btn').disabled).toBe(false);
+    expect($1('#loading-overlay').style.display).toBe('none');
+    expect($1('#toast-container').textContent).toBe('');
+    expect(window.location.href).toBe('http://localhost/checkout');
+
+    await click_(window, $1('#place-order-btn'));
+
+    expect(sent(ORDERS)).toHaveLength(2);
+    expect(sent(ORDERS)[1].body.expected_total).toBe(40000);
+    expect($1('#checkout-price-changed').hidden).toBe(true);
+  });
+
+  it('the same refusal on Click redraws and opens nothing', async () => {
+    const { $1, sent, click, island, window } = await boot({ [ORDERS]: PRICE_CHANGED });
+    $1('.payment-method[data-method="click"] input[type=radio]').click();
+    await settle(window);
+    $1('#agree-terms').click();
+
+    await click_(window, $1('#place-order-btn'));
+
+    expect(sent(ORDERS)).toHaveLength(1);
+    expect(sent(ORDERS)[0].body).toMatchObject({ payment_method: 'click', expected_total: 36000 });
+    expect($1('#summary-total').textContent).toBe('40 000 UZS');
+    expect($1('#checkout-price-changed').hidden).toBe(false);
+    expect($1('#checkout-price-changed').textContent).toContain(island.i18n.price_changed);
+    expect($1('#place-order-btn').disabled).toBe(false);
+    expect($1('#loading-overlay').style.display).toBe('none');
+    expect($1('#checkoutPaymentState').hidden).toBe(true);
+    expect(window.location.href).toBe('http://localhost/checkout');
+    expect(window.localStorage.getItem('cart')).not.toBeNull();
   });
 
   it('a delivery window fills the two fields the order carries', async () => {

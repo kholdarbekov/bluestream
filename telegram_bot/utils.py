@@ -503,6 +503,15 @@ def format_price(price: float) -> str:
     return f"{price:,.0f}"
 
 
+def format_money(amount, language: str) -> str:
+    """A customer-facing money figure with the language's currency word ("20,000 so'm").
+
+    ONE spelling for every new customer line; the currency word is the seeded
+    `telegram.currency.uzs` row, never a typed "UZS".
+    """
+    return f"{format_price(float(amount or 0))} {i18n.get('telegram.currency.uzs', language)}"
+
+
 def format_date(value) -> str:
     """Format an ISO date or timestamp as 'dd.mm.yyyy' in the DISPLAY timezone;
     '' when absent/unparseable.

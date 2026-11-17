@@ -402,9 +402,15 @@ class TestBreachNotification:
         the actual NET total and the live threshold, both read from the SSOT
         / the real restriction context, never a hardcoded figure. A debt this
         far over the floor clears it regardless of the configured value."""
+        from business_app.models.translation import Translation
         from business_app.services.staff_service import StaffService
+        from scripts.seed_prepayment_translations import PREPAYMENT_TRANSLATIONS
         from shared.business_config import COD_DEBT_AMOUNT_THRESHOLD
 
+        # The copy is DB-backed (Task X2): seed the rows the way the seed script does.
+        for key in ("telegram.orders.cod_restricted_subject", "telegram.orders.cod_restricted_person"):
+            for language, value in PREPAYMENT_TRANSLATIONS[key].items():
+                db.session.add(Translation(key=key, language=language, value=value, category="telegram"))
         sample_user.telegram_id = 424242
         db.session.commit()
 

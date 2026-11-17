@@ -78,6 +78,8 @@ describe('Products fiscal workflow', () => {
             category_id: 8,
             price: 18000,
             base_price: 18000,
+            catalogue_unit_price: 18000,
+            price_change_pending: null,
             stock_quantity: 24,
             status: 'active',
             created_at: '2026-03-11T10:00:00+00:00',

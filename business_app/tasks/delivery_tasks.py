@@ -6,7 +6,7 @@ This file should be placed in business_app/tasks/delivery_tasks.py
 from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError, Retry, SoftTimeLimitExceeded
 from celery.utils.log import get_task_logger
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from business_app.models.delivery import Delivery, DeliveryPerson
@@ -14,7 +14,6 @@ from business_app.models.user import User
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.delivery_service import DeliveryService
 from business_app.services.notification_service import NotificationService
-from business_app.services.maps_service import MapsService
 from shared.enums import DeliveryStatus, UserRole, OrderStatus
 from business_app import db
 from business_app.utils.exceptions import ValidationError
@@ -132,6 +131,10 @@ def auto_assign_delivery_task(self, delivery_id: int):
             return {"success": False, "delivery_id": delivery_id, "error": NO_DRIVER_WITH_ENOUGH_BOTTLES}
         else:
             logger.warning(f"No available drivers found for delivery {delivery_id}")
+            # End this run's transaction before asking for the retry: it releases the row lock taken above. Under eager
+            # Celery (dev) the retry runs at once, inline, on a new connection that asks for the same lock, and it
+            # waited on this run until the hard time limit. This path wrote nothing.
+            db.session.rollback()
             # Retry after 15 minutes
             try:
                 raise self.retry(countdown=900)
@@ -147,6 +150,9 @@ def auto_assign_delivery_task(self, delivery_id: int):
         raise
     except Exception as exc:
         logger.error(f"Auto-assignment failed for delivery {delivery_id}: {exc}")
+        # Release the row lock before the retry, as on the no-driver path. Only what this run had not committed is
+        # dropped: an assignment `assign_delivery_driver` already committed stays.
+        db.session.rollback()
         try:
             raise self.retry(exc=exc)
         except MaxRetriesExceededError:
@@ -570,134 +576,6 @@ def optimize_daily_delivery_routes():
         return {"error": str(e)}
 
 
-@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
-def track_delivery_location_task(self, delivery_id: int, latitude: float, longitude: float):
-    """Update delivery location tracking"""
-    try:
-        logger.info(f"Updating location for delivery {delivery_id}")
-
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            logger.error(f"Delivery {delivery_id} not found")
-            return {"success": False, "error": "Delivery not found"}
-
-        # Update location
-        delivery.update_location(latitude, longitude)
-
-        # Calculate distance to destination
-        maps_service = MapsService()
-        destination_latitude = None
-        destination_longitude = None
-        if delivery.order and delivery.order.delivery_address:
-            destination_latitude = delivery.order.delivery_address.latitude
-            destination_longitude = delivery.order.delivery_address.longitude
-        else:
-            destination_latitude = getattr(delivery.order, "delivery_latitude", None)
-            destination_longitude = getattr(delivery.order, "delivery_longitude", None)
-
-        if destination_latitude is None or destination_longitude is None:
-            logger.warning(
-                "Skipping distance-based arrival check for delivery %s: destination coordinates unavailable",
-                delivery_id,
-            )
-            db.session.commit()
-            return {
-                "success": True,
-                "delivery_id": delivery_id,
-                "distance_to_destination": None,
-                "status": delivery.status.value,
-            }
-
-        distance_to_destination = maps_service.calculate_distance(
-            latitude, longitude, destination_latitude, destination_longitude
-        )
-
-        # Update status if driver is close to destination (within 100m)
-        if distance_to_destination < 0.1 and delivery.status == DeliveryStatus.IN_TRANSIT:
-            delivery_service = DeliveryService()
-            delivery = delivery_service.mark_delivery_arrived(
-                delivery.id,
-                actor_user_id=None,
-                notes="Automatically marked as arrived based on location tracking",
-                automatic=True,
-            )
-
-        db.session.commit()
-
-        logger.info(f"Location updated for delivery {delivery_id}")
-        return {
-            "success": True,
-            "delivery_id": delivery_id,
-            "distance_to_destination": distance_to_destination,
-            "status": delivery.status.value,
-        }
-
-    except Exception as exc:
-        logger.error(f"Location tracking failed for delivery {delivery_id}: {exc}")
-        raise self.retry(exc=exc)
-
-
-@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
-def calculate_delivery_eta_task(self, delivery_id: int):
-    """Calculate and update delivery ETA"""
-    try:
-        logger.info(f"Calculating ETA for delivery {delivery_id}")
-
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            logger.error(f"Delivery {delivery_id} not found")
-            return {"success": False, "error": "Delivery not found"}
-
-        if not delivery.current_location_lat or not delivery.current_location_lng:
-            logger.warning(f"No current location for delivery {delivery_id}")
-            return {"success": False, "error": "No current location"}
-
-        maps_service = MapsService()
-
-        # Calculate travel time from current location to destination
-        travel_time = maps_service.calculate_travel_time(
-            delivery.current_location_lat,
-            delivery.current_location_lng,
-            delivery.order.delivery_latitude,
-            delivery.order.delivery_longitude,
-        )
-
-        # Calculate new ETA
-        current_eta = delivery.estimated_delivery_time
-        new_eta = datetime.now(timezone.utc) + timedelta(minutes=travel_time.get("duration_minutes", 30))
-
-        # Update ETA
-        delivery.estimated_delivery_time = new_eta
-        delivery.updated_at = datetime.now(timezone.utc)
-
-        db.session.commit()
-
-        # Notify customer if ETA changed significantly (more than 15 minutes)
-        if current_eta and abs((new_eta - current_eta).total_seconds()) > 900:
-            notification_service = NotificationService()
-            notification_service.send_notification(
-                delivery.order.user_id,
-                "delivery_eta_updated",
-                template_data={
-                    "order_number": delivery.order.order_number,
-                    "new_eta": new_eta.strftime("%H:%M"),
-                    "tracking_number": delivery.tracking_number,
-                },
-            )
-
-        logger.info(f"ETA calculated for delivery {delivery_id}: {new_eta}")
-        return {
-            "success": True,
-            "delivery_id": delivery_id,
-            "eta": new_eta.isoformat(),
-            "travel_time_minutes": travel_time.get("duration_minutes"),
-        }
-
-    except Exception as exc:
-        logger.error(f"ETA calculation failed for delivery {delivery_id}: {exc}")
-        raise self.retry(exc=exc)
-
-
 @shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, details: Dict[str, Any]):
     """Handle delivery exceptions (delays, issues, etc.)"""
@@ -752,6 +630,9 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
 
     except Exception as exc:
         logger.error(f"Failed to handle delivery exception: {exc}")
+        # End the transaction before the retry, as auto-assign does: the new delivery time was flushed by the next query
+        # and holds the delivery row, which a dev (eager) retry asks for again at once, inline, on a new connection.
+        db.session.rollback()
         raise self.retry(exc=exc)
 
 
@@ -837,6 +718,10 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         return {"success": False, "delivery_id": delivery_id, "error": str(exc)}
     except Exception as exc:
         logger.error(f"Failed to process delivery confirmation: {exc}")
+        # End the transaction before the retry, as auto-assign does: `update_order_status` claimed the order row (an
+        # UPDATE) and does not roll back on its own, and a dev (eager) retry claims it again at once, inline, on a new
+        # connection. Only what this run had not committed is dropped.
+        db.session.rollback()
         raise self.retry(exc=exc)
 
 

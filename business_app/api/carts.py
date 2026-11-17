@@ -2,6 +2,8 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
 
+from business_app.services.cart_service import CartService
+
 from business_app.utils.service_factory import (
     get_cart_service,
 )
@@ -189,6 +191,8 @@ def validate_cart():
                     "quantity": item["quantity"],
                     "unit_price": item["unit_price"],
                     "subtotal": item["subtotal"],
+                    "total_price": item["total_price"],
+                    **{key: item[key] for key in CartService.PUBLISHED_LINE_KEYS},
                 }
                 for item in validation_result.get("items", [])
             ],

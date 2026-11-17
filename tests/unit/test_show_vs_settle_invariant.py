@@ -566,6 +566,14 @@ _PREVIEW_SURFACES: Dict[Tuple[str, str], Union[Tuple[str, str], Tuple[Tuple[str,
         "apply",
         "self._plan(",
     ),
+    # Price-change transition (spec 2026-11-16, Task 25): the admin order screen's quote and the order
+    # `create_order` writes both enter the ONE pricing `price_order`. ONE-DECISION (shared expression): the quote
+    # (`claim=False`) writes and locks nothing, and `create_order` (`claim=True`) prices the basket afresh rather
+    # than replaying the quoted figure, so the order is charged at the price, courtesy and tier live at creation.
+    ("business_app.services.order_service", "OrderService.quote_order"): (
+        "create_order",
+        "self.price_order(",
+    ),
 }
 
 

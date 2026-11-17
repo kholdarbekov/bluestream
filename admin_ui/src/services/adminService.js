@@ -4,6 +4,15 @@ import api, { getCookie } from './api';
 // 10 s cut an 11 MB one off mid-download in production.
 const SUPPORT_ATTACHMENT_TIMEOUT_MS = 60000;
 
+// The `error_code`s the basket quote refuses with, read off `_admin_order_request` and `OrderService.price_order`: the
+// order's lines and minimums. The quote panel prints their sentence itself, so api.js does not toast them too.
+export const QUOTE_REFUSAL_CODES = [
+  'ORDER_ITEM_BELOW_MIN_QUANTITY',
+  'ORDER_MIN_AMOUNT',
+  'ORDER_PRODUCT_UNAVAILABLE',
+  'ORDER_STOCK_UNAVAILABLE',
+];
+
 const TIMEFRAME_TO_PERIOD = {
   '7d': 'week',
   '30d': 'month',
@@ -410,6 +419,16 @@ class AdminService {
     return response.data;
   }
 
+  async getCustomerPriceCourtesy(userId) {
+    const response = await api.get(`/admin/customers/${userId}/price-courtesy`);
+    return response.data.data;
+  }
+
+  async grantCustomerPriceCourtesy(userId, reason) {
+    const response = await api.post(`/admin/customers/${userId}/price-courtesy`, { reason });
+    return response.data.data;
+  }
+
   async dismissCustomerLink(userIdA, userIdB) {
     const response = await api.post('/admin/customer-links/dismiss', { userIdA, userIdB });
     return response.data;
@@ -562,9 +581,18 @@ class AdminService {
   }
 
   // Create order for user (call center operations)
-  async createOrderForUser(orderData) {
-    const response = await api.post('/admin/orders', orderData);
+  // `handledErrorCodes`: refusal codes the caller explains itself (the create modal redraws on STATE_CHANGED), so
+  // api.js does not toast them too.
+  async createOrderForUser(orderData, { handledErrorCodes } = {}) {
+    const response = await api.post('/admin/orders', orderData, { handledErrorCodes });
     return response.data;
+  }
+
+  // The server's pricing of the basket the create modal is building (courtesy split, totals, courtesy status).
+  // The refusals in QUOTE_REFUSAL_CODES are printed by the quote panel itself.
+  async quoteAdminOrder(payload) {
+    const response = await api.post('/admin/orders/quote', payload, { handledErrorCodes: QUOTE_REFUSAL_CODES });
+    return response.data?.data;
   }
 
   // Re-date or re-window an order's delivery. `delivery_date` must always be a
@@ -756,6 +784,45 @@ class AdminService {
   async deleteProduct(productId) {
     const response = await api.delete(`/admin/products/${productId}`);
     return response.data;
+  }
+
+  // Price changes (price-change spec §5.2)
+  async listPriceChanges() {
+    const response = await api.get('/admin/price-changes');
+    return response.data?.data;
+  }
+
+  async getPriceChange(priceChangeId) {
+    const response = await api.get(`/admin/price-changes/${priceChangeId}`);
+    return response.data?.data;
+  }
+
+  async listPriceChangeUnreachable(priceChangeId, { page, perPage } = {}) {
+    const response = await api.get(`/admin/price-changes/${priceChangeId}/unreachable`, {
+      params: { page, per_page: perPage },
+    });
+    return response.data?.data;
+  }
+
+  async listPriceChangeExceptions(priceChangeId) {
+    const response = await api.get(`/admin/price-changes/${priceChangeId}/exceptions`);
+    return response.data?.data?.items;
+  }
+
+  // FORM in, `{price_change: ROW}` out (Task 8); each resolves to the row.
+  async createPriceChange(payload) {
+    const response = await api.post('/admin/price-changes', payload);
+    return response.data?.data?.price_change;
+  }
+
+  async updatePriceChange(priceChangeId, payload) {
+    const response = await api.put(`/admin/price-changes/${priceChangeId}`, payload);
+    return response.data?.data?.price_change;
+  }
+
+  async cancelPriceChange(priceChangeId) {
+    const response = await api.post(`/admin/price-changes/${priceChangeId}/cancel`, {});
+    return response.data?.data?.price_change;
   }
 
   async listProductMarkingCodes(productId, params = {}) {

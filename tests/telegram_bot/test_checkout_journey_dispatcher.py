@@ -143,20 +143,21 @@ PRODUCTS = {
 # key renders as in production too — so no test here can lean on a translation
 # that does not exist.
 TRANSLATIONS = {
-    "telegram.orders.grand_total": "Grand total: {amount} UZS",
-    "telegram.orders.estimate_tier_line": "{tier_name} discount -{percentage}%: -{amount} UZS",
+    "telegram.currency.uzs": "so'm",
+    "telegram.orders.grand_total": "Grand total: {amount} so'm",
+    "telegram.orders.estimate_tier_line": "{tier_name} discount -{percentage}%: -{amount} so'm",
     # `{icon}` replaced `{method}` (owner screenshot review): the rail's name
     # is already stated on the confirmation screen's "Payment method" line
     # above, so the payable line carries only the icon that ties to it.
-    "telegram.orders.estimate_payable": "{icon} To pay: {amount} UZS",
+    "telegram.orders.estimate_payable": "{icon} To pay: {amount} so'm",
     # The payment-method PICKER's neutral total — basket plus the plain,
     # undiscounted figure, shown before any rail (and its discount) is chosen.
-    "telegram.orders.estimate_neutral_total": "Total: {amount} UZS",
-    "telegram.orders.estimate_cod_savings": "Pay cash and save {amount} UZS",
-    "telegram.orders.delivery_fee": "Delivery: {amount} UZS",
-    "telegram.cart_min_order_warning": "Minimum {min_amount} UZS. Add {remaining} UZS more",
+    "telegram.orders.estimate_neutral_total": "Total: {amount} so'm",
+    "telegram.orders.estimate_cod_savings": "Pay cash and save {amount} so'm",
+    "telegram.orders.delivery_fee": "Delivery: {amount} so'm",
+    "telegram.cart_min_order_warning": "Minimum {min_amount} so'm. Add {remaining} so'm more",
     "telegram.cart_min_qty_warning": "{product_name}: minimum {min_qty}, add {remaining}",
-    "telegram.payment.pay_message": "Pay order {order_number}: {amount} UZS",
+    "telegram.payment.pay_message": "Pay order {order_number}: {amount} so'm",
     # The card rail's "the order exists but the link does not" screen. Seeded
     # because the ORDER NUMBER in it is the whole point: a screen that cannot
     # name the order it is talking about tells the customer nothing they can
@@ -164,7 +165,7 @@ TRANSLATIONS = {
     "telegram.orders.payment_link_failed_message":
         "Order {order_number} is placed. We could not create the payment link.",
     "telegram.order.number": "Order {0}",
-    "telegram.order.total": "Total {0} UZS",
+    "telegram.order.total": "Total {0} so'm",
     # Seeded on purpose while `telegram.orders.cod_restricted_place` is left
     # UNSEEDED — that is the shape production has in any environment where the
     # newer key's seed script has not run.
@@ -209,6 +210,12 @@ class Shop:
         # comments in products.py / orders.py exist for.
         self.line_total_overrides: dict[int, float] = {}
         self.subtotal_override: float | None = None
+
+        # Fields the server publishes beyond the base shape: per product id on the cart line and the estimate
+        # item (`courtesy_quantity`, `regular_quantity`, `upcoming_price`, ...), and once on the cart and the
+        # estimate (`price_courtesy`). Empty leaves every payload as it was.
+        self.line_extras: dict[int, dict] = {}
+        self.quote_extras: dict = {}
 
         # The server's quote. Overridable so a test can put a customer in a
         # discounting tier without standing up the whole loyalty schema — the
@@ -323,6 +330,7 @@ class Shop:
                 "quantity": quantity,
                 "total_price": line_total,
                 "product": product,
+                **self.line_extras.get(product_id, {}),
             })
         cart = {
             "cart_items": items,
@@ -331,6 +339,7 @@ class Shop:
                 if self.subtotal_override is not None
                 else naive_subtotal
             ),
+            **self.quote_extras,
         }
         return {"data": {"cart": cart}}
 
@@ -402,10 +411,12 @@ class Shop:
                         "quantity": item["quantity"],
                         "unit_price": float(self.products[item["product_id"]]["pricing"]["current_price"]),
                         "subtotal": float(item["total_price"]),
+                        **self.line_extras.get(item["product_id"], {}),
                     }
                     for item in cart["cart_items"]
                 ],
                 "pricing": pricing,
+                **self.quote_extras,
                 "cod_prepayment": (
                     self.estimate_cod_prepayment
                     if (call.data or {}).get("payment_method") == "cash"
@@ -785,8 +796,8 @@ async def test_a_cart_below_the_minimum_offers_no_checkout_button_and_says_how_s
         "checkout must be unreachable below the minimum order amount"
     )
     shortfall = min_order_shortfall(6000)
-    assert f"Add {shortfall:,.0f} UZS more" in cart_screen.text
-    assert f"Minimum {MIN_ORDER_AMOUNT:,.0f} UZS" in cart_screen.text
+    assert f"Add {shortfall:,.0f} so'm more" in cart_screen.text
+    assert f"Minimum {MIN_ORDER_AMOUNT:,.0f} so'm" in cart_screen.text
 
 
 async def test_an_empty_cart_screen_offers_shopping_rather_than_checkout(bot, shop, user):
@@ -887,6 +898,7 @@ async def test_checkout_with_several_addresses_lists_them_all_and_carries_the_pi
         "payment_method": "cash",
         "source": "telegram",
         "items": [{"product_id": BOTTLE_19L, "quantity": 3}],
+        "expected_total": 45000.0,
     }]
     assert_no_swallowed_crash(bot)
 
@@ -923,7 +935,7 @@ async def test_the_payment_picker_offers_exactly_the_rails_the_backend_enabled(
     # Owner screenshot review: the message body stays NEUTRAL now — basket
     # plus the plain, undiscounted total, no rail assumed.
     assert picker.text.startswith("To'lov usulini tanlang")
-    assert "Total: 45,000 UZS" in picker.text, picker.text
+    assert "Total: 45,000 so'm" in picker.text, picker.text
 
 
 async def test_a_cod_cap_explains_itself_without_leaking_an_unseeded_key_as_english(
@@ -980,7 +992,7 @@ async def test_the_cash_buttons_discount_suffix_comes_off_the_neutral_screens_ow
     picker = bot.telegram.last_shown()
     assert "Nimbus" not in picker.text, picker.text
     assert "To pay" not in picker.text, picker.text
-    assert "Total: 45,000 UZS" in picker.text, (
+    assert "Total: 45,000 so'm" in picker.text, (
         "the body must show the UNDISCOUNTED basket total, never the "
         f"cash-discounted 43,200: {picker.text!r}"
     )
@@ -1127,7 +1139,7 @@ async def test_the_card_confirm_screen_no_longer_pitches_the_cash_saving(
     await reach_confirmation(bot, user, 900, payment="card")
 
     screen = bot.telegram.last_shown()
-    assert "💳 To pay: 45,000 UZS" in screen.text, screen.text
+    assert "💳 To pay: 45,000 so'm" in screen.text, screen.text
     assert "Pay cash and save" not in screen.text, screen.text
     assert "Nimbus discount" not in screen.text, (
         "a fiscalized rail earns no discount; showing the line would be a lie"
@@ -1177,8 +1189,8 @@ async def test_a_method_whose_contract_price_sinks_the_basket_below_the_minimum_
         "Confirm must be unreachable when the chosen method's quote is below the minimum"
     )
     assert "cart_view" in screen.callback_data(), "the customer must be sent back to the cart"
-    assert f"Minimum {MIN_ORDER_AMOUNT:,.0f} UZS" in screen.text, screen.text
-    assert f"Add {shortfall:,.0f} UZS more" in screen.text, screen.text
+    assert f"Minimum {MIN_ORDER_AMOUNT:,.0f} so'm" in screen.text, screen.text
+    assert f"Add {shortfall:,.0f} so'm more" in screen.text, screen.text
     assert "Minimum order amount is" not in screen.text, "the server's English must not leak"
     assert_no_swallowed_crash(bot)
 
@@ -1205,6 +1217,7 @@ async def test_each_offered_payment_method_posts_itself_verbatim_on_the_order(
         "payment_method": posted_method,
         "source": "telegram",
         "items": [{"product_id": BOTTLE_19L, "quantity": 3}],
+        "expected_total": 45000.0,
     }]
 
 
@@ -1224,7 +1237,7 @@ async def test_a_cash_order_clears_the_cart_and_shows_the_order_number(bot, shop
     assert_no_edit_carries_a_reply_keyboard(bot)
     assert "Placed success" in success.text
     assert f"Order BS-{shop.next_order_id}" in success.text
-    assert "Total 45,000 UZS" in success.text
+    assert "Total 45,000 so'm" in success.text
     assert "Cash note" in success.text, "the customer must be told to have cash ready"
     assert_no_swallowed_crash(bot)
 
@@ -1246,7 +1259,7 @@ async def test_checkout_uses_the_link_post_orders_returned(bot, shop, user):
     assert not [c for c in bot.backend.calls if c.endpoint.endswith("/retry-payment")]
 
     link_screen = bot.telegram.last_shown()
-    assert link_screen.text == f"Pay order BS-{order_id}: 45,000 UZS"
+    assert link_screen.text == f"Pay order BS-{order_id}: 45,000 so'm"
     urls = [
         button["url"]
         for row in link_screen.reply_markup["inline_keyboard"]
@@ -1446,7 +1459,7 @@ async def test_checkout_without_a_link_shows_the_order_stands_screen_with_publis
     assert paid.data == {"channel": "bot", "expected_amount": pay["expected_amount"]}
     assert backend_calls(bot, "POST", "/api/v1/payments/create") == []
     link = bot.telegram.last_shown()
-    assert link.text == f"Pay order BS-{order_id}: 45,000 UZS"
+    assert link.text == f"Pay order BS-{order_id}: 45,000 so'm"
     assert_no_swallowed_crash(bot)
 
 
@@ -1617,7 +1630,7 @@ async def test_editing_the_cart_from_the_confirmation_screen_returns_with_the_ne
     await reach_confirmation(bot, user, 900, payment="cash")
     # The confirm screen's money now comes from the quote block's payable
     # line, not a separately-rendered "Grand total".
-    assert "💰 To pay: 45,000 UZS" in bot.telegram.last_shown().text
+    assert "💰 To pay: 45,000 so'm" in bot.telegram.last_shown().text
 
     await bot.send(user.tap("edit_order"))
     edit_screen = bot.telegram.last_shown()
@@ -1631,7 +1644,7 @@ async def test_editing_the_cart_from_the_confirmation_screen_returns_with_the_ne
 
     await bot.send(user.tap("back_to_order_confirm"))
     confirmation = bot.telegram.last_shown()
-    assert "💰 To pay: 60,000 UZS" in confirmation.text
+    assert "💰 To pay: 60,000 so'm" in confirmation.text
     assert "Uy" in confirmation.text, "the address chosen before the detour was lost"
 
     await bot.send(user.tap("confirm_order"))
@@ -1640,6 +1653,7 @@ async def test_editing_the_cart_from_the_confirmation_screen_returns_with_the_ne
         "payment_method": "cash",
         "source": "telegram",
         "items": [{"product_id": BOTTLE_19L, "quantity": 4}],
+        "expected_total": 60000.0,
     }]
     assert_no_swallowed_crash(bot)
 
@@ -1735,6 +1749,7 @@ async def test_a_failed_edit_of_the_success_screen_still_leaves_exactly_one_orde
         "payment_method": "cash",
         "source": "telegram",
         "items": [{"product_id": BOTTLE_19L, "quantity": 3}],
+        "expected_total": 45000.0,
     }]
 
 

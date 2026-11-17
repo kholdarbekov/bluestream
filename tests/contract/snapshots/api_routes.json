@@ -476,6 +476,20 @@
     "rule": "/api/v1/admin/customer-links/dismiss"
   },
   {
+    "endpoint": "admin_price_changes.get_customer_price_courtesy",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/customers/<int:user_id>/price-courtesy"
+  },
+  {
+    "endpoint": "admin_price_changes.grant_customer_price_courtesy",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/customers/<int:user_id>/price-courtesy"
+  },
+  {
     "endpoint": "admin.get_customer_map_pins",
     "methods": [
       "GET"
@@ -1148,6 +1162,13 @@
     "rule": "/api/v1/admin/orders/<int:order_id>/status"
   },
   {
+    "endpoint": "admin.create_order_quote",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/quote"
+  },
+  {
     "endpoint": "admin.get_payments",
     "methods": [
       "GET"
@@ -1251,6 +1272,55 @@
       "GET"
     ],
     "rule": "/api/v1/admin/place-groups/merge-preview"
+  },
+  {
+    "endpoint": "admin_price_changes.create_price_change",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/price-changes"
+  },
+  {
+    "endpoint": "admin_price_changes.list_price_changes",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-changes"
+  },
+  {
+    "endpoint": "admin_price_changes.get_price_change",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-changes/<int:price_change_id>"
+  },
+  {
+    "endpoint": "admin_price_changes.update_price_change",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/price-changes/<int:price_change_id>"
+  },
+  {
+    "endpoint": "admin_price_changes.cancel_price_change",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/price-changes/<int:price_change_id>/cancel"
+  },
+  {
+    "endpoint": "admin_price_changes.list_granted_exceptions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-changes/<int:price_change_id>/exceptions"
+  },
+  {
+    "endpoint": "admin_price_changes.list_unreachable_customers",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-changes/<int:price_change_id>/unreachable"
   },
   {
     "endpoint": "admin.create_price_rule",
@@ -3156,13 +3226,6 @@
       "POST"
     ],
     "rule": "/api/v1/delivery/driver/start-delivery/<int:delivery_id>"
-  },
-  {
-    "endpoint": "delivery.update_driver_location",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/delivery/driver/update-location"
   },
   {
     "endpoint": "delivery.estimate_delivery",

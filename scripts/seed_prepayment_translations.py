@@ -249,8 +249,8 @@ PREPAYMENT_TRANSLATIONS = {
     # an unseeded environment, same guard as the place key.
     'telegram.orders.cod_restricted_person': {
         'en': (
-            'Cash on delivery is unavailable: your outstanding balance is {net_debt_total} UZS, '
-            'over the {threshold} UZS limit. Please pay down your balance or choose a card '
+            'Cash on delivery is unavailable: your outstanding balance is {net_debt_total} so\'m, '
+            'over the {threshold} so\'m limit. Please pay down your balance or choose a card '
             'payment method.'
         ),
         'uz': (
@@ -264,13 +264,21 @@ PREPAYMENT_TRANSLATIONS = {
             'часть долга или выберите оплату картой.'
         ),
     },
+    # Task X2: the subject line of the Telegram warning sent when a delivery tips
+    # the customer over the COD debt limit (StaffService._notify_customer_cod_debt_limit).
+    # Its body is `telegram.orders.cod_restricted_person` above: one sentence for one fact.
+    'telegram.orders.cod_restricted_subject': {
+        'en': 'Cash on delivery is paused',
+        'uz': 'Yetkazib berishda naqd to\'lash vaqtincha to\'xtatildi',  # NATIVE-READ
+        'ru': 'Оплата наличными при доставке приостановлена',  # NATIVE-READ
+    },
     'telegram.orders.cod_restricted_unavailable': {
         'en': 'Cash on delivery is temporarily unavailable. Please choose a card payment method.',
         'uz': 'Yetkazib berishda naqd to\'lash vaqtincha mavjud emas. Iltimos, karta to\'lovini tanlang.',
         'ru': 'Оплата наличными при доставке временно недоступна. Пожалуйста, выберите оплату картой.',
     },
     'telegram.orders.cod_prepayment_applied': {
-        'en': '\n🔁 COD prepaid used: {potential_applied} UZS. Pay on delivery: {payable_after} UZS.',
+        'en': '\n🔁 COD prepaid used: {potential_applied} so\'m. Pay on delivery: {payable_after} so\'m.',
         'uz': '\n🔁 Oldindan to\'langan summadan ishlatildi: {potential_applied} so\'m. Yetkazib berishda to\'lanadi: {payable_after} so\'m.',
         'ru': '\n🔁 Использован предоплаченный остаток: {potential_applied} сум. К оплате при доставке: {payable_after} сум.',
     },
@@ -280,12 +288,12 @@ PREPAYMENT_TRANSLATIONS = {
     # that a card/Click checkout will not honour, and leaving a stale copy here
     # would mean the next run of this script silently reverted that wording.
     'telegram.orders.cod_prepaid_auto_applied': {
-        'en': '🔁 Auto-applied on this COD order: {potential_applied} UZS',
+        'en': '🔁 Auto-applied on this COD order: {potential_applied} so\'m',
         'uz': '🔁 Ushbu buyurtmaga avtomatik qo\'llaniladi: {potential_applied} so\'m',
         'ru': '🔁 Автоматически зачтено по этому заказу: {potential_applied} сум',
     },
     'telegram.orders.cod_estimated_payable': {
-        'en': '🧾 Estimated COD payable after prepaid: {payable_after} UZS',
+        'en': '🧾 Estimated COD payable after prepaid: {payable_after} so\'m',
         'uz': '🧾 Predoplata hisobga olingach to\'lanadi: {payable_after} so\'m',
         'ru': '🧾 К оплате при доставке после зачёта: {payable_after} сум',
     },

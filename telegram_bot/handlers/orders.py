@@ -19,9 +19,10 @@ from keyboards import (
 )
 from api_client import api_client
 from database import db_manager, BotUserRepository
+from price_change_lines import courtesy_thanks, price_changed_quote, price_line_sub_lines
 from menu_keyboard import send_menu_keyboard
 from utils import (
-    user_middleware, format_price, MessageBuilder, get_auth_token, arm_location_request,
+    user_middleware, format_price, format_money, MessageBuilder, get_auth_token, arm_location_request,
     ORDER_STATUS_LABEL_KEYS,
 )
 from shared import eta_copy
@@ -320,11 +321,12 @@ class OrderHandlers(BaseHandler):
 
         lines = []
         for line in (estimate.get('items') or []):
-            lines.append("• {name} × {qty} — {amount} UZS".format(
+            lines.append("• {name} × {qty} — {amount}".format(
                 name=line.get('product_name', ''),
                 qty=line.get('quantity', 1),
-                amount=format_price(float(line.get('subtotal') or 0)),
+                amount=format_money(line.get('subtotal'), language),
             ))
+            lines.extend(price_line_sub_lines(line, language))
 
         if not neutral:
             # Subscription → reward → tier. Each is semantically distinct and
@@ -390,6 +392,9 @@ class OrderHandlers(BaseHandler):
                     amount=format_price(balance_after),
                 )
                 lines += ["", html.escape(balance_line, quote=False) if as_html else balance_line]
+            thanks = courtesy_thanks(estimate.get('price_courtesy'), language)
+            if thanks:
+                lines += ["", html.escape(thanks, quote=False) if as_html else thanks]
             # The cash-savings motivator ("pay cash and save N") used to render
             # here on the CARD confirm screen, off `pricing['cod_savings']`.
             # Owner screenshot review: it now lives on the picker's cash
@@ -654,7 +659,9 @@ class OrderHandlers(BaseHandler):
                     bonus = free_by_pid.get(it.get('product_id'), 0)
                     suffix = f" (+{bonus} {free_suffix} 🎁)" if bonus else ""
                     details_text += f"• {it.get('product_name', unknown_text)} x{it.get('quantity', 1)}{suffix}\n"
-                    details_text += f"  💰 {format_price(it.get('total_price', 0))} UZS\n"
+                    details_text += f"  💰 {format_money(it.get('total_price', 0), language)}\n"
+                    for sub in price_line_sub_lines(it, language):
+                        details_text += f"{sub}\n"
                 standalone = {}
                 for it in items:
                     if it.get('is_reward') and it.get('product_id') not in paid_pids:
@@ -1421,6 +1428,7 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('quick_order_address_id', None)
             context.user_data.pop('selected_reward_id', None)
             context.user_data.pop('cart_edit_return', None)
+            context.user_data.pop('confirm_expected_total', None)
 
             await self._edit_or_replace_callback_message(
                 query, i18n.get('telegram.action_cancelled', language),
@@ -1473,6 +1481,11 @@ class OrderHandlers(BaseHandler):
                     # disagrees with the charge by construction.
                     'items': self._order_items_from_cart(cart),
                 }
+                # The total the confirm screen showed, so the server can refuse a basket whose price moved
+                # since. Absent (cash rescue, a stale screen) means no check.
+                expected_total = context.user_data.get('confirm_expected_total')
+                if expected_total is not None:
+                    order_data['expected_total'] = expected_total
 
                 # Apply a loyalty reward selected via the loyalty rewards menu
                 # (Phase 3 apply-at-checkout flow). Backend CreateOrderRequest
@@ -1514,6 +1527,17 @@ class OrderHandlers(BaseHandler):
                             query, error_text, reply_markup=keyboard,
                         )
                         await self._ack(query)
+                        return
+                    # The price moved between the confirm screen and this tap: nothing was placed. Redraw the
+                    # screen from the quote the refusal carried, with the reward the customer chose.
+                    new_quote = price_changed_quote(response)
+                    if new_quote is not None:
+                        if selected_reward_id:
+                            context.user_data['selected_reward_id'] = selected_reward_id
+                        await self._show_order_confirmation(
+                            update, context, quote=new_quote,
+                            notice=i18n.get('telegram.price_change.price_changed_note', language),
+                        )
                         return
                     await self._handle_api_error(update, response.error, language)
                     return
@@ -1684,6 +1708,8 @@ class OrderHandlers(BaseHandler):
             order_id = context.user_data.get('psp_failed_order_id')
             if not order_id:
                 context.user_data['selected_payment_method'] = 'cash'
+                # The stash belongs to the rail the screen showed, not to this cash rebuild.
+                context.user_data.pop('confirm_expected_total', None)
                 await self.confirm_order(update, context)
                 return
 
@@ -1720,8 +1746,15 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="select_payment_cash")
 
-    async def _show_order_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show order confirmation screen"""
+    async def _show_order_confirmation(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, quote: dict | None = None,
+        notice: str | None = None,
+    ):
+        """Show order confirmation screen.
+
+        `quote` is a new estimate the server already handed back (a refused `price_changed` order): it is drawn
+        as the estimate and `estimate_cart` is not called again. `notice` is printed under the title.
+        """
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
         unknown_text = i18n.get('telegram.common.unknown', language)
@@ -1763,6 +1796,8 @@ class OrderHandlers(BaseHandler):
         # would otherwise make Telegram refuse the whole screen.
         esc = partial(html.escape, quote=False)
         confirmation_text = f"<b>{esc(i18n.get('telegram.orders.confirmation_title', language))}</b>\n\n"
+        if notice:
+            confirmation_text += f"{esc(notice)}\n\n"
 
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0.0
@@ -1842,13 +1877,16 @@ class OrderHandlers(BaseHandler):
             # 🔴 THE MONEY. One server call, for the SAME basket confirm_order
             # posts, on the SAME rail, with the SAME reward. Anything this screen
             # computes for itself is a second answer to "how much".
-            estimate_resp = await client.estimate_cart(user_token, {
-                'items': self._order_items_from_cart(cart),
-                'delivery_address_id': context.user_data.get('selected_address_id'),
-                'payment_method': context.user_data.get('selected_payment_method'),
-                'reward_id': selected_reward_id,
-            })
-            estimate = (estimate_resp.data or {}).get('data') if estimate_resp.success else None
+            if quote is not None:
+                estimate, estimate_resp = quote, None
+            else:
+                estimate_resp = await client.estimate_cart(user_token, {
+                    'items': self._order_items_from_cart(cart),
+                    'delivery_address_id': context.user_data.get('selected_address_id'),
+                    'payment_method': context.user_data.get('selected_payment_method'),
+                    'reward_id': selected_reward_id,
+                })
+                estimate = (estimate_resp.data or {}).get('data') if estimate_resp.success else None
 
         # The subtotal the minimum-order gate reads. The cart's is the catalogue
         # price (D5, spec 2026-10-09), but a contract's cash or bank-transfer
@@ -1857,9 +1895,17 @@ class OrderHandlers(BaseHandler):
         # its own subtotal in `details` (the `@handle_api_exception` body, whose
         # `error_code` sits at the TOP level of `APIResponse.data`).
         min_order_subtotal = cart_total_amount
-        refusal = estimate_resp.data if not estimate_resp.success else None
+        refusal = estimate_resp.data if estimate_resp is not None and not estimate_resp.success else None
         if isinstance(refusal, dict) and refusal.get('error_code') == 'ORDER_MIN_AMOUNT':
             min_order_subtotal = float((refusal.get('details') or {}).get('items_subtotal') or 0)
+
+        # The figure confirm posts as `expected_total`: the estimate's `final_total` this screen shows as payable
+        # (before the prepaid deduction).
+        expected_total = ((estimate or {}).get('pricing') or {}).get('final_total')
+        if expected_total is not None:
+            context.user_data['confirm_expected_total'] = expected_total
+        else:
+            context.user_data.pop('confirm_expected_total', None)
 
         # Add address info
         address_id = context.user_data.get('selected_address_id')

@@ -15,6 +15,7 @@ from scripts.seed_web_ui_account_translations import TRANSLATIONS as ACCOUNT_TRA
 from scripts.seed_web_ui_auth_translations import TRANSLATIONS as AUTH_TRANSLATIONS
 from scripts.seed_web_ui_cabinet_translations import TRANSLATIONS as CABINET_TRANSLATIONS
 from scripts.seed_web_ui_checkout_translations import TRANSLATIONS as CHECKOUT_TRANSLATIONS
+from scripts.seed_web_ui_shop_translations import TRANSLATIONS as SHOP_TRANSLATIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "business_app" / "templates"
@@ -38,6 +39,14 @@ CHECKOUT_PREFIX = "web.checkout."
 CHECKOUT_ROWS = {
     key: {language: rows[key] for language, rows in CHECKOUT_TRANSLATIONS.items() if key in rows}
     for key in set().union(*CHECKOUT_TRANSLATIONS.values())
+}
+
+# A word the cabinet's order pages share with the cart and checkout (the courtesy line's "{qty} x {price} (your price,
+# kept for you)") is ONE `web.shop.` row in the shop seed: the same sentence under a second key would drift.
+SHOP_PREFIX = "web.shop."
+SHOP_ROWS = {
+    key: {language: rows[key] for language, rows in SHOP_TRANSLATIONS.items() if key in rows}
+    for key in set().union(*SHOP_TRANSLATIONS.values())
 }
 
 # The auth group's building blocks (macros/auth.html: password fields, the checklist, the one-time code) and their
@@ -113,6 +122,8 @@ def test_every_cabinet_key_has_a_seed_row_in_all_three_languages(key):
         row = CHECKOUT_ROWS.get(key)
     elif key.startswith(AUTH_PREFIX):
         row = AUTH_ROWS.get(key)
+    elif key.startswith(SHOP_PREFIX):
+        row = SHOP_ROWS.get(key)
     else:
         row = BACKEND_TRANSLATIONS.get(key)
     assert row is not None, f"{key!r} is rendered at {cabinet_template_keys()[key]} but no seed row exists"

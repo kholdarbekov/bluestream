@@ -168,7 +168,36 @@ PREPAYMENT_RETURNED = {
     "balance": 15000.0,
     "timestamp": "2027-01-07T07:15:00+00:00",
 }
-ALL = [ORDER_CREATED, DELIVERY_SKIPPED, PAID_ORDER_KEPT, PAYMENT_EXPIRED, SCHEDULE_CHANGED, PREPAYMENT_RETURNED]
+# Task 41's payload (customer_notices.send_price_change): the date as an ISO day, each product named in the
+# notice's language with its new price as a float, and the caller's answer for the subscription sentence.
+PRICE_ANNOUNCEMENT = {
+    "notice_id": "price-change:5:announcement:810000001",
+    "kind": "price_change_announcement",
+    "telegram_id": "810000001",
+    "language": "en",
+    "price_change_id": 5,
+    "effective_date": "2027-02-01",
+    "prices": [{"name": "Pure Water 18.9L", "new_price": 21000.0}, {"name": "Pure <Water> 10L", "new_price": 12500.0}],
+    "is_subscriber": False,
+    "timestamp": "2027-01-25T04:00:00+00:00",
+}
+PRICE_REMINDER = dict(PRICE_ANNOUNCEMENT, notice_id="price-change:5:reminder:810000001", kind="price_change_reminder")
+CONTRACT_KEYS["price_change_announcement"] = CONTRACT_KEYS["price_change_reminder"] = ENVELOPE | {
+    "price_change_id",
+    "effective_date",
+    "prices",
+    "is_subscriber",
+}
+ALL = [
+    ORDER_CREATED,
+    DELIVERY_SKIPPED,
+    PAID_ORDER_KEPT,
+    PAYMENT_EXPIRED,
+    SCHEDULE_CHANGED,
+    PREPAYMENT_RETURNED,
+    PRICE_ANNOUNCEMENT,
+    PRICE_REMINDER,
+]
 CLICK = dict(ORDER_CREATED, payment="online_unpaid", amount_due=None, deadline="2027-01-07T12:00:00+05:00")
 
 # The same payloads as a backend from before Task 17a queued them (for one release the bot still renders them):
@@ -820,7 +849,7 @@ async def test_the_english_order_notice_reads_as_written(ws, monkeypatch):
         "🚚 Delivery: 07.01.2027, from 10:00 to 12:00\n"
         "• Pure Water 19L × 2\n"
         "• Cooler cups × 1\n\n"
-        "💰 Total: 30,000 UZS\n"
+        "💰 Total: 30,000 so'm\n"
         "💳 Please pay by 01/07/2027, 12:00 PM. An order not paid by then is cancelled."
     )
     assert [text for text, _data in _buttons(kwargs)] == ["💳 Pay Now", "View Order"]
@@ -838,7 +867,7 @@ async def test_an_online_order_whose_published_pay_is_refused_reads_no_pay_line_
 
     assert resp.status == 200
     kwargs = _sent(ws)
-    assert kwargs["text"].rstrip("\n").endswith("💰 Total: 30,000 UZS")
+    assert kwargs["text"].rstrip("\n").endswith("💰 Total: 30,000 so'm")
     assert "pay by" not in kwargs["text"].lower()
     assert [data for _text, data in _buttons(kwargs)] == ["order_9001", "subscription_7"]
 
@@ -878,7 +907,7 @@ async def test_prepayment_returned_renders_formatted_amounts(ws, monkeypatch):
     assert resp.status == 200
     kwargs = _sent(ws)
     assert kwargs["text"] == (
-        "✅ We returned 35,000 UZS of your prepaid balance to you.\n💳 Prepaid balance now: 15,000 UZS"
+        "✅ We returned 35,000 so'm of your prepaid balance to you.\n💳 Prepaid balance now: 15,000 so'm"
     )
     assert kwargs["reply_markup"] is None
 
@@ -890,7 +919,7 @@ async def test_prepayment_returned_prints_a_zero_balance(ws, monkeypatch):
 
     await ws.customer_notice_handler(_make_request(dict(PREPAYMENT_RETURNED, balance=0.0)))
 
-    assert _sent(ws)["text"].endswith("Prepaid balance now: 0 UZS")
+    assert _sent(ws)["text"].endswith("Prepaid balance now: 0 so'm")
 
 
 @pytest.mark.unit
@@ -909,6 +938,96 @@ async def test_prepayment_returned_prints_a_zero_balance(ws, monkeypatch):
 )
 async def test_prepayment_returned_with_a_non_numeric_amount_is_refused_before_the_claim(ws, change):
     resp = await ws.customer_notice_handler(_make_request(dict(PREPAYMENT_RETURNED, **change)))
+
+    assert resp.status == 400
+    assert "Unknown kind" not in json.loads(resp.body)["message"]
+    ws.bot_app.bot.send_message.assert_not_awaited()
+    assert _redis(ws).store == {}
+
+
+# --------------------------------------------------------------------------- the price change (spec 2026-11-16 §5.3)
+
+_PRICE_ITEM = "telegram.customer_notice.price_change_item|en|name={name}|price={price}"
+_PRICE_ITEMS = (
+    _PRICE_ITEM.format(name="Pure Water 18.9L", price="21,000")
+    + "\n"
+    + _PRICE_ITEM.format(name="Pure &lt;Water&gt; 10L", price="12,500")
+)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload, key", [
+    (PRICE_ANNOUNCEMENT, "price_change_announcement"),
+    (PRICE_REMINDER, "price_change_reminder"),
+], ids=["announcement", "reminder"])
+async def test_the_announcement_names_the_date_and_each_new_price_and_has_no_buttons(ws, payload, key):
+    resp = await ws.customer_notice_handler(_make_request(payload))
+
+    assert resp.status == 200
+    kwargs = _sent(ws)
+    assert kwargs["chat_id"] == "810000001"
+    assert kwargs["parse_mode"] == "HTML"
+    assert kwargs["text"] == f"telegram.customer_notice.{key}|en|date=01.02.2027|items={_PRICE_ITEMS}"
+    assert kwargs["reply_markup"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_subscriber_reads_the_subscription_sentence_after_the_message(ws):
+    resp = await ws.customer_notice_handler(_make_request(dict(PRICE_ANNOUNCEMENT, is_subscriber=True)))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        f"telegram.customer_notice.price_change_announcement|en|date=01.02.2027|items={_PRICE_ITEMS}"
+        "\n\ntelegram.customer_notice.price_change_subscriber|en|date=01.02.2027"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_english_announcement_reads_as_written(ws, monkeypatch):
+    _use_real_i18n(monkeypatch)
+
+    resp = await ws.customer_notice_handler(_make_request(dict(PRICE_ANNOUNCEMENT, is_subscriber=True)))
+
+    assert resp.status == 200
+    assert _sent(ws)["text"] == (
+        "💧 <b>Our prices change on 01.02.2027</b>\n\n"
+        "From 01.02.2027, our water will cost:\n"
+        "• Pure Water 18.9L: 21,000 so'm\n"
+        "• Pure &lt;Water&gt; 10L: 12,500 so'm\n\n"
+        "Why: it costs us more to bring you your water. Electricity for purification, fuel for delivery, "
+        "our team's wages and new bottles all cost more than they did.\n\n"
+        "What stays the same: free delivery, the bottle exchange, your AquaCoins and your tier discount.\n\n"
+        "Every order placed before 01.02.2027 keeps today's price, even if it is delivered later.\n\n"
+        "Thank you for staying with us.\n\n"
+        "🔁 For your subscription, orders created from 01.02.2027 are at the new price."
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["price_change_announcement", "price_change_reminder"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"prices": []},
+        {"prices": None},
+        {"prices": "21000"},
+        {"prices": [{"name": "Water"}]},
+        {"prices": [{"name": "Water", "new_price": "21000"}]},
+        {"prices": [{"name": "Water", "new_price": float("nan")}]},
+        {"prices": [{"name": "Water", "new_price": True}]},
+        {"prices": ["Water"]},
+        {"effective_date": None},
+        {"effective_date": "soon"},
+        {"is_subscriber": "yes"},
+        {"is_subscriber": None},
+    ],
+)
+async def test_a_broken_price_notice_is_refused_before_the_claim(ws, kind, change):
+    resp = await ws.customer_notice_handler(_make_request(dict(PRICE_ANNOUNCEMENT, kind=kind, **change)))
 
     assert resp.status == 400
     assert "Unknown kind" not in json.loads(resp.body)["message"]

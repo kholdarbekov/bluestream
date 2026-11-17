@@ -7,7 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 
 from i18n import i18n
 from config import config
-from utils import format_date
+from utils import format_date, format_money
 from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
 from shared import reorder_reminder_copy
 from shared.telegram_login import subscription_target
@@ -579,7 +579,7 @@ class ProductKeyboards:
         for product in products:
             price = get_product_display_price(product)
             buttons.append([{
-                'text': f"{product['name']} - {price} UZS",
+                'text': f"{product['name']} - {format_money(price, language)}",
                 'callback_data': f"product_{product['id']}"
             }])
 
@@ -622,7 +622,7 @@ class ProductKeyboards:
         for product in products:
             price = get_product_display_price(product)
             buttons.append([{
-                'text': f"{product['name']} - {price} UZS",
+                'text': f"{product['name']} - {format_money(price, language)}",
                 'callback_data': f"sub_product_{product['id']}"
             }])
 

@@ -9,6 +9,7 @@ keys listed here.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from string import Formatter
@@ -48,7 +49,15 @@ BOT_KEYS = {
     "telegram.customer_notice.schedule_change.days_added": {"days"},
     "telegram.customer_notice.schedule_change.days_removed": {"days"},
     "telegram.customer_notice.schedule_change.date_moved": {"old_day"},
+    # The price change (spec 2026-11-16 §5.3): the announcement, its reminder, one price line, the subscriber sentence.
+    "telegram.customer_notice.price_change_announcement": {"date", "items"},
+    "telegram.customer_notice.price_change_reminder": {"date", "items"},
+    "telegram.customer_notice.price_change_item": {"name", "price"},
+    "telegram.customer_notice.price_change_subscriber": {"date"},
 }
+PRICE_CHANGE_KEYS = sorted(key for key in BOT_KEYS if ".price_change_" in key)
+# The copy frames a fact, never pressure (spec §5.3): no urgency, no "save", no countdown.
+_PRESSURE = re.compile(r"missed|last chance|\bsave\b|hurry|days left|countdown", re.IGNORECASE)
 
 _RENDERING_MODULE = Path(__file__).resolve().parents[2] / "telegram_bot" / "webhook_server.py"
 # Dotted to the end: `telegram.customer_notice.schedule_change.time_cleared` is one key, not its prefix.
@@ -98,3 +107,51 @@ def test_the_route_renders_exactly_the_keys_this_file_lists():
         "the telegram.customer_notice.* keys the bot renders and the keys this file checks have diverged: "
         f"only in the bot {sorted(rendered - set(BOT_KEYS))}, only in this file {sorted(set(BOT_KEYS) - rendered)}"
     )
+
+
+@pytest.mark.parametrize("key", PRICE_CHANGE_KEYS)
+def test_price_change_copy_prints_no_digits_no_uzs_and_no_pressure(key):
+    """Dates and prices arrive as placeholders: a digit typed into the copy would be a price that goes stale, and
+    the currency is the local word beside `{price}`, never the code `UZS`."""
+    for language in LANGUAGES:
+        text = BACKEND_TRANSLATIONS[key][language]
+        assert not re.search(r"\d", text), f"{key} [{language}] prints a digit"
+        assert "UZS" not in text, f"{key} [{language}] prints UZS"
+        assert not _PRESSURE.search(text), f"{key} [{language}] pressures the customer"
+
+
+def test_the_price_line_names_the_currency_in_each_language():
+    """`format_price` prints only the number, so the copy types the currency beside it."""
+    line = BACKEND_TRANSLATIONS["telegram.customer_notice.price_change_item"]
+    assert line["en"].endswith("{price} so'm")
+    assert line["uz"].endswith("{price} so'm")
+    assert line["ru"].endswith("{price} сум")
+
+
+def _value_source_spans(key: str, language: str) -> str:
+    """The source lines the seed spends on one language's value (comments included)."""
+    path = Path(__file__).resolve().parents[2] / "scripts" / "seed_backend_translations.py"
+    source = path.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Dict):
+            continue
+        for k, v in zip(node.keys, node.values):
+            if isinstance(k, ast.Constant) and k.value == key and isinstance(v, ast.Dict):
+                for lk, lv in zip(v.keys, v.values):
+                    if isinstance(lk, ast.Constant) and lk.value == language:
+                        return "\n".join(lines[lv.lineno - 1 : lv.end_lineno])
+    raise AssertionError(f"{key} [{language}] not found in the seed")
+
+
+@pytest.mark.parametrize("key", PRICE_CHANGE_KEYS)
+@pytest.mark.parametrize("language", ("uz", "ru"))
+def test_uz_and_ru_price_change_values_are_marked_native_read(key, language):
+    """Machine-written uz/ru customer copy stays visibly unreviewed until a native speaker reads it."""
+    assert "NATIVE-READ" in _value_source_spans(key, language), f"{key} [{language}]"
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_the_reason_sentence_is_marked_for_owner_approval(language):
+    span = _value_source_spans("telegram.customer_notice.price_change_announcement", language)
+    assert "OWNER-APPROVE" in span

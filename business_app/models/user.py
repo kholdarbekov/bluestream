@@ -18,6 +18,7 @@ from business_app import db
 from business_app.models import TimestampMixin
 from shared.enums import UserRole, UserStatus, UserGender, UserType
 from business_app.utils.user_types import is_entity_user_type, is_staff_user_type, normalize_user_type
+from business_app.utils.address_helpers import address_display_label
 from shared.enums import EntitySubtype
 from shared.constants import DISPLAY_TIMEZONE
 from shared.validators import is_deliverable_email, validate_email, sanitize_user_input, validate_uzbekistan_phone
@@ -387,6 +388,8 @@ class UserAddress(db.Model, TimestampMixin):
             "landmark": self.landmark,
             "floor_number": self.floor_number,
             "apartment_number": self.apartment_number,
+            # The address as the customer names it (title, else street line): every client prints this.
+            "display_label": address_display_label(self),
         }
 
 

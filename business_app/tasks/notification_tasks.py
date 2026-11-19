@@ -13,8 +13,10 @@ from business_app.models.notification import Notification
 from business_app.models.user import User
 from business_app.models.delivery import Delivery
 from business_app.services.notification_service import NotificationService
+from business_app.tasks.secret_arguments import hidden, secret_arguments
 from business_app.utils.constants import NotificationType, NotificationChannel
 from business_app import db
+from shared.validators import mask_phone_number
 
 logger = get_task_logger(__name__)
 
@@ -457,7 +459,14 @@ def send_late_debit_credit_notice_task(self, user_id: int, order_number: str, am
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    time_limit=120,
+    soft_time_limit=100,
+    **secret_arguments(verification_token=hidden),
+)
 def send_verification_email_task(self, user_id: int, verification_token: str):
     """Send email verification notification"""
     try:
@@ -499,16 +508,27 @@ def _dispatch_otp_sms(phone: str, otp_code: str, language: str):
     place is what stops a second flow from quietly inventing its own text
     again (see the registration-OTP outage that motivated this).
     """
-    return NotificationService().send_sms_to_phone(
+    result = NotificationService().send_sms_to_phone(
         phone=phone,
         notification_type=NotificationType.SYSTEM,
         template_key="sms.verification.otp",
         template_data={"otp_code": otp_code, "phone_number": phone},
         language=language,
     )
+    # The OTP tasks return this, and Celery prints a task's return value on its "succeeded" line
+    if isinstance(result, dict) and result.get("phone"):
+        result = {**result, "phone": mask_phone_number(result["phone"])}
+    return result
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    time_limit=120,
+    soft_time_limit=100,
+    **secret_arguments(otp_code=hidden, phone=mask_phone_number),
+)
 def send_registration_otp_task(self, phone: str, otp_code: str, language: str = "uz"):
     """
     Send the web phone-signup OTP.
@@ -538,7 +558,14 @@ def send_registration_otp_task(self, phone: str, otp_code: str, language: str = 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    time_limit=120,
+    soft_time_limit=100,
+    **secret_arguments(otp_code=hidden, phone_number=mask_phone_number),
+)
 def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: str = None):
     """
     Send SMS verification notification
@@ -569,7 +596,10 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
         # through it would silently deliver nothing.
         result = _dispatch_otp_sms(target_phone, otp_code, getattr(user, "preferred_language", None) or "en")
 
-        logger.info(f"SMS verification sent successfully for user {user_id} to {target_phone}")
+        if isinstance(result, dict) and result.get("success"):
+            logger.info(f"SMS verification sent successfully for user {user_id} to {target_phone}")
+        else:
+            logger.warning(f"SMS verification for user {user_id} was not sent: {result}")
         return result
 
     except Exception as exc:
@@ -577,7 +607,14 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    time_limit=120,
+    soft_time_limit=100,
+    **secret_arguments(reset_token=hidden),
+)
 def send_password_reset_email_task(self, user_id: int, reset_token: str):
     """Send password reset email"""
     try:

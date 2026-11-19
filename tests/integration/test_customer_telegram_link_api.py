@@ -14,7 +14,6 @@ import re
 from datetime import UTC, datetime, timedelta
 
 import pytest
-import redis
 from flask_jwt_extended import decode_token
 
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyTransaction, ReferralProgram
@@ -31,6 +30,7 @@ from business_app.utils.service_factory import get_auth_service
 from scripts.seed_backend_translations import BACKEND_TRANSLATIONS, TELEGRAM_LINK_API_TRANSLATIONS
 from shared.enums import UserRole, UserStatus, UserType
 from shared.redis_keyspace import KEYSPACE_TIERS, RedisKeyspace, RedisUsageTier
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.reorder_reminder_builders import (
     captured_logs,
     customer_headers,
@@ -76,16 +76,6 @@ def _link_alive(token):
 def _telegram_id_of(db, user_id):
     db.session.expire_all()
     return db.session.get(User, user_id).telegram_id
-
-
-class _DownRedis:
-    """Redis is unreachable: every command fails the way redis-py fails."""
-
-    def __getattr__(self, name):
-        def _fail(*args, **kwargs):
-            raise redis.ConnectionError("Error 111 connecting to redis:6379. Connection refused.")
-
-        return _fail
 
 
 @pytest.fixture
@@ -245,7 +235,7 @@ def test_unsigned_or_wrongly_signed_bot_calls_are_401_and_write_nothing(
 
 
 def test_redis_down_fails_closed(monkeypatch, app, db, sample_user, auth_token, signed_bot_post, link_copy):  # RF4
-    monkeypatch.setattr(CustomerTelegramLinkService, "_redis", staticmethod(lambda: _DownRedis()))
+    monkeypatch.setattr(CustomerTelegramLinkService, "_redis", staticmethod(lambda: DownRedis()))
     resp = _issue(app, auth_token)
     assert _code(resp) == (503, "TELEGRAM_LINK_STORE_UNAVAILABLE")
     assert (

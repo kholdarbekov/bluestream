@@ -23,7 +23,7 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 def _delivered_unpaid_click_order(db, user, *, order_number, payment_status=PaymentStatus.PENDING):
@@ -41,7 +41,7 @@ def _delivered_unpaid_click_order(db, user, *, order_number, payment_status=Paym
     )
     db.session.add(order)
     db.session.flush()
-    payment = _seed_click_payment(db, order, payment_id_str=f"pay-{order_number}")
+    payment = seed_click_payment(db, order, payment_id_str=f"pay-{order_number}")
     payment.status = payment_status
     db.session.commit()
     return order, payment

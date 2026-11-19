@@ -338,30 +338,52 @@ For API support, contact: support@aqua-element.uz
             },
             "Address": {
                 "type": "object",
+                "description": "A saved delivery address, as every address endpoint answers it (UserAddress.to_dict)",
                 "properties": {
                     "id": {"type": "integer", "example": 1, "description": "Address identifier"},
-                    "address_line1": {
+                    "title": {
                         "type": "string",
-                        "example": "123 Main Street, Apt 4B",
-                        "description": "Primary address line",
+                        "x-nullable": True,
+                        "example": "Home",
+                        "description": "The customer's name for the address; may be null",
                     },
-                    "address_line2": {
+                    "display_label": {
                         "type": "string",
-                        "example": "Near Metro Station",
-                        "description": "Secondary address line (optional)",
+                        "example": "Home",
+                        "description": "What to print for the address: its title, else its full_address. Clients "
+                        "print this rather than deriving their own label",
                     },
-                    "city": {"type": "string", "example": "Tashkent", "description": "City name"},
-                    "district": {"type": "string", "example": "Chilanzar", "description": "District or area"},
-                    "postal_code": {"type": "string", "example": "100000", "description": "Postal code"},
+                    "full_address": {
+                        "type": "string",
+                        "example": "Chilonzor 9-kvartal, 14-uy, Tashkent",
+                        "description": "The street line",
+                    },
+                    "street_address": {"type": "string", "x-nullable": True, "example": "Chilonzor 9-kvartal"},
+                    "city": {"type": "string", "x-nullable": True, "example": "Tashkent", "description": "City name"},
+                    "district": {
+                        "type": "string",
+                        "x-nullable": True,
+                        "example": "chilanzar",
+                        "description": "District key or area",
+                    },
+                    "postal_code": {
+                        "type": "string",
+                        "x-nullable": True,
+                        "example": "100000",
+                        "description": "Postal code",
+                    },
+                    "country": {"type": "string", "x-nullable": True, "example": "Uzbekistan"},
                     "latitude": {
                         "type": "number",
                         "format": "float",
+                        "x-nullable": True,
                         "example": 41.2995,
                         "description": "GPS latitude coordinate",
                     },
                     "longitude": {
                         "type": "number",
                         "format": "float",
+                        "x-nullable": True,
                         "example": 69.2401,
                         "description": "GPS longitude coordinate",
                     },
@@ -370,6 +392,16 @@ For API support, contact: support@aqua-element.uz
                         "example": True,
                         "description": "Whether this is the default address",
                     },
+                    "is_business": {"type": "boolean", "example": False, "description": "A business address"},
+                    "delivery_instructions": {
+                        "type": "string",
+                        "x-nullable": True,
+                        "example": "Ring bell twice",
+                        "description": "Notes for the driver at the door",
+                    },
+                    "landmark": {"type": "string", "x-nullable": True, "example": "Near Metro Station"},
+                    "floor_number": {"type": "string", "x-nullable": True, "example": "3"},
+                    "apartment_number": {"type": "string", "x-nullable": True, "example": "14"},
                 },
             },
             "TimeSlot": {

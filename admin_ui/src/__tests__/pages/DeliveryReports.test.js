@@ -107,6 +107,15 @@ const createWrapper = () => {
   );
 };
 
+// user-event refuses to click an element whose computed `pointer-events` is `none`. antd Spin
+// copies its `spinning` prop into state in an effect, so a table's blurred container keeps
+// `pointer-events: none` for one effect after the rows have rendered. Wait for that to clear.
+const findClickable = (query) => waitFor(() => {
+  const element = query();
+  expect(window.getComputedStyle(element).pointerEvents).not.toBe('none');
+  return element;
+});
+
 const reconciliationPayload = {
   data: {
     data: {
@@ -304,8 +313,7 @@ describe('DeliveryReports page', () => {
       expect(staffService.getCashReconciliation).toHaveBeenCalled();
     });
 
-    const rejectButtons = await screen.findAllByText('Reject');
-    await user.click(rejectButtons[0]);
+    await user.click(await findClickable(() => screen.getAllByText('Reject')[0]));
 
     expect(await screen.findByText('Reject Reconciliation')).toBeInTheDocument();
 
@@ -404,7 +412,7 @@ describe('DeliveryReports page', () => {
       expect(staffService.getCashReconciliation).toHaveBeenCalled();
     });
 
-    await user.click(await screen.findByText('Force Close'));
+    await user.click(await findClickable(() => screen.getByText('Force Close')));
 
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByRole('textbox'), 'Driver left; closing session');
@@ -425,8 +433,7 @@ describe('DeliveryReports page', () => {
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
 
-    const viewButtons = await screen.findAllByText('View');
-    await user.click(viewButtons[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     // Scoped to the modal: the session-list table (behind the modal) renders the
     // same session's session_started_at with the same formatter, so an unscoped
@@ -443,7 +450,7 @@ describe('DeliveryReports page', () => {
     render(<DeliveryReports />, { wrapper: createWrapper() });
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
-    await user.click((await screen.findAllByText('View'))[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     // Customer column shows name + phone
     expect(await screen.findByText('Ali Buyer')).toBeInTheDocument();
@@ -511,7 +518,7 @@ describe('DeliveryReports page', () => {
     render(<DeliveryReports />, { wrapper: createWrapper() });
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
-    await user.click((await screen.findAllByText('View'))[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     // Expand the event row -> settlement breakdown appears
     const expandButton = document.querySelector('.ant-table-row-expand-icon');
@@ -579,7 +586,7 @@ describe('DeliveryReports page', () => {
     render(<DeliveryReports />, { wrapper: createWrapper() });
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
-    await user.click((await screen.findAllByText('View'))[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     // Event row carries the place label — a workplace collection must not read
     // as personal cash.
@@ -597,7 +604,7 @@ describe('DeliveryReports page', () => {
     render(<DeliveryReports />, { wrapper: createWrapper() });
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
-    await user.click((await screen.findAllByText('View'))[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     await screen.findByText('Ali Buyer');
     expect(screen.queryByText(/Place collection/)).toBeNull();
@@ -610,7 +617,7 @@ describe('DeliveryReports page', () => {
     render(<DeliveryReports />, { wrapper: createWrapper() });
 
     await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
-    await user.click((await screen.findAllByText('View'))[0]);
+    await user.click(await findClickable(() => screen.getAllByText('View')[0]));
 
     // Customer Statement (event Actions button; event has customer_id 77)
     await user.click(await screen.findByText('Customer Statement'));

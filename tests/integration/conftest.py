@@ -29,6 +29,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
 
+from tests.app_configs import postgres_app_config
+from tests.integration.celery_task_harness import publish_for_real
 from tests.integration.fake_gateways import apply_test_provider_secrets
 
 
@@ -99,18 +101,6 @@ def transient_pg_database(name: str, template: str | None = None):
         admin_engine.dispose()
 
 
-def _pg_app_config(database_url: str) -> dict:
-    return {
-        "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": database_url,
-        "SQLALCHEMY_TRACK_MODIFICATIONS": False,
-        "SECRET_KEY": "test-secret-key-for-pg-e2e-32-characters",
-        "JWT_SECRET_KEY": "test-jwt-secret-key-for-pg-e2e",
-        "CELERY_ALWAYS_EAGER": True,
-        "WTF_CSRF_ENABLED": False,
-    }
-
-
 @pytest.fixture(scope="session")
 def migrated_pg_template():
     """Name of a database holding the REAL migration chain, built once per worker.
@@ -124,7 +114,7 @@ def migrated_pg_template():
     from business_app import create_app, db
 
     with transient_pg_database("template") as url:
-        app = create_app(_pg_app_config(url))
+        app = create_app(postgres_app_config(url))
         with app.app_context():
             upgrade(revision="head")
             db.session.remove()
@@ -151,7 +141,7 @@ def pg_app(ephemeral_pg_database):
     """
     from business_app import create_app
 
-    app = create_app(_pg_app_config(ephemeral_pg_database))
+    app = create_app(postgres_app_config(ephemeral_pg_database))
 
     with app.app_context():
         yield app
@@ -204,6 +194,18 @@ def no_fiscalization(monkeypatch):
         lambda self, payment_id: None,
         raising=True,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Real Celery publishing (used by test_task_secrets_kept_out_of_celery_logs.py,
+# test_otp_codes_kept_out_of_task_logs.py and test_payment_webhook_task_secrets.py).
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def published(monkeypatch):
+    """Every task message published during the test; see `celery_task_harness.publish_for_real`."""
+    with publish_for_real(monkeypatch) as capture:
+        yield capture
 
 
 @pytest.fixture

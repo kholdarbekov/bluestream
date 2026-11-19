@@ -70,7 +70,9 @@ def test_startup_token_line_shows_no_secret_for_any_token_shape(startup_messages
     assert not any(part in message for message in messages for part in _parts_of(TOKEN_SECRET))
 
 
-def test_staff_bot_sentry_init_redacts_url_credentials_in_every_event():
+def test_staff_bot_sentry_init_applies_the_shared_secret_rule_to_every_event():
+    """URL credentials included: `scrub_event` ends with `redact_event_urls` (tests/staff_bot/
+    test_staff_bot_sentry_one_secret_rule.py drives it)."""
     tree = ast.parse((REPO / "staff_bot" / "bot.py").read_text(encoding="utf-8"))
     inits = [
         node
@@ -83,14 +85,14 @@ def test_staff_bot_sentry_init_redacts_url_credentials_in_every_event():
     ]
     assert len(inits) == 1
     before_send = {keyword.arg: keyword.value for keyword in inits[0].keywords}.get("before_send")
-    assert isinstance(before_send, ast.Name) and before_send.id == "redact_event_urls"
+    assert isinstance(before_send, ast.Name) and before_send.id == "scrub_event"
 
     # bound at module level BEFORE the init: a later import would raise NameError only where SENTRY_DSN is set
     imports = [
         node
         for node in tree.body
         if isinstance(node, ast.ImportFrom)
-        and node.module == "shared.url_redaction"
-        and any(alias.name == "redact_event_urls" and alias.asname is None for alias in node.names)
+        and node.module == "shared.secret_scrub"
+        and any(alias.name == "scrub_event" and alias.asname is None for alias in node.names)
     ]
     assert imports and imports[0].lineno < inits[0].lineno

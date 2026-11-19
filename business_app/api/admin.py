@@ -12,7 +12,7 @@ from sqlalchemy import and_, or_, desc, func, text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
 from decimal import Decimal, InvalidOperation
-from shared.constants import DISPLAY_TIMEZONE, is_within_tashkent
+from shared.constants import DISPLAY_TIMEZONE, STAFF_INVITE_START_PREFIX, is_within_tashkent
 from shared.redis_keyspace import RedisKeyspace
 
 from business_app.models.user import User, UserAddress
@@ -13396,7 +13396,7 @@ def generate_staff_invite_link():
         finally:
             redis_client.close()
 
-        invite_link = f"https://t.me/{bot_username}?start=staff_invite_{invite_token}"
+        invite_link = f"https://t.me/{bot_username}?start={STAFF_INVITE_START_PREFIX}{invite_token}"
 
         return success_response(
             data={

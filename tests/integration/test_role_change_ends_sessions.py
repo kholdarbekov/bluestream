@@ -17,8 +17,8 @@ from flask_jwt_extended import decode_token
 
 import business_app.services.session_revocation_service as revocation_module
 from business_app.models.user import User
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.test_admin_order_reschedule import audit_events  # noqa: F401  (a fixture)
-from tests.integration.test_customer_telegram_link_api import _DownRedis
 from tests.integration.test_session_revocation import (  # noqa: F401  (production_access_lifetime is a fixture)
     PROFILE,
     SIGNED_OUT,
@@ -194,7 +194,7 @@ def test_editing_an_operator_signs_them_out_only_when_their_roles_change(
 @pytest.fixture
 def cut_off_store_down(monkeypatch):
     """Redis refuses the cut-off write."""
-    monkeypatch.setattr(revocation_module, "redis_client", _DownRedis())
+    monkeypatch.setattr(revocation_module, "redis_client", DownRedis())
 
 
 def test_with_redis_down_a_staff_role_change_fails_loudly_and_changes_nothing(

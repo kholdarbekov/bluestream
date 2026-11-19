@@ -7,14 +7,14 @@ import pytest
 from business_app.models.payment import Payment
 from business_app.services.order_edit_service import OrderEditPlan, OrderEditService
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 @pytest.mark.unit
 def test_recompute_totals_rederives_payment_idempotency_key(app, db, sample_order):
     """After an amount-changing edit, the payment's idempotency key must match the
     new amount — a stale key would collide/miss on the next create_payment call."""
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     stale_key = Payment.compute_idempotency_key(
         order_id=sample_order.id,
         user_id=payment.user_id,

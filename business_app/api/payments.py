@@ -25,7 +25,7 @@ from business_app.serializers.payment_serializers import (
     serialize_payment,
     serialize_credit_card,
 )
-from business_app.utils.decorators import validate_json, rate_limit
+from business_app.utils.decorators import validate_json, rate_limit, count_in_window
 from business_app.utils.constants import PaymeErrors, PaymentMethodType
 from shared.enums import PaymentStatus, OrderStatus
 from business_app.services.order_service import OrderService
@@ -105,13 +105,10 @@ def _check_provider_webhook_rate_limit(provider_lc: str, redis_client):
         return None
     try:
         key = RedisKeyspace.webhook_provider_rate(provider_lc)
-        # Use a sliding-window-ish counter: INCR + EXPIRE on first hit.
-        count = redis_client.incr(key)
-        if count == 1:
-            redis_client.expire(key, _PROVIDER_WEBHOOK_WINDOW_SECONDS)
+        # Fixed one-minute window; a counter found without an expiry gets one, so it can never refuse for good.
+        count, ttl = count_in_window(redis_client, key, _PROVIDER_WEBHOOK_WINDOW_SECONDS)
         if count > _PROVIDER_WEBHOOK_GLOBAL_LIMIT:
-            ttl = redis_client.ttl(key)
-            retry_after = ttl if isinstance(ttl, int) and ttl > 0 else _PROVIDER_WEBHOOK_WINDOW_SECONDS
+            retry_after = ttl if ttl > 0 else _PROVIDER_WEBHOOK_WINDOW_SECONDS
             current_app.logger.warning(f"Provider webhook rate limit hit (provider={provider_lc}, count={count})")
             response = jsonify(
                 {
@@ -122,7 +119,7 @@ def _check_provider_webhook_rate_limit(provider_lc: str, redis_client):
             response.status_code = 503
             response.headers["Retry-After"] = str(retry_after)
             return response
-    except Exception as exc:  # pragma: no cover — availability > strict limiting
+    except Exception as exc:  # availability > strict limiting
         current_app.logger.warning(f"Provider webhook rate-limit check failed (provider={provider_lc}): {exc}")
     return None
 

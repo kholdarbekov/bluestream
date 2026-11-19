@@ -1,7 +1,7 @@
 """Sweep: COMPLETED Click payments with lost fiscalization or confirmation get re-driven.
 
 Fixture style mirrors Task 7's ``tests/unit/test_reconcile_positive_evidence.py``
-(``db`` + ``sample_order`` + ``_seed_click_payment``); no ``db_session`` fixture
+(``db`` + ``sample_order`` + ``seed_click_payment``); no ``db_session`` fixture
 exists in this project's conftest.
 """
 
@@ -10,11 +10,11 @@ from datetime import datetime, timedelta, timezone
 from business_app import db
 from shared.enums import PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 def _completed_payment(db, order, *, paid_minutes_ago=60):
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     payment.status = PaymentStatus.COMPLETED
     payment.paid_at = datetime.now(timezone.utc) - timedelta(minutes=paid_minutes_ago)
     db.session.commit()

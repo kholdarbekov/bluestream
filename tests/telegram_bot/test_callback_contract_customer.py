@@ -106,6 +106,7 @@ from keyboards import (
     SubscriptionKeyboards,
 )
 
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import build_bot_harness, menu_already_installed
 # The debounce window is 2 REAL seconds. Ageing the guard's own lock table is
 # what the wall clock would do, without putting two seconds into the suite —
@@ -574,19 +575,10 @@ _PRODUCTS = [
     {"id": 8, "name": "Aqua Element 10L", "current_price": 16000},
 ]
 _CATEGORIES = [{"id": 1, "name": "Suv"}, {"id": 2, "name": "Kulerlar"}]
+# Saved addresses through the producer's own serializer (`UserAddress.to_dict()`), `display_label` included.
 _ADDRESSES = [
-    {
-        "id": 91,
-        "title": "Uy",
-        "full_address": "15, Chilonzor dahasi, Toshkent shahri",
-        "is_default": True,
-    },
-    {
-        "id": 92,
-        "title": "Ish",
-        "full_address": "1, Amir Temur ko'chasi, Toshkent",
-        "is_default": False,
-    },
+    address_row(91, title="Uy", full_address="15, Chilonzor dahasi, Toshkent shahri", is_default=True),
+    address_row(92, title="Ish", full_address="1, Amir Temur ko'chasi, Toshkent", is_default=False),
 ]
 _PAYMENT_METHODS = [
     {"type": "cash", "name": "Naqd"},

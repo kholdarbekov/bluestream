@@ -1,51 +1,21 @@
 """
-Sentry PII scrubbing and event pre-processing.
+What an error event or a performance trace may carry out of the process.
 
-Reuses the `sanitize_request_data` redaction logic from error_handlers.py so
-Sentry sees the same SENSITIVE_KEYS redaction policy that structured logs do.
-`send_default_pii=False` on init already scrubs request headers/cookies at the
-SDK level; this hook catches anything that ends up in event extras, breadcrumbs,
-or exception frame locals. A URL's password has no key, so `before_send` ends
-with `shared.url_redaction.redact_event_urls`, which masks it in every string of
-the event; both bots apply the same function.
+`before_send` (errors) and `before_send_transaction` (traces) apply the rule every process that reports to Sentry
+applies, `shared.secret_scrub.scrub_event`: a secret is hidden by its name, by its value wherever it travels and by its
+shape (a JWT, a `Bearer` value, a secret `name=value` pair, a token at the end of a Redis key or a link's path, a URL's
+password). The backend adds what only a backend request carries: a Telegram sign-in link's query
+(`_redact_sign_in_request`).
 
-Transactions (performance traces) never pass through `before_send`, but the SDK
-puts the request's raw query string on them too, so `before_send_transaction`
-applies the same request redaction. Both are wired in config/production.py and
-config/staging.py.
+`send_default_pii=False` on init already drops request headers/cookies at the SDK level. Both hooks are wired in
+config/production.py and config/staging.py.
 """
 
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
-from business_app.utils.error_handlers import sanitize_request_data
+from shared.secret_scrub import scrub_event
 from shared.telegram_login import TELEGRAM_LOGIN_PATH, loggable_login_url
-from shared.url_redaction import redact_event_urls
-
-
-_SENSITIVE_SUBSTRINGS = (
-    "password",
-    "token",
-    "secret",
-    "authorization",
-    "credit_card",
-    "card_number",
-    "cvv",
-    "pin",
-    "ssn",
-    "passport",
-    "api_key",
-    "access_token",
-    "refresh_token",
-)
-
-
-def _scrub_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return sanitize_request_data(value)
-    if isinstance(value, list):
-        return [_scrub_value(v) for v in value]
-    return value
 
 
 def _redact_sign_in_request(request: Dict[str, Any]) -> None:
@@ -65,37 +35,16 @@ def _redact_sign_in_request(request: Dict[str, Any]) -> None:
 
 
 def before_send(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """Redact sensitive keys from event payloads before they leave the process, then every URL's password
-    (`redact_event_urls`, the one rule the bots apply too)."""
-    for section in ("extra", "contexts", "tags"):
-        if section in event and isinstance(event[section], dict):
-            event[section] = _scrub_value(event[section])
-
-    request = event.get("request") or {}
-    _redact_sign_in_request(request)
-    for key in ("data", "query_string", "headers", "cookies"):
-        if key in request and isinstance(request[key], dict):
-            request[key] = sanitize_request_data(request[key])
-
-    exception = event.get("exception") or {}
-    for entry in exception.get("values", []) or []:
-        stacktrace = (entry or {}).get("stacktrace") or {}
-        for frame in stacktrace.get("frames", []) or []:
-            if isinstance(frame.get("vars"), dict):
-                frame["vars"] = sanitize_request_data(frame["vars"])
-
-    breadcrumbs = (event.get("breadcrumbs") or {}).get("values") or []
-    for crumb in breadcrumbs:
-        if isinstance(crumb.get("data"), dict):
-            crumb["data"] = sanitize_request_data(crumb["data"])
-
-    return redact_event_urls(event)
+    """An error event, scrubbed (`shared.secret_scrub.scrub_event`)."""
+    if isinstance(event.get("request"), dict):
+        _redact_sign_in_request(event["request"])
+    return scrub_event(event, hint)
 
 
 def before_send_transaction(event: Dict[str, Any], hint: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """A transaction's request, redacted as `before_send` redacts an error's: the SDK writes the raw query string on
-    every event it sends, a traced sign-in included."""
-    request = event.get("request")
-    if isinstance(request, dict):
-        _redact_sign_in_request(request)
-    return event
+    """A performance trace, scrubbed as an error is: its spans name Redis keys, and the SDK writes the request on it
+    too, its body and raw query string included. With `attach_stacktrace` the SDK also adds the stack of whatever code
+    closed the trace, every caller's locals with it (the WSGI environ, a test client's body): that says nothing about
+    the trace, and it goes."""
+    event.pop("threads", None)
+    return before_send(event, hint)

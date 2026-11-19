@@ -397,6 +397,12 @@ def _through_backend_before_send(event):
     return before_send(event)
 
 
+def _through_staff_bot_before_send(event):
+    from shared.secret_scrub import scrub_event  # what staff_bot/bot.py passes as `before_send`
+
+    return scrub_event(event)
+
+
 def _through_customer_bot_before_send(event):
     from telegram_bot.sentry_scrub import before_send  # the bot imports it as `sentry_scrub`; the same file
 
@@ -445,8 +451,8 @@ def _error_event_after_a_bot_api_call(redact):
 
 @pytest.mark.parametrize(
     "redact",
-    [_through_redact_event_urls, _through_customer_bot_before_send, _through_backend_before_send],
-    ids=["staff_bot-redact_event_urls", "telegram_bot-sentry_scrub", "backend-before_send"],
+    [_through_staff_bot_before_send, _through_customer_bot_before_send, _through_backend_before_send],
+    ids=["staff_bot-scrub_event", "telegram_bot-sentry_scrub", "backend-before_send"],
 )
 def test_a_bot_api_breadcrumb_reaches_sentry_with_the_bot_id_only(redact):
     event = _error_event_after_a_bot_api_call(redact)

@@ -19,6 +19,7 @@ helper delegates go away in PR 3 when CardTokenService moves out.
 from __future__ import annotations
 
 import base64
+import hmac
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
@@ -172,10 +173,13 @@ class PaymeProvider:
             expected_username = "Paycom"
             expected_password = self.payme_secret_key_with_billing
 
-            if username != expected_username or password != expected_password:
-                current_app.logger.warning(
-                    f"Invalid Payme webhook credentials. Username: {username}, Maxfiy_soz: {password}, Expected Username: {expected_username}, Expected Maxfiy_soz: {expected_password}"  # noqa: E501
-                )
+            # Constant-time comparisons, so the time a refusal takes says nothing about how much of the secret a guess
+            # got right. Both are always computed.
+            username_matches = hmac.compare_digest(username.encode(), expected_username.encode())
+            password_matches = hmac.compare_digest(password.encode(), (expected_password or "").encode())
+            if not (username_matches and password_matches and expected_password):
+                # Only that they did not match: never a password sent, the merchant secret or anything derived from it
+                current_app.logger.warning("Invalid Payme webhook credentials (username matches: %s)", username_matches)
                 return False
 
             return True

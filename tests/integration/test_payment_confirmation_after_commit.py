@@ -86,7 +86,7 @@ from tests.integration.test_payment_confirmation_one_per_payment import (  # pla
     _pay_by_click,
     _push,
 )
-from tests.integration.test_payment_matrix import _seed_click_payment  # plain helper, safe to import
+from tests.integration.payment_builders import seed_click_payment
 from tests.integration.test_staff_sales_visits_api import _fund_business_account  # plain helper, safe to import
 from tests.integration.test_sales_agent_order_hold_pg import (  # plain helpers, safe to import
     HELD,
@@ -491,7 +491,7 @@ def test_a_rolled_back_completion_sends_nothing(
     order = order_with_address
     order.status = OrderStatus.CONFIRMED
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     sent.payment_id = payment.id
 
     def the_commit_never_comes(self, payment_id):
@@ -702,7 +702,7 @@ class TestAReconcileOverlappingAComplete:
 
 def _cancelled_order_with_a_cancelled_click_payment(db, order):
     order.status = OrderStatus.CANCELLED
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     payment.status = PaymentStatus.CANCELLED
     db.session.commit()
     return payment
@@ -833,7 +833,7 @@ def test_a_bot_push_the_bot_did_not_take_is_resent_by_the_sweep(
     collapses a push that had really been delivered)."""
     customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     answers = [{"success": False, "message": "Bot webhook timeout"}, {"success": True, "message": "Notification sent"}]
     pushes = []
 
@@ -927,7 +927,7 @@ def test_a_push_the_bot_refused_because_the_customer_blocked_it_goes_by_email_in
     the payment keeps its mark and no sweep pushes Telegram again or sends a second email."""
     customer = _customer(db, sample_user, bot="connected", email=email)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     bot = _bot_answers(monkeypatch, BOT_BLOCKED)
     before = datetime.now(UTC)
 
@@ -948,7 +948,7 @@ def test_a_blocked_customer_is_emailed_on_a_rail_no_sweep_re_sends(db, sample_us
     drain of the commit that confirmed the payment."""
     customer = _customer(db, sample_user, bot="connected", email=REAL_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     payment.payment_method = order.payment_method = PaymentMethod.PAYME
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
@@ -973,7 +973,7 @@ def test_a_push_the_bot_failed_to_send_leaves_the_customer_connected_and_the_swe
     one-line warning."""
     customer = _customer(db, sample_user, bot="connected", email=REAL_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     bot = _bot_answers(monkeypatch, BOT_DOWN)
 
     _pay_by_click(matrix_client, order, "966102")

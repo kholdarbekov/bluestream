@@ -25,7 +25,7 @@ from tests.integration.fake_gateways import (
     TEST_CLICK_SHOP_SECRET_KEY,
     make_click_webhook_form,
 )
-from tests.integration.test_payment_matrix import _seed_click_payment  # reuse existing helper
+from tests.integration.payment_builders import seed_click_payment
 
 
 WEBHOOK_URL = "/api/v1/payments/webhook/click"
@@ -68,7 +68,7 @@ class TestClickCrashWindows:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization, monkeypatch
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
 
         from business_app.services.order_service import OrderService
 
@@ -101,7 +101,7 @@ class TestClickCrashWindows:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         resp = _post_complete(matrix_client, order, payment, click_trans_id="900002")
         assert resp.status_code == 200
         body_first = resp.get_json()
@@ -117,7 +117,7 @@ class TestClickCrashWindows:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         # Simulate a crashed first attempt: claim exists, no cached response.
         guard_redis = _guard_redis()
         guard_redis.set(_claim_key("900003"), "1", ex=90)
@@ -140,7 +140,7 @@ class TestClickCrashWindows:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization, monkeypatch
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
 
         from business_app.services.payment_service import PaymentService
 

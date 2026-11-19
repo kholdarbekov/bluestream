@@ -39,7 +39,9 @@ class TestAuthService:
         assert "access_token" in tokens
         assert "refresh_token" in tokens
 
-    def test_login_user_invalid_credentials(self, auth_service, db):
+    def test_login_user_invalid_credentials(self, auth_service, mock_redis, db):
+        # The wrong password is counted in one MULTI (INCR, EXPIRE): the first one
+        mock_redis.pipeline.return_value.execute.return_value = [1, True]
         with pytest.raises(UnauthorizedError):
             auth_service.login_user("missing@example.com", "bad-pass")
 

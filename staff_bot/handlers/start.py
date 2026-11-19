@@ -11,6 +11,7 @@ from staff_bot.i18n import i18n
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.utils import auth_refusals
+from shared.constants import STAFF_INVITE_START_PREFIX
 from shared.staff_constants import STAFF_BOT_ROLES
 
 logger = logging.getLogger(__name__)
@@ -64,8 +65,8 @@ class StartHandler(BaseHandler):
 
         # Capture optional invite token passed via deep link
         invite_arg = context.args[0].strip() if getattr(context, 'args', None) else ''
-        if invite_arg.startswith('staff_invite_'):
-            context.user_data['invite_token'] = invite_arg[len('staff_invite_'):]
+        if invite_arg.startswith(STAFF_INVITE_START_PREFIX):
+            context.user_data['invite_token'] = invite_arg[len(STAFF_INVITE_START_PREFIX):]
         elif invite_arg:
             # Backward compatibility for short links that may pass raw token
             context.user_data['invite_token'] = invite_arg

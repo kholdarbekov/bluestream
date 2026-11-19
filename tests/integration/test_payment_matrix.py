@@ -52,6 +52,7 @@ from tests.integration.fake_gateways import (
     make_click_webhook_form,
     make_payme_webhook_body,
 )
+from tests.integration.payment_builders import seed_click_payment
 
 
 WEBHOOK_PATH = '/api/v1/payments/webhook/{provider}'
@@ -152,34 +153,6 @@ def _seed_payme_transaction(db, order, trans_id: str) -> PaymentTransaction:
     return transaction
 
 
-def _seed_click_payment(
-    db,
-    order,
-    payment_id_str: str = 'PAY_CLICK_TEST',
-    *,
-    click_paydoc_id: str = '20240101000001',
-) -> Payment:
-    """Seed a PENDING Click Payment row.
-
-    ``click_paydoc_id`` is required by ``_resolve_click_payment_id`` for the
-    refund/status/reconcile paths. Default seeds a deterministic value so
-    refund/reconcile cells don't have to set up provider_data themselves.
-    """
-    payment = Payment(
-        order_id=order.id,
-        user_id=order.user_id,
-        payment_method=PaymentMethod.CLICK,
-        amount=order.total_amount,
-        currency='UZS',
-        status=PaymentStatus.PENDING,
-        payment_id=payment_id_str,
-        provider_data={'click': {'click_paydoc_id': str(click_paydoc_id)}},
-    )
-    db.session.add(payment)
-    db.session.commit()
-    return payment
-
-
 def _payme_amount(order) -> int:
     """Convert order total to Payme's tiyin units (×100)."""
     return int(float(order.total_amount) * 100)
@@ -200,7 +173,7 @@ class TestWebhookStateMachine:
         self, matrix_app, matrix_client, db, order_with_address, no_fiscalization,
     ):
         order = order_with_address
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         # Prepare
         prepare_body = make_click_webhook_form(
             action='0',
@@ -248,7 +221,7 @@ class TestWebhookStateMachine:
     def test_click_complete_with_provider_error_keeps_live_payment_payable(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         # Prepare first so complete has a merchant_prepare_id
         prepare_body = make_click_webhook_form(
             action='0',
@@ -293,7 +266,7 @@ class TestWebhookStateMachine:
     def test_click_amount_mismatch_returns_error_minus_2(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         wrong_amount = str(int(sample_order.total_amount) + 1)
         prepare_body = make_click_webhook_form(
             action='0',
@@ -316,7 +289,7 @@ class TestWebhookStateMachine:
     def test_click_invalid_signature_returns_signed_failure(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         body = make_click_webhook_form(
             action='0',
             click_trans_id='click-tx-bad',
@@ -378,7 +351,7 @@ class TestWebhookStateMachine:
     def test_click_complete_with_missing_error_field_does_not_mark_paid(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         merchant_prepare_id = self._post_click_prepare_for_complete(
             matrix_client, sample_order, 'click-tx-missing-err',
         )
@@ -412,7 +385,7 @@ class TestWebhookStateMachine:
     def test_click_complete_with_empty_string_error_does_not_mark_paid(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         merchant_prepare_id = self._post_click_prepare_for_complete(
             matrix_client, sample_order, 'click-tx-empty-err',
         )
@@ -445,7 +418,7 @@ class TestWebhookStateMachine:
     def test_click_complete_zero_error_no_click_trans_id_does_not_mark_paid(
         self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
     ):
-        _seed_click_payment(db, sample_order)
+        seed_click_payment(db, sample_order)
         merchant_prepare_id = self._post_click_prepare_for_complete(
             matrix_client, sample_order, 'click-tx-no-trans',
         )
@@ -654,7 +627,7 @@ class TestConcurrentWebhooks:
         """PAY-002: a replayed Click webhook (same click_trans_id, different
         nonce — mirroring real gateway retry) must collapse to one effect."""
         order = order_with_address
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         prepare_body = make_click_webhook_form(
             action='0',
             click_trans_id='click-replay-1',
@@ -765,7 +738,7 @@ class TestConcurrentWebhooks:
 class TestRefundReversalsMidFlow:
 
     def _completed_click_payment(self, db, sample_order) -> Payment:
-        payment = _seed_click_payment(db, sample_order)
+        payment = seed_click_payment(db, sample_order)
         payment.status = PaymentStatus.COMPLETED
         payment.paid_at = datetime.now(timezone.utc)
         payment.provider_transaction_id = 'click-tx-refund'
@@ -887,7 +860,7 @@ class TestProviderTimeoutCircuit:
         """
         from business_app.services.payment_service import PaymentService
 
-        payment = _seed_click_payment(db, sample_order)
+        payment = seed_click_payment(db, sample_order)
         payment.status = PaymentStatus.PENDING
         payment.provider_data = {'click': {'click_paydoc_id': '20240101000007'}}
         db.session.commit()
@@ -926,7 +899,7 @@ class TestReconciliationCatchesStrandedPending:
         reports completed → reconcile flips status to COMPLETED."""
         from business_app.tasks.payment_tasks import reconcile_pending_payments
 
-        payment = _seed_click_payment(db, order_with_address)
+        payment = seed_click_payment(db, order_with_address)
         # Age the payment so reconcile picks it up. Keep tz-aware — Payment
         # uses ``DateTime(timezone=True)``; the in-Python comparison
         # ``payment.created_at < timeout_threshold`` blows up on naive vs aware.
@@ -980,7 +953,7 @@ class TestReconciliationCatchesStrandedPending:
                 "Tracked alongside TST-001 / TST-011 Postgres-lane work."
             )
 
-        payment = _seed_click_payment(db, sample_order)
+        payment = seed_click_payment(db, sample_order)
         payment.created_at = datetime.now(timezone.utc) - timedelta(minutes=120)
         db.session.commit()
 
@@ -1028,7 +1001,7 @@ class TestReconcilePreventionGate:
 
     def _stale_click_payment(self, db, order) -> Payment:
         """Seed a PENDING Click payment aged past the timeout threshold."""
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
         db.session.commit()
         return payment

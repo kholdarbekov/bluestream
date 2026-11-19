@@ -1803,7 +1803,7 @@ class SubscriptionHandlers(BaseHandler):
             saved = (addresses.data or {}).get('data', {}).get('addresses') or []
 
             def label(address):
-                return address.get('title') or address.get('full_address') or i18n.get('telegram.common.address', language)
+                return address.get('display_label') or i18n.get('telegram.common.address', language)
 
             rows = [
                 [InlineKeyboardButton(label(address), callback_data=f"subaddr_{address['id']}_{sub_id}")]
@@ -2139,11 +2139,12 @@ class SubscriptionHandlers(BaseHandler):
         return product_id
 
     def _build_address_keyboard(self, addresses, language):
-        """Build keyboard for address selection"""
+        """Build keyboard for address selection: each address by the backend's `display_label` (its title, else its
+        street line)."""
         keyboard = []
         address_fallback = i18n.get('telegram.common.address', language)
         for addr in addresses:
-            button_text = f"{addr.get('address_line1') or address_fallback} - {addr.get('city', '')}"
+            button_text = addr.get('display_label') or address_fallback
             if addr.get('is_default'):
                 button_text = f"⭐ {button_text}"
             keyboard.append([InlineKeyboardButton(

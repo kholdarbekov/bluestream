@@ -13,6 +13,7 @@ from business_app.models.payment import Payment, PaymentTransaction, PaymentFisc
 from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+from business_app.tasks.secret_arguments import hidden, secret_arguments
 from business_app.utils.audit_logger import audit_logger
 from business_app.utils.exceptions import ProviderUnavailableError, PaymentError
 from business_app.utils.payment_projection import FISCALIZED_RAILS, order_is_dead, order_is_resolved
@@ -30,7 +31,14 @@ logger = get_task_logger(__name__)
 CONFIRMATION_REDISPATCH_FLOOR = timedelta(minutes=5)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    time_limit=300,
+    soft_time_limit=270,
+    **secret_arguments(webhook_data=hidden),  # Click's payload carries its sign_string
+)
 def process_payment_webhook(self, payment_id: int, webhook_data: Dict[str, Any]):
     """Process payment webhook from external gateway"""
     try:
@@ -733,7 +741,14 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    time_limit=300,
+    soft_time_limit=270,
+    **secret_arguments(webhook_metadata=hidden),  # every request header (Payme's Authorization) and the payload
+)
 def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_source: str):
     """Handle payment webhook from external payment providers with enhanced security"""
     try:

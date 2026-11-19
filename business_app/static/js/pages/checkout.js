@@ -369,7 +369,7 @@
             grid.insertBefore(card, grid.querySelector('[data-action="show-add-address"]'));
         }
         if (!card) return;
-        card.querySelector('.ae-co-addr__name').textContent = address.title || address.full_address || I18N.untitled_address || '';
+        card.querySelector('.ae-co-addr__name').textContent = address.display_label || I18N.untitled_address || '';
         var line = card.querySelector('.ae-co-addr__line');
         line.textContent = address.title ? (address.full_address || '') : '';
         line.hidden = !address.title;

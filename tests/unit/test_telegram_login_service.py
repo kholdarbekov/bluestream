@@ -35,8 +35,8 @@ from shared.telegram_login import (
     subscription_target,
 )
 from shared.validators import merge_tombstone_email
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.telegram_login_builders import telegram_signed
-from tests.integration.test_customer_telegram_link_api import _DownRedis
 
 pytestmark = pytest.mark.unit
 
@@ -247,7 +247,7 @@ def test_a_hash_is_good_once(customer_424242):
 
 
 def test_redis_down_refuses(customer_424242, monkeypatch):
-    monkeypatch.setattr(telegram_login_service, "_redis", lambda: _DownRedis())
+    monkeypatch.setattr(telegram_login_service, "_redis", lambda: DownRedis())
 
     assert _code() == "unavailable"
 

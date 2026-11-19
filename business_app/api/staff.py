@@ -12,7 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
-from business_app.utils.address_helpers import door_fields, get_address_label, get_address_line
+from business_app.utils.address_helpers import door_fields, get_address_line
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
 from business_app.utils.delivery_window import format_delivery_window, parse_schedule
 from business_app.utils.error_handlers import handle_api_exception
@@ -1053,14 +1053,8 @@ def add_client_address(user_id):
         raise ValidationError("Request body is required", error_code="STAFF_REQUEST_BODY_REQUIRED")
     address = StaffService.add_client_address(user_id, data)
 
-    return success_response(
-        {
-            "id": address.id,
-            "label": get_address_label(address),
-            "full_address": get_address_line(address),
-        },
-        status_code=201,
-    )
+    # The one address payload every address endpoint answers (title, display_label, ...): no staff-only rename.
+    return success_response(address.to_dict(), status_code=201)
 
 
 @staff_bp.route("/operator/users/<int:user_id>/addresses", methods=["GET"])
@@ -1071,21 +1065,7 @@ def get_client_addresses(user_id):
     """Get addresses for a client"""
     addresses = StaffService.get_client_addresses(user_id)
 
-    items = []
-    for addr in addresses:
-        display_address = get_address_line(addr)
-        items.append(
-            {
-                "id": addr.id,
-                "label": get_address_label(addr),
-                "full_address": display_address,
-                "city": addr.city,
-                "district": addr.district,
-                "latitude": addr.latitude,
-                "longitude": addr.longitude,
-            }
-        )
-
+    items = [address.to_dict() for address in addresses]
     return success_response({"items": items, "total": len(items)})
 
 

@@ -163,24 +163,14 @@ from business_app.models.payment import Payment
 from business_app.models.delivery import DeliveryPerson
 from shared.enums import UserRole, UserStatus, UserType, OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
+from tests.app_configs import sqlite_app_config
 
 
 @pytest.fixture(scope='session')
 def app():
     """Create Flask app for testing"""
     base_redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/15')
-    test_config = {
-        'TESTING': True,
-        'WTF_CSRF_ENABLED': False,
-        'SECRET_KEY': 'test-secret-key',
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
-        'JWT_SECRET_KEY': 'test-jwt-secret',
-        'REDIS_URL': _per_worker_redis_url(base_redis_url),
-        'CELERY_ALWAYS_EAGER': True,  # Run tasks synchronously in tests
-    }
-
-    app = create_app(test_config)
+    app = create_app(sqlite_app_config(_per_worker_redis_url(base_redis_url)))
 
     with app.app_context():
         yield app
@@ -410,10 +400,11 @@ def block_external_side_effects(monkeypatch):
     Prevent any real-world side effects during tests.
 
     Guards against:
-    - Outbound HTTP requests (email/SMS/telegram providers)
+    - Outbound HTTP requests (email/SMS/telegram providers), through `requests` or httpx
     - Celery task queue publishing via `.delay()`/`.apply_async()`
     - Real notification delivery paths
     """
+    import httpx
     from celery.app.task import Task
     from business_app.services.notification_service import NotificationService
 
@@ -423,6 +414,14 @@ def block_external_side_effects(monkeypatch):
         raise RuntimeError(
             f"Outbound HTTP blocked during tests: {method} {url} (host={host or 'unknown'})"
         )
+
+    # httpx (eskiz_sms, both bots' API clients, PTB) is refused at its network transport, below the client, so a
+    # client built on httpx.MockTransport (how tests stand in for a server) still answers.
+    def _blocked_httpx_request(_self, request):
+        _blocked_http_request(None, request.method, request.url)
+
+    async def _blocked_httpx_async_request(_self, request):
+        _blocked_http_request(None, request.method, request.url)
 
     def _mock_async_publish(_self, *args, **kwargs):
         result = Mock()
@@ -458,6 +457,8 @@ def block_external_side_effects(monkeypatch):
         }
 
     monkeypatch.setattr(requests.sessions.Session, 'request', _blocked_http_request, raising=True)
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', _blocked_httpx_request, raising=True)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, 'handle_async_request', _blocked_httpx_async_request, raising=True)
     monkeypatch.setattr(Task, 'delay', _mock_async_publish, raising=True)
     monkeypatch.setattr(Task, 'apply_async', _mock_async_publish, raising=True)
     monkeypatch.setattr(NotificationService, 'send_notification', _mock_send_notification, raising=True)

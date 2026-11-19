@@ -805,8 +805,13 @@ class OrderKeyboards:
         buttons = []
 
         for address in addresses:
+            # The backend's name for it (title, else street line); the street excerpt only under a title, where
+            # it is not the name already.
+            text = f"📍 {address.get('display_label') or i18n.get('telegram.common.address', language)}"
+            if address.get('title'):
+                text += f" - {(address.get('full_address') or '')[:30]}..."
             buttons.append([{
-                'text': f"📍 {address['title']} - {address['full_address'][:30]}...",
+                'text': text,
                 'callback_data': f"address_{address['id']}"
             }])
 
@@ -1627,7 +1632,7 @@ class ProfileKeyboards:
         # Add individual address buttons
         for address in addresses[:MAX_DISPLAYED_ADDRESSES]:
             status = "🏠" if address.get('is_default') else "📍"
-            title = address.get('title', f"Address {address.get('id')}")
+            title = address.get('display_label') or i18n.get('telegram.common.address', language)
             buttons.append([{
                 'text': f"{status} {title}",
                 'callback_data': f"view_address_{address['id']}"

@@ -57,6 +57,7 @@ import utils as utils_module
 from handlers import profile as profile_module
 from menu_keyboard import MENU_KEYBOARD_STATE_KEY
 
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import FakeDatabase, build_bot_harness
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -166,27 +167,28 @@ def user(bot):
 
 @pytest.fixture
 def address_book(bot):
-    """Two saved addresses: one whose every field is hostile to the parser."""
+    """Two saved addresses, one whose every field is hostile to the parser, as `GET /api/v1/auth/addresses` sends
+    them (the producer's own serializer)."""
     bot.backend.addresses.update(
         {
-            901: {
-                "id": 901,
-                "title": HOSTILE_TITLE,
-                "full_address": HOSTILE_ADDRESS,
-                "street_address": HOSTILE_STREET,
-                "city": "Toshkent",
-                "is_default": True,
-                "delivery_instructions": HOSTILE_INSTRUCTIONS,
-            },
-            902: {
-                "id": 902,
-                "title": "Ish",
-                "full_address": "Amir Temur 7, Mirobod",
-                "street_address": "Amir Temur",
-                "city": "Toshkent",
-                "is_default": False,
-                "delivery_instructions": None,
-            },
+            901: address_row(
+                901,
+                title=HOSTILE_TITLE,
+                full_address=HOSTILE_ADDRESS,
+                street_address=HOSTILE_STREET,
+                city="Toshkent",
+                is_default=True,
+                delivery_instructions=HOSTILE_INSTRUCTIONS,
+            ),
+            902: address_row(
+                902,
+                title="Ish",
+                full_address="Amir Temur 7, Mirobod",
+                street_address="Amir Temur",
+                city="Toshkent",
+                is_default=False,
+                delivery_instructions=None,
+            ),
         }
     )
     return bot.backend.addresses

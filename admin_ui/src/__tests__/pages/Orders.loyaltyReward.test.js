@@ -56,6 +56,15 @@ const createWrapper = () => {
   );
 };
 
+// user-event refuses to click an element whose computed `pointer-events` is `none`. antd Spin
+// copies its `spinning` prop into state in an effect, so the table's blurred container keeps
+// `pointer-events: none` for one effect after the rows have rendered. Wait for that to clear.
+const findClickable = (query) => waitFor(() => {
+  const element = query();
+  expect(window.getComputedStyle(element).pointerEvents).not.toBe('none');
+  return element;
+});
+
 // A minimal "full order details" stub used in all detail-modal tests.
 const makeDetailOrder = (overrides = {}) => ({
   id: 201,
@@ -230,11 +239,12 @@ describe('Orders page — loyalty reward display', () => {
       render(<Orders />, { wrapper: createWrapper() });
 
       await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-      await user.click(await screen.findByText(/View Details/i));
+      await user.click(await findClickable(() => screen.getByText(/View Details/i)));
       await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(201));
 
-      // Only ONE row for "19 litrlik suv" should appear in the items table
-      const productRows = screen.queryAllByText('19 litrlik suv');
+      // Only ONE row for "19 litrlik suv" should appear in the items table. The rows render
+      // after the details response, which is later than the call itself, so wait for them.
+      const productRows = await screen.findAllByText('19 litrlik suv');
       expect(productRows.length).toBe(1);
 
       // The Qty cell should show the free annotation
@@ -259,7 +269,7 @@ describe('Orders page — loyalty reward display', () => {
       render(<Orders />, { wrapper: createWrapper() });
 
       await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-      await user.click(await screen.findByText(/View Details/i));
+      await user.click(await findClickable(() => screen.getByText(/View Details/i)));
       await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(201));
 
       // Should find Reward badge in the modal
@@ -286,7 +296,7 @@ describe('Orders page — loyalty reward display', () => {
       render(<Orders />, { wrapper: createWrapper() });
 
       await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-      await user.click(await screen.findByText(/View Details/i));
+      await user.click(await findClickable(() => screen.getByText(/View Details/i)));
       await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(201));
 
       // Gift Bottle should appear as a standalone Free row

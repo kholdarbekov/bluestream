@@ -35,6 +35,7 @@ from handlers.subscriptions import (
     SELECT_SLOT,
 )
 
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure, build_bot_harness
 # One expression of each shared trick rather than a second copy: ageing the
 # dedup lock table is what the wall clock does, and PTB fires a conversation
@@ -56,6 +57,7 @@ SLOTS = "/api/v1/delivery/time-slots"
 SUB_ID = 12
 PRODUCT_ID = 7
 ADDRESS_ID = 91
+OTHER_ADDRESS_ID = 92
 
 # Per-product minimum order quantities, as `GET /api/v1/products/<id>` publishes them.
 # PRODUCT_ID mirrors prod's 18.9 l bottle (minimum 2); 8 is the 10 l (minimum 3).
@@ -168,12 +170,14 @@ async def bot(monkeypatch):
         SLOTS,
         lambda _c: {"time_slots": [{"id": 5, "name": "Morning", "time_range": "10:00-12:00"}]},
     )
-    harness.backend.addresses[ADDRESS_ID] = {
-        "id": ADDRESS_ID,
-        "address_line1": "15, Chilonzor dahasi",
-        "city": "Toshkent",
-        "is_default": True,
-    }
+    # Two saved addresses as `GET /api/v1/auth/addresses` sends them (the producer's own serializer), neither the
+    # default: the bot never sends `is_default`, so a bot-made address is not one.
+    harness.backend.addresses[ADDRESS_ID] = address_row(
+        ADDRESS_ID, title="Uy", full_address="15, Chilonzor dahasi, Toshkent", city="Toshkent"
+    )
+    harness.backend.addresses[OTHER_ADDRESS_ID] = address_row(
+        OTHER_ADDRESS_ID, title="Ish", full_address="45, Amir Temur ko'chasi, Toshkent", city="Toshkent"
+    )
     harness.backend.route(
         "GET",
         PAYMENT_METHODS,
@@ -248,6 +252,22 @@ async def reach_payment_screen(bot, user):
 # ---------------------------------------------------------------------------
 # The two Back buttons that landed nowhere
 # ---------------------------------------------------------------------------
+
+
+async def test_the_address_step_names_each_saved_address_as_the_backend_labels_it(bot, user):
+    """The picker read `address_line1` and `city`, keys no address endpoint has ever sent, so every button read
+    "<Address> - <city>" ("Manzil - Toshkent"): a customer with a home and an office got two identical buttons and
+    the confirm screen never names the address. It prints the backend's `display_label` now."""
+    await reach_quantity_screen(bot, user)
+    for tap in ("sub_qty_2", "sub_items_done", "subscription_freq_weekly", "subscription_day_3", "subscription_slot_5"):
+        await bot.send(user.tap(tap))
+
+    assert last_text(bot) == "WHERE-TO"
+    picker = bot.telegram.last_shown()
+    assert list(zip(picker.button_labels(), picker.callback_data()))[:2] == [
+        ("Uy", f"addr_{ADDRESS_ID}"),
+        ("Ish", f"addr_{OTHER_ADDRESS_ID}"),
+    ]
 
 
 async def test_back_from_the_payment_screen_returns_to_the_address_list(bot, user):

@@ -64,6 +64,7 @@ from staff_bot.handlers.operator.manage_address import (
     ENTER_NOTES as ADDR_ENTER_NOTES,
 )
 
+from tests.integration.address_row_builders import address_row, producer_rows, stored_row
 from tests.staff_bot.ptb_harness import (
     DEFAULT_DRIVER_TELEGRAM_ID,
     FakeStaffDatabase,
@@ -270,12 +271,14 @@ CLIENT_ROW = {
     "order_count": 4,
 }
 
-HOME_ADDRESS = {
-    "id": EXISTING_ADDRESS_ID,
-    "title": "Uy",
-    "full_address": "Chilonzor 9-kvartal, 14-uy",
-    "district": "Chilonzor",
-}
+# As `GET /api/v1/staff/operator/users/<id>/addresses` sends it: the producer's own serializer, never a hand-written
+# guess (the hand-written one carried `title` while the endpoint sent `label`, and every screen test stayed green).
+HOME_ADDRESS = address_row(
+    EXISTING_ADDRESS_ID,
+    title="Uy",
+    full_address="Chilonzor 9-kvartal, 14-uy",
+    district="Chilonzor",
+)
 
 
 @dataclass
@@ -316,6 +319,13 @@ class OperatorWorld:
         default_factory=lambda: {"id": CREATED_CLIENT_ID, "phone": CLIENT_PHONE}
     )
 
+    def __setattr__(self, name, value):
+        # Every address row the operator's list can serve is in the producer's shape, refused in the test's own line
+        # (the dataclass __init__ and any `world.addresses = [...]` reseed both come through here).
+        if name == "addresses":
+            producer_rows(value, "OperatorWorld.addresses")
+        super().__setattr__(name, value)
+
 
 def _estimate(call):
     """Price a basket the way ``StaffService.price_phone_order`` would.
@@ -355,7 +365,12 @@ def wire_backend(harness, world: OperatorWorld):
         CREATE_USER_ENDPOINT,
         lambda _c: world.created_client,
     )
-    backend.route("GET", ADDRESSES_ENDPOINT, lambda _c: {"items": world.addresses})
+    # Checked again on the way out: an append or an in-place edit after seeding can still add a key.
+    backend.route(
+        "GET",
+        ADDRESSES_ENDPOINT,
+        lambda _c: {"items": producer_rows(world.addresses, "OperatorWorld.addresses")},
+    )
     backend.route("GET", PRODUCTS_ENDPOINT, lambda _c: {"items": world.products})
     backend.route("POST", GEOCODE_ENDPOINT, lambda _c: world.geocode)
     backend.route("POST", REVERSE_GEOCODE_ENDPOINT, lambda _c: world.reverse_geocode)
@@ -372,7 +387,9 @@ def wire_backend(harness, world: OperatorWorld):
     def _write_address(call):
         if world.address_write is not None:
             return world.address_write
-        saved = {"id": NEW_ADDRESS_ID, **(call.data or {})}
+        # The row the endpoint answers and lists afterwards; it maps the bot's `delivery_notes` the way
+        # `StaffService.add_client_address` does.
+        saved = stored_row(NEW_ADDRESS_ID, call.data, delivery_instructions=(call.data or {}).get("delivery_notes"))
         world.addresses.append(saved)
         return saved
 

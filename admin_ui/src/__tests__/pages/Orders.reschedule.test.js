@@ -283,18 +283,22 @@ it("opens an undated order's date empty, so Save waits for a real choice", async
 
 // Review Focus 1, per stored shape: an untouched form must describe exactly the stored schedule.
 // Save stays disabled, and a submit that bypasses the button (Enter in a field) sends nothing.
+// `shown` is every picker in the form: the date, then a Custom window's two edges.
 it.each([
-  ['a preset window', {}, day(1)],
-  ['a custom between window', { delivery_window: CUSTOM_BETWEEN }, day(1)],
-  ['a custom until window', { delivery_window: CUSTOM_UNTIL }, day(1)],
-  ['anytime on a set day', { delivery_window: ANYTIME }, day(1)],
+  ['a preset window', {}, [day(1)]],
+  ['a custom between window', { delivery_window: CUSTOM_BETWEEN }, [day(1), '10:30', '14:00']],
+  ['a custom until window', { delivery_window: CUSTOM_UNTIL }, [day(1), '', '11:00']],
+  ['anytime on a set day', { delivery_window: ANYTIME }, [day(1)]],
   // Past the last allowed day: the date opens empty rather than on a day the admin never picked.
-  ['a date past reschedule_max_date', { delivery_date: day(20) }, ''],
-])('an untouched form over %s sends nothing, even submitted directly', async (_label, row, openDate) => {
+  ['a date past reschedule_max_date', { delivery_date: day(20) }, ['']],
+])('an untouched form over %s sends nothing, even submitted directly', async (_label, row, shown) => {
   mount({ row });
   const modal = await openRescheduleFromRow();
 
-  expect(modal.querySelector('.ant-picker input')).toHaveValue(openDate);
+  // Awaited, not read at once: the Custom edge pickers mount one effect AFTER the form (antd's
+  // Form.useWatch hands over `window_preset` from an effect). Under load a submit sent before
+  // then carries no window at all and goes out as a real reschedule to "anytime".
+  await waitFor(() => expect([...modal.querySelectorAll('.ant-picker input')].map((input) => input.value)).toEqual(shown));
   const save = within(modal).getByRole('button', { name: 'Save' });
   expect(save).toBeDisabled();
 

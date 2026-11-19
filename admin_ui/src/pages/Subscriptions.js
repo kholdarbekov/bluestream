@@ -510,7 +510,7 @@ const Subscriptions = () => {
             <Col span={8}>
               <Form.Item name="delivery_address_id" label={t('sub_address', { defaultValue: 'Delivery address' })} rules={[{ required: true }]}>
                 <Select loading={addressesQuery.isLoading} placeholder={t('select_address', { defaultValue: 'Select address' })}
-                  options={addresses.map((a) => ({ value: a.id, label: a.full_address || a.title || `#${a.id}` }))} />
+                  options={addresses.map((a) => ({ value: a.id, label: a.display_label || `#${a.id}` }))} />
               </Form.Item>
             </Col>
             <Col span={8}>

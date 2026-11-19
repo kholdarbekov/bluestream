@@ -41,7 +41,7 @@ from shared.enums import (
 )
 from shared.validators import PLACEHOLDER_EMAIL_DOMAIN_LOCAL
 from tests.integration.fake_gateways import TEST_CLICK_SHOP_SECRET_KEY, make_click_webhook_form
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 from tests.notification_send_fakes import BREVO_URL, live_send_path
 from tests.unit.test_payment_confirmation_collection_scoped import _cash_order
 
@@ -194,7 +194,7 @@ def test_a_telegram_customer_paying_a_subscription_order_gets_one_bot_message(
     order = order_with_address
     order.subscription_id = _subscription_for(db, customer, sample_address).id
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     before = datetime.now(UTC)
 
     _pay_by_click(matrix_client, order, "917001")
@@ -210,7 +210,7 @@ def test_a_telegram_customer_paying_a_bot_order_gets_the_same_one_message(
     order = order_with_address
     order.order_source = "telegram"
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     _pay_by_click(matrix_client, order, "917002")
 
@@ -222,7 +222,7 @@ def test_an_email_customer_gets_one_email_linking_the_order_page(
 ):
     customer = _customer(db, sample_user, bot=None, email=REAL_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     _pay_by_click(matrix_client, order, "917003")
 
@@ -242,7 +242,7 @@ def test_a_blocked_bot_with_a_real_email_gets_the_email(
     order = order_with_address
     order.order_source = "telegram"
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     _pay_by_click(matrix_client, order, "917004")
 
@@ -260,7 +260,7 @@ def test_no_channel_sends_nothing_and_still_marks_the_payment(
     order = order_with_address
     order.order_source = "telegram"
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     before = datetime.now(UTC)
 
     _pay_by_click(matrix_client, order, "917005")
@@ -279,7 +279,7 @@ def test_reconciling_an_already_confirmed_payment_sends_nothing_more(
     the pending-payment reconcile publishes, and the side-effect sweep) adds no second message."""
     customer = _customer(db, sample_user, bot="connected", email=REAL_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     _pay_by_click(matrix_client, order, "917006")
 
     confirmed = process_payment_confirmation.run(payment.id)
@@ -301,7 +301,7 @@ def test_the_sweep_running_between_a_click_completes_two_commits_sends_nothing(
     for the bot to collapse a second one on)."""
     customer = _customer(db, sample_user, bot=bot, email=REAL_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     between, swept = [], []
     award = OrderService.maybe_award_purchase_points
 
@@ -338,7 +338,7 @@ def test_a_click_payment_for_an_order_dated_later_asks_for_no_statement(
     order.order_source = "telegram"
     order.delivery_date = local_date() + timedelta(days=2)
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     _pay_by_click(matrix_client, order, "917021")
 
@@ -356,7 +356,7 @@ def test_a_late_click_payment_for_a_delivered_order_asks_for_no_statement(
     order.status = OrderStatus.DELIVERED
     order.is_paid = False
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     _pay_by_click(matrix_client, order, "917022")
 
@@ -368,7 +368,7 @@ def test_a_business_account_confirmation_asks_for_no_statement(db, sample_user, 
     contract, and the customer has just read the order-placed screen."""
     customer = _customer(db, sample_user, bot="connected", email=PLACEHOLDER_EMAIL)
     order = order_with_address
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
     payment.payment_method = order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
@@ -387,7 +387,7 @@ def test_a_statement_that_cannot_be_decided_drops_the_sentence_never_the_confirm
     order = order_with_address
     order.order_source = "telegram"
     db.session.commit()
-    payment = _seed_click_payment(db, order)
+    payment = seed_click_payment(db, order)
 
     def the_schedule_cannot_answer(cls, order):
         raise RuntimeError("the schedule could not be read")

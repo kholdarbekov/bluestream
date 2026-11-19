@@ -2498,8 +2498,13 @@ class ProfileHandlers(BaseHandler):
                 addresses_text = i18n.get('telegram.address.list_header', language, count=len(addresses))
                 for i, addr in enumerate(addresses, 1):
                     status = "🏠" if addr.get('is_default') else "📍"
-                    addresses_text += f"{status} {addr.get('title', i18n.get('telegram.address.title_fallback', language, index=i))}\n"
-                    addresses_text += f"   {addr.get('full_address', i18n.get('telegram.address.no_address_placeholder', language))}\n\n"
+                    # The backend's name for it (title, else street line); the street line under it only when
+                    # a title is the name, or an untitled address would print its street twice.
+                    name = addr.get('display_label') or i18n.get('telegram.address.title_fallback', language, index=i)
+                    addresses_text += f"{status} {name}\n"
+                    if addr.get('title'):
+                        addresses_text += f"   {addr.get('full_address') or i18n.get('telegram.address.no_address_placeholder', language)}\n"
+                    addresses_text += "\n"
 
                 # Create proper address management keyboard
                 keyboard = ProfileKeyboards.addresses_management(addresses, language)
@@ -3933,7 +3938,7 @@ class ProfileHandlers(BaseHandler):
             address_text = _markdown_copy(
                 'telegram.address.details_title',
                 language,
-                title=address.get('title', i18n.get('telegram.address.untitled', language))
+                title=address.get('title') or i18n.get('telegram.address.untitled', language)
             )
             address_text += _markdown_copy(
                 'telegram.address.details_full_address',
@@ -4195,8 +4200,8 @@ class ProfileHandlers(BaseHandler):
             confirm_text = _markdown_copy(
                 'telegram.address.delete_confirmation',
                 language,
-                title=address.get('title', 'Untitled'),
-                address=address.get('full_address', 'N/A'),
+                title=address.get('title') or i18n.get('telegram.address.untitled', language),
+                address=address.get('full_address') or i18n.get('telegram.common.not_set', language),
             )
 
             buttons = [
@@ -4303,7 +4308,7 @@ class ProfileHandlers(BaseHandler):
                     address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
 
                     if address:
-                        current_title = address.get('title', i18n.get('telegram.address.untitled', language))
+                        current_title = address.get('title') or i18n.get('telegram.address.untitled', language)
                         edit_text = _markdown_copy('telegram.address.edit_title_prompt', language, current_title=current_title)
 
                         cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]

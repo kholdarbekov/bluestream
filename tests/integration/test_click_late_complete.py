@@ -10,7 +10,7 @@ from business_app.models.payment import CashCollectionEvent, Payment, PaymentTra
 from shared.enums import CashCollectionSource, OrderStatus, PaymentMethod, PaymentStatus
 
 from tests.integration.fake_gateways import make_click_webhook_form
-from tests.integration.test_payment_matrix import _seed_click_payment  # plain helper, safe to import
+from tests.integration.payment_builders import seed_click_payment
 
 
 WEBHOOK_URL = "/api/v1/payments/webhook/click"
@@ -37,7 +37,7 @@ class TestLateCompleteAcceptAndFulfill:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         # Simulate the reconcile auto-cancel that raced the debit.
         payment.status = PaymentStatus.CANCELLED
         payment.failure_reason = "Auto-cancelled: gateway status unknown past timeout"
@@ -64,7 +64,7 @@ class TestLateCompleteAcceptAndFulfill:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.FAILED
         db.session.commit()
 
@@ -77,7 +77,7 @@ class TestLateCompleteAcceptAndFulfill:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         db.session.commit()
 
@@ -92,7 +92,7 @@ class TestLateCompleteAcceptAndFulfill:
     ):
         """A duplicate Complete (different trans id) must not overwrite the winner's ids."""
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         r1 = _post_complete(matrix_client, order, payment, click_trans_id="910010")
         assert r1.get_json()["error"] == 0
 
@@ -109,7 +109,7 @@ class TestDuplicateChargeAutoReversal:
         self, matrix_client, matrix_app, db, order_with_address, no_fiscalization, monkeypatch
     ):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         r1 = _post_complete(matrix_client, order, payment, click_trans_id="920001", click_paydoc_id="777001")
         assert r1.get_json()["error"] == 0
 
@@ -137,7 +137,7 @@ class TestDuplicateChargeAutoReversal:
     ):
         matrix_app.config["CLICK_DUPLICATE_AUTO_REVERSAL_ENABLED"] = False
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         _post_complete(matrix_client, order, payment, click_trans_id="920011", click_paydoc_id="777011")
 
         enqueued = []
@@ -182,7 +182,7 @@ class TestLateDebitAfterOfflineSettlement:
         hand-builds the settled state and so has no allocation to reverse.
         """
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         self._settle_offline(payment)
 
         resp = _post_complete(matrix_client, order, payment, click_trans_id="940001", click_paydoc_id="778001")
@@ -210,7 +210,7 @@ class TestLateDebitAfterOfflineSettlement:
         """A Click re-send must not credit twice, restore twice, or record a
         second transaction."""
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         self._settle_offline(payment)
 
         first = _post_complete(matrix_client, order, payment, click_trans_id="940002", click_paydoc_id="778002")
@@ -238,7 +238,7 @@ class TestLateDebitAfterOfflineSettlement:
         order is dead (NOT PENDING, NOT settled) must NOT re-fulfill — it falls
         to the prepaid-credit path; payment and order stay cancelled."""
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         payment.failure_reason = "Auto-cancelled: gateway status unknown past timeout"
         order.status = OrderStatus.CANCELLED
@@ -287,7 +287,7 @@ class TestLateCompleteOnLiveOrderPastPending:
     ):
         order = order_with_address
         order.status = order_status
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         payment.failure_reason = "Auto-cancelled: gateway status unknown past timeout"
         db.session.commit()
@@ -319,7 +319,7 @@ class TestLateCompleteOnLiveOrderPastPending:
         order = order_with_address
         order.status = OrderStatus.DELIVERED
         order.is_paid = True
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         db.session.commit()
 
@@ -335,7 +335,7 @@ class TestLateCompleteOnLiveOrderPastPending:
     ):
         order = order_with_address
         order.status = OrderStatus.CANCELLED
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         db.session.commit()
 
@@ -364,7 +364,7 @@ class TestLateAcceptReReserveIsAllOrNothing:
         order = order_with_address
         product_a, _product_b = two_line_order_with_one_short_pool(order, sample_product)
 
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = PaymentStatus.CANCELLED
         payment.failure_reason = "Auto-cancelled: gateway status unknown past timeout"
         db.session.commit()

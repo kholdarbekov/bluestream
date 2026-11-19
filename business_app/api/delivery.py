@@ -15,6 +15,7 @@ from business_app.models.user import User
 from business_app.utils.service_factory import get_delivery_service, get_maps_service, get_file_storage_service
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response
+from business_app.utils.address_helpers import get_address_line
 from business_app.utils.translations import get_translation
 from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.utils.validation_helpers import validate_list_request_params, FilterValidator
@@ -173,7 +174,7 @@ def get_live_tracking(delivery_id):
                 {
                     "lat": delivery.order.delivery_address.latitude,
                     "lng": delivery.order.delivery_address.longitude,
-                    "address": delivery.order.delivery_address.address_line1,
+                    "address": get_address_line(delivery.order.delivery_address),
                 }
                 if delivery.order.delivery_address
                 else None

@@ -36,6 +36,9 @@ ETA_ATTRIBUTION_GOOGLE = "google_maps"
 # Telegram (CustomerTelegramLinkService). Built by the backend and parsed by the customer bot from
 # this one constant; it collides with none of `ref_`, `ai_`, `src_` or `staff_invite_`.
 WEB_LINK_START_PREFIX = "web_"
+# `/start staff_invite_<token>`: the staff bot's one-time invite link (admin generate_staff_invite_link). The token is a
+# secret, so shared/secret_scrub.py hides it wherever a link or a `/start` message carries it.
+STAFF_INVITE_START_PREFIX = "staff_invite_"
 # `/start order_<id>` and `/start sub_<id>`: the bot chat's link to one order or one subscription. Click's return
 # and cancel URLs for a Pay tapped in the bot (business_app/services/customer_links.py); the customer bot opens
 # that screen (spec 2026-10-27 §4.5, §16 M5).

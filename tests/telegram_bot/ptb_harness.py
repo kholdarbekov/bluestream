@@ -50,6 +50,7 @@ from telegram.ext import Application, ConversationHandler
 import i18n as i18n_module
 
 
+from tests.integration.address_row_builders import address_row, edited_row, producer_rows, stored_row
 from tests.bot_dispatcher_harness import (  # noqa: F401  (re-exported)
     _is_catch_all,
     DEFAULT_CHAT_ID,
@@ -83,6 +84,30 @@ class BackendCall:
     language: Optional[str] = None
 
 
+class _AddressBook(dict):
+    """`FakeBackend.addresses`: saved addresses by id, each in the producer's shape.
+
+    A row is refused the moment a test seeds it (in the test's own line, where no handler's `except Exception` can
+    swallow it) unless it has exactly the keys `GET /api/v1/auth/addresses` sends. Build rows with `address_row`.
+    """
+
+    _WHERE = "FakeBackend.addresses"
+
+    def __setitem__(self, address_id, row):
+        producer_rows([row], self._WHERE)
+        super().__setitem__(address_id, row)
+
+    def update(self, *args, **kwargs):
+        rows = dict(*args, **kwargs)
+        producer_rows(rows.values(), self._WHERE)
+        super().update(rows)
+
+    def setdefault(self, address_id, row=None):
+        if address_id not in self:
+            self[address_id] = row
+        return self[address_id]
+
+
 class FakeBackend:
     """Routes ``api_client._make_request`` against an in-memory backend.
 
@@ -93,7 +118,7 @@ class FakeBackend:
 
     def __init__(self):
         self.calls: list[BackendCall] = []
-        self.addresses: dict[int, dict] = {}
+        self.addresses: dict[int, dict] = _AddressBook()
         self.routes: dict[tuple[str, str], Callable[[BackendCall], Any]] = {}
         self._next_address_id = 900
 
@@ -143,20 +168,26 @@ class FakeBackend:
                     "formatted_address": "15, Chilonzor dahasi, Toshkent shahri",
                 }
             }
+        # The rows are what the real endpoint answers (`UserAddress.to_dict()`, through `address_row`), never the
+        # bot's own POST body echoed back: a screen must read the keys the backend sends, `display_label` included.
         if endpoint == "/api/v1/auth/addresses":
             if method == "GET":
-                return {"data": {"addresses": list(self.addresses.values())}}
+                # Checked again on the way out: an in-place edit after seeding can still add a key.
+                return {"data": {"addresses": producer_rows(list(self.addresses.values()), "FakeBackend.addresses")}}
             if method == "POST":
                 address_id = self._next_address_id
                 self._next_address_id += 1
-                row = {"id": address_id, "is_default": not self.addresses, **(call.data or {})}
+                row = stored_row(address_id, call.data, is_default=not self.addresses)
                 self.addresses[address_id] = row
                 return {"data": {"address": row}}
         if endpoint.startswith("/api/v1/auth/addresses/"):
             address_id = int(endpoint.rsplit("/", 1)[-1])
             if method in {"PUT", "PATCH"}:
-                self.addresses.setdefault(address_id, {"id": address_id}).update(call.data or {})
-                return {"data": {"address": self.addresses[address_id]}}
+                row = self.addresses.setdefault(address_id, address_row(address_id, full_address=""))
+                edited = edited_row(row, call.data)
+                row.clear()
+                row.update(edited)  # in place: a test holding the row sees the edit
+                return {"data": {"address": row}}
             if method == "DELETE":
                 self.addresses.pop(address_id, None)
                 return {"data": {}}

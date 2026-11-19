@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from business_app.services import subscription_schedule
 from business_app.services.customer_order_actions import pay_answer
 from business_app.utils import display_labels
-from business_app.utils.address_helpers import get_address_label, get_address_line
+from business_app.utils.address_helpers import address_display_label
 from business_app.utils.payment_projection import (
     PAY_REFUSAL_ALREADY_PAID,
     PAY_REFUSAL_DEADLINE_PASSED,
@@ -215,8 +215,9 @@ def _next_label(plan) -> Optional[str]:
 
 
 def address_label(address) -> str:
-    """An address as the customer names it: its title ("Office"), else its street line."""
-    return get_address_label(address) or get_address_line(address)
+    """An address as the customer names it: its title ("Office"), else its street line (`address_display_label`,
+    the one rule, which the address payload also publishes as `display_label`)."""
+    return address_display_label(address)
 
 
 def address_consequences(plan, method) -> List[str]:

@@ -587,7 +587,9 @@ def create_app(config_class=None):
     Create Flask application factory
     """
     app = Flask(__name__)
-    print(f"!!! CREATE_APP CALLED - app id: {id(app)}, config_class: {config_class}")
+    # The config's name only: a dict config would print every value, its passwords and keys included
+    config_name = getattr(config_class, "__name__", type(config_class).__name__)
+    print(f"!!! CREATE_APP CALLED - app id: {id(app)}, config_class: {config_name}")
 
     def _apply_config_from_instance(config_instance):
         """Copy readable non-callable attributes from config instance."""

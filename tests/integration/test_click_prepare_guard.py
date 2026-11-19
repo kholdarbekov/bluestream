@@ -21,7 +21,7 @@ from business_app.models.payment import Payment
 from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 
 from tests.integration.fake_gateways import TEST_CLICK_SHOP_SECRET_KEY, make_click_webhook_form
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 WEBHOOK_URL = "/api/v1/payments/webhook/click"
 
@@ -45,7 +45,7 @@ class TestPrepareRefusesUnpayableOrders:
                                    no_fiscalization, order_status):
         order = order_with_address
         order.status = order_status
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         body = _post_prepare(matrix_client, order).get_json()
@@ -58,7 +58,7 @@ class TestPrepareRefusesUnpayableOrders:
         order = order_with_address
         order.status = OrderStatus.DELIVERED
         order.is_paid = True
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         body = _post_prepare(matrix_client, order).get_json()
@@ -71,7 +71,7 @@ class TestPrepareRefusesUnpayableOrders:
                                              no_fiscalization, payment_status):
         """The exact incident: a PREPARE on an auto-cancelled payment said error 0."""
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.status = payment_status
         db.session.commit()
 
@@ -84,7 +84,7 @@ class TestPrepareRefusesUnpayableOrders:
     def test_cash_rail_is_refused(self, matrix_client, matrix_app, db, order_with_address,
                                   no_fiscalization):
         order = order_with_address
-        payment = _seed_click_payment(db, order)
+        payment = seed_click_payment(db, order)
         payment.payment_method = PaymentMethod.CASH
         order.payment_method = PaymentMethod.CASH
         db.session.commit()
@@ -99,7 +99,7 @@ class TestPrepareRefusesUnpayableOrders:
         tells the customer to retry with a different amount."""
         order = order_with_address
         order.status = OrderStatus.CANCELLED
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         body = _post_prepare(matrix_client, order, amount=999).get_json()
@@ -119,7 +119,7 @@ class TestPrepareStillAllowsGenuinePayment:
                                           no_fiscalization, order_status):
         order = order_with_address
         order.status = order_status
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         body = _post_prepare(matrix_client, order).get_json()
@@ -135,7 +135,7 @@ class TestPrepareStillAllowsGenuinePayment:
         order = order_with_address
         order.status = OrderStatus.DELIVERED
         order.is_paid = False
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         body = _post_prepare(matrix_client, order).get_json()
@@ -154,7 +154,7 @@ class TestPrepareFailsClosedOnMarkingCodes:
         from business_app.utils.exceptions import ValidationError
 
         order = order_with_address
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         def boom(self, payment, **kwargs):
@@ -262,7 +262,7 @@ class TestPrepareFailsClosedOnMarkingCodes:
         )
         db.session.commit()
 
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         resp = _post_prepare(matrix_client, order)
@@ -322,7 +322,7 @@ class TestPrepareFailsClosedOnMarkingCodes:
         )
         db.session.commit()
 
-        _seed_click_payment(db, order)
+        seed_click_payment(db, order)
         db.session.commit()
 
         replenish_calls = []

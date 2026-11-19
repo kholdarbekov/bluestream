@@ -38,6 +38,7 @@ from scripts.seed_backend_translations import TELEGRAM_LOGIN_PAGE_TRANSLATIONS
 from shared.enums import UserRole, UserStatus, UserType
 from shared.telegram_login import TELEGRAM_LOGIN_PATH
 from shared.validators import merge_tombstone_email
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.reorder_reminder_builders import seed_translations
 from tests.integration.telegram_login_builders import telegram_signed
 from tests.integration.test_customer_page_auth import (  # noqa: F401 - production_cookie_setting: autouse
@@ -52,7 +53,7 @@ from tests.integration.test_customer_page_auth import (  # noqa: F401 - producti
     _sign_in,
     production_cookie_setting,
 )
-from tests.integration.test_customer_telegram_link_api import TG, _bot_signup, _DownRedis
+from tests.integration.test_customer_telegram_link_api import TG, _bot_signup
 
 pytestmark = pytest.mark.integration
 
@@ -258,7 +259,7 @@ def _arrange(db, case, monkeypatch):
     if case == "stale":
         auth_date = int(time.time()) - MAX_AGE_SECONDS - 1
     if case == "redis_down":
-        monkeypatch.setattr(telegram_login_service, "_redis", lambda: _DownRedis())
+        monkeypatch.setattr(telegram_login_service, "_redis", lambda: DownRedis())
     signed = _signed(fields, auth_date)
     if case == "bad_hash":
         signed["hash"] = signed["hash"][:-1] + ("0" if signed["hash"][-1] != "0" else "1")

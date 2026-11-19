@@ -63,6 +63,7 @@ from handlers.profile import (
 
 from shared.constants import get_district_center, get_district_name
 
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import (
     FakeDatabase,
     backend_failure,
@@ -1088,29 +1089,30 @@ async def test_switching_language_mid_flow_still_saves_and_names_the_address_in_
 
 @pytest.fixture
 def address_book(bot):
-    """Two saved addresses, the first of them default."""
+    """Two saved addresses, the first of them default, as `GET /api/v1/auth/addresses` sends them (the producer's
+    own serializer, never a hand-written guess)."""
     bot.backend.addresses.update(
         {
-            901: {
-                "id": 901,
-                "title": "Uy",
-                "full_address": "Bunyodkor 15, Chilonzor",
-                "street_address": "Bunyodkor",
-                "city": "Toshkent",
-                "district": "chilanzar",
-                "is_default": True,
-                "delivery_instructions": "domofon 15",
-            },
-            902: {
-                "id": 902,
-                "title": "Ish",
-                "full_address": "Amir Temur 7, Mirobod",
-                "street_address": "Amir Temur",
-                "city": "Toshkent",
-                "district": "mirobod",
-                "is_default": False,
-                "delivery_instructions": None,
-            },
+            901: address_row(
+                901,
+                title="Uy",
+                full_address="Bunyodkor 15, Chilonzor",
+                street_address="Bunyodkor",
+                city="Toshkent",
+                district="chilanzar",
+                is_default=True,
+                delivery_instructions="domofon 15",
+            ),
+            902: address_row(
+                902,
+                title="Ish",
+                full_address="Amir Temur 7, Mirobod",
+                street_address="Amir Temur",
+                city="Toshkent",
+                district="mirobod",
+                is_default=False,
+                delivery_instructions=None,
+            ),
         }
     )
 

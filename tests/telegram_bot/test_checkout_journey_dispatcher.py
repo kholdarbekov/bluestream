@@ -47,6 +47,7 @@ from tests.telegram_bot.menu_keyboard_helpers import (
     expected_labels,
     menu_sends,
 )
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import (
     DEFAULT_USER_ID,
     BackendCall,
@@ -524,14 +525,10 @@ def user_data(bot):
 
 
 def add_address(bot, address_id, title, full_address, *, is_default=False):
-    bot.backend.addresses[address_id] = {
-        "id": address_id,
-        "title": title,
-        "full_address": full_address,
-        "is_default": is_default,
-        "latitude": 41.2876,
-        "longitude": 69.2224,
-    }
+    """A saved address as `GET /api/v1/auth/addresses` sends it (the producer's own serializer)."""
+    bot.backend.addresses[address_id] = address_row(
+        address_id, title=title, full_address=full_address, is_default=is_default, latitude=41.2876, longitude=69.2224,
+    )
 
 
 def backend_calls(bot, method, endpoint):
@@ -900,6 +897,25 @@ async def test_checkout_with_several_addresses_lists_them_all_and_carries_the_pi
         "items": [{"product_id": BOTTLE_19L, "quantity": 3}],
         "expected_total": 45000.0,
     }]
+    assert_no_swallowed_crash(bot)
+
+
+async def test_an_address_saved_without_a_title_is_offered_by_its_street_line(bot, shop, user):
+    """A title is optional where addresses are written (the admin form), and the address list sends `"title": None`
+    for one without: the picker read `address['title']` and offered "📍 None - Amir Temur 45...". It prints the
+    backend's `display_label` (the title, else the street line) and adds the street excerpt only under a title."""
+    add_address(bot, 900, "Uy", "Chilonzor 15", is_default=True)
+    add_address(bot, 901, None, "Amir Temur 45, Mirobod")
+
+    await fill_cart(bot, user, BOTTLE_19L, quantity=3)
+    await bot.send(user.tap("cart_view"))
+    await bot.send(user.tap("cart_checkout"))
+
+    picker = bot.telegram.last_shown()
+    assert list(zip(picker.button_labels(), picker.callback_data()))[:2] == [
+        ("📍 Uy - Chilonzor 15...", "address_900"),
+        ("📍 Amir Temur 45, Mirobod", "address_901"),
+    ]
     assert_no_swallowed_crash(bot)
 
 

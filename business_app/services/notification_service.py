@@ -9,12 +9,14 @@ import re
 import uuid
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
+from time import sleep
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Dict, Any, List, Optional
 from flask import current_app
 import requests
 from eskiz_sms import EskizSMS
+from eskiz_sms.exceptions import BadRequest as EskizBadRequest
 
 from business_app.models.notification import (
     Notification,
@@ -55,7 +57,7 @@ from business_app.utils.translations import get_translation, renderer
 from business_app.utils.helpers import scrub_bot_token
 from business_app.utils.timezone_utils import get_utc_now
 from shared import eta_copy
-from shared.validators import is_deliverable_email
+from shared.validators import is_deliverable_email, mask_phone_number
 from business_app.services.customer_link_service import CustomerLinkService
 from business_app.services.customer_links import tracking_url
 from business_app.services.delivery_eta_service import DeliveryEtaService
@@ -169,6 +171,12 @@ OTP_SMS_TEMPLATES = {
 }
 
 OTP_SMS_TEMPLATE_KEYS = frozenset(OTP_SMS_TEMPLATES)
+
+# Eskiz stamps a token's issue time in whole seconds, and the server that checks a send can still be in the previous
+# second: a token used a fraction of a second after login is then refused with 401 "Token used before issued"
+# (2026-11-15, the first SMS after a deploy). Waiting past that second lets the same token through.
+ESKIZ_FRESH_TOKEN_RETRY_DELAY_SECONDS = 1.5
+ESKIZ_FRESH_TOKEN_REFUSAL = "used before issued"
 
 
 class BottleSummaryNotReady(Exception):
@@ -3978,10 +3986,7 @@ class NotificationService:
             # Clean phone number (Eskiz expects format like 998901234567)
             clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
 
-            # Send SMS via Eskiz
-            response = self.eskiz_client.send_sms(
-                mobile_phone=clean_phone, message=rendered_content, from_whom=self.eskiz_from
-            )
+            response = self._send_via_eskiz(clean_phone, rendered_content)
 
             # Check if SMS was sent successfully
             if response and hasattr(response, "status"):
@@ -4012,6 +4017,27 @@ class NotificationService:
         except Exception as e:
             logger.exception("Eskiz SMS error")
             return {"success": False, "error": str(e)}
+
+    def _send_via_eskiz(self, clean_phone: str, text: str):
+        """Hand one SMS to Eskiz; resend it once if Eskiz refused the token it had just issued.
+
+        That refusal (401 "Token used before issued", see ESKIZ_FRESH_TOKEN_RETRY_DELAY_SECONDS) means Eskiz took
+        nothing, so the resend cannot deliver the SMS twice. It goes through the same client, with the token that
+        client was just given: no second login. Any other error is raised as before, with no resend: it may have
+        reached the handset or been billed already. A refused resend is raised to the caller like any other error.
+        """
+        try:
+            return self.eskiz_client.send_sms(mobile_phone=clean_phone, message=text, from_whom=self.eskiz_from)
+        except EskizBadRequest as exc:
+            if ESKIZ_FRESH_TOKEN_REFUSAL not in str(exc.message or "").lower():
+                raise
+        logger.warning(
+            "Eskiz fresh-token race; retrying once in %ss for %s",
+            ESKIZ_FRESH_TOKEN_RETRY_DELAY_SECONDS,
+            mask_phone_number(clean_phone),
+        )
+        sleep(ESKIZ_FRESH_TOKEN_RETRY_DELAY_SECONDS)
+        return self.eskiz_client.send_sms(mobile_phone=clean_phone, message=text, from_whom=self.eskiz_from)
 
     def send_staff_telegram_message(
         self, user: User, message: str, *, language: Optional[str] = None

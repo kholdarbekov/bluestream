@@ -25,6 +25,7 @@ from handlers.subscriptions import (
     SELECT_QUANTITY,
     SELECT_SLOT,
 )
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.ptb_harness import DEFAULT_USER_ID, backend_failure, build_bot_harness
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -148,7 +149,7 @@ async def bot(monkeypatch):
     )
     backend.route("GET", f"{SUBSCRIPTIONS}/{SUB_ID}", lambda _c: {"data": {"subscription": subscription()}})
     backend.route("GET", f"{SUBSCRIPTIONS}/{SUB_ID}/items", lambda _c: {"data": {"items": []}})
-    backend.addresses[ADDRESS_ID] = {"id": ADDRESS_ID, "address_line1": "15 Chilonzor", "is_default": True}
+    backend.addresses[ADDRESS_ID] = address_row(ADDRESS_ID, title="Uy", full_address="15 Chilonzor", is_default=True)
     return harness
 
 

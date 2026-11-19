@@ -60,6 +60,31 @@ class InMemoryRedis:
                 self._ttl.pop(key, None)
         return deleted
 
+    def pipeline(self):
+        return InMemoryPipeline(self)
+
+
+class InMemoryPipeline:
+    """A MULTI on the double: commands queue, and `execute()` runs them in order on its store and returns their
+    results."""
+
+    def __init__(self, redis):
+        self._redis = redis
+        self._queued = []
+
+    def __getattr__(self, name):
+        command = getattr(self._redis, name)
+
+        def queue(*args):
+            self._queued.append((command, args))
+            return self
+
+        return queue
+
+    def execute(self):
+        queued, self._queued = self._queued, []
+        return [command(*args) for command, args in queued]
+
 
 @pytest.fixture
 def stateful_redis():

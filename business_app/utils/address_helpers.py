@@ -13,10 +13,20 @@ def get_address_line(address) -> str:
 
 
 def get_address_label(address) -> str:
-    """Return address label/title across schema variants."""
+    """Return the address's title ("Office"), or "" when it has none."""
     if not address:
         return ""
-    return getattr(address, "title", None) or getattr(address, "label", None) or ""
+    return getattr(address, "title", None) or ""
+
+
+def address_display_label(address) -> str:
+    """An address as the customer names it: its title ("Office"), else its street line.
+
+    The one display rule. `UserAddress.to_dict` publishes it as `display_label`, so the bots, the website and the
+    admin print that field instead of re-deriving it. Deliberately not the street-only `address_label` the dispatch
+    and customer-map screens publish: drivers need the location, not the customer's name for it.
+    """
+    return get_address_label(address) or get_address_line(address)
 
 
 def door_fields(address) -> Dict[str, Any]:

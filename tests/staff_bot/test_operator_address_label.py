@@ -1,7 +1,8 @@
 """Operator add-address must persist the typed label under the 'title' key.
 
 The backend (StaffService.add_client_address) reads address_data.get('title',
-'Home') and the GET serializer exposes the address label from `title`. The bot
+'Home'), and the address endpoints send it back as `title` (UserAddress.to_dict;
+until 2026-11-17 they renamed it to `label`, which nothing read). The bot
 stored the typed label under 'label', so the backend defaulted every operator-
 created address to 'Home' and the confirm screen (which reads 'title') showed
 a blank label.

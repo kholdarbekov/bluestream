@@ -74,6 +74,27 @@ const createWrapper = () => {
   );
 };
 
+// user-event refuses to click an element whose computed `pointer-events` is `none`. antd Spin
+// copies its `spinning` prop into state in an effect, so the table's blurred container keeps
+// `pointer-events: none` for one effect after the rows have rendered. Wait for that to clear.
+const findClickable = (query) => waitFor(() => {
+  const element = query();
+  expect(window.getComputedStyle(element).pointerEvents).not.toBe('none');
+  return element;
+});
+
+// rc-dialog moves focus into a modal from an effect that runs when its open motion ends. Until
+// then that effect is still pending, and when it runs it pulls focus away from whatever the test
+// is typing into: the Order Details modal's late effect took focus from the cash form's fields,
+// so `user.clear` failed and `user.type` lost characters. Wait until the modal holds the focus.
+// Found by its title: under test rc-util's useId gives every modal the id `test-id`, so two open
+// modals share one aria-labelledby target and a role+name query cannot tell them apart.
+const waitForDialogFocus = async (title) => {
+  const dialog = (await screen.findByText(title)).closest('[role="dialog"]');
+  await waitFor(() => expect(dialog).toContainElement(document.activeElement));
+  return dialog;
+};
+
 const DELIVERED_CASH_ORDER = {
   id: 620,
   order_number: 'TG_000183_26',
@@ -161,7 +182,7 @@ describe('Orders collected cash edit flow', () => {
       expect(adminService.getOrders).toHaveBeenCalled();
     });
 
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
 
     await waitFor(() => {
       expect(adminService.getOrderDetails).toHaveBeenCalledWith(620);
@@ -180,14 +201,16 @@ describe('Orders collected cash edit flow', () => {
       expect(adminService.getOrders).toHaveBeenCalled();
     });
 
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
 
     await waitFor(() => {
       expect(adminService.getOrderDetails).toHaveBeenCalledWith(620);
     });
 
     // Open the modal
+    await waitForDialogFocus(/^Order Details - /);
     fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
 
     // Check modal opened (step 1 form is visible)
     expect(await screen.findByText(/Preview impact/i)).toBeInTheDocument();
@@ -252,13 +275,15 @@ describe('Orders collected cash edit flow', () => {
       expect(adminService.getOrders).toHaveBeenCalled();
     });
 
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
 
     await waitFor(() => {
       expect(adminService.getOrderDetails).toHaveBeenCalledWith(620);
     });
 
+    await waitForDialogFocus(/^Order Details - /);
     fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
 
     // Fill reason then preview
     const reasonInputs = screen.getAllByRole('textbox');
@@ -301,9 +326,11 @@ describe('Orders collected cash edit flow', () => {
     const user = userEvent.setup();
     render(<Orders />, { wrapper: createWrapper() });
     await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
     await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
     fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
 
     const reasonInputs = screen.getAllByRole('textbox');
     await user.type(reasonInputs[reasonInputs.length - 1], 'driver collected extra cash from customer');
@@ -332,7 +359,7 @@ describe('Orders collected cash edit flow', () => {
     const user = userEvent.setup();
     render(<Orders />, { wrapper: createWrapper() });
     await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
     await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
 
     const reason = await screen.findByTestId('cash-edit-blocked-by-return');
@@ -352,7 +379,7 @@ describe('Orders collected cash edit flow', () => {
     const user = userEvent.setup();
     render(<Orders />, { wrapper: createWrapper() });
     await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
     await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
     await screen.findAllByText(/Fiscalization/i);
     expect(screen.queryByTestId('cash-edit-blocked-by-return')).toBeNull();
@@ -378,7 +405,7 @@ describe('Orders collected cash edit flow', () => {
       expect(adminService.getOrders).toHaveBeenCalled();
     });
 
-    await user.click(await screen.findByText(/view_details|View Details/i));
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
 
     await waitFor(() => {
       expect(adminService.getOrderDetails).toHaveBeenCalledWith(620);

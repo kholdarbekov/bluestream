@@ -5,7 +5,6 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-import redis
 from celery.exceptions import Retry
 
 from business_app.services.public_urls_service import indexnow_urls
@@ -21,6 +20,7 @@ from tests.integration.indexnow_builders import (  # noqa: F401 -- fixtures
     submission_requests_fixture as submission_requests,
 )
 from tests.integration.public_page_builders import offer_skus  # noqa: F401 -- fixture
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.reorder_reminder_builders import captured_logs
 from tests.unit.test_sales_agent_tasks import _spy
 
@@ -111,14 +111,7 @@ def test_two_requests_publish_once(indexnow_redis, submission_requests):
 
 
 def test_redis_down_still_publishes(monkeypatch, submission_requests):
-    class _DownRedis:
-        def set(self, *args, **kwargs):
-            raise redis.exceptions.ConnectionError("down")
-
-        def delete(self, *args, **kwargs):
-            raise redis.exceptions.ConnectionError("down")
-
-    monkeypatch.setattr(indexnow_dispatch, "redis_client", _DownRedis())
+    monkeypatch.setattr(indexnow_dispatch, "redis_client", DownRedis())
     assert request_submission() is True
     assert submission_requests == [60]
 

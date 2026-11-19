@@ -34,11 +34,11 @@ from tests.integration.test_customer_telegram_link_api import (  # noqa: F401  (
     HOLDER_PASSWORD,
     _bot_signup,
     _claim_by_phone,
-    _DownRedis,
     linked_email_only_account,
     program,
     sms,
 )
+from tests.integration.redis_fakes import DownRedis
 from tests.integration.reorder_reminder_builders import captured_logs
 from tests.integration.test_web_password_reset_and_change import (  # noqa: F401  (emailed_reset_links is a fixture)
     FORGOT_URL,
@@ -170,8 +170,8 @@ def redis_down(monkeypatch):
     """Redis is unreachable for the cut-off and the per-token blacklist alike."""
     import business_app.services.session_revocation_service as revocation_module
 
-    monkeypatch.setattr(revocation_module, "redis_client", _DownRedis())
-    monkeypatch.setattr(TokenService(), "redis_client", _DownRedis())
+    monkeypatch.setattr(revocation_module, "redis_client", DownRedis())
+    monkeypatch.setattr(TokenService(), "redis_client", DownRedis())
     monkeypatch.setattr(TokenService(), "redis_available", True)
 
 

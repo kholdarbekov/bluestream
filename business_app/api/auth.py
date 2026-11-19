@@ -1369,18 +1369,18 @@ def add_user_address():
             title:
               type: string
               example: Home
-            address_line1:
+            full_address:
               type: string
-              example: 123 Main St
-            address_line2:
+              example: Chilonzor 9-kvartal, 14-uy, Tashkent
+            street_address:
               type: string
-              example: Apt 4B
+              example: Chilonzor 9-kvartal
             city:
               type: string
               example: Tashkent
             district:
               type: string
-              example: Chilanzar
+              example: chilanzar
             postal_code:
               type: string
               example: 100000
@@ -1393,12 +1393,34 @@ def add_user_address():
             is_default:
               type: boolean
               example: false
-            delivery_notes:
+            is_business:
+              type: boolean
+              example: false
+            delivery_instructions:
               type: string
               example: Ring bell twice
+            landmark:
+              type: string
+              example: Near Metro Station
+            floor_number:
+              type: string
+              example: "3"
+            apartment_number:
+              type: string
+              example: "14"
     responses:
       201:
-        description: Address added successfully
+        description: >-
+          Address added successfully. `data.address` is the saved address (definitions/Address), with
+          `display_label`: its title, else its full_address.
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                address:
+                  $ref: '#/definitions/Address'
       400:
         description: Validation error
     """

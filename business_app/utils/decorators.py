@@ -354,6 +354,77 @@ def verify_webhook_signature(
     return decorator
 
 
+def count_in_window(redis_client, key: str, window_seconds: int, *, sliding: bool = False) -> Tuple[int, int]:
+    """Count one hit on the counter `key`; return (hits in this window, seconds until it ends).
+
+    The counting rule of the request rate limiters here (`rate_limit`, `rate_limit_by_telegram_id`) and of the payment
+    webhooks' per-provider limit, and, with `sliding`, of the wrong-password counters of sign-in and the wrong-code
+    counter of phone sign-up (`AuthService`). Not the only one: the Telegram sign-in and Google Routes counters (INCR +
+    `EXPIRE NX`) and the card-code attempts (`CardTokenService`, INCR + EXPIRE) each run their own in one MULTI, which
+    is equally safe.
+
+    Fixed window (the default): INCR and TTL run in one MULTI, so concurrent hits never read a stale count, and the key
+    gets its window when INCR created it (count 1) or when it has no expiry (TTL -1). The second case heals a counter
+    left without one (a worker that died between INCR and EXPIRE, or the old GET-then-INCR race), which would otherwise
+    never reset and, once past its limit, refuse for good. Hits past the limit are counted too; the window still ends
+    when it began to.
+
+    `sliding`: every hit restarts the window, so the count runs out only `window_seconds` after the LAST hit. The
+    attempt counters need that: the lock set at the limit lasts the same `window_seconds`, so the count never runs out
+    before it (the sign-in lock is honoured only while its count is at the limit). INCR and EXPIRE run in one MULTI,
+    so no worker can die between them, and a counter left without an expiry gets one at its next hit.
+
+    Redis errors propagate: the caller decides whether to fail open.
+    """
+    pipe = redis_client.pipeline()
+    pipe.incr(key)
+    if sliding:
+        pipe.expire(key, window_seconds)
+        count, _ = pipe.execute()
+        return count, window_seconds
+    pipe.ttl(key)
+    count, ttl = pipe.execute()
+    if count == 1 or ttl == -1:
+        redis_client.expire(key, window_seconds)
+        ttl = window_seconds
+    return count, ttl
+
+
+def _count_request(
+    name: str,
+    identifier: str,
+    identifier_type: str,
+    max_requests: int,
+    window_seconds: int,
+    details: Optional[dict] = None,
+) -> None:
+    """Count one request in the fixed window `rate_limit:<name>:<identifier>`; raise RateLimitError past max_requests.
+
+    Counts with `count_in_window`. Every refusal logs one line with the kind of key, never the key itself (an
+    address, an account or a Telegram id). Fails open: if Redis is down, the request is allowed.
+    """
+    key = f"rate_limit:{name}:{identifier}"
+    try:
+        count, ttl = count_in_window(redis.from_url(current_app.config["REDIS_URL"]), key, window_seconds)
+    except redis.RedisError as e:
+        current_app.logger.warning(f"Redis unavailable for rate limiting: {e}")
+        return
+
+    if count > max_requests:
+        current_app.logger.warning(
+            "Rate limit refused %s (per %s): limit %d per %ds, retry after %ds",
+            name,
+            identifier_type,
+            max_requests,
+            window_seconds,
+            ttl,
+        )
+        raise RateLimitError(
+            f"Rate limit exceeded. Try again in {ttl} seconds.",
+            details={"retry_after": ttl, "limit": max_requests, **(details or {})},
+        )
+
+
 def rate_limit(max_requests: int, window_seconds: int, per: str = "ip"):
     """Rate limiting decorator"""
 
@@ -361,48 +432,16 @@ def rate_limit(max_requests: int, window_seconds: int, per: str = "ip"):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             # Get identifier based on 'per' parameter
-            if per == "ip":
-                identifier = request.remote_addr
-            elif per == "user":
+            identifier, identifier_type = request.remote_addr, "ip"
+            if per == "user":
                 try:
                     verify_jwt_in_request()
-                    identifier = get_jwt_identity()
+                    identifier, identifier_type = get_jwt_identity(), "user"
                 except Exception:
-                    identifier = request.remote_addr
-            else:
-                identifier = request.remote_addr
+                    pass
 
-            # Create Redis key
-            key = f"rate_limit:{f.__name__}:{identifier}"
-
-            try:
-                redis_client = redis.from_url(current_app.config["REDIS_URL"])
-
-                # Get current count
-                current_count = redis_client.get(key)
-
-                if current_count is None:
-                    # First request in window
-                    redis_client.setex(key, window_seconds, 1)
-                    return f(*args, **kwargs)
-                else:
-                    current_count = int(current_count)
-                    if current_count >= max_requests:
-                        # Rate limit exceeded
-                        ttl = redis_client.ttl(key)
-                        raise RateLimitError(
-                            f"Rate limit exceeded. Try again in {ttl} seconds.",
-                            details={"retry_after": ttl, "limit": max_requests},
-                        )
-                    else:
-                        # Increment counter
-                        redis_client.incr(key)
-                        return f(*args, **kwargs)
-
-            except redis.RedisError:
-                # If Redis is down, allow the request
-                current_app.logger.warning("Redis unavailable for rate limiting")
-                return f(*args, **kwargs)
+            _count_request(f.__name__, identifier, identifier_type, max_requests, window_seconds)
+            return f(*args, **kwargs)
 
         return decorated_function
 
@@ -430,50 +469,20 @@ def rate_limit_by_telegram_id(max_requests: int, window_seconds: int):
 
             if telegram_id:
                 # Use telegram_id as identifier for per-user rate limiting
-                identifier = f"telegram:{telegram_id}"
+                identifier, identifier_type = f"telegram:{telegram_id}", "telegram"
             else:
                 # Fall back to IP if no telegram_id provided
-                identifier = f"ip:{request.remote_addr}"
+                identifier, identifier_type = f"ip:{request.remote_addr}", "ip"
 
-            # Create Redis key
-            key = f"rate_limit:{f.__name__}:{identifier}"
-
-            try:
-                redis_client = redis.from_url(current_app.config["REDIS_URL"])
-
-                # Get current count
-                current_count = redis_client.get(key)
-
-                if current_count is None:
-                    # First request in window
-                    redis_client.setex(key, window_seconds, 1)
-                    return f(*args, **kwargs)
-                else:
-                    current_count = int(current_count)
-                    if current_count >= max_requests:
-                        # Rate limit exceeded
-                        ttl = redis_client.ttl(key)
-                        current_app.logger.warning(
-                            f"Rate limit exceeded for {identifier}: "
-                            f"{current_count}/{max_requests} requests in {window_seconds}s window"
-                        )
-                        raise RateLimitError(
-                            f"Rate limit exceeded. Try again in {ttl} seconds.",
-                            details={
-                                "retry_after": ttl,
-                                "limit": max_requests,
-                                "identifier_type": "telegram_id" if telegram_id else "ip",
-                            },
-                        )
-                    else:
-                        # Increment counter
-                        redis_client.incr(key)
-                        return f(*args, **kwargs)
-
-            except redis.RedisError as e:
-                # If Redis is down, allow the request but log warning
-                current_app.logger.warning(f"Redis unavailable for rate limiting: {e}")
-                return f(*args, **kwargs)
+            _count_request(
+                f.__name__,
+                identifier,
+                identifier_type,
+                max_requests,
+                window_seconds,
+                details={"identifier_type": "telegram_id" if telegram_id else "ip"},
+            )
+            return f(*args, **kwargs)
 
         return decorated_function
 

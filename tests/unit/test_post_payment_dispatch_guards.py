@@ -8,7 +8,7 @@ from business_app import db
 from business_app.models.user import UserAddress
 from shared.enums import PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def test_dispatch_payment_confirmation_sets_marker_and_publishes_only_after_the_
 ):
     """The confirmation is decided and marked in the caller's transaction, and published by its commit (Task Hfix:
     nothing customer-facing leaves before the money commits)."""
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
 
@@ -63,7 +63,7 @@ def test_a_broker_failure_after_the_commit_leaves_the_payment_unmarked_for_the_s
 ):
     """The publish fails after the money committed: the committing caller never sees it, and the payment is left
     unmarked so the side-effect sweep sends the confirmation later."""
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
 
@@ -84,7 +84,7 @@ def test_a_broker_failure_after_the_commit_leaves_the_payment_unmarked_for_the_s
 
 
 def test_a_dispatch_that_raises_parks_nothing_and_leaves_the_payment_unmarked(app, db, sample_order, monkeypatch):
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
 
@@ -120,7 +120,7 @@ def test_a_failed_publish_never_clears_a_mark_another_dispatch_wrote_since(app, 
     from business_app.services.payment_service import PaymentService
     from business_app.tasks import notification_tasks
 
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
     theirs = "2026-11-02T09:00:00+00:00"
@@ -156,7 +156,7 @@ def test_a_failed_publish_on_a_rail_no_sweep_covers_is_logged_at_error(
     from business_app.tasks import notification_tasks
     from shared.enums import PaymentMethod
 
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.payment_method = PaymentMethod(rail)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
@@ -195,7 +195,7 @@ def test_a_savepoint_release_publishes_nothing_and_the_outer_commit_publishes_on
     from business_app.services.payment_service import PaymentService
     from business_app.tasks import notification_tasks
 
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
     enqueued = []

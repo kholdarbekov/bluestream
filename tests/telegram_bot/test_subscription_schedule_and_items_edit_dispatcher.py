@@ -44,6 +44,7 @@ from tests.telegram_bot.test_order_customer_actions_dispatcher import (
     toast,
     visible_alert,
 )
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.test_subscription_card_and_history_dispatcher import STATE_CHANGED
 from tests.telegram_bot.web_fixtures import exchange, load, serve, subscription
 
@@ -297,7 +298,7 @@ class TestCreationReadsTheSameAnswers:
             lambda c: {"data": {"preview": {"items": [{"product_name": "Aqua 19L", "quantity": 2}],
                                             "frequency": c.data["frequency"], "total_amount_label": "30 000 so'm"}}},
         )
-        bot.backend.addresses[91] = {"id": 91, "address_line1": "15 Chilonzor", "is_default": True}
+        bot.backend.addresses[91] = address_row(91, title="Uy", full_address="15 Chilonzor", is_default=True)
         return bot
 
     async def test_the_weekday_picker_offers_only_delivery_days(self, monkeypatch):

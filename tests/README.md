@@ -140,11 +140,11 @@ DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_db
 ### Creating Test Data
 
 ```python
-def test_order_creation(client, db, sample_user, sample_product):
+def test_order_creation(client, db, sample_user, user_address, sample_product):
     """Test order creation with fixtures"""
     order_data = {
         'items': [{'product_id': sample_product.id, 'quantity': 2}],
-        'delivery_address': {'address_line1': '123 Test St'}
+        'delivery_address_id': user_address.id,  # a saved address (UserAddress), never an inline dict
     }
 
     response = client.post('/api/v1/orders', json=order_data)

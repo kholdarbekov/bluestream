@@ -49,6 +49,14 @@ const renderPage = () => {
   );
 };
 
+// antd's picker copies a new value into its inputs from an effect, one render AFTER the report text appears, so the
+// inputs are awaited rather than read the moment the report shows (under load they still read "" then).
+const pickerShows = (start, end) => waitFor(() => {
+  const [startInput, endInput] = document.querySelectorAll('.ant-picker-input input');
+  expect(startInput).toHaveValue(start);
+  expect(endInput).toHaveValue(end);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   answer(REPORT);
@@ -180,14 +188,13 @@ it('asks for the backend default window, then reads the answered range into the 
   await screen.findByText('Latest fit: 2026-11-02');
 
   expect(api.get).toHaveBeenCalledWith(URL, { params: { start_date: undefined, end_date: undefined } });
-  const inputs = document.querySelectorAll('.ant-picker-input input');
-  expect(inputs[0]).toHaveValue('2026-11-03');
-  expect(inputs[1]).toHaveValue('2026-11-03');
+  await pickerShows('2026-11-03', '2026-11-03');
 });
 
 it('sends the picked range as start_date and end_date', async () => {
   renderPage();
   await screen.findByText('Latest fit: 2026-11-02');
+  await pickerShows('2026-11-03', '2026-11-03');
 
   // The picker opens on the answered range's month (November 2026); pick two days from its panels.
   const startInput = document.querySelector('.ant-picker-input input');

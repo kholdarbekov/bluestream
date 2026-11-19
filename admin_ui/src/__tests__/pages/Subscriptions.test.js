@@ -100,7 +100,7 @@ describe('Subscriptions page', () => {
     adminService.getUsers.mockResolvedValue({ items: [], total: 0 });
     adminService.getProducts.mockResolvedValue({ data: { items: [] } });
     adminService.getTimeSlots.mockResolvedValue({ data: { items: [] } });
-    adminService.getUserAddresses.mockResolvedValue({ data: { addresses: [{ id: 3, full_address: 'Amir Temur 1' }] } });
+    adminService.getUserAddresses.mockResolvedValue({ data: { addresses: [{ id: 3, title: null, full_address: 'Amir Temur 1', display_label: 'Amir Temur 1' }] } });
     adminService.getSubscription.mockResolvedValue({
       id: 1, subscription_number: 'SUB-1', user: { id: 7, name: 'Test User' },
       name: 'Existing Sub', description: 'd', frequency: 'weekly', delivery_day_of_week: 3,
@@ -216,7 +216,7 @@ describe('Subscriptions page', () => {
 
     it('asks again when the address changes', async () => {
       adminService.getUserAddresses.mockResolvedValue({
-        data: { addresses: [{ id: 3, full_address: 'Amir Temur 1' }, { id: 4, full_address: 'Office 9' }] },
+        data: { addresses: [{ id: 3, title: null, full_address: 'Amir Temur 1', display_label: 'Amir Temur 1' }, { id: 4, title: null, full_address: 'Office 9', display_label: 'Office 9' }] },
       });
       const dialog = await openEditOf(editDetail);
       await waitFor(() => expect(adminService.getCustomerSubscriptionPaymentMethods).toHaveBeenCalledWith(7, 3));
@@ -225,6 +225,24 @@ describe('Subscriptions page', () => {
       fireEvent.click(await within(dropdown).findByText('Office 9'));
 
       await waitFor(() => expect(adminService.getCustomerSubscriptionPaymentMethods).toHaveBeenLastCalledWith(7, 4));
+    });
+
+    it('names each address as the backend labels it: its title, else its street line', async () => {
+      // `display_label` is the API's one display rule (UserAddress.to_dict); the picker prints it and never re-derives it.
+      adminService.getUserAddresses.mockResolvedValue({
+        data: {
+          addresses: [
+            { id: 3, title: 'Uy', full_address: 'Amir Temur 1', display_label: 'Uy' },
+            { id: 4, title: null, full_address: 'Office 9', display_label: 'Office 9' },
+          ],
+        },
+      });
+      const dialog = await openEditOf(editDetail);
+      await waitFor(() => expect(adminService.getCustomerSubscriptionPaymentMethods).toHaveBeenCalledWith(7, 3));
+
+      const dropdown = await openDropdown(dialog, 'Delivery address');
+      expect([...dropdown.querySelectorAll('.ant-select-item-option')].map((o) => o.getAttribute('title')))
+        .toEqual(['Uy', 'Office 9']);
     });
 
     it('asks nothing before a customer is chosen on create', async () => {
@@ -621,7 +639,7 @@ describe('Subscriptions page', () => {
     beforeEach(() => {
       adminService.getUsers.mockResolvedValue({ items: USERS });
       adminService.getUserAddresses.mockImplementation(async (userId) => ({
-        data: { addresses: userId === 7 ? [{ id: 3, full_address: 'Amir Temur 1' }] : [{ id: 9, full_address: 'Office 9' }] },
+        data: { addresses: userId === 7 ? [{ id: 3, title: null, full_address: 'Amir Temur 1', display_label: 'Amir Temur 1' }] : [{ id: 9, title: null, full_address: 'Office 9', display_label: 'Office 9' }] },
       }));
     });
 
@@ -670,7 +688,7 @@ describe('Subscriptions page', () => {
 
     it('edit: moving to an address whose menu drops the method clears it', async () => {
       adminService.getUserAddresses.mockResolvedValue({
-        data: { addresses: [{ id: 3, full_address: 'Amir Temur 1' }, { id: 4, full_address: 'Office 4' }] },
+        data: { addresses: [{ id: 3, title: null, full_address: 'Amir Temur 1', display_label: 'Amir Temur 1' }, { id: 4, title: null, full_address: 'Office 4', display_label: 'Office 4' }] },
       });
       adminService.getCustomerSubscriptionPaymentMethods.mockImplementation(async (_user, addressId) => (addressId === 4
         ? [{ method: 'click', display_name: 'Card' }]

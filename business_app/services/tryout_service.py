@@ -245,9 +245,13 @@ class TryoutService:
             "city": snapshot.get("city") or "Tashkent",
             "latitude": snapshot.get("latitude"),
             "longitude": snapshot.get("longitude"),
-            "delivery_notes": snapshot.get("delivery_notes"),
             "is_default": True,
         }
+        # The address's own key: `update_user_address` takes no `delivery_notes`, so a conversion onto an existing
+        # address used to drop the try-out's door notes. Only real notes are handed over: a try-out without any must
+        # not wipe the door notes that address already holds.
+        if snapshot.get("delivery_notes"):
+            payload["delivery_instructions"] = snapshot["delivery_notes"]
         existing = (
             UserAddress.query.filter_by(
                 user_id=user_id,

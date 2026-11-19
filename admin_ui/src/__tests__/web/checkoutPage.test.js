@@ -200,7 +200,7 @@ describe('/checkout', () => {
   });
 
   it('“Add address” runs the shared wizard; the saved address joins the list, selected, and is quoted', async () => {
-    const created = { ...NEW, id: 90, is_default: false };
+    const created = { ...NEW, id: 90, is_default: false, display_label: NEW.title };
     const { $1, sent, click, type } = await boot({
       'POST /api/v1/addresses/geocode': ok({ latitude: NEW.latitude, longitude: NEW.longitude, formatted_address: 'x' }),
       'POST /api/v1/addresses/reverse-geocode': ok({ formatted_address: NEW.full_address, district_key: 'chilanzar' }),

@@ -286,13 +286,7 @@ Create a new order.
       "unit_price": 15000.00
     }
   ],
-  "delivery_address": {
-    "address_line1": "123 Main Street, Apt 4B",
-    "city": "Tashkent",
-    "district": "Chilanzar",
-    "latitude": 41.2995,
-    "longitude": 69.2401
-  },
+  "delivery_address_id": 42,
   "delivery_time_slot_id": 1,
   "notes": "Please call before delivery",
   "payment_method": "card"

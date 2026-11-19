@@ -35,7 +35,7 @@ from business_app import db
 from business_app.models.payment import Payment
 from shared.enums import OrderStatus, PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 def _age_payment(payment, minutes):
@@ -95,7 +95,7 @@ def _run_reconcile_with_status(monkeypatch, status_payload):
     {"status": "pending", "not_found": False},
 ])
 def test_no_gateway_answer_ever_cancels(db, sample_order, monkeypatch, notified, gateway_status):
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     _age_payment(payment, minutes=600)
 
     counts = _run_reconcile_with_status(monkeypatch, gateway_status)
@@ -120,7 +120,7 @@ def test_affirmative_success_completes_the_payment(db, sample_order, user_addres
     """
     sample_order.delivery_address_id = user_address.id
     db.session.commit()
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     _age_payment(payment, minutes=600)
 
     counts = _run_reconcile_with_status(monkeypatch, {"status": "completed", "not_found": False})
@@ -135,7 +135,7 @@ def test_transport_error_leaves_pending_not_cancelled(db, sample_order, monkeypa
     """Unchanged from the old contract, and now trivially true."""
     from business_app.utils.exceptions import PaymentError
 
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     _age_payment(payment, minutes=600)
 
     def boom(self, payment):
@@ -163,7 +163,7 @@ def test_marking_codes_survive_reconcile(db, sample_order, sample_product, monke
     from business_app.models.product import ProductMarkingCode
     from shared.enums import MarkingCodeStatus
 
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     _age_payment(payment, minutes=600)
     code = ProductMarkingCode(
         product_id=sample_product.id,

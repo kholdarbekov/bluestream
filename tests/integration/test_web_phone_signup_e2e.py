@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 from business_app.models.user import User
 from business_app.services import notification_service as ns_module
 from business_app.services.notification_service import NotificationService
+from tests.integration.celery_task_harness import patch_task
 
 MODERATED = {
     "ru": "Kod dlya podtverjdeniya vashego nomera telefona na platforme Aqua Element: ",
@@ -50,13 +51,14 @@ def captured_sms(app, monkeypatch):
 
     monkeypatch.setattr(NotificationService, "send_sms_to_phone", _REAL_SEND_SMS_TO_PHONE)
     monkeypatch.setattr(ns_module, "EskizSMS", lambda *a, **k: eskiz)
-    monkeypatch.setattr(
+    patch_task(
+        monkeypatch,
         notification_tasks.send_registration_otp_task,
         "delay",
         lambda *a, **kw: notification_tasks.send_registration_otp_task.run(*a, **kw),
     )
-    app.config["ESKIZ_EMAIL"] = "test@example.com"
-    app.config["ESKIZ_PASSWORD"] = "test-password"
+    monkeypatch.setitem(app.config, "ESKIZ_EMAIL", "test@example.com")
+    monkeypatch.setitem(app.config, "ESKIZ_PASSWORD", "test-password")
     return eskiz
 
 

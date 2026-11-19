@@ -36,7 +36,7 @@ from business_app.services.price_change.permissions import (
 )
 from business_app.services.shared_place.permissions import SHARED_PLACE_REVIEW_PERMISSIONS
 from business_app.services.telegram_reachability_service import TelegramReachabilityService
-from business_app.utils.decorators import has_admin_permission
+from business_app.utils.decorators import count_in_window, has_admin_permission
 from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
 from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
@@ -879,9 +879,10 @@ class AuthService:
         attempts_key = f"phone_otp_attempts:{phone_hash}"
 
         if stored_otp.decode() != otp_code:
-            # Increment failed attempts
-            attempts = self.redis_client.incr(attempts_key)
-            self.redis_client.expire(attempts_key, self.PHONE_OTP_LOCKOUT_DURATION)
+            # Count the wrong code; the count runs out PHONE_OTP_LOCKOUT_DURATION after the last one
+            attempts, _ = count_in_window(
+                self.redis_client, attempts_key, self.PHONE_OTP_LOCKOUT_DURATION, sliding=True
+            )
 
             if attempts >= self.PHONE_OTP_MAX_ATTEMPTS:
                 # Lock out
@@ -2429,8 +2430,8 @@ class AuthService:
     def _increment_failed_attempts(self, keys: Tuple[str, str], user: Optional[User] = None):
         """Count a wrong password against `keys`; at the limit lock them and, in the DB, the account `user`."""
         attempts_key, lockout_key = keys
-        attempts = self.redis_client.incr(attempts_key)
-        self.redis_client.expire(attempts_key, self.lockout_duration)
+        # The count runs out lockout_duration after the last wrong password, never before the lock it sets
+        attempts, _ = count_in_window(self.redis_client, attempts_key, self.lockout_duration, sliding=True)
 
         if attempts >= self.max_login_attempts:
             # Set Redis lockout key

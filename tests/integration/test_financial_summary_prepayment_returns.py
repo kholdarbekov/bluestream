@@ -28,12 +28,21 @@ GENERATE = "/api/v1/admin/reports/generate"
 
 
 class _UnlimitedRedis:
-    """What the rate limiter asks Redis: no counter yet, so every request is the first of its window."""
+    """What the rate limiter asks Redis: every request is the first of its window."""
 
-    def get(self, key):
-        return None
+    def pipeline(self):
+        return self
 
-    def setex(self, key, seconds, value):
+    def incr(self, key):
+        return self
+
+    def ttl(self, key):
+        return self
+
+    def execute(self):
+        return [1, -1]
+
+    def expire(self, key, seconds):
         return True
 
 

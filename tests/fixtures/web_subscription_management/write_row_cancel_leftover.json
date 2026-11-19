@@ -418,6 +418,7 @@
        "city": "Tashkent",
        "country": "Uzbekistan",
        "delivery_instructions": null,
+       "display_label": "1 Test St, Tashkent",
        "district": null,
        "floor_number": null,
        "full_address": "1 Test St, Tashkent",

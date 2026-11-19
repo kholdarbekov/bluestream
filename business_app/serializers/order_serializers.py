@@ -13,6 +13,7 @@ from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
 from business_app.services.customer_links import PAY_CHANNELS
+from business_app.utils.address_helpers import address_display_label
 from business_app.utils.delivery_window import format_delivery_window
 from business_app.utils.helpers import get_current_language
 from business_app.utils.payment_projection import (
@@ -438,11 +439,9 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         if hasattr(order, "delivery_address") and order.delivery_address:
             addr = order.delivery_address
             order_data["delivery_address"] = addr.to_dict()
-            # The address as the customer names it (its title, else its street line): the one rule the subscription
-            # page uses too, so the website's order cards print it instead of picking fields themselves.
-            from business_app.services.subscription_display import address_label  # local: services import this module
-
-            order_data["delivery_address_label"] = address_label(addr)
+            # The address as the customer names it (its title, else its street line): the one rule every address
+            # payload publishes as `display_label`, so the website's order cards print it instead of picking fields.
+            order_data["delivery_address_label"] = address_display_label(addr)
             # The district by its name in the request's language (shared.constants, as /addresses names it); a
             # free-text district from an older row stays as it was typed. The website never prints the stored key.
             from shared.constants import get_district_name

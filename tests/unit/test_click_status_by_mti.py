@@ -8,7 +8,7 @@ from business_app import db
 from business_app.utils.exceptions import PaymentError
 from shared.enums import PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 def _service(app):
@@ -21,7 +21,7 @@ def _service(app):
 
 def _blind_payment(db, order):
     """A payment with NO Click ids anywhere (the crash-window state)."""
-    payment = _seed_click_payment(db, order, click_paydoc_id="")
+    payment = seed_click_payment(db, order, click_paydoc_id="")
     provider_data = dict(payment.provider_data or {})
     provider_data["click"] = {}
     payment.provider_data = provider_data

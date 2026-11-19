@@ -7,7 +7,7 @@ from business_app.models.payment import PaymentTransaction
 from business_app.utils.exceptions import PaymentError
 from shared.enums import PaymentStatus
 
-from tests.integration.test_payment_matrix import _seed_click_payment
+from tests.integration.payment_builders import seed_click_payment
 
 
 def _seed_duplicate_txn(payment, click_trans_id="930002"):
@@ -28,7 +28,7 @@ def _seed_duplicate_txn(payment, click_trans_id="930002"):
 
 @pytest.mark.unit
 def test_reversal_success_marks_transaction_reversed(db, sample_order, monkeypatch):
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
     txn = _seed_duplicate_txn(payment)
@@ -53,7 +53,7 @@ def test_reversal_success_marks_transaction_reversed(db, sample_order, monkeypat
 
 @pytest.mark.unit
 def test_reversal_rejection_marks_transaction_rejected(db, sample_order, monkeypatch):
-    payment = _seed_click_payment(db, sample_order)
+    payment = seed_click_payment(db, sample_order)
     payment.status = PaymentStatus.COMPLETED
     db.session.commit()
     txn = _seed_duplicate_txn(payment, click_trans_id="930003")

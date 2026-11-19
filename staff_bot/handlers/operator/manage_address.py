@@ -70,7 +70,8 @@ class ManageAddressHandler(BaseHandler):
             lines = [f"📍 <b>{i18n.get('staff.operator.addresses_title', language)}</b>\n"]
 
             for addr in addresses:
-                label = escape_html(addr.get('title', ''))
+                # The name line; the street line follows on its own, so an untitled address is named by the word.
+                label = escape_html(addr.get('title') or i18n.get('staff.operator.address', language))
                 address_line = escape_html(addr.get('full_address', ''))
                 district = escape_html(addr.get('district', ''))
 
@@ -141,9 +142,9 @@ class ManageAddressHandler(BaseHandler):
             return ENTER_LABEL
 
         # Persist under 'title' — the key StaffService.add_client_address reads
-        # (and the GET serializer exposes). Storing under 'label' made the backend
-        # default every operator-created address to 'Home' and left the confirm
-        # screen's title blank.
+        # and the address endpoints send back (UserAddress.to_dict). Storing under
+        # 'label' made the backend default every operator-created address to
+        # 'Home' and left the confirm screen's title blank.
         flow['title'] = label
 
         await update.message.reply_text(

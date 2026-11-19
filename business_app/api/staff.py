@@ -9,6 +9,7 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from business_app.services.driver_expense.claims import DriverExpenseClaims
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
 from business_app.utils.service_factory import get_corporate_contract_service
@@ -16,7 +17,7 @@ from business_app.utils.address_helpers import door_fields, get_address_line
 from business_app.utils.decorators import require_staff_roles, verify_webhook_signature
 from business_app.utils.delivery_window import format_delivery_window, parse_schedule
 from business_app.utils.error_handlers import handle_api_exception
-from business_app.utils.api_responses import price_changed_response, success_response
+from business_app.utils.api_responses import price_changed_response, staff_state_changed_response, success_response
 from business_app.utils.exceptions import StateChangedError, ValidationError
 from business_app.utils.timezone_utils import ensure_utc
 
@@ -844,25 +845,72 @@ def get_reconciliation_session():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def submit_reconciliation_session():
-    """Submit the active driver reconciliation and open the next empty session."""
+    """Record a hand-in on the driver's active trip, and open the next empty one when it closes the trip.
+
+    Body: `declared_cash` (typed, or the Cash screen's button; omitted, "settle everything"), `notes`, and from the
+    button `session_id` and `basis` (the trip and the waiting claims total it was drawn with)."""
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
 
     from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
     reconciliation_service = DriverReconciliationService()
-    session = reconciliation_service.submit_session(
-        driver_user_id=current_user_id,
-        declared_cash=data.get("declared_cash"),
-        notes=data.get("notes"),
-        submitted_by_user_id=current_user_id,
-    )
+    try:
+        session = reconciliation_service.submit_session(
+            driver_user_id=current_user_id,
+            declared_cash=data.get("declared_cash"),
+            notes=data.get("notes"),
+            submitted_by_user_id=current_user_id,
+            session_id=data.get("session_id"),
+            basis=data.get("basis"),
+        )
+    except StateChangedError as e:
+        # The button no longer holds: nothing was recorded, and the bot redraws the Cash screen.
+        return staff_state_changed_response(e)
     payload = reconciliation_service.get_session_detail(session.id)
     next_session = getattr(session, "_next_active_session", None)
     payload["next_active_session"] = (
         reconciliation_service.get_session_detail(next_session.id) if next_session else None
     )
     return success_response(payload)
+
+
+@staff_bp.route("/expenses/options", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def get_driver_expense_options():
+    """What the claim flow reads before it starts: the driver's active trip and its "Hand in now" (max_amount)."""
+    return success_response(DriverExpenseClaims.options(int(get_jwt_identity())))
+
+
+@staff_bp.route("/expenses", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def submit_driver_expense():
+    """Record a cash expense claim on the driver's active trip: 201, or 200 when its key replays a recorded claim."""
+    result = DriverExpenseClaims.submit(int(get_jwt_identity()), request.get_json(silent=True) or {})
+    return success_response(DriverExpenseClaims.answer(result), status_code=200 if result.replayed else 201)
+
+
+@staff_bp.route("/expenses", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def list_driver_expenses():
+    """My expenses: the driver's waiting claims, his last decided ones and the active trip's figures."""
+    return success_response(DriverExpenseClaims.list_for_driver(int(get_jwt_identity())))
+
+
+@staff_bp.route("/expenses/<int:expense_id>/withdraw", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def withdraw_driver_expense(expense_id):
+    """The driver takes back a claim that is still waiting."""
+    result = DriverExpenseClaims.withdraw(int(get_jwt_identity()), expense_id)
+    return success_response(DriverExpenseClaims.answer(result))
 
 
 @staff_bp.route("/customers/<int:customer_id>/cod-statement", methods=["GET"])

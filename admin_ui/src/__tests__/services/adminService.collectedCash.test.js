@@ -19,10 +19,18 @@ describe('adminService collected-cash methods', () => {
     expect(out).toEqual({ data: { applied_to_order: 54000 } });
   });
 
-  it('editCollectedCash POSTs to the apply route and returns data', async () => {
+  it('editCollectedCash POSTs to the apply route with the caller\'s request config and returns data', async () => {
     api.post.mockResolvedValue({ data: { data: { order_id: 42 } } });
-    const out = await adminService.editCollectedCash(42, { new_amount: 60000, reason: 'driver collected 60k' });
-    expect(api.post).toHaveBeenCalledWith('/admin/orders/42/collected-cash', { new_amount: 60000, reason: 'driver collected 60k' });
+    // The config Orders.js sends: the refusal it explains itself, so api.js does not toast it too.
+    const config = { handledErrorCodes: ['EVENT_FUNDS_DRIVER_EXPENSE'] };
+    const out = await adminService.editCollectedCash(
+      42, { new_amount: 60000, reason: 'driver collected 60k' }, config,
+    );
+    expect(api.post).toHaveBeenCalledWith(
+      '/admin/orders/42/collected-cash',
+      { new_amount: 60000, reason: 'driver collected 60k' },
+      { handledErrorCodes: ['EVENT_FUNDS_DRIVER_EXPENSE'] },
+    );
     expect(out).toEqual({ data: { order_id: 42 } });
   });
 });

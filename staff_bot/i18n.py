@@ -10,6 +10,9 @@ from typing import Dict, Any, Optional, List, Set
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from shared.staff_constants import (
+    DRIVER_EXPENSE_CATEGORIES,
+    DRIVER_EXPENSE_EVENTS,
+    DRIVER_EXPENSE_STATUSES,
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
     SALES_EVENTS,
@@ -224,6 +227,11 @@ class Translation:
         for event in SALES_EVENTS:
             keys.add(f"staff.sales.notify.{event}")
 
+        # Driver-expense decisions: webhook_server.expense_event_handler builds the key with
+        # f'staff.expense.notify.{event}' from the same shared tuple that decides which events it accepts.
+        for event in DRIVER_EXPENSE_EVENTS:
+            keys.add(f"staff.expense.notify.{event}")
+
         # The outlet card and its lists build these three families with
         # f-strings from BACKEND-supplied values: `keyboards/sales.py`
         # (stage_label) and `handlers/sales/hub.py` (the type label and the
@@ -334,6 +342,12 @@ class Translation:
 
         for status in OrderStatus:
             keys.add(f"staff.order.status.{status.value}")
+
+        for category in DRIVER_EXPENSE_CATEGORIES:
+            keys.add(f"staff.expense.category.{category}")
+
+        for status in DRIVER_EXPENSE_STATUSES:
+            keys.add(f"staff.expense.status.{status}")
 
     def get_required_staff_keys(self, force_refresh: bool = False) -> Set[str]:
         """Return the full set of translation keys required by staff bot."""

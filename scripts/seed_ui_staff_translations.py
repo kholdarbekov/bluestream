@@ -43,6 +43,12 @@ UI_STAFF_TRANSLATIONS = {
         # Cash reconciliation: gross collected vs what the driver must hand in (expected_cash_on_hand).
         "cash_gross_collected": "Collected (gross)",
         "cash_to_hand_in": "To hand in",
+        # Driver cash expenses on the cash-reconciliation screens (DeliveryReports, StaffManagement).
+        "driver_expenses_column": "Expenses",
+        "driver_expenses_waiting": "Waiting for approval",
+        "driver_expenses_section": "Expenses on this trip",
+        "driver_expenses_none": "No expenses on this trip",
+        "driver_expenses_block_pending": "Decide the driver's waiting expenses first",
     },
     "uz": {
         "customer_phone": "Telefon",
@@ -56,6 +62,11 @@ UI_STAFF_TRANSLATIONS = {
         "sales_agent": "Savdo agenti",
         "cash_gross_collected": "Yig'ilgan (umumiy)",
         "cash_to_hand_in": "Topshirilishi kerak",
+        "driver_expenses_column": "Xarajatlar",  # NATIVE-READ
+        "driver_expenses_waiting": "Tasdiq kutilmoqda",  # NATIVE-READ
+        "driver_expenses_section": "Ushbu reysdagi xarajatlar",  # NATIVE-READ
+        "driver_expenses_none": "Bu reysda xarajatlar yo'q",  # NATIVE-READ
+        "driver_expenses_block_pending": "Avval haydovchining kutilayotgan xarajatlari bo'yicha qaror qiling",  # NATIVE-READ
     },
     "ru": {
         "customer_phone": "Телефон",
@@ -69,6 +80,11 @@ UI_STAFF_TRANSLATIONS = {
         "sales_agent": "Торговый агент",
         "cash_gross_collected": "Собрано (всего)",
         "cash_to_hand_in": "К сдаче",
+        "driver_expenses_column": "Расходы",  # NATIVE-READ
+        "driver_expenses_waiting": "Ожидают утверждения",  # NATIVE-READ
+        "driver_expenses_section": "Расходы за этот рейс",  # NATIVE-READ
+        "driver_expenses_none": "Расходов за этот рейс нет",  # NATIVE-READ
+        "driver_expenses_block_pending": "Сначала примите решение по ожидающим расходам водителя",  # NATIVE-READ
     },
 }
 

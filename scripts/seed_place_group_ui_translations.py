@@ -552,6 +552,20 @@ KEYS = {
             "заказать с оплатой наличными будет нельзя, пока долг не уменьшат"
         ),
     },
+    "ui.orders.cash_warning_driver_expense": {
+        "en": (
+            "The driver has an expense waiting for approval on this trip; this correction would "
+            "leave him less than he handed in plus that claim. Decide the expense first."
+        ),
+        "uz": (  # NATIVE-READ
+            "Haydovchining bu reysda tasdiq kutayotgan xarajati bor; bu tuzatish unda topshirgani "
+            "va shu xarajatdan kam pul qoldiradi. Avval xarajat bo'yicha qaror qiling."
+        ),
+        "ru": (  # NATIVE-READ
+            "У водителя на этом рейсе есть расход, ожидающий утверждения; эта корректировка "
+            "оставит ему меньше, чем он сдал, плюс этот расход. Сначала примите решение по расходу."
+        ),
+    },
 
     # ---- Users: COD statement card cluster/place context -------------------
     "ui.users.cluster_outstanding": {

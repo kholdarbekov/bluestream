@@ -1214,6 +1214,41 @@ class StaffAPIClient:
             data=payload,
         )
 
+    # --- Driver cash expenses ---
+
+    async def get_expense_options(self, token: str) -> APIResponse:
+        """The active trip and the most the driver may claim (his "Hand in now")."""
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/expenses/options',
+            token=token,
+        )
+
+    async def create_expense(self, token: str, payload: Dict) -> APIResponse:
+        """Record a claim; a re-send with the same idempotency key replays the recorded one."""
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/expenses',
+            token=token,
+            data=payload,
+        )
+
+    async def list_my_expenses(self, token: str) -> APIResponse:
+        """The driver's waiting claims, his last decided ones and the active trip's figures."""
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/expenses',
+            token=token,
+        )
+
+    async def withdraw_expense(self, token: str, expense_id: int) -> APIResponse:
+        """Take back a claim still waiting for a decision."""
+        return await self._make_request(
+            'POST',
+            f'/api/v1/staff/expenses/{expense_id}/withdraw',
+            token=token,
+        )
+
     # --- Try-out Operations ---
 
     async def create_tryout(self, token: str, payload: Dict) -> APIResponse:

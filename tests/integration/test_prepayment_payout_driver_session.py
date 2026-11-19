@@ -80,6 +80,7 @@ def test_current_trip_return_lowers_on_hand_not_gross(
         "on_hand_before": 100000.0,
         "handed_in": 0.0,
         "cap": 100000.0,
+        "expenses_waiting": 0.0,
         "on_hand_after": 60000.0,
         "will_close": False,
     }
@@ -181,6 +182,7 @@ def test_return_to_zero_closes_the_session(
         "on_hand_before": 108000.0,
         "handed_in": 0.0,
         "cap": 108000.0,
+        "expenses_waiting": 0.0,
         "on_hand_after": 0.0,
         "will_close": True,
     }

@@ -194,21 +194,32 @@ def notify_staff_order_assigned(self, telegram_id: str, order_info: dict):
     )
 
 
-@shared_task(name="staff.push_bottle_event", bind=True, max_retries=3, default_retry_delay=60)
-def push_bottle_event(self, telegram_id: int, event: str, payload: dict):
-    """Push one bottle event (transfer waiting, join request, its answer) to one driver.
+def _push_driver_event(task, route: str, telegram_id: int, event: str, payload: dict) -> dict:
+    """Post one event to one driver's chat through the staff bot's ``/internal/<route>``; a send it did not take is
+    retried.
 
-    Retried like `sales.push_sales_event`, and keyed the same way: Celery keeps
-    `request.id` across `self.retry()`, so a retry collapses to one message in
-    the staff bot's dedup. NOT a fixed per-request id: the bot holds an id for
-    24h, which would silently swallow a genuine re-request after a decline.
+    Keyed like `sales.push_sales_event`: Celery keeps `request.id` across `task.retry()`, so a retry collapses to one
+    message in the staff bot's dedup. NOT a fixed per-request id: the bot holds an id for 24h, which would silently
+    swallow a genuine repeat (a re-request after a decline, a second decision after an undo).
     """
     data = {"telegram_id": telegram_id, "event": event, "payload": payload}
-    if self.request.id:
-        data["event_id"] = f"bottle-event:{self.request.id}"
-    if not _send_staff_webhook("/internal/bottle-event", data):
-        raise self.retry(exc=RuntimeError(f"bottle-event webhook failed for {event}"))
+    if task.request.id:
+        data["event_id"] = f"{route}:{task.request.id}"
+    if not _send_staff_webhook(f"/internal/{route}", data):
+        raise task.retry(exc=RuntimeError(f"{route} webhook failed for {event}"))
     return {"success": True, "event": event, "telegram_id": telegram_id}
+
+
+@shared_task(name="staff.push_bottle_event", bind=True, max_retries=3, default_retry_delay=60)
+def push_bottle_event(self, telegram_id: int, event: str, payload: dict):
+    """Push one bottle event (transfer waiting, join request, its answer) to one driver."""
+    return _push_driver_event(self, "bottle-event", telegram_id, event, payload)
+
+
+@shared_task(name="staff.push_expense_event", bind=True, max_retries=3, default_retry_delay=60)
+def push_expense_event(self, telegram_id: int, event: str, payload: dict):
+    """Push one decision on a driver's expense claim (approved, approved for less, rejected, approval undone) to him."""
+    return _push_driver_event(self, "expense-event", telegram_id, event, payload)
 
 
 @shared_task(name="staff.notify_order_reassigned", bind=True)
@@ -436,3 +447,45 @@ def notify_order_address_changed(self, delivery_id: int, driver_id: int, payload
     ):
         raise self.retry(exc=RuntimeError(f"order-address-changed webhook failed for delivery {delivery_id}"))
     return {"success": True, "delivery_id": delivery_id}
+
+
+@shared_task(name="staff.alert_driver_expense_claimed")
+def alert_driver_expense_claimed(expense_id: int) -> bool:
+    """Post one Slack alert for a new driver expense claim. Returns whether Slack accepted it; never retried, so a
+    refusal costs one missed post and never a second one."""
+    from business_app.models.driver_expense import DriverCashExpense
+    from business_app.services.driver_expense.alerts import DriverExpenseAlerts
+    from business_app.utils import slack_alerts
+
+    expense = DriverCashExpense.query.get(expense_id)
+    if expense is None:
+        logger.warning("driver-expense alert not sent: claim %s is gone", expense_id)
+        return False
+    return slack_alerts.send_slack_alert(DriverExpenseAlerts.claim_text(expense))
+
+
+@shared_task(name="staff.driver_expense_digest")
+def driver_expense_digest() -> int:
+    """Once a day, list the claims still waiting after ``DRIVER_EXPENSE_DIGEST_AFTER_HOURS``, oldest first.
+
+    Posts nothing and returns 0 when none wait. Returns the number of claims listed."""
+    from datetime import timedelta
+
+    from business_app.models.driver_expense import DriverCashExpense
+    from business_app.services.driver_expense.alerts import DriverExpenseAlerts
+    from business_app.utils import slack_alerts
+    from shared.business_config import DRIVER_EXPENSE_DIGEST_AFTER_HOURS
+
+    now = datetime.now(timezone.utc)
+    waiting = (
+        DriverCashExpense.query.filter(
+            DriverCashExpense.status == DriverCashExpense.PENDING,
+            DriverCashExpense.submitted_at <= now - timedelta(hours=DRIVER_EXPENSE_DIGEST_AFTER_HOURS),
+        )
+        .order_by(DriverCashExpense.submitted_at, DriverCashExpense.id)
+        .all()
+    )
+    if not waiting:
+        return 0
+    slack_alerts.send_slack_alert(DriverExpenseAlerts.digest_text(waiting, now=now))
+    return len(waiting)

@@ -3,12 +3,21 @@ Delivery-related keyboards for Staff Bot
 """
 from decimal import Decimal, InvalidOperation
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, NamedTuple, Optional, Tuple
 
 from staff_bot.i18n import i18n
-from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, FAILED_DELIVERY_REASONS
+from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, DRIVER_EXPENSE_CATEGORIES, FAILED_DELIVERY_REASONS
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.utils.formatters import format_currency, format_quantity
+
+
+class HandoffTap(NamedTuple):
+    """What a tapped hand-in button was drawn with: the figure, the trip it belongs to and the expense claims
+    waiting on that trip (``basis``)."""
+
+    amount: Decimal
+    session_id: int
+    basis: Decimal
 
 
 class DeliveryKeyboards:
@@ -267,32 +276,38 @@ class DeliveryKeyboards:
         return f"{amount:,.2f}"
 
     @staticmethod
-    def parse_handoff_callback(data) -> Optional[Decimal]:
-        """Read back the figure the tapped handoff button displayed.
+    def parse_handoff_callback(data) -> Optional["HandoffTap"]:
+        """Read back what the tapped handoff button was drawn with: its amount, its trip and its basis.
 
-        The inverse of the callback minted in :meth:`reconciliation_actions`.
-        Returns ``None`` for a button that carries no amount (one rendered
-        before this became a frozen figure, or a malformed payload) — the
-        caller must then refuse to write rather than let the amount be
-        invented downstream.
+        The inverse of the callback minted in :meth:`reconciliation_actions`: exactly four fields. A button
+        drawn before the trip and the basis travelled with it (amount only), and anything malformed, answers
+        ``None`` -- the caller must then redraw the screen and never post, because a tap that names no trip or
+        no basis would hand the decision back to the server.
         """
         if not data:
             return None
-        prefix = f"{DeliveryKeyboards.HANDOFF_ALL_CALLBACK}:"
-        text = str(data)
-        if not text.startswith(prefix):
+        parts = str(data).split(":")
+        if len(parts) != 4 or parts[0] != DeliveryKeyboards.HANDOFF_ALL_CALLBACK:
             return None
         try:
-            amount = Decimal(text[len(prefix):]).quantize(Decimal("0.01"))
+            amount = Decimal(parts[1]).quantize(Decimal("0.01"))
+            basis = Decimal(parts[3]).quantize(Decimal("0.01"))
+            session_id = int(parts[2])
         except (InvalidOperation, ValueError):
             return None
-        return amount if amount > Decimal("0.00") else None
+        if not (amount.is_finite() and basis.is_finite()):
+            return None
+        if amount <= Decimal("0.00") or basis < Decimal("0.00") or session_id <= 0:
+            return None
+        return HandoffTap(amount=amount, session_id=session_id, basis=basis)
 
     @staticmethod
     def reconciliation_actions(
         language: str,
         can_submit: bool = True,
         remaining_amount: float = None,
+        session_id: Optional[int] = None,
+        basis=None,
     ) -> InlineKeyboardMarkup:
         """Actions for the driver's reconciliation session view.
 
@@ -313,7 +328,8 @@ class DeliveryKeyboards:
         keyboard = []
         if can_submit:
             frozen_amount = DeliveryKeyboards.freeze_handoff_amount(remaining_amount)
-            if frozen_amount is not None:
+            frozen_basis = Decimal(str(basis or 0)).quantize(Decimal("0.01"))
+            if frozen_amount is not None and session_id is not None:
                 label = i18n.get(
                     'staff.delivery.handoff_remaining_cash',
                     language,
@@ -324,7 +340,7 @@ class DeliveryKeyboards:
                     # The literal prefix stays inline so the static routing
                     # guard in tests/unit/test_staff_bot_routing_regressions.py
                     # keeps seeing this callback.
-                    callback_data=f"staff_reconcile_submit_all:{frozen_amount}"
+                    callback_data=f"staff_reconcile_submit_all:{frozen_amount}:{session_id}:{frozen_basis}"
                 )])
             keyboard.append([InlineKeyboardButton(
                 f"✏️ {i18n.get('staff.delivery.edit_reconciliation_cash', language)}",
@@ -726,3 +742,99 @@ class DeliveryKeyboards:
             callback_data="staff_cash_hub"
         )])
         return InlineKeyboardMarkup(keyboard)
+
+    # The category buttons' callback prefix (`staff_expense_cat_<category>`); the handler reads the category back
+    # off it. A constant rather than an inline f-string: the category is a code, not a number, and the static
+    # routing guard samples every `{...}` hole as `1`.
+    EXPENSE_CATEGORY_CALLBACK_PREFIX = "staff_expense_cat_"
+
+    # One emoji per expense category, in `DRIVER_EXPENSE_CATEGORIES` order (a test pins the two equal).
+    EXPENSE_CATEGORY_EMOJI = {
+        'fuel': '⛽',
+        'new_bottles': '🧴',
+        'caps': '🔘',
+        'labels': '🏷',
+        'other_supplies': '📦',
+        'vehicle': '🔧',
+        'parking_wash': '🅿️',
+        'other': '✏️',
+    }
+
+    @staticmethod
+    def expense_categories(language: str) -> InlineKeyboardMarkup:
+        """What the driver paid for: the categories two to a row, then Cancel."""
+        buttons = [
+            InlineKeyboardButton(
+                f"{DeliveryKeyboards.EXPENSE_CATEGORY_EMOJI[category]} "
+                f"{i18n.get(f'staff.expense.category.{category}', language)}",
+                callback_data=f"{DeliveryKeyboards.EXPENSE_CATEGORY_CALLBACK_PREFIX}{category}",
+            )
+            for category in DRIVER_EXPENSE_CATEGORIES
+        ]
+        rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+        rows.append([InlineKeyboardButton(
+            f"❌ {i18n.get('staff.cancel', language)}",
+            callback_data="staff_expense_cancel",
+        )])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def expense_confirm(language: str, can_send: bool) -> InlineKeyboardMarkup:
+        """The draft's screen: Send for approval (only once the claim is complete), and Cancel."""
+        rows = []
+        if can_send:
+            rows.append([InlineKeyboardButton(
+                f"✅ {i18n.get('staff.expense.send', language)}",
+                callback_data="staff_expense_send",
+            )])
+        rows.append([InlineKeyboardButton(
+            f"❌ {i18n.get('staff.cancel', language)}",
+            callback_data="staff_expense_cancel",
+        )])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def expense_sent(language: str) -> InlineKeyboardMarkup:
+        """After Send: My expenses (where the claim can be withdrawn), and back to the Cash hub."""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"🧾 {i18n.get('staff.menu.my_expenses', language)}",
+                callback_data="staff_expense_list",
+            )],
+            [InlineKeyboardButton(
+                f"⬅️ {i18n.get('staff.back', language)}",
+                callback_data="staff_cash_hub",
+            )],
+        ])
+
+    @staticmethod
+    def my_expenses(language: str, waiting: List[dict]) -> InlineKeyboardMarkup:
+        """My expenses: a Withdraw button per waiting claim (named by its category and amount), then back."""
+        rows = [
+            [InlineKeyboardButton(
+                f"↩️ {i18n.get('staff.expense.withdraw', language)} · "
+                f"{i18n.get(f"staff.expense.category.{claim['category']}", language)} · "
+                f"{format_currency(claim['amount'], language=language)}",
+                callback_data=f"staff_expense_withdraw_{int(claim['id'])}",
+            )]
+            for claim in waiting
+        ]
+        rows.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_cash_hub",
+        )])
+        return InlineKeyboardMarkup(rows)
+
+    @staticmethod
+    def expense_withdraw_confirm(language: str, expense_id: int) -> InlineKeyboardMarkup:
+        """Withdraw this claim? Yes posts; No goes back to the list."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"✅ {i18n.get('staff.yes', language)}",
+                callback_data=f"staff_expense_withdraw_yes_{int(expense_id)}",
+            ),
+            InlineKeyboardButton(
+                f"❌ {i18n.get('staff.no', language)}",
+                callback_data="staff_expense_list",
+            ),
+        ]])

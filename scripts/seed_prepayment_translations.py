@@ -452,6 +452,16 @@ PREPAYMENT_TRANSLATIONS = {
         'uz': 'Haydovchining reysdagi naqd puli',
         'ru': 'Наличные водителя на рейсе',
     },
+    'ui.orders.cash_edit_min_amount': {
+        'en': "At least {{amount}} while the driver's expense waits for a decision",
+        'uz': "Haydovchining xarajati qaror kutayotgan paytda kamida {{amount}}",  # NATIVE-READ
+        'ru': "Не меньше {{amount}}, пока расход водителя ждёт решения",  # NATIVE-READ
+    },
+    'ui.prepayments.return_expenses_waiting': {
+        'en': "{{amount}} of the driver's trip cash is waiting for an expense decision, so the limit is lower",
+        'uz': "Haydovchi reys naqdidan {{amount}} xarajat qarorini kutmoqda, shuning uchun chegara pastroq",  # NATIVE-READ
+        'ru': "{{amount}} из наличных рейса водителя ждут решения по расходу, поэтому лимит ниже",  # NATIVE-READ
+    },
     'ui.prepayments.return_contract_effect': {
         'en': 'Contract accounts',
         'uz': 'Shartnoma hisoblari',
@@ -669,8 +679,10 @@ def main():
         print(f"  updated:   {updated}")
         print(f"  unchanged: {unchanged}")
         print()
-        print("Don't forget to clear the translation cache:")
-        print("  docker compose exec redis redis-cli FLUSHDB")
+        # Never hint at a Redis flush here: deploys run this on prod, where Redis DB 0 is also the Celery broker.
+        print("No cache flush needed: a key that was missing is served once it is in the DB.")
+        print("A CHANGED value can be served from the Redis translation cache until its TTL; delete only its")
+        print("translations:<lang>:<key> entries. Never flush Redis: DB 0 also holds the Celery broker queue.")
 
 
 if __name__ == '__main__':

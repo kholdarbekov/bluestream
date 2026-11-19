@@ -41,6 +41,7 @@ import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
 import adminService from '../../services/adminService';
 import salesPayService from '../../services/salesPayService';
 import salesService from '../../services/salesService';
+import driverExpenseService from '../../services/driverExpenseService';
 import useResponsive from '../../hooks/useResponsive';
 import LanguageSwitcher from '../common/LanguageSwitcher';
 import { useTranslation } from 'react-i18next';
@@ -81,6 +82,18 @@ const AdminLayout = ({ children }) => {
     refetchInterval: 60_000,
   });
   const pendingApprovals = orderApprovalsBadge?.pending_count || 0;
+  // Driver expenses (spec 2026-11-17 §6.8): the Delivery child counts the claims waiting for a decision (the list
+  // route's `pending_count`, whatever its filters), polled every minute. The page's writes invalidate the
+  // `['driverExpenses']` prefix this key sits under.
+  const canReviewDriverExpenses = hasPermission('can_review_driver_expenses');
+  const { data: driverExpensesBadge } = useQuery({
+    queryKey: ['driverExpenses', 'pendingCount'],
+    queryFn: () => driverExpenseService.list({ status: 'pending', perPage: 1 }),
+    enabled: canReviewDriverExpenses,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const pendingDriverExpenses = driverExpensesBadge?.pending_count || 0;
   const canManageLapsedCustomers = hasPermission('can_manage_lapsed_customers');
   const canViewEtaAccuracy = hasPermission('can_view_eta_accuracy');
   const canViewPriceChanges = hasPermission('can_view_price_changes');
@@ -216,6 +229,10 @@ const AdminLayout = ({ children }) => {
         ...(canViewEtaAccuracy ? [{
           key: '/delivery/eta-accuracy',
           label: t('ui.nav.eta_accuracy', 'Delivery time accuracy')
+        }] : []),
+        ...(canReviewDriverExpenses ? [{
+          key: '/delivery/expenses',
+          label: <>{t('ui.nav.driver_expenses', 'Driver expenses')} <Badge count={pendingDriverExpenses} size="small" /></>
         }] : []),
         {
           key: '/delivery/dispatch',

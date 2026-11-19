@@ -1,9 +1,8 @@
 """Standalone bottle collection and fine creation flow for delivery drivers."""
 
 import logging
-import math
 import uuid
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -23,6 +22,7 @@ from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils import flow_state
+from staff_bot.utils.money_input import parse_typed_money
 from staff_bot.utils.formatters import (
     escape_html,
     format_currency,
@@ -157,50 +157,6 @@ class BottleCollectionHandler(BaseHandler):
         """
         return uuid.uuid4().hex
 
-    async def _refuse_stale_tap(self, update: Update, language: str, reply_markup=None):
-        """A tap on an inline button whose flow is already over. Say so, and take
-        the dead buttons away.
-
-        Telegram never removes an old message, so every picker this handler ever
-        drew is still sitting in the driver's scrollback with live-looking
-        buttons on it. The flow behind it, though, is gone the moment the driver
-        taps a main-menu button: `flow_state.clear_pending_flows` drops
-        `pending_bottle_collection_flow` / `pending_transfer_flow` and the
-        guards below then refuse the tap.
-
-        Refusing it SILENTLY — a bare `query.answer()` with no `text=` — is what
-        this bot used to do, and it is indistinguishable from a crashed bot: the
-        spinner stops and nothing else happens, so the driver taps harder. One
-        toast plus a screen that no longer offers the dead buttons is the whole
-        fix, and it is written once here because "this tap belongs to a flow
-        that ended" is one rule with several call sites (the collection quantity
-        picker, the transfer driver picker and send screen).
-
-        The picker is neutralised on the TAP rather than when the flow clears:
-        `clear_pending_flows` is the SSOT for leaving a flow and it deliberately
-        knows nothing about Telegram message ids — teaching it to reach back and
-        edit screens would mean tracking a message id per flow, i.e. a second
-        piece of state to get wrong, for a message the driver is no longer
-        looking at. The tap is both the moment feedback is wanted and the moment
-        the message handle is in hand.
-        """
-        query = update.callback_query
-        if query is None:
-            return
-        text = i18n.get('staff.cancelled', language)
-        try:
-            await query.answer(text=text)
-        except Exception:
-            logger.debug("stale-tap callback answer failed", exc_info=True)
-        try:
-            await query.edit_message_text(
-                text, reply_markup=reply_markup, parse_mode='HTML'
-            )
-        except Exception:
-            # An unchanged message, a message too old to edit, a deleted one:
-            # the toast already told the driver, so this is best-effort.
-            logger.debug("stale-tap picker cleanup failed", exc_info=True)
-
     async def _handle_submit_failure(self, update: Update, response, language: str):
         """Render a failed collection/fine submit, warning the driver when the
         write MAY already have landed.
@@ -245,38 +201,13 @@ class BottleCollectionHandler(BaseHandler):
 
     @staticmethod
     def _parse_positive_amount(raw_text: str) -> float:
-        """Coerce a driver-typed money amount, fencing NON-FINITE values.
+        """A driver-typed money amount, read by the one money-typing rule.
 
-        `float(text)` happily returns `nan` / `inf` for the literals "nan",
-        "inf" and "Infinity", and neither survives a `<= 0` sign check:
-        `nan <= 0` is False and `inf <= 0` is False, so both used to be accepted
-        and posted as the non-standard JSON literals Python's json module both
-        emits AND re-parses. Downstream they diverge and NEITHER outcome is
-        acceptable — `Decimal('NaN') <= 0` raises `decimal.InvalidOperation`
-        (a 500 at the customer's door) while `Decimal('Infinity') <= 0` is merely
-        False, so an infinite fine was committed and read back to the next driver
-        as "Active fines: 1 (inf Uzs)".
-
-        Decimal is the same coercion the backend's SSOT fence
-        (`BottleTrackingService._as_decimal`) uses, and `is_finite()` is checked
-        BEFORE any ordering comparison because Python's decimal is not
-        IEEE-754: comparing `Decimal('NaN')` with a number RAISES.
-
-        Raises ``ValueError`` for anything non-numeric, non-finite or <= 0.
+        Raises ``ValueError`` for anything unreadable or <= 0.
         """
-        text = (raw_text or '').strip().replace(',', '').replace(' ', '')
-        try:
-            amount = Decimal(text)
-        except (InvalidOperation, TypeError, ValueError):
-            raise ValueError("not a number")
-        if not amount.is_finite():
-            raise ValueError("non-finite amount")
-        if amount <= 0:
+        value = float(parse_typed_money(raw_text))
+        if value <= 0:
             raise ValueError("non-positive amount")
-        value = float(amount)
-        # `Decimal('1e400')` is perfectly finite until `float()` overflows it.
-        if not math.isfinite(value):
-            raise ValueError("amount overflows to infinity")
         return value
 
     @staticmethod

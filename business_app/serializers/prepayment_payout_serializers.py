@@ -60,9 +60,11 @@ class PayoutWarnings(BaseModel):
 class SessionEffect(BaseModel):
     """What a return "from his current trip's cash" does to the driver's open cash session (spec §4.3).
 
-    ``cap`` is what the driver still holds of this trip (on hand minus handed in, unclamped); a return
-    above it is blocked. ``will_close`` is the session close rule applied to the on-hand figure after
-    the return (``DriverReconciliationService.session_closes``).
+    ``cap`` is the trip's "Hand in now" (on hand minus handed in minus ``expenses_waiting``, unclamped); a return
+    above it is blocked. ``expenses_waiting`` is the claims still waiting on the trip, which is why the cap can
+    be lower than on hand minus handed in: a return cannot eat into a claim the office has yet to decide.
+    ``will_close`` is the session close rule applied to the on-hand figure after the return
+    (``DriverReconciliationService.session_closes``).
     """
 
     session_id: int
@@ -70,6 +72,7 @@ class SessionEffect(BaseModel):
     on_hand_before: MoneyFloat
     handed_in: MoneyFloat
     cap: MoneyFloat
+    expenses_waiting: MoneyFloat
     on_hand_after: MoneyFloat
     will_close: bool
 

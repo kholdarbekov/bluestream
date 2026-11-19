@@ -751,12 +751,13 @@ def test_users_namespace_serves_every_dotted_place_key(client, place_seeds, lang
 
 @pytest.mark.integration
 @pytest.mark.parametrize("lang", LANGUAGES)
-def test_orders_namespace_serves_the_scope_tags_and_all_six_cash_warnings(
+def test_orders_namespace_serves_the_scope_tags_and_all_seven_cash_warnings(
     client, place_seeds, lang
 ):
     bundle = client.get(TRANSLATIONS_URL.format(lang=lang, ns="orders")).get_json()
     expected = {k for k in _ui_place_keys() if k.startswith("ui.orders.")}
-    assert len({k for k in expected if k.startswith("ui.orders.cash_warning_")}) == 6
+    # The seventh is the driver-expense floor's refusal (driver cash expenses, spec 2026-11-17).
+    assert len({k for k in expected if k.startswith("ui.orders.cash_warning_")}) == 7
     missing = sorted(expected - set(bundle))
     assert not missing, f"orders/{lang} is missing {missing}"
     for key in expected:
@@ -2849,9 +2850,10 @@ def test_every_cash_edit_warning_code_has_ui_copy_and_vice_versa(place_seeds):
     assert len(backend_codes) == 6, backend_codes
     assert backend_codes <= ui_codes, f"warnings without UI copy: {sorted(backend_codes - ui_codes)}"
     # The map may also translate a blocking reason Orders.js renders through describeCashEditWarning
-    # (the prepayment-return guard), but every extra entry must be a code the service really emits.
+    # (the prepayment-return guard and the driver-expense floor), but every extra entry must be a code
+    # the service really emits.
     extra = ui_codes - backend_codes
-    assert extra == {"event_funds_prepayment_return"}, extra
+    assert extra == {"event_funds_prepayment_return", "event_funds_driver_expense"}, extra
     assert extra <= blocking_codes, f"UI copy for codes the service never emits: {sorted(extra - blocking_codes)}"
     for key in sorted(k for k in _ui_place_keys() if k.startswith("ui.orders.cash_warning_")):
         for lang in LANGUAGES:

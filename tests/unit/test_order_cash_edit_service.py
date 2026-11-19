@@ -216,14 +216,15 @@ def test_apply_blocked_when_driver_has_another_active_session(
     DriverReconciliationService().get_or_create_session(driver_user_id=delivery_driver.id)
     db.session.commit()
 
-    # Preview surfaces the conflict as a blocking reason → apply raises ValidationError.
+    # Preview surfaces the conflict as a blocking reason → apply raises the 409 conflict code.
     plan = OrderCashEditService().preview(order_id=order.id, new_amount="60000")
     assert any("cash_session_active_conflict" in r for r in plan.blocking_reasons)
-    with pytest.raises(ValidationError):
+    with pytest.raises(ConflictError) as raised:
         OrderCashEditService().apply_edit(
             order_id=order.id, new_amount="60000", reason="blocked by active session",
             actor_user_id=delivery_driver.id,
         )
+    assert raised.value.error_code == "CASH_SESSION_ACTIVE_CONFLICT"
 
 
 def test_preview_warns_when_customer_has_other_unpaid_cod_orders(

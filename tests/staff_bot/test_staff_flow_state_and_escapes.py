@@ -339,6 +339,9 @@ ENTRY_TAP = {
     # branch. (Its /cancel redraws the card through GET /outlets/7, which the
     # fake backend answers with its empty default.)
     "staff_sales_set_phone": "staff_sales_setphone_7",
+    # Add expense opens from the Cash hub and READS the trip's cash before it asks anything, so it needs the
+    # `prepare_backend` branch below (no trip cash ends the conversation on the spot).
+    "staff_expense": "staff_expense_start",
 }
 
 # `staff_auth` is entered by /start rather than a button and only parks an
@@ -365,6 +368,13 @@ def prepare_backend(harness, name):
         harness.backend.route("GET", TRANSFER_RECIPIENTS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
     elif name in {"staff_create_user", "staff_create_order", "staff_search_user"}:
         harness.backend.route("GET", OPERATOR_SEARCH_ENDPOINT, lambda _call: [])
+    elif name == "staff_expense":
+        harness.backend.route(
+            "GET", "/api/v1/staff/expenses/options",
+            lambda _call: {
+                "has_active_trip": True, "session_id": 124, "max_amount": 420000.0, "expenses_waiting_total": 0.0,
+            },
+        )
     elif name == "staff_sales_visit":
         # Starting a visit WRITES before it renders. With no routed reply the
         # fake backend's empty default would come back, the entry point would

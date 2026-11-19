@@ -2672,10 +2672,12 @@ def preview_collected_cash_edit(order_id):
 
         plan = OrderCashEditService().preview(order_id=order_id, new_amount=data.get("new_amount"))
         return success_response(data=plan.to_summary())
+    except ConflictError as exc:
+        return conflict_response(exc.message, error_code=exc.error_code)
     except NotFoundError as exc:
         return not_found_response(resource_type="Order", message=str(exc))
     except ValidationError as exc:
-        return validation_error_response(str(exc))
+        return validation_error_response(exc.message, error_code=exc.error_code)
     except Exception:  # noqa: BLE001
         current_app.logger.exception("collected-cash preview failed for order %s", order_id)
         return internal_error_response("Failed to preview collected-cash edit")
@@ -2742,11 +2744,11 @@ def apply_collected_cash_edit(order_id):
             message="Collected cash updated",
         )
     except ConflictError as exc:
-        return error_response(str(exc), status_code=409)
+        return conflict_response(exc.message, error_code=exc.error_code)
     except NotFoundError as exc:
         return not_found_response(resource_type="Order", message=str(exc))
     except ValidationError as exc:
-        return validation_error_response(str(exc))
+        return validation_error_response(exc.message, error_code=exc.error_code)
     except Exception:  # noqa: BLE001
         current_app.logger.exception("collected-cash edit failed for order %s", order_id)
         return internal_error_response("Failed to edit collected cash")
@@ -12951,8 +12953,10 @@ def verify_cash_reconciliation_session(session_id):
         return success_response(data=payload)
     except NotFoundError:
         return not_found_response("Driver cash session not found")
+    except ConflictError as e:
+        return conflict_response(e.message, error_code=e.error_code)
     except ValidationError as e:
-        return validation_error_response(e.message)
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Verify cash reconciliation session error: {e}")
         return internal_error_response("Failed to verify reconciliation session")
@@ -12997,8 +13001,10 @@ def adjust_cash_collection_event(event_id):
         )
     except NotFoundError as e:
         return not_found_response(str(e))
+    except ConflictError as e:
+        return conflict_response(e.message, error_code=e.error_code)
     except ValidationError as e:
-        return validation_error_response(e.message)
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Adjust cash collection event error: {e}")
         return internal_error_response("Failed to adjust cash collection event")
@@ -13032,8 +13038,10 @@ def resolve_cash_reconciliation_session(session_id):
         return success_response(data=payload)
     except NotFoundError:
         return not_found_response("Driver cash session not found")
+    except ConflictError as e:
+        return conflict_response(e.message, error_code=e.error_code)
     except ValidationError as e:
-        return validation_error_response(e.message)
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Resolve cash reconciliation session error: {e}")
         return internal_error_response("Failed to resolve reconciliation session")
@@ -13064,9 +13072,9 @@ def force_close_cash_reconciliation_session(session_id):
     except NotFoundError:
         return not_found_response("Driver cash session not found")
     except ConflictError as e:
-        return error_response(str(e), status_code=409)
+        return conflict_response(e.message, error_code=e.error_code)
     except ValidationError as e:
-        return validation_error_response(e.message)
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Force close cash reconciliation session error: {e}")
         return internal_error_response("Failed to force-close reconciliation session")

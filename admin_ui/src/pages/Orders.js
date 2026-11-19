@@ -48,6 +48,8 @@ import { formatMoney } from '../utils/formatMoney';
 import { getOrderStatusColor } from '../utils/orderStatusColor';
 import {
   describeAllocationScope,
+  CASH_EDIT_HANDLED_ERROR_CODES,
+  CASH_EDIT_REFUSAL_CODES,
   describeCashEditWarning,
   hasPlaceScopedAllocation,
 } from '../utils/cashScopeDisplay';
@@ -236,6 +238,8 @@ const Orders = () => {
   // confirmCashEdit would return undefined fields (new_amount → NaN → JSON null).
   // Same reason the order-edit flow keeps pendingEditPayload above.
   const [pendingCashEdit, setPendingCashEdit] = useState(null);
+  // The apply refused for a code this modal explains itself (a driver expense waiting on the trip).
+  const [cashEditRefusal, setCashEditRefusal] = useState(null);
   // Payment-method edit modal (2-step flow): step 1 = form, step 2 = preview/confirm.
   const [isPaymentMethodModalVisible, setIsPaymentMethodModalVisible] = useState(false);
   const [paymentMethodStep, setPaymentMethodStep] = useState(1);
@@ -661,6 +665,7 @@ const Orders = () => {
     });
     setCashEditPreview(null);
     setPendingCashEdit(null);
+    setCashEditRefusal(null);
     setCashEditStep(1);
     setIsCashEditModalVisible(true);
   };
@@ -674,6 +679,9 @@ const Orders = () => {
       'ui.orders.cash_edit_scope_cluster',
       "Settles the customer's (and linked accounts') oldest unpaid order first",
     );
+
+  // The floor the backend publishes while the driver's expense waits; never derived here.
+  const cashEditMinAmount = Number(selectedOrder?.collected_cash_edit_min_amount ?? 0);
 
   const handleCashEditPreview = async () => {
     let values;
@@ -701,7 +709,11 @@ const Orders = () => {
   };
 
   const cashEditMutation = useMutation({
-    mutationFn: ({ orderId, payload }) => adminService.editCollectedCash(orderId, payload),
+    mutationFn: ({ orderId, payload }) => adminService.editCollectedCash(
+      orderId,
+      payload,
+      { handledErrorCodes: CASH_EDIT_HANDLED_ERROR_CODES },
+    ),
     onSuccess: async (resp) => {
       message.success(t('ui.orders.collected_cash_updated', 'Collected cash updated'));
       const warnings = resp?.data?.warnings || [];
@@ -723,6 +735,12 @@ const Orders = () => {
       setIsCashEditModalVisible(false);
     },
     onError: (err) => {
+      // Named in handledErrorCodes, so api.js stayed silent: the modal's own copy is the one message.
+      const refusal = CASH_EDIT_REFUSAL_CODES.get(apiErrorCode(err));
+      if (refusal) {
+        setCashEditRefusal(describeCashEditWarning(refusal, t));
+        return;
+      }
       message.error(err?.response?.data?.message || t('ui.orders.collected_cash_failed', 'Failed to update collected cash'));
     },
   });
@@ -733,6 +751,7 @@ const Orders = () => {
       setCashEditStep(1);
       return;
     }
+    setCashEditRefusal(null);
     cashEditMutation.mutate({
       orderId: selectedOrder.id,
       payload: pendingCashEdit,
@@ -1711,13 +1730,14 @@ const Orders = () => {
                   ? ` (${selectedOrder.collected_cash_edit_window_remaining_hours.toFixed(1)}h left)`
                   : ''}
               </Button>
-            ) : isAdmin() && selectedOrder.collected_cash_edit_block_code === 'event_funds_prepayment_return' ? (
-              // Not hidden silently: the backend names the return that drew on this collection.
+            ) : isAdmin() && selectedOrder.collected_cash_edit_block_code ? (
+              // Not hidden silently: the backend names why the edit is closed, and any code it
+              // publishes is shown through its copy (describeCashEditWarning).
               <Alert
                 type="info"
                 showIcon
                 style={{ marginTop: 8 }}
-                data-testid="cash-edit-blocked-by-return"
+                data-testid="cash-edit-blocked"
                 message={describeCashEditWarning(selectedOrder.collected_cash_edit_block_code, t)}
               />
             ) : null}
@@ -3044,8 +3064,13 @@ const Orders = () => {
               </Descriptions.Item>
             </Descriptions>
             <Form.Item name="new_amount" label={t('ui.orders.new_collected_amount', 'Actual collected amount')}
+              extra={cashEditMinAmount > 0
+                ? t('ui.orders.cash_edit_min_amount', "At least {{amount}} while the driver's expense waits for a decision", {
+                  amount: formatMoney(cashEditMinAmount),
+                })
+                : undefined}
               rules={[{ required: true, message: t('ui.orders.collected_cash_amount_required', 'Enter the collected amount') }]}>
-              <InputNumber min={0} style={{ width: '100%' }} addonAfter="UZS" />
+              <InputNumber min={cashEditMinAmount} style={{ width: '100%' }} addonAfter="UZS" />
             </Form.Item>
             <Form.Item name="reason" label={t('ui.orders.collected_cash_reason', 'Reason')}
               rules={[{ required: true, min: 5, message: t('ui.orders.collected_cash_reason_required', 'Reason (min 5 chars) is required') }]}>
@@ -3080,6 +3105,9 @@ const Orders = () => {
               </Descriptions.Item>
             </Descriptions>
             <Alert type="info" showIcon style={{ marginBottom: 6 }} message={cashEditScopeCopy} />
+            {cashEditRefusal && (
+              <Alert type="error" showIcon message={cashEditRefusal} style={{ marginBottom: 6 }} />
+            )}
             {(cashEditPreview?.blocking_reasons || []).map((r, i) => (
               <Alert key={i} type="error" showIcon message={describeCashEditWarning(r, t)} style={{ marginBottom: 6 }} />
             ))}

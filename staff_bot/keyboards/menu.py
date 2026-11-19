@@ -249,6 +249,14 @@ class MenuKeyboards:
                 callback_data="staff_bottle_my_accountability",
             )],
             [InlineKeyboardButton(
+                f"⛽ {i18n.get('staff.menu.add_expense', language)}",
+                callback_data="staff_expense_start",
+            )],
+            [InlineKeyboardButton(
+                f"🧾 {i18n.get('staff.menu.my_expenses', language)}",
+                callback_data="staff_expense_list",
+            )],
+            [InlineKeyboardButton(
                 f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data="staff_back_to_main",
             )],

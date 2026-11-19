@@ -2,6 +2,8 @@
 Centralized validation helpers to reduce duplicate validation logic across API endpoints
 """
 
+import re
+from decimal import Decimal, InvalidOperation
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, UTC
 from flask import request
@@ -432,3 +434,43 @@ def strip_reason(reason: Optional[str], *, max_length: int, error_code: str) -> 
     if reason is not None and len(reason) > max_length:
         raise ValidationError(f"The reason can be at most {max_length} characters", error_code=error_code)
     return reason
+
+
+_CENT = Decimal("0.01")
+_AMOUNT_TEXT = re.compile(r"\d+(\.\d{1,2})?", re.ASCII)
+
+
+def parse_money_amount(value: Any, *, error_code: str, allow_zero: bool = False) -> Decimal:
+    """The one money parser for a figure from a JSON body: an int, a float, or digits with at most two decimals.
+
+    More than zero, or zero too with ``allow_zero`` (a set-balance target). A bool, a sign, a space, an exponent,
+    a third decimal or anything else is refused with ``error_code``, never rounded. There is no thousands-separator
+    rule here: the clients send a JSON number.
+    """
+    invalid = ValidationError(
+        (
+            "The amount must be a number of at least 0 with at most two decimals"
+            if allow_zero
+            else "The amount must be a number above 0 with at most two decimals"
+        ),
+        error_code=error_code,
+    )
+    if isinstance(value, bool):
+        raise invalid
+    if isinstance(value, int):
+        number = Decimal(value)
+    elif isinstance(value, float):
+        number = Decimal(str(value))
+    elif isinstance(value, str) and _AMOUNT_TEXT.fullmatch(value):
+        number = Decimal(value)
+    else:
+        raise invalid
+    try:
+        if not number.is_finite() or number != number.quantize(_CENT):
+            raise invalid
+        number = number.quantize(_CENT)
+    except InvalidOperation:  # too many digits to hold at all
+        raise invalid
+    if number < 0 or (number == 0 and not allow_zero):
+        raise invalid
+    return number

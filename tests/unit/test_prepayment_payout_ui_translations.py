@@ -65,6 +65,7 @@ KEYS = {
     "ui.prepayments.return_live_subscriptions",
     "ui.prepayments.return_place_debts",
     "ui.prepayments.return_session_effect",
+    "ui.prepayments.return_expenses_waiting",
     "ui.prepayments.return_session_closes_warning",
     "ui.prepayments.return_success_amount",
     "ui.prepayments.return_amount_required",
@@ -210,3 +211,11 @@ def test_the_status_copy_maps_cover_every_status_the_warnings_can_carry():
 
     assert set(_map_codes("PAYOUT_ORDER_STATUS_COPY")) == {s.value for s in CashCollectionService.RESERVABLE_ORDER_STATUSES}
     assert set(_map_codes("PAYOUT_SUBSCRIPTION_STATUS_COPY")) == {s.value for s in LIVE_SUBSCRIPTION_STATUSES}
+
+
+@pytest.mark.unit
+def test_the_seed_never_tells_the_operator_to_flush_redis():
+    """Deploys run this seed on prod, where Redis DB 0 is also the Celery broker: a flush drops queued tasks."""
+    src = (REPO_ROOT / "scripts" / "seed_prepayment_translations.py").read_text(encoding="utf-8")
+    assert "FLUSHDB" not in src.upper()
+    assert "FLUSHALL" not in src.upper()

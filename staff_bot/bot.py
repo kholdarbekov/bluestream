@@ -63,8 +63,9 @@ from staff_bot.handlers.tryouts import TryoutHandler
 from staff_bot.handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
 from staff_bot.handlers.delivery import (
     OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler, CashCollectionHandler,
-    BottleCollectionHandler, HistoryHandler, LocationHandler
+    BottleCollectionHandler, HistoryHandler, LocationHandler, ExpenseHandler
 )
+from staff_bot.handlers.delivery.expenses import EXPENSE_CATEGORY, EXPENSE_AMOUNT, EXPENSE_CONFIRM
 from staff_bot.handlers.delivery.status_update import BOTTLE_RETURN_INPUT
 from staff_bot.handlers.delivery.bottle_collection import (
     BOTTLE_COLLECTION_SEARCH_INPUT, BOTTLE_COLLECTION_QTY_INPUT,
@@ -567,6 +568,7 @@ class StaffBot:
         status_update_handler = StatusUpdateHandler()
         cash_collection_handler = CashCollectionHandler()
         bottle_collection_handler = BottleCollectionHandler()
+        expense_handler = ExpenseHandler()
         bottle_session_membership_handler = BottleSessionMembershipHandler()
         shared_place_handler = SharedPlaceHandler()
         history_handler = HistoryHandler()
@@ -950,6 +952,9 @@ class StaffBot:
             CallbackQueryHandler(status_update_handler.confirm_full_cash_collection, pattern=r"^staff_cash_full_\d+$"),
             CallbackQueryHandler(status_update_handler.start_partial_cash_collection, pattern=r"^staff_cash_partial_\d+$"),
             CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\d+$"),
+            CallbackQueryHandler(expense_handler.show_my_expenses, pattern="^staff_expense_list$"),
+            CallbackQueryHandler(expense_handler.ask_withdraw, pattern=r"^staff_expense_withdraw_\d+$"),
+            CallbackQueryHandler(expense_handler.confirm_withdraw, pattern=r"^staff_expense_withdraw_yes_\d+$"),
             CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$"),
             # The handoff button carries the amount it displayed: "…submit_all:120000.00".
             # The bare form is still routed so buttons rendered before that
@@ -1449,6 +1454,51 @@ class StaffBot:
             allow_reentry=True,
         )
         self.application.add_handler(bottle_transfer_confirm_conv)
+
+        # Driver adds a cash expense claim: category -> amount -> note/receipt -> Send for approval
+        expense_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(expense_handler.start_expense, pattern="^staff_expense_start$"),
+                # A category, Send or Cancel button tapped from a draft that already ended (timeout, menu tap,
+                # already sent). Registered as entry points, not second global handlers, so the LIVE flow and the
+                # stale tap reach the same method and cannot answer differently: each answers out loud and shows
+                # the Cash hub when the draft is gone. Cancel matters most: every note or photo draws a new confirm
+                # screen, so older ones keep their Cancel button, and fallbacks are only tried while a state is set.
+                CallbackQueryHandler(expense_handler.pick_category, pattern="^staff_expense_cat_[a-z_]+$"),
+                CallbackQueryHandler(expense_handler.send_expense, pattern="^staff_expense_send$"),
+                CallbackQueryHandler(expense_handler.cancel_expense, pattern="^staff_expense_cancel$"),
+            ],
+            states={
+                EXPENSE_CATEGORY: [
+                    menu_escape,
+                    CallbackQueryHandler(expense_handler.pick_category, pattern="^staff_expense_cat_[a-z_]+$"),
+                ],
+                EXPENSE_AMOUNT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, expense_handler.receive_amount),
+                ],
+                EXPENSE_CONFIRM: [
+                    menu_escape,
+                    MessageHandler(filters.PHOTO, expense_handler.receive_photo),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, expense_handler.receive_note),
+                    CallbackQueryHandler(expense_handler.send_expense, pattern="^staff_expense_send$"),
+                ],
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=expense_handler.FLOW_KEYS),
+            },
+            fallbacks=[
+                CommandHandler("cancel", _cancel_bottle_flow),
+                start_reset,
+                CallbackQueryHandler(expense_handler.cancel_expense, pattern="^staff_expense_cancel$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_leave_conversation, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_expense",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(expense_conv)
 
         # Co-driver session join/leave handlers
         self.application.add_handler(

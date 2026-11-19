@@ -651,6 +651,55 @@
     "rule": "/api/v1/admin/dispatch/stops/<int:delivery_id>/unassign"
   },
   {
+    "endpoint": "admin_driver_expenses.list_driver_expenses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/driver-expenses"
+  },
+  {
+    "endpoint": "admin_driver_expenses.get_driver_expense",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>"
+  },
+  {
+    "endpoint": "admin_driver_expenses.approve_driver_expense",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>/approve"
+  },
+  {
+    "endpoint": "admin_driver_expenses.preview_driver_expense_decision",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>/preview"
+  },
+  {
+    "endpoint": "admin_driver_expenses.get_driver_expense_receipt",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>/receipt"
+  },
+  {
+    "endpoint": "admin_driver_expenses.reject_driver_expense",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>/reject"
+  },
+  {
+    "endpoint": "admin_driver_expenses.undo_driver_expense_approval",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/driver-expenses/<int:expense_id>/undo"
+  },
+  {
     "endpoint": "admin_eta.get_eta_accuracy",
     "methods": [
       "GET"
@@ -4185,6 +4234,34 @@
       "GET"
     ],
     "rule": "/api/v1/staff/delivery/stats"
+  },
+  {
+    "endpoint": "staff.list_driver_expenses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/expenses"
+  },
+  {
+    "endpoint": "staff.submit_driver_expense",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/expenses"
+  },
+  {
+    "endpoint": "staff.withdraw_driver_expense",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/expenses/<int:expense_id>/withdraw"
+  },
+  {
+    "endpoint": "staff.get_driver_expense_options",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/expenses/options"
   },
   {
     "endpoint": "staff.create_order_for_client",

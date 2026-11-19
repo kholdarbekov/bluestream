@@ -324,6 +324,20 @@ const ReturnPrepaymentModal = ({ open, customerId, freeBalance, onClose, onDone 
           )}
         />
       )}
+      {session && Number(session.expenses_waiting) > 0 && (
+        // Outside the branch below on purpose: a typed amount refused with amount_exceeds_driver_cash
+        // is exactly when this explains the lower limit.
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 6 }}
+          message={t(
+            'ui.prepayments.return_expenses_waiting',
+            "{{amount}} of the driver's trip cash is waiting for an expense decision, so the limit is lower",
+            { amount: formatMoneyUZS(session.expenses_waiting) },
+          )}
+        />
+      )}
       {blocks.length === 0 && session && (
         <Alert
           type="info"

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { message } from 'antd';
 
 import DeliveryReports from '../../pages/DeliveryReports';
+import { usePermissions } from '../../components/common/PermissionGuard';
 import staffService from '../../services/staffService';
 
 vi.mock('../../services/staffService');
@@ -155,6 +156,9 @@ const reconciliationPayload = {
           declared_variance: 0,
           verified_variance: null,
           blocked_from_cod: false,
+          can_verify: true,
+          remaining_cash_to_submit: 100000,
+          expenses_approved_total: 0,
         },
         {
           id: 102,
@@ -168,6 +172,9 @@ const reconciliationPayload = {
           declared_variance: -50000,
           verified_variance: -50000,
           blocked_from_cod: true,
+          can_resolve: true,
+          remaining_cash_to_submit: 200000,
+          expenses_approved_total: 0,
         },
       ],
     },
@@ -399,6 +406,7 @@ describe('DeliveryReports page', () => {
               declared_variance: 1000,
               verified_variance: null,
               blocked_from_cod: false,
+              can_force_close: true,
             },
           ],
         },
@@ -1015,5 +1023,166 @@ describe('DeliveryReports report window', () => {
       page: 1,
       per_page: 20,
     }));
+  });
+});
+
+describe('DeliveryReports reads the backend answers for office actions and expenses', () => {
+  const sessionRow = (overrides) => ({
+    id: 301,
+    driver_name: 'Flag Driver',
+    session_started_at: '2026-03-06T08:00:00Z',
+    status: 'open',
+    expected_cash: 500000,
+    expected_cash_on_hand: 420000,
+    remaining_cash_to_submit: 0,
+    expenses_approved_total: 80000,
+    declared_cash: null,
+    verified_cash: null,
+    declared_variance: 0,
+    verified_variance: null,
+    blocked_from_cod: false,
+    can_verify: false,
+    verify_block_code: 'session_status',
+    can_resolve: false,
+    resolve_block_code: 'session_status',
+    can_force_close: false,
+    force_close_block_code: 'session_status',
+    ...overrides,
+  });
+
+  const mockSessions = (sessions, report = []) => {
+    staffService.getCashReconciliation.mockResolvedValue({
+      data: { data: { grand_total_cash: 0, summary: {}, report, sessions, total: sessions.length } },
+    });
+    staffService.getDeliveryPersons.mockResolvedValue({ data: { data: { items: [] } } });
+    staffService.getCodCollectionUsersWithOpenDebts.mockResolvedValue({ data: { data: { items: [] } } });
+  };
+
+  const renderPage = async () => {
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+    await waitFor(() => expect(staffService.getCashReconciliation).toHaveBeenCalled());
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows Verify, Resolve and Force-close from the can_* flags', async () => {
+    mockSessions([
+      sessionRow({ id: 301, driver_name: 'Open Verifiable', status: 'open', can_verify: true, verify_block_code: null }),
+      sessionRow({
+        id: 302, driver_name: 'Overdue Resolvable', status: 'overdue', can_resolve: true, resolve_block_code: null,
+      }),
+      sessionRow({ id: 303, driver_name: 'Submitted Blocked', status: 'submitted', verify_block_code: 'expenses_pending' }),
+      sessionRow({ id: 304, driver_name: 'Closeable', status: 'partial', can_force_close: true, force_close_block_code: null }),
+    ]);
+    await renderPage();
+
+    const open = (await screen.findAllByRole('row', { name: /Open Verifiable/ })).at(-1);
+    expect(within(open).getByRole('button', { name: /Approve/ })).toBeEnabled();
+    expect(within(open).getByRole('button', { name: /Reject/ })).toBeEnabled();
+    expect(within(open).queryByRole('button', { name: /Resolve/ })).toBeNull();
+    expect(within(open).queryByRole('button', { name: /Force Close/ })).toBeNull();
+
+    const overdue = screen.getAllByRole('row', { name: /Overdue Resolvable/ }).at(-1);
+    expect(within(overdue).getByRole('button', { name: /Resolve/ })).toBeEnabled();
+    expect(within(overdue).queryByRole('button', { name: /Approve/ })).toBeNull();
+
+    const closeable = screen.getAllByRole('row', { name: /Closeable/ }).at(-1);
+    expect(within(closeable).getByRole('button', { name: /Force Close/ })).toBeEnabled();
+
+    const blocked = screen.getAllByRole('row', { name: /Submitted Blocked/ }).at(-1);
+    expect(within(blocked).getByRole('button', { name: /Approve/ })).toBeDisabled();
+    expect(within(blocked).getByRole('button', { name: /Reject/ })).toBeDisabled();
+    expect(within(blocked).queryByRole('button', { name: /Resolve/ })).toBeNull();
+
+    const user = userEvent.setup();
+    await user.hover(within(blocked).getByRole('button', { name: /Approve/ }).parentElement);
+    expect(await screen.findByText("Decide the driver's waiting expenses first")).toBeInTheDocument();
+  });
+
+  it('hides Force-close from a manager even when can_force_close', async () => {
+    usePermissions.mockReturnValue({
+      getUserRole: () => 'manager',
+      isAdmin: () => false,
+      isManager: () => true,
+      isOperator: () => false,
+      hasPermission: () => true,
+    });
+    mockSessions([
+      sessionRow({ driver_name: 'Closeable', status: 'partial', can_force_close: true, force_close_block_code: null }),
+    ]);
+    await renderPage();
+
+    await screen.findAllByRole('row', { name: /Closeable/ });
+    expect(screen.queryByRole('button', { name: /Force Close/ })).toBeNull();
+    usePermissions.mockReturnValue({
+      getUserRole: () => 'admin',
+      isAdmin: () => true,
+      isManager: () => false,
+      isOperator: () => false,
+      hasPermission: () => true,
+    });
+  });
+
+  it('reads To hand in from remaining_cash_to_submit', async () => {
+    mockSessions([sessionRow({ driver_name: 'Handed In' })]);
+    await renderPage();
+
+    const row = (await screen.findAllByRole('row', { name: /Handed In/ })).at(-1);
+    // expected_cash_on_hand is 420000 on the wire; the column must show the backend's 0.
+    expect(within(row).queryByText('420,000 UZS')).toBeNull();
+    expect(within(row).getAllByText('0 UZS').length).toBeGreaterThan(0);
+  });
+
+  it('shows the Expenses column in the driver and session tables', async () => {
+    mockSessions(
+      [sessionRow({ driver_name: 'Spender' })],
+      [{ driver_id: 9, driver_name: 'Spender', phone: '+998900000000', total_cash_collected: 500000, expenses_approved_total: 123000 }],
+    );
+    await renderPage();
+
+    expect((await screen.findAllByRole('columnheader', { name: 'Expenses' })).length).toBe(2);
+    expect(screen.getAllByText('123,000 UZS').length).toBe(1);
+    expect(screen.getAllByText('80,000 UZS').length).toBe(1);
+  });
+
+  it('shows the net variance, the waiting line and the trip expenses in the detail', async () => {
+    mockSessions([sessionRow({ id: 310, driver_name: 'Detail Driver' })]);
+    staffService.getCashReconciliationSession.mockResolvedValue({
+      data: {
+        data: sessionRow({
+          id: 310,
+          driver_name: 'Detail Driver',
+          declared_variance: -90000,
+          declared_variance_net: -10000,
+          expenses_waiting_total: 80000,
+          events: [],
+          handoffs: [],
+          expenses: [
+            { id: 1, category: 'fuel', amount: 50000, approved_amount: 40000, status: 'approved', submitted_at: '2026-03-06T09:00:00Z' },
+            { id: 2, category: 'new_bottles', amount: 80000, approved_amount: null, status: 'pending', submitted_at: '2026-03-06T10:00:00Z' },
+          ],
+        }),
+      },
+    });
+    const user = userEvent.setup();
+    await renderPage();
+
+    await user.click(await findClickable(() => screen.getAllByRole('button', { name: /View/ }).at(-1)));
+
+    const dialog = await screen.findByRole('dialog');
+    const variance = within(dialog).getByText('Declared Variance').closest('th').nextElementSibling;
+    expect(variance).toHaveTextContent('-10,000 UZS');
+    expect(variance).not.toHaveTextContent('-90,000');
+    const waiting = within(dialog).getByText('Waiting for approval').closest('th').nextElementSibling;
+    expect(waiting).toHaveTextContent('80,000 UZS');
+    expect(within(dialog).getByText('Expenses on this trip')).toBeInTheDocument();
+    const fuel = within(dialog).getByRole('row', { name: /Fuel/ });
+    expect(fuel).toHaveTextContent('50,000 UZS');
+    expect(fuel).toHaveTextContent('40,000 UZS');
+    expect(fuel).toHaveTextContent('Approved');
+    const bottles = within(dialog).getByRole('row', { name: /New bottles/ });
+    expect(bottles).toHaveTextContent('Waiting');
   });
 });

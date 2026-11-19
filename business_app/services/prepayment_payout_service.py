@@ -20,10 +20,9 @@ a return posts the matching contract entry in the same transaction, or blocks (s
 """
 
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func
@@ -62,20 +61,18 @@ from business_app.services.cash_collection_service import (
     card_click_origin_event_clause,
     customer_credit_rebook_event_clause,
 )
-from business_app.services.driver_reconciliation_service import DriverReconciliationService
+from business_app.services.driver_reconciliation_service import CashFigures, DriverReconciliationService
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.decorators import has_admin_permission
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.service_factory import get_corporate_contract_service
 from business_app.utils.transactions import atomic_transaction
-from business_app.utils.validation_helpers import strip_reason
+from business_app.utils.validation_helpers import parse_money_amount, strip_reason
 from shared.enums import LIVE_SUBSCRIPTION_STATUSES
 
 logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0.00")
-CENT = Decimal("0.01")
-_AMOUNT_TEXT = re.compile(r"\d+(\.\d{1,2})?", re.ASCII)
 REASON_MIN_LENGTH = 5
 IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
@@ -84,38 +81,8 @@ IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
 
 def parse_payout_amount(value: Any, *, allow_zero: bool = False) -> Decimal:
-    """A money figure from a JSON body: an int, a float, or digits with at most two decimals.
-
-    More than zero, or zero too with ``allow_zero`` (a set-balance target). A bool, a sign, a space,
-    a third decimal or anything else is refused with PAYOUT_AMOUNT_INVALID, never rounded.
-    """
-    invalid = ValidationError(
-        (
-            "The amount must be a number of at least 0 with at most two decimals"
-            if allow_zero
-            else "The amount must be a number above 0 with at most two decimals"
-        ),
-        error_code="PAYOUT_AMOUNT_INVALID",
-    )
-    if isinstance(value, bool):
-        raise invalid
-    if isinstance(value, int):
-        number = Decimal(value)
-    elif isinstance(value, float):
-        number = Decimal(str(value))
-    elif isinstance(value, str) and _AMOUNT_TEXT.fullmatch(value):
-        number = Decimal(value)
-    else:
-        raise invalid
-    try:
-        if not number.is_finite() or number != number.quantize(CENT):
-            raise invalid
-        number = number.quantize(CENT)
-    except InvalidOperation:  # too many digits to hold at all
-        raise invalid
-    if number < ZERO or (number == ZERO and not allow_zero):
-        raise invalid
-    return number
+    """A return's money figure: ``parse_money_amount``'s rule, refused with PAYOUT_AMOUNT_INVALID."""
+    return parse_money_amount(value, error_code="PAYOUT_AMOUNT_INVALID", allow_zero=allow_zero)
 
 
 def parse_paid_at(value: Any, *, now: datetime) -> datetime:
@@ -457,7 +424,13 @@ class PrepaymentPayoutService:
 
         self._audit_recorded(payout, plan, reason=reason, idempotency_key=idempotency_key, actor_user_id=actor_user_id)
         if next_session is not None:
-            self._audit_session_closed(payout, next_session, actor_user_id=actor_user_id)
+            DriverReconciliationService.audit_session_closed_by_cash_out(
+                payout.driver_cash_session,
+                next_session,
+                actor_user_id=actor_user_id,
+                cause="payout",
+                cause_id=payout.id,
+            )
         self._notify_customer(payout)
         return PayoutResult(payout=payout, plan=plan, replayed=False, next_session=next_session)
 
@@ -748,8 +721,9 @@ class PrepaymentPayoutService:
         """(session, effect, blocking reasons) of a return paid out of the driver's current trip cash (§4.3).
 
         The session is his current not-yet-closed one, under the session row lock on apply; a past session
-        is never touched (P11). The return is capped at what he still holds of this trip (on hand minus
-        handed in), so on hand never drops below what he handed in.
+        is never touched (P11). The return is capped at the trip's "Hand in now" (``cash_held_now``: on hand
+        minus handed in minus the claims waiting), so on hand never drops below what he handed in plus a claim
+        he is waiting on. The figures are the STORED ones, current under the payout's session lock.
         """
         recon = self.recon_service
         session = recon.find_active_session(driver_user_id, for_update=lock)
@@ -763,8 +737,9 @@ class PrepaymentPayoutService:
                 ],
             )
 
-        figures = recon.cash_figures(session)
-        cap = figures.remaining_to_hand_in
+        figures = CashFigures.from_session(session)
+        waiting = recon._sum_waiting_expenses(session)
+        cap = recon.cash_held_now(session, waiting=waiting)
         on_hand_after = figures.on_hand - amount
         effect = SessionEffect(
             session_id=session.id,
@@ -772,6 +747,7 @@ class PrepaymentPayoutService:
             on_hand_before=figures.on_hand,
             handed_in=figures.handed_in,
             cap=cap,
+            expenses_waiting=waiting,
             on_hand_after=on_hand_after,
             will_close=recon.session_closes(handed_in=figures.handed_in, on_hand=on_hand_after, has_live_payout=True),
         )
@@ -964,31 +940,6 @@ class PrepaymentPayoutService:
                 "debits": [
                     {"event_id": debit.cash_collection_event_id, "amount": str(debit.amount)} for debit in payout.debits
                 ],
-            },
-        )
-
-    @staticmethod
-    def _audit_session_closed(
-        payout: CustomerCreditPayout, next_session: DriverCashSession, *, actor_user_id: int
-    ) -> None:
-        """The return left the driver nothing to hand in, so it closed his trip's cash session."""
-        session = payout.driver_cash_session
-        audit_logger.log_event(
-            event_type=AuditEventType.PAYMENT_PROCESSED,
-            action="driver_cash_session_closed_by_payout",
-            severity=AuditSeverity.MEDIUM,
-            resource_type="driver_cash_session",
-            resource_id=str(session.id),
-            additional_data={
-                "driver_user_id": session.driver_user_id,
-                "payout_id": payout.id,
-                "actor_user_id": actor_user_id,
-                "expected_cash": str(session.expected_cash),
-                "expected_cash_on_hand": str(session.expected_cash_on_hand),
-                "declared_cash": str(session.declared_cash) if session.declared_cash is not None else None,
-                "declared_variance": str(session.declared_variance),
-                "status": session.status.value,
-                "next_driver_cash_session_id": next_session.id,
             },
         )
 

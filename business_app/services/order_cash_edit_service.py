@@ -18,14 +18,14 @@ from flask import current_app
 from business_app.models.order import Order
 from business_app.models.payment import CashCollectionEvent, DriverCashSession
 from business_app.services.cash_collection_service import CashCollectionService
-from business_app.services.driver_reconciliation_service import DriverReconciliationService
+from business_app.services.driver_reconciliation_service import CashFigures, DriverReconciliationService
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.cod_cap import cod_cap_reached
-from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 from business_app.utils.order_timing import delivered_at_utc
 from business_app.utils.payment_projection import net_open_receivable_amount
 from business_app.utils.transactions import atomic_transaction
-from shared.enums import CashCollectionSource, DriverCashSessionStatus, OrderStatus, PaymentMethod
+from shared.enums import CashCollectionSource, OrderStatus, PaymentMethod
 
 DEFAULT_CASH_EDIT_WINDOW_HOURS = 72
 
@@ -133,6 +133,10 @@ class OrderCashEditService:
         (§4.3a, the same ``live_payout_ids_for_event`` read every correction guard uses), so the screen can
         say "undo the return first". None otherwise, including when the window or the event count already
         rules the edit out: undoing the return would not bring it back then.
+
+        ``collected_cash_edit_min_amount`` is the lowest amount the edit accepts while a claim waits on the event's
+        trip (``expense_floor``), so the dialog can say so before the preview refuses; None when any amount from 0
+        goes. A correction upwards is always allowed, so it never sets the block code.
         """
         is_cod = order.payment_method == PaymentMethod.CASH
         delivered = order.status == OrderStatus.DELIVERED
@@ -142,6 +146,7 @@ class OrderCashEditService:
                 "collected_cash_edit_block_code": None,
                 "collected_cash_edit_window_remaining_hours": None,
                 "collected_cash_event_amount": None,
+                "collected_cash_edit_min_amount": None,
             }
         remaining: Optional[float] = None
         editable = True
@@ -164,7 +169,19 @@ class OrderCashEditService:
             # The edit adjusts this event; payment.amount_collected may be funded from
             # another source (card transfer, prepaid credit) and would seed a wrong figure.
             "collected_cash_event_amount": (float(events[0].amount) if len(events) == 1 else None),
+            "collected_cash_edit_min_amount": (self._min_corrected_amount(events[0]) if len(events) == 1 else None),
         }
+
+    def _min_corrected_amount(self, event: CashCollectionEvent) -> Optional[float]:
+        """The lowest amount ``event`` may be corrected to without taking its trip's on hand below ``expense_floor``,
+        or None when the trip has no floor."""
+        session = event.driver_cash_session
+        floor = self.recon_service.expense_floor(session) if session is not None else None
+        if floor is None:
+            return None
+        zero = Decimal("0.00")
+        headroom = max(zero, CashFigures.from_session(session).on_hand - floor)
+        return float(max(zero, self.cash_service._to_decimal(event.amount) - headroom))
 
     # ---- preview (read-only) ----
     def preview(self, *, order_id: int, new_amount: Any) -> CashEditPlan:
@@ -201,6 +218,7 @@ class OrderCashEditService:
         order_total = to_dec(order.total_amount)
         current_collected = to_dec(event.amount) if event else Decimal("0.00")
 
+        session: Optional[DriverCashSession] = None
         session_id: Optional[int] = None
         session_status: Optional[str] = None
         session_will_reopen = False
@@ -211,11 +229,7 @@ class OrderCashEditService:
                 session_status = getattr(session.status, "value", session.status)
                 if session_status in _REOPEN_REQUIRED:
                     session_will_reopen = True
-                    conflict = DriverCashSession.query.filter(
-                        DriverCashSession.driver_user_id == session.driver_user_id,
-                        DriverCashSession.id != session.id,
-                        DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]),
-                    ).first()
+                    conflict = self.recon_service.active_session_conflict(session)
                     if conflict:
                         blocking.append(
                             f"cash_session_active_conflict: driver has another active session "
@@ -236,6 +250,13 @@ class OrderCashEditService:
                     f"event_funds_prepayment_return: prepayment return(s) {projection['funding_payout_ids']} "
                     "drew on this collection; undo the return first"
                 )
+            if session is not None:
+                # A hint read without the lock; adjust_event_amount decides again under the session lock.
+                below_floor = self.recon_service.correction_below_expense_floor(
+                    session, change=new_dec - current_collected
+                )
+                if below_floor is not None:
+                    blocking.append(f"event_funds_driver_expense: {below_floor}")
             applied_to_order = projection["applied_to_order"]
             projected_outstanding = projection["order_outstanding_after"]
             customer_credit_delta = projection["credit_after"] - projection["credit_before"]
@@ -367,6 +388,10 @@ class OrderCashEditService:
             raise NotFoundError("Order not found")
 
         plan = self.preview(order_id=order_id, new_amount=new_amount)
+        if any(reason.startswith("cash_session_active_conflict") for reason in plan.blocking_reasons):
+            raise ConflictError("; ".join(plan.blocking_reasons), error_code="CASH_SESSION_ACTIVE_CONFLICT")
+        if any(blocked.startswith("event_funds_driver_expense") for blocked in plan.blocking_reasons):
+            raise ValidationError("; ".join(plan.blocking_reasons), error_code="EVENT_FUNDS_DRIVER_EXPENSE")
         if plan.blocking_reasons:
             raise ValidationError("; ".join(plan.blocking_reasons))
 

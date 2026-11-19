@@ -304,8 +304,24 @@ class BaseHandler:
         # The session the driver was settling closed while his tap waited on it: his own
         # earlier tap (a double tap), a prepayment return from this trip's cash that
         # emptied it, or an admin close. Nothing was recorded and that trip is settled,
-        # so the true sentence is the same one.
+        # so the true sentence is the same one. A hand-in BUTTON tap (it carries its trip's id)
+        # answered with this code never reaches this sentence: its trip has since closed, often by
+        # the same driver's first tap, whose "✅" confirmation is the tapped message. The handler
+        # leaves that message as it is and sends the current Cash screen below it
+        # (`_hand_in_trip_closed`).
         'RECONCILIATION_SESSION_CHANGED': 'staff.error.api.nothing_to_reconcile',
+        # A typed hand-in above "Hand in now" while an expense claim waits on the trip: the cash it waits on
+        # stays with the driver until the office decides, so he hands in the figure on the Cash screen's button.
+        'RECONCILIATION_EXPENSES_WAITING': 'staff.error.api.expenses_waiting_hand_in',
+        # Driver cash expenses (business_app/services/driver_expense/claims.py submit): no trip to spend from,
+        # a claim above "Hand in now", or an amount or note the backend refuses.
+        'DRIVER_EXPENSE_NO_ACTIVE_TRIP': 'staff.error.api.expense_no_active_trip',
+        'DRIVER_EXPENSE_ABOVE_CASH_HELD': 'staff.error.api.expense_above_cash_held',
+        'DRIVER_EXPENSE_AMOUNT_INVALID': 'staff.error.api.expense_amount_invalid',
+        'DRIVER_EXPENSE_NOTE_REQUIRED': 'staff.error.api.expense_note_required',
+        'DRIVER_EXPENSE_NOTE_TOO_LONG': 'staff.error.api.expense_note_too_long',
+        # A Withdraw tap on a claim already decided or withdrawn (a stale My expenses card).
+        'DRIVER_EXPENSE_NOT_WITHDRAWABLE': 'staff.error.api.expense_not_withdrawable',
         # CashCollectionService: the customer behind an at-door collection or a
         # statement lookup was deleted/merged out from under the driver's card.
         'COD_CUSTOMER_NOT_FOUND': 'staff.error.api.customer_not_found',
@@ -822,6 +838,50 @@ class BaseHandler:
             await update.message.reply_text(
                 text, reply_markup=keyboard, parse_mode='HTML'
             )
+
+    async def _refuse_stale_tap(self, update: Update, language: str, reply_markup=None):
+        """A tap on an inline button whose flow is already over. Say so, and take
+        the dead buttons away.
+
+        Telegram never removes an old message, so every picker this handler ever
+        drew is still sitting in the driver's scrollback with live-looking
+        buttons on it. The flow behind it, though, is gone the moment the driver
+        taps a main-menu button: `flow_state.clear_pending_flows` drops
+        `pending_bottle_collection_flow` / `pending_transfer_flow` and the
+        guards below then refuse the tap.
+
+        Refusing it SILENTLY — a bare `query.answer()` with no `text=` — is what
+        this bot used to do, and it is indistinguishable from a crashed bot: the
+        spinner stops and nothing else happens, so the driver taps harder. One
+        toast plus a screen that no longer offers the dead buttons is the whole
+        fix, and it is written once here because "this tap belongs to a flow
+        that ended" is one rule with several call sites (the collection quantity
+        picker, the transfer driver picker and send screen).
+
+        The picker is neutralised on the TAP rather than when the flow clears:
+        `clear_pending_flows` is the SSOT for leaving a flow and it deliberately
+        knows nothing about Telegram message ids — teaching it to reach back and
+        edit screens would mean tracking a message id per flow, i.e. a second
+        piece of state to get wrong, for a message the driver is no longer
+        looking at. The tap is both the moment feedback is wanted and the moment
+        the message handle is in hand.
+        """
+        query = update.callback_query
+        if query is None:
+            return
+        text = i18n.get('staff.cancelled', language)
+        try:
+            await query.answer(text=text)
+        except Exception:
+            logger.debug("stale-tap callback answer failed", exc_info=True)
+        try:
+            await query.edit_message_text(
+                text, reply_markup=reply_markup, parse_mode='HTML'
+            )
+        except Exception:
+            # An unchanged message, a message too old to edit, a deleted one:
+            # the toast already told the driver, so this is best-effort.
+            logger.debug("stale-tap picker cleanup failed", exc_info=True)
 
     async def _handle_auth_error(self, update: Update, language: str):
         """Tell the user their session is gone — and why, when the backend

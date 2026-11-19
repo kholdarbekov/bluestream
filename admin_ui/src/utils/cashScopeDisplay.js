@@ -83,6 +83,11 @@ const WARNING_COPY = new Map([
     'ui.prepayments.correction_blocked_by_return',
     'A prepayment return drew on this collection. Undo the return first.',
   ]],
+  ['event_funds_driver_expense', [
+    'ui.orders.cash_warning_driver_expense',
+    'The driver has an expense waiting for approval on this trip; this correction would leave him '
+      + 'less than he handed in plus that claim. Decide the expense first.',
+  ]],
   ['correction_pushes_cod_over_cap', [
     'ui.orders.cash_warning_cap',
     'This correction puts the customer (or their workplace) back at the COD debt cap — '
@@ -181,6 +186,12 @@ export function describeCodedReason(reason, copyMap, t) {
 export function describeCashEditWarning(warning, t) {
   return describeCodedReason(warning, WARNING_COPY, t);
 }
+
+// Refusal error_codes the collected-cash apply explains itself -> the warning code whose copy says it.
+export const CASH_EDIT_REFUSAL_CODES = new Map([['EVENT_FUNDS_DRIVER_EXPENSE', 'event_funds_driver_expense']]);
+
+/** Passed as the apply request's `handledErrorCodes`, so api.js stays silent and the modal's copy is the one message. */
+export const CASH_EDIT_HANDLED_ERROR_CODES = [...CASH_EDIT_REFUSAL_CODES.keys()];
 
 // Statuses a payout preview's warning lines can carry -> [key, English fallback]: the pending orders that hold
 // credit, and the live subscriptions that may rely on it.

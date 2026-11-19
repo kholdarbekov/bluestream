@@ -17,6 +17,8 @@ BESPOKE = {
     "BOTTLE_SESSION_REQUIRED": "start/join-session buttons (DeliveryKeyboards.session_required_remedy): orders_pool.py "
     "accept, and base.py API_ERROR_REMEDY_KEYBOARDS for every other refusal (also mapped)",
     "STAFF_INVALID_INVITE_TOKEN": "start.py login refusal copy (also mapped)",
+    "STATE_CHANGED": "price_lines.py price_changed_quote: operator/create_order.py and sales/visit.py redraw the "
+    "quote on details.reason price_changed; the hand-in answers hand_in_changed only to a button that sends a basis",
 }
 
 # The two shapes a reason may take (Task 12 ruling). A code no staff-bot route
@@ -27,6 +29,12 @@ _NOT_ON_ROUTE = "not raised on any staff-bot route"
 _BOT_NEVER_SENDS = "staff route, but the bot never sends this input"
 _RACE_ONLY = "staff route, but race-only"
 _FALLBACK = " — backend-reason fallback applies"
+_EXPENSE_CLAIM_BODY = (
+    f"{_BOT_NEVER_SENDS} (claims.py submit: the bot mints one key per draft, sends a tuple category and a "
+    f"Telegram file id){_FALLBACK}"
+)
+_EXPENSE_DECISION = f"{_NOT_ON_ROUTE} (driver_expense/decision.py: admin /admin/driver-expenses/<id>/*)"
+_EXPENSE_RECEIPT = f"{_NOT_ON_ROUTE} (driver_expense/receipt.py: admin /admin/driver-expenses/<id>/receipt)"
 
 # Raised only on paths no staff-bot route reaches. One reason per line.
 NOT_STAFF_FACING: dict[str, str] = {
@@ -94,7 +102,6 @@ NOT_STAFF_FACING: dict[str, str] = {
     "ORDER_NOT_CUSTOMER_CANCELLABLE": f"{_NOT_ON_ROUTE} (order_service.py cancel_order_as_customer: customer "
     "POST /orders/<id>/cancel)",
     "PAY_REFUSED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
-    "STATE_CHANGED": f"{_NOT_ON_ROUTE} (customer order/subscription writes)",
     "PAYMENT_NOT_CANCELLABLE": f"{_NOT_ON_ROUTE} (api/payments.py:694 /payments/<id>/cancel)",
     "RAIL_MOVE_NOT_ALLOWED": f"{_NOT_ON_ROUTE} (payment_service.create_payment: customer POST "
     "/orders/<id>/retry-payment)",
@@ -161,6 +168,10 @@ NOT_STAFF_FACING: dict[str, str] = {
     "PAYOUT_UNDO_BLOCKED": f"{_NOT_ON_ROUTE} (prepayment_payout_service.py: admin prepayment payout)",
     "EVENT_FUNDS_PREPAYMENT_RETURN": f"{_NOT_ON_ROUTE} (cash_collection_service.py: admin collected-cash correction)",
     "CASH_SESSION_NOT_FORCE_CLOSEABLE": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py:729: admin force-close)",
+    "CASH_SESSION_EXPENSES_PENDING": f"{_NOT_ON_ROUTE} (driver_reconciliation_service.py verify/resolve/force_close: "
+    "admin cash-reconciliation routes)",
+    "EVENT_FUNDS_DRIVER_EXPENSE": f"{_NOT_ON_ROUTE} (cash_collection_service.adjust_event_amount, "
+    "order_cash_edit_service.apply_edit: admin routes)",
     "INVALID_REPORT_TYPE": f"{_NOT_ON_ROUTE} (admin_report_service.py:75: admin /reports/generate)",
     "UNSUPPORTED_REPORT_TYPE": f"{_NOT_ON_ROUTE} (admin_report_service.py:103: admin /reports/generate)",
     "GROCERY_FLAG_BLOCKED_WHILE_LINKED": f"{_NOT_ON_ROUTE} (auth_service.py:1388: admin user and try-out edits)",
@@ -195,6 +206,14 @@ NOT_STAFF_FACING: dict[str, str] = {
     "SHARED_PLACE_RESOLVE_INVALID": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
     "SHARED_PLACE_NOT_VERIFIED": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
     "SHARED_PLACE_RESOLUTION_CONFLICT": f"{_NOT_ON_ROUTE} (admin shared-place resolve)",
+    # Admin decisions on driver expense claims (spec 2026-11-17 §6.4): the admin Driver expenses page only.
+    "DRIVER_EXPENSE_DECISION_BLOCKED": _EXPENSE_DECISION,
+    "DRIVER_EXPENSE_SELF_DECISION": _EXPENSE_DECISION,
+    "DRIVER_EXPENSE_REASON_REQUIRED": _EXPENSE_DECISION,
+    "DRIVER_EXPENSE_REASON_TOO_LONG": _EXPENSE_DECISION,
+    # Admin receipt photo (spec 2026-11-17 §6.8): GET /admin/driver-expenses/<id>/receipt only.
+    "DRIVER_EXPENSE_NO_RECEIPT": _EXPENSE_RECEIPT,
+    "DRIVER_EXPENSE_RECEIPT_UNAVAILABLE": _EXPENSE_RECEIPT,
     # Price-change transition (spec 2026-11-16): switch runs in Celery; courtesy routes are admin-UI only.
     "PRICE_CHANGE_PRODUCT_DISCOUNTED": f"{_NOT_ON_ROUTE} (price_change/switch.py: raised inside the Celery switch, "
     "logged, never answered over HTTP)",
@@ -283,6 +302,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     f"(outlet_service.py:452, new_outlet.py){_FALLBACK}",
     "SALES_WINDOW_INVALID": f"{_BOT_NEVER_SENDS}: raised by the outlet PUT (outlet_service.py:1044/1056), which "
     f"the bot never calls{_FALLBACK}",
+    # Driver cash expenses: the body checks the bot's own draft always passes.
+    "DRIVER_EXPENSE_IDEMPOTENCY_KEY_REUSED": _EXPENSE_CLAIM_BODY,
+    "DRIVER_EXPENSE_CATEGORY_INVALID": _EXPENSE_CLAIM_BODY,
+    "DRIVER_EXPENSE_IDEMPOTENCY_KEY_REQUIRED": _EXPENSE_CLAIM_BODY,
+    "DRIVER_EXPENSE_RECEIPT_INVALID": _EXPENSE_CLAIM_BODY,
+    "DRIVER_EXPENSE_NOT_FOUND": f"{_BOT_NEVER_SENDS} (claims.py withdraw: the bot sends only ids it listed for this "
+    f"driver){_FALLBACK}",
     "ORDER_NOT_FOUND": f"{_RACE_ONLY}: re-dispatch reads the delivery first (STAFF_DELIVERY_NOT_FOUND); this needs "
     f"an admin to delete the order inside the lock window (order_schedule_service.py _apply_reschedule){_FALLBACK}",
     "ORDER_RESCHEDULE_WINDOW_INVALID": f"{_RACE_ONLY}: the bot sends no window and re-dispatch passes the order's "

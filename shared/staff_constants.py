@@ -174,6 +174,35 @@ BOTTLE_EVENTS = (
     BOTTLE_EVENT_JOIN_DECLINED,
 )
 
+# Driver cash expenses (spec 2026-11-17). SSOT for the vocabulary: read by the model CHECKs
+# (business_app/models/driver_expense.py), the migration's FROZEN copy (pinned equal by
+# tests/integration/test_driver_cash_expense_pg_constraints.py), the staff bot keyboards and key families,
+# the translation seed, and the staff bot's `/internal/expense-event` webhook allowlist.
+DRIVER_EXPENSE_CATEGORIES = (
+    'fuel',
+    'new_bottles',
+    'caps',
+    'labels',
+    'other_supplies',
+    'vehicle',
+    'parking_wash',
+    'other',
+)
+# Categories whose claim must carry a note saying what the money bought.
+DRIVER_EXPENSE_NOTE_REQUIRED_CATEGORIES = ('other',)
+DRIVER_EXPENSE_STATUSES = ('pending', 'approved', 'rejected', 'withdrawn')
+# Pushes the office's decision sends to the driver.
+DRIVER_EXPENSE_EVENT_APPROVED = 'approved'
+DRIVER_EXPENSE_EVENT_APPROVED_LESS = 'approved_less'
+DRIVER_EXPENSE_EVENT_REJECTED = 'rejected'
+DRIVER_EXPENSE_EVENT_UNDONE = 'approval_undone'
+DRIVER_EXPENSE_EVENTS = (
+    DRIVER_EXPENSE_EVENT_APPROVED,
+    DRIVER_EXPENSE_EVENT_APPROVED_LESS,
+    DRIVER_EXPENSE_EVENT_REJECTED,
+    DRIVER_EXPENSE_EVENT_UNDONE,
+)
+
 # Risk flags a driver cash-reconciliation session can carry.
 #
 # SSOT for a value with TWO expressions: `DriverReconciliationService.

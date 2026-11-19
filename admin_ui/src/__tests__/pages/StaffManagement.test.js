@@ -111,7 +111,7 @@ describe('Cash reconciliation tab report window', () => {
     const payload = cashPayload(1);
     payload.data.data.sessions = [{
       id: 5, driver_name: 'Aziz', session_started_at: '2026-03-02T09:00:00', status: 'open',
-      expected_cash: 150000, expected_cash_on_hand: 90000, declared_cash: null, verified_cash: null,
+      expected_cash: 150000, expected_cash_on_hand: 90000, remaining_cash_to_submit: 90000, declared_cash: null, verified_cash: null,
     }];
     staffService.getCashReconciliation.mockResolvedValue(payload);
     await openCashTab();
@@ -123,5 +123,29 @@ describe('Cash reconciliation tab report window', () => {
     const row = screen.getByRole('row', { name: /Aziz/ });
     expect(within(row).getByText('150,000 UZS')).toBeInTheDocument();
     expect(within(row).getByText('90,000 UZS')).toBeInTheDocument();
+  });
+
+  it('reads To hand in from remaining_cash_to_submit and shows Expenses', async () => {
+    const payload = cashPayload(1);
+    payload.data.data.report = [{
+      driver_id: 7, driver_name: 'Aziz', phone: '+998901112233', total_cash_collected: 150000,
+      expenses_approved_total: 25000,
+    }];
+    payload.data.data.sessions = [{
+      id: 5, driver_name: 'Aziz', session_started_at: '2026-03-02T09:00:00', status: 'open',
+      expected_cash: 150000, expected_cash_on_hand: 420000, remaining_cash_to_submit: 0,
+      expenses_approved_total: 30000, declared_cash: null, verified_cash: null,
+    }];
+    staffService.getCashReconciliation.mockResolvedValue(payload);
+    await openCashTab();
+
+    expect((await screen.findAllByRole('columnheader', { name: 'Expenses' })).length).toBe(2);
+    const row = screen.getAllByRole('row', { name: /Aziz/ }).at(-1);
+    expect(within(row).queryByText('420,000 UZS')).toBeNull();
+    const headers = [...row.closest('table').querySelectorAll('thead th')].map((th) => th.textContent);
+    const cells = [...row.querySelectorAll('td')].map((td) => td.textContent);
+    expect(cells[headers.indexOf('To hand in')]).toBe('0 UZS');
+    expect(cells[headers.indexOf('Expenses')]).toBe('30,000 UZS');
+    expect(screen.getByText('25,000 UZS')).toBeInTheDocument();
   });
 });

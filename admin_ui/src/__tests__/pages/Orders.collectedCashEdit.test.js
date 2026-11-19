@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Orders from '../../pages/Orders';
 import adminService from '../../services/adminService';
 import api from '../../services/api';
+import { message } from 'antd';
 
 vi.mock('../../services/adminService');
 vi.mock('../../services/api', () => ({
@@ -20,7 +21,8 @@ vi.mock('../../services/api', () => ({
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key, fallback) => fallback || key,
+    t: (key, fallback, options) => (fallback || key)
+      .replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? '')),
   }),
 }));
 
@@ -43,6 +45,9 @@ vi.mock('antd', async () => {
   const actual = await vi.importActual('antd');
   return {
     ...actual,
+    message: {
+      success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), loading: vi.fn(), destroy: vi.fn(), open: vi.fn(),
+    },
     Dropdown: ({ menu, children }) => (
       <div>
         {children}
@@ -94,6 +99,9 @@ const waitForDialogFocus = async (title) => {
   await waitFor(() => expect(dialog).toContainElement(document.activeElement));
   return dialog;
 };
+
+const DRIVER_EXPENSE_COPY = 'The driver has an expense waiting for approval on this trip; this correction would '
+  + 'leave him less than he handed in plus that claim. Decide the expense first.';
 
 const DELIVERED_CASH_ORDER = {
   id: 620,
@@ -248,7 +256,7 @@ describe('Orders collected cash edit flow', () => {
       expect(adminService.editCollectedCash).toHaveBeenCalledWith(620, {
         new_amount: 60000,
         reason: 'driver collected extra cash from customer',
-      });
+      }, { handledErrorCodes: ['EVENT_FUNDS_DRIVER_EXPENSE'] });
     });
   });
 
@@ -362,9 +370,150 @@ describe('Orders collected cash edit flow', () => {
     await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
     await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
 
-    const reason = await screen.findByTestId('cash-edit-blocked-by-return');
+    const reason = await screen.findByTestId('cash-edit-blocked');
     expect(reason).toHaveTextContent('A prepayment return drew on this collection. Undo the return first.');
     expect(screen.queryByText(/Edit collected cash/i)).toBeNull();
+  });
+
+  it('limits the corrected amount to the published minimum', async () => {
+    setupBaseMocks();
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: { order: { ...DELIVERED_CASH_ORDER_DETAIL, collected_cash_edit_min_amount: 100000 } },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
+
+    expect(screen.getByRole('spinbutton')).toHaveAttribute('aria-valuemin', '100000');
+    expect(screen.getByText('At least 100,000 while the driver\'s expense waits for a decision')).toBeInTheDocument();
+  });
+
+  it('keeps the floor at zero and shows no help text when no minimum is published', async () => {
+    setupBaseMocks();
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
+
+    expect(screen.getByRole('spinbutton')).toHaveAttribute('aria-valuemin', '0');
+    expect(screen.queryByText(/while the driver's expense waits/)).toBeNull();
+  });
+
+  it('explains an apply refused for a waiting driver expense', async () => {
+    setupBaseMocks();
+    adminService.editCollectedCash.mockRejectedValueOnce({
+      response: {
+        status: 400,
+        data: { success: false, message: 'raw backend text', error_code: 'EVENT_FUNDS_DRIVER_EXPENSE' },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
+    const reasonInputs = screen.getAllByRole('textbox');
+    await user.type(reasonInputs[reasonInputs.length - 1], 'driver collected extra cash from customer');
+    fireEvent.click(screen.getByText(/Preview impact/i));
+    fireEvent.click(await screen.findByText(/Apply correction/i));
+
+    expect(await screen.findByText(DRIVER_EXPENSE_COPY)).toBeInTheDocument();
+    expect(adminService.editCollectedCash).toHaveBeenCalledWith(
+      620,
+      { new_amount: 54000, reason: 'driver collected extra cash from customer' },
+      { handledErrorCodes: ['EVENT_FUNDS_DRIVER_EXPENSE'] },
+    );
+    expect(message.error).not.toHaveBeenCalled();
+    expect(screen.queryByText('raw backend text')).toBeNull();
+  });
+
+  it('still toasts the backend message for any other apply failure', async () => {
+    setupBaseMocks();
+    adminService.editCollectedCash.mockRejectedValueOnce({
+      response: { status: 400, data: { message: 'Something else broke', error_code: 'OTHER' } },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
+    const reasonInputs = screen.getAllByRole('textbox');
+    await user.type(reasonInputs[reasonInputs.length - 1], 'driver collected extra cash from customer');
+    fireEvent.click(screen.getByText(/Preview impact/i));
+    fireEvent.click(await screen.findByText(/Apply correction/i));
+
+    await waitFor(() => expect(message.error).toHaveBeenCalledWith('Something else broke'));
+    expect(screen.queryByText(DRIVER_EXPENSE_COPY)).toBeNull();
+  });
+
+  it('names any published block code', async () => {
+    setupBaseMocks();
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          ...DELIVERED_CASH_ORDER_DETAIL,
+          is_collected_cash_editable: false,
+          collected_cash_edit_block_code: 'event_funds_driver_expense',
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+
+    expect(await screen.findByTestId('cash-edit-blocked')).toHaveTextContent(DRIVER_EXPENSE_COPY);
+  });
+
+  it('translates a driver-expense block in the preview', async () => {
+    setupBaseMocks();
+    adminService.previewCollectedCashEdit.mockResolvedValueOnce({
+      data: {
+        new_amount: 60000, applied_to_order: 54000, projected_outstanding: 0, customer_credit_delta: 6000,
+        session_will_reopen: false, is_editable: false,
+        blocking_reasons: ['event_funds_driver_expense: expense 4 waits on trip 12'],
+        warnings: [],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+    await waitFor(() => expect(adminService.getOrders).toHaveBeenCalled());
+    await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
+    await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
+    await waitForDialogFocus(/^Order Details - /);
+    fireEvent.click(await screen.findByText(/Edit collected cash/i));
+    await waitForDialogFocus(/^Edit collected cash — /);
+    const reasonInputs = screen.getAllByRole('textbox');
+    await user.type(reasonInputs[reasonInputs.length - 1], 'driver collected extra cash from customer');
+    fireEvent.click(screen.getByText(/Preview impact/i));
+
+    expect(await screen.findByText(DRIVER_EXPENSE_COPY)).toBeInTheDocument();
+    expect(screen.queryByText(/expense 4 waits on trip 12/)).toBeNull();
+    expect((await screen.findByText(/Apply correction/i)).closest('button')).toBeDisabled();
   });
 
   it('stays silent when the edit is closed for another reason', async () => {
@@ -382,7 +531,7 @@ describe('Orders collected cash edit flow', () => {
     await user.click(await findClickable(() => screen.getByText(/view_details|View Details/i)));
     await waitFor(() => expect(adminService.getOrderDetails).toHaveBeenCalledWith(620));
     await screen.findAllByText(/Fiscalization/i);
-    expect(screen.queryByTestId('cash-edit-blocked-by-return')).toBeNull();
+    expect(screen.queryByTestId('cash-edit-blocked')).toBeNull();
   });
 
   it('does NOT show Edit collected cash button when isAdmin() is false', async () => {

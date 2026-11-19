@@ -19,6 +19,9 @@ sys.path.insert(0, '/app')
 from business_app import create_app, db  # noqa: E402
 from business_app.models.translation import Translation  # noqa: E402
 from shared.staff_constants import (  # noqa: E402
+    DRIVER_EXPENSE_CATEGORIES,
+    DRIVER_EXPENSE_EVENTS,
+    DRIVER_EXPENSE_STATUSES,
     FAILED_DELIVERY_REASONS,
     RECONCILIATION_RISK_FLAGS,
     SALES_EVENTS,
@@ -966,6 +969,23 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Topshiriladigan qolgan summa",
         "ru": "Осталось сдать",
     },
+    # Cash screen with driver expenses (spec 2026-11-17): the two totals and the title after a hand-in
+    # that leaves claims waiting for the office.
+    "staff.delivery.expenses_approved_label": {
+        "en": "Expenses approved",
+        "uz": "Tasdiqlangan xarajatlar",  # NATIVE-READ
+        "ru": "Утверждённые расходы",  # NATIVE-READ
+    },
+    "staff.delivery.expenses_waiting_label": {
+        "en": "Waiting for approval",
+        "uz": "Tasdiq kutilmoqda",  # NATIVE-READ
+        "ru": "Ожидают утверждения",  # NATIVE-READ
+    },
+    "staff.delivery.handed_in_waiting_title": {
+        "en": "Handed in. {waiting} waiting for approval",
+        "uz": "Topshirildi. {waiting} tasdiq kutmoqda",  # NATIVE-READ
+        "ru": "Сдано. {waiting} ожидает утверждения",  # NATIVE-READ
+    },
     "staff.delivery.reconciliation_partial_recorded": {
         "en": "Partial handoff recorded. The session stays open until the remaining cash is submitted.",
         "uz": "Qisman topshirish yozib olindi. Qolgan summa topshirilmaguncha sessiya ochiq qoladi.",
@@ -1677,6 +1697,176 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "You have no cash to hand over right now.",
         "uz": "Hozir topshiradigan naqd pulingiz yo'q.",
         "ru": "Сейчас у вас нет наличных для сдачи.",
+    },
+    # A typed hand-in above "Hand in now" while an expense claim waits on the trip (spec 2026-11-17).
+    "staff.error.api.expenses_waiting_hand_in": {
+        "en": "Some of your cash is waiting for an expense decision. Hand in the amount on the button.",
+        "uz": "Naqdingizning bir qismi xarajat qarorini kutmoqda. Tugmadagi summani topshiring.",  # NATIVE-READ
+        "ru": "Часть ваших наличных ожидает решения по расходу. Сдайте сумму, указанную на кнопке.",  # NATIVE-READ
+    },
+    # Driver cash expenses (spec 2026-11-17): the claim's refusals the driver can meet.
+    "staff.error.api.expense_no_active_trip": {
+        "en": "You have no open trip, so there is no trip cash to spend.",
+        "uz": "Ochiq reysingiz yo'q, sarflash uchun reys naqdi yo'q.",  # NATIVE-READ
+        "ru": "У вас нет открытого рейса, поэтому нет наличных рейса для расхода.",  # NATIVE-READ
+    },
+    "staff.error.api.expense_above_cash_held": {
+        "en": "That's more than the cash you hold. Bigger purchases are paid by the office.",
+        "uz": "Bu qo'lingizdagi naqddan ko'p. Kattaroq xaridlarni ofis to'laydi.",  # NATIVE-READ
+        "ru": "Это больше, чем наличные у вас. Крупные покупки оплачивает офис.",  # NATIVE-READ
+    },
+    "staff.error.api.expense_amount_invalid": {
+        "en": "Type the amount as a number above 0, for example 150000.",
+        "uz": "Summani 0 dan katta son bilan yozing, masalan 150000.",  # NATIVE-READ
+        "ru": "Введите сумму числом больше 0, например 150000.",  # NATIVE-READ
+    },
+    "staff.error.api.expense_note_required": {
+        "en": "For “Other”, write what you paid for.",
+        "uz": "«Boshqa» uchun nima uchun to'laganingizni yozing.",  # NATIVE-READ
+        "ru": "Для «Другое» напишите, за что заплатили.",  # NATIVE-READ
+    },
+    "staff.error.api.expense_note_too_long": {
+        "en": "The note is too long: keep it under 500 characters.",
+        "uz": "Izoh juda uzun: 500 belgidan oshmasin.",  # NATIVE-READ
+        "ru": "Комментарий слишком длинный: не больше 500 символов.",  # NATIVE-READ
+    },
+    "staff.error.api.expense_not_withdrawable": {
+        "en": "This expense was already decided, so it can't be withdrawn.",
+        "uz": "Bu xarajat bo'yicha qaror qabul qilingan, uni qaytarib bo'lmaydi.",  # NATIVE-READ
+        "ru": "По этому расходу уже принято решение, его нельзя отозвать.",  # NATIVE-READ
+    },
+    # Add expense (spec 2026-11-17): the driver's claim conversation. The "Other needs a note" line is
+    # `staff.error.api.expense_note_required` above (one copy for the screen and the backend refusal).
+    "staff.menu.add_expense": {
+        "en": "Add expense",
+        "uz": "Xarajat qo'shish",  # NATIVE-READ
+        "ru": "Добавить расход",  # NATIVE-READ
+    },
+    "staff.expense.new_title": {
+        "en": "New expense",
+        "uz": "Yangi xarajat",  # NATIVE-READ
+        "ru": "Новый расход",  # NATIVE-READ
+    },
+    "staff.expense.cash_held_now": {
+        "en": "Cash you hold now: {amount}",
+        "uz": "Hozir qo'lingizdagi naqd: {amount}",  # NATIVE-READ
+        "ru": "Наличные у вас сейчас: {amount}",  # NATIVE-READ
+    },
+    "staff.expense.pick_category": {
+        "en": "What did you pay for?",
+        "uz": "Nima uchun to'ladingiz?",  # NATIVE-READ
+        "ru": "За что вы заплатили?",  # NATIVE-READ
+    },
+    "staff.expense.enter_amount": {
+        "en": "Type the amount you paid (so'm):",
+        "uz": "To'lagan summangizni yozing (so'm):",  # NATIVE-READ
+        "ru": "Введите сумму, которую заплатили (сум):",  # NATIVE-READ
+    },
+    "staff.expense.above_cash_held": {
+        "en": "That's more than the cash you hold ({amount}). Bigger purchases are paid by the office.",
+        "uz": "Bu qo'lingizdagi naqddan ({amount}) ko'p. Kattaroq xaridlarni ofis to'laydi.",  # NATIVE-READ
+        "ru": "Это больше, чем наличные у вас ({amount}). Крупные покупки оплачивает офис.",  # NATIVE-READ
+    },
+    "staff.expense.no_trip_cash": {
+        "en": "You hold no trip cash to spend right now.",
+        "uz": "Hozir sarflash uchun qo'lingizda reys naqdi yo'q.",  # NATIVE-READ
+        "ru": "Сейчас у вас нет наличных рейса, которые можно потратить.",  # NATIVE-READ
+    },
+    "staff.expense.add_note_or_photo": {
+        "en": "Add a note or a receipt photo, or send it now.",
+        "uz": "Izoh yoki chek rasmini qo'shing yoki hozir yuboring.",  # NATIVE-READ
+        "ru": "Добавьте комментарий или фото чека либо отправьте сейчас.",  # NATIVE-READ
+    },
+    "staff.expense.note_label": {
+        "en": "Note",
+        "uz": "Izoh",  # NATIVE-READ
+        "ru": "Комментарий",  # NATIVE-READ
+    },
+    "staff.expense.receipt_attached": {
+        "en": "Receipt photo attached",
+        "uz": "Chek rasmi qo'shildi",  # NATIVE-READ
+        "ru": "Фото чека прикреплено",  # NATIVE-READ
+    },
+    "staff.expense.send": {
+        "en": "Send for approval",
+        "uz": "Tasdiqlashga yuborish",  # NATIVE-READ
+        "ru": "Отправить на утверждение",  # NATIVE-READ
+    },
+    # The office's decision on a claim, pushed to the driver (`/internal/expense-event`).
+    "staff.expense.notify.approved": {
+        "en": "✅ Expense approved · {category} · {amount} · Hand in now: {hand_in_now}",
+        "uz": "✅ Xarajat tasdiqlandi · {category} · {amount} · Hozir topshiring: {hand_in_now}",  # NATIVE-READ
+        "ru": "✅ Расход утверждён · {category} · {amount} · Сдать сейчас: {hand_in_now}",  # NATIVE-READ
+    },
+    "staff.expense.notify.approved_less": {
+        "en": "✅ Approved {approved_amount} of {amount} · hand in the other {difference} with your cash",
+        "uz": "✅ {amount} dan {approved_amount} tasdiqlandi · qolgan {difference} ni naqdingiz bilan topshiring",  # NATIVE-READ
+        "ru": "✅ Утверждено {approved_amount} из {amount} · остальные {difference} сдайте вместе с наличными",  # NATIVE-READ
+    },
+    "staff.expense.notify.rejected": {
+        "en": "❌ Not approved · {reason} · hand in this {amount} with your cash",
+        "uz": "❌ Tasdiqlanmadi · {reason} · bu {amount} ni naqdingiz bilan topshiring",  # NATIVE-READ
+        "ru": "❌ Не утверждено · {reason} · сдайте эти {amount} вместе с наличными",  # NATIVE-READ
+    },
+    "staff.expense.notify.approval_undone": {
+        "en": "↩️ Approval undone · {category} {amount} is waiting for a new decision",
+        "uz": "↩️ Tasdiq bekor qilindi · {category} {amount} yangi qarorni kutmoqda",  # NATIVE-READ
+        "ru": "↩️ Утверждение отменено · {category} {amount} ожидает нового решения",  # NATIVE-READ
+    },
+    "staff.expense.sent": {
+        "en": "Sent for approval: {category} · {amount}",
+        "uz": "Tasdiqlashga yuborildi: {category} · {amount}",  # NATIVE-READ
+        "ru": "Отправлено на утверждение: {category} · {amount}",  # NATIVE-READ
+    },
+    "staff.expense.sent_explainer": {
+        "en": "It comes off your cash once a manager approves it.",
+        "uz": "Menejer tasdiqlagach, naqdingizdan ayriladi.",  # NATIVE-READ
+        "ru": "Сумма спишется с ваших наличных после утверждения менеджером.",  # NATIVE-READ
+    },
+    "staff.expense.hand_in_now_waiting": {
+        "en": "Hand in now: {amount} ({waiting} waiting)",
+        "uz": "Hozir topshiring: {amount} ({waiting} kutilmoqda)",  # NATIVE-READ
+        "ru": "Сдать сейчас: {amount} ({waiting} ожидает)",  # NATIVE-READ
+    },
+    "staff.menu.my_expenses": {
+        "en": "My expenses",
+        "uz": "Mening xarajatlarim",  # NATIVE-READ
+        "ru": "Мои расходы",  # NATIVE-READ
+    },
+    "staff.expense.my_expenses": {
+        "en": "My expenses",
+        "uz": "Mening xarajatlarim",  # NATIVE-READ
+        "ru": "Мои расходы",  # NATIVE-READ
+    },
+    "staff.expense.waiting_header": {
+        "en": "Waiting for approval",
+        "uz": "Tasdiq kutilmoqda",  # NATIVE-READ
+        "ru": "Ожидают утверждения",  # NATIVE-READ
+    },
+    "staff.expense.decided_header": {
+        "en": "Decided",
+        "uz": "Ko'rib chiqilgan",  # NATIVE-READ
+        "ru": "Рассмотренные",  # NATIVE-READ
+    },
+    "staff.expense.none": {
+        "en": "No expenses yet.",
+        "uz": "Hozircha xarajatlar yo'q.",  # NATIVE-READ
+        "ru": "Расходов пока нет.",  # NATIVE-READ
+    },
+    "staff.expense.withdraw": {
+        "en": "Withdraw",
+        "uz": "Qaytarib olish",  # NATIVE-READ
+        "ru": "Отозвать",  # NATIVE-READ
+    },
+    "staff.expense.withdraw_confirm": {
+        "en": "Withdraw this expense? {category} · {amount}",
+        "uz": "Bu xarajatni qaytarib olasizmi? {category} · {amount}",  # NATIVE-READ
+        "ru": "Отозвать этот расход? {category} · {amount}",  # NATIVE-READ
+    },
+    "staff.expense.withdrawn": {
+        "en": "Expense withdrawn. Hand in now: {amount}",
+        "uz": "Xarajat qaytarib olindi. Hozir topshiring: {amount}",  # NATIVE-READ
+        "ru": "Расход отозван. Сдать сейчас: {amount}",  # NATIVE-READ
     },
     "staff.error.api.customer_not_found": {
         "en": "This customer account no longer exists.",
@@ -2656,6 +2846,27 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
 }
 
 
+# The driver-expense category labels, keyed by category code (`DRIVER_EXPENSE_CATEGORIES`). The Slack posts read the
+# English rows; the bot's screens read all three.
+DRIVER_EXPENSE_CATEGORY_TRANSLATIONS = {
+    "fuel": {"en": "Fuel", "uz": "Yoqilg'i", "ru": "Топливо"},  # NATIVE-READ
+    "new_bottles": {"en": "New bottles", "uz": "Yangi idishlar", "ru": "Новые бутыли"},  # NATIVE-READ
+    "caps": {"en": "Caps", "uz": "Qopqoqlar", "ru": "Крышки"},  # NATIVE-READ
+    "labels": {"en": "Labels", "uz": "Yorliqlar", "ru": "Этикетки"},  # NATIVE-READ
+    "other_supplies": {"en": "Other supplies", "uz": "Boshqa materiallar", "ru": "Прочие материалы"},  # NATIVE-READ
+    "vehicle": {"en": "Car repair", "uz": "Mashina ta'miri", "ru": "Ремонт машины"},  # NATIVE-READ
+    "parking_wash": {"en": "Parking/wash", "uz": "Avtoturargoh/yuvish", "ru": "Парковка/мойка"},  # NATIVE-READ
+    "other": {"en": "Other", "uz": "Boshqa", "ru": "Другое"},  # NATIVE-READ
+}
+
+# The driver-expense status labels, keyed by status code (`DRIVER_EXPENSE_STATUSES`), for the My expenses list.
+DRIVER_EXPENSE_STATUS_TRANSLATIONS = {
+    "pending": {"en": "Waiting", "uz": "Kutilmoqda", "ru": "Ожидает"},  # NATIVE-READ
+    "approved": {"en": "Approved", "uz": "Tasdiqlandi", "ru": "Утверждён"},  # NATIVE-READ
+    "rejected": {"en": "Not approved", "uz": "Tasdiqlanmadi", "ru": "Не утверждён"},  # NATIVE-READ
+    "withdrawn": {"en": "Withdrawn", "uz": "Qaytarib olingan", "ru": "Отозван"},  # NATIVE-READ
+}
+
 ROLE_TRANSLATIONS = {
     "delivery_driver": {"en": "Delivery Driver", "uz": "Kuryer", "ru": "Курьер"},
     "operator": {"en": "Operator", "uz": "Operator", "ru": "Оператор"},
@@ -2880,6 +3091,13 @@ EXTRA_TRANSLATIONS = {
         "en": "⚠️ Cash session warning: session started {date} is 7+ days old. Expected on-hand cash: {expected_cash} UZS.",
         "uz": "⚠️ Naqd sessiya ogohlantirishi: {date} boshlangan sessiya 7 kundan oshdi. Kutilayotgan naqd: {expected_cash} soʻm.",
         "ru": "⚠️ Предупреждение по наличным: сессии от {date} уже 7+ дней. Ожидаемый остаток: {expected_cash} сум.",
+    },
+    "staff.notification.reconciliation_reminder_overdue_expenses_waiting": {
+        "en": "⚠️ Cash session warning: session started {date} is 7+ days old. Expected on-hand cash: {expected_cash} UZS. Hand in now: {hand_in_now} UZS · {waiting} UZS waiting for approval.",
+        # NATIVE-READ
+        "uz": "⚠️ Naqd sessiya ogohlantirishi: {date} boshlangan sessiya 7 kundan oshdi. Kutilayotgan naqd: {expected_cash} soʻm. Hozir topshiring: {hand_in_now} soʻm · {waiting} soʻm tasdiq kutmoqda.",
+        # NATIVE-READ
+        "ru": "⚠️ Предупреждение по наличным: сессии от {date} уже 7+ дней. Ожидаемый остаток: {expected_cash} сум. Сдать сейчас: {hand_in_now} сум · {waiting} сум ожидает утверждения.",
     },
     "staff.notification.manager_exception_summary": {
         "en": "There are {count} driver cash sessions with mismatch or 7+ day warning status requiring review.",
@@ -3647,6 +3865,11 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
     for event in SALES_EVENTS:
         keys.add(f"staff.sales.notify.{event}")
 
+    # Driver-expense decision pushes — the family webhook_server.expense_event_handler builds by f-string,
+    # from the shared tuple (twin of staff_bot/i18n.py::_add_dynamic_family_keys).
+    for event in DRIVER_EXPENSE_EVENTS:
+        keys.add(f"staff.expense.notify.{event}")
+
     # The outlet card families — the twin of
     # `staff_bot/i18n.py::_add_dynamic_family_keys`. The stage/type tuples
     # mirror `business_app/models/sales.py::OUTLET_STAGES / OUTLET_TYPES`;
@@ -3735,6 +3958,13 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
     # Order status labels (operator order-pool details)
     for status in OrderStatus:
         keys.add(f"staff.order.status.{status.value}")
+
+    # Driver-expense category labels, from the shared tuple the claim table's CHECK uses
+    for category in DRIVER_EXPENSE_CATEGORIES:
+        keys.add(f"staff.expense.category.{category}")
+
+    for status in DRIVER_EXPENSE_STATUSES:
+        keys.add(f"staff.expense.status.{status}")
 
 
 def _add_curated_keys(keys: Set[str]) -> None:
@@ -3827,6 +4057,14 @@ def _auto_family_translation(key: str, language: str) -> Optional[str]:
     if key.startswith("staff.order.status."):
         status = key.rsplit(".", 1)[-1]
         return ORDER_STATUS_TRANSLATIONS.get(status, {}).get(language)
+
+    if key.startswith("staff.expense.category."):
+        category = key.rsplit(".", 1)[-1]
+        return DRIVER_EXPENSE_CATEGORY_TRANSLATIONS.get(category, {}).get(language)
+
+    if key.startswith("staff.expense.status."):
+        status = key.rsplit(".", 1)[-1]
+        return DRIVER_EXPENSE_STATUS_TRANSLATIONS.get(status, {}).get(language)
 
     return None
 

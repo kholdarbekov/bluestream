@@ -14,6 +14,7 @@ from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils import flow_state
+from staff_bot.utils.money_input import parse_typed_money
 from staff_bot.utils.formatters import escape_html, format_currency
 
 logger = logging.getLogger(__name__)
@@ -711,7 +712,7 @@ class CashCollectionHandler(BaseHandler):
             return ConversationHandler.END
 
         try:
-            amount = float(update.message.text.strip().replace(',', '').replace(' ', ''))
+            amount = float(parse_typed_money(update.message.text))
             if amount <= 0:
                 raise ValueError("non-positive")
         except ValueError:

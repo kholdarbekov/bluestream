@@ -19,6 +19,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "admin.py": 527,  # +1 user cart view endpoint (User.query.get existence check, mirrors get_user_details); +4 consecutive-strike-rule CRUD endpoints; prev +2 collected-cash edit endpoints; prev +4 loyalty streak-rule CRUD
     "admin_bottles.py": 0,
     "admin_dispatch.py": 0,
+    "admin_driver_expenses.py": 0,
     "admin_eta.py": 0,
     "admin_price_changes.py": 0,
     "admin_reorder_reminders.py": 0,

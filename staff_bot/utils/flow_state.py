@@ -103,6 +103,10 @@ SALES_TRYOUT_FLOW_KEY = 'sales_tryout'
 # only this key -- and `handlers/sales/outlet_phone.py` imports it rather than
 # spelling it again.
 SALES_SET_PHONE_FLOW_KEY = 'sales_set_phone'
+# The driver's Add expense draft (`handlers/delivery/expenses.py`): category, amount, note, receipt photo and the
+# idempotency key its Send posts. Named here for the same reasons: a menu tap must drop it, and the conversation
+# imports it rather than spelling it again.
+EXPENSE_FLOW_KEY = 'pending_expense_draft'
 
 PENDING_FLOW_USER_DATA_KEYS = (
     # -- Text-router flows: while present, the catch-all router feeds the next
@@ -156,6 +160,9 @@ PENDING_FLOW_USER_DATA_KEYS = (
     # Its one state reads free TEXT, and an armed draft would send the agent's
     # next message to `PUT /outlets/<id>/primary-phone`.
     SALES_SET_PHONE_FLOW_KEY,
+    # The Add expense draft (states 130-132). WRITE-side rule: `handlers/delivery/expenses.py` stamps it, so a menu
+    # tap must drop it -- and every Send/category button left in the scrollback is then refused out loud.
+    EXPENSE_FLOW_KEY,
     'new_address',
     'new_tryout',
     'new_tryout_products',

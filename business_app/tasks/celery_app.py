@@ -107,6 +107,11 @@ def make_celery(app=None):
 
     # Configure periodic tasks
     celery.conf.beat_schedule = {
+        # Daily list of driver expense claims waiting over 24 h (spec 2026-11-17 §6.7), 09:30 Tashkent
+        "driver-expense-waiting-digest": {
+            "task": "staff.driver_expense_digest",
+            "schedule": crontab(hour=9, minute=30),
+        },
         # Create every subscription order due by the lead (spec 2026-10-23 §4.3), daily at 9 AM
         "process-subscription-billing": {
             "task": "business_app.tasks.subscription_tasks.process_daily_subscription_billing",

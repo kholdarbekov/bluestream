@@ -69,6 +69,16 @@ AUDIT: list[tuple[str, str]] = [
     ("RECONCILIATION_NOTHING_TO_SUBMIT", "staff.error.api.nothing_to_reconcile"),
     # Prepayment return, Task 4: the trip being settled closed under the tap (double tap, a return).
     ("RECONCILIATION_SESSION_CHANGED", "staff.error.api.nothing_to_reconcile"),
+    # Driver cash expenses: a typed hand-in above "Hand in now" while a claim waits on the trip.
+    ("RECONCILIATION_EXPENSES_WAITING", "staff.error.api.expenses_waiting_hand_in"),
+    # Add expense (Task 22): every refusal the claim conversation can show the driver.
+    ("DRIVER_EXPENSE_NO_ACTIVE_TRIP", "staff.error.api.expense_no_active_trip"),
+    ("DRIVER_EXPENSE_ABOVE_CASH_HELD", "staff.error.api.expense_above_cash_held"),
+    ("DRIVER_EXPENSE_AMOUNT_INVALID", "staff.error.api.expense_amount_invalid"),
+    ("DRIVER_EXPENSE_NOTE_REQUIRED", "staff.error.api.expense_note_required"),
+    ("DRIVER_EXPENSE_NOTE_TOO_LONG", "staff.error.api.expense_note_too_long"),
+    # My expenses (Task 23): Withdraw on a claim the office already decided.
+    ("DRIVER_EXPENSE_NOT_WITHDRAWABLE", "staff.error.api.expense_not_withdrawable"),
     ("COD_CUSTOMER_NOT_FOUND", "staff.error.api.customer_not_found"),
     # Task 9: operator flows. STAFF_PHONE_INVALID / STAFF_PHONE_EXISTS point at
     # operator keys that predate this audit, so they have no row here.

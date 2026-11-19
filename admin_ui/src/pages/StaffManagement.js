@@ -252,6 +252,12 @@ const StaffManagement = () => {
             render: (val) => `${(val || 0).toLocaleString()} UZS`,
         },
         {
+            title: t('staff:driver_expenses_column', 'Expenses'),
+            dataIndex: 'expenses_approved_total',
+            key: 'expenses_approved_total',
+            render: (val) => `${(val || 0).toLocaleString()} UZS`,
+        },
+        {
             title: t('staff:blocked_sessions', 'Blocked'),
             dataIndex: 'blocked_session_count',
             key: 'blocked_session_count',
@@ -304,8 +310,14 @@ const StaffManagement = () => {
         {
             // What the driver must hand in: the gross minus what the office already returned from his trip.
             title: t('staff:cash_to_hand_in', 'To hand in'),
-            dataIndex: 'expected_cash_on_hand',
-            key: 'expected_cash_on_hand',
+            dataIndex: 'remaining_cash_to_submit',
+            key: 'remaining_cash_to_submit',
+            render: (value) => `${(value || 0).toLocaleString()} UZS`,
+        },
+        {
+            title: t('staff:driver_expenses_column', 'Expenses'),
+            dataIndex: 'expenses_approved_total',
+            key: 'expenses_approved_total',
             render: (value) => `${(value || 0).toLocaleString()} UZS`,
         },
         {

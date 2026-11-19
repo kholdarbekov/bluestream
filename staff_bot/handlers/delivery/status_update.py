@@ -3,8 +3,6 @@ Delivery Status Update Handler for Staff Bot
 Handles status transitions, delivered flow, failed flow, and cash collection.
 """
 import logging
-import math
-from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from telegram import Update, InlineKeyboardMarkup
@@ -28,6 +26,7 @@ from staff_bot.utils.formatters import (
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
 from staff_bot.utils import flow_state, route_card_state
+from staff_bot.utils.money_input import parse_typed_money
 from shared.staff_constants import ADDRESS_BOUND_DELIVERY_STATUSES, DELIVERY_STATUS_TRANSITIONS
 
 logger = logging.getLogger(__name__)
@@ -70,36 +69,12 @@ class StatusUpdateHandler(BaseHandler):
 
     @staticmethod
     def _parse_amount(raw_text: str) -> float:
-        """Coerce a driver-typed cash amount, fencing NON-FINITE values.
+        """A driver-typed cash amount, read by the one money-typing rule.
 
-        `float(text)` returns `nan` for "nan" and `inf` for "inf"/"Infinity"/
-        "1e400", and neither is caught by a sign check: `nan < 0` and `inf < 0`
-        are both False. Both would then be posted as the non-standard JSON
-        literals Python's json module emits AND re-parses, into
-        `metadata['cash_collected']`.
-
-        Decimal first (the same coercion the backend's SSOT money fence uses),
-        `is_finite()` BEFORE any ordering comparison — Python's decimal is not
-        IEEE-754, so comparing `Decimal('NaN')` RAISES — then a second
-        finiteness check on the float, because `Decimal('1e400')` is perfectly
-        finite until `float()` overflows it to `inf`.
-
-        Raises ``ValueError`` (never ``InvalidOperation``) so every existing
+        Raises ``ValueError`` so every existing
         `except (TypeError, ValueError)` call site keeps catching it.
         """
-        text = (raw_text or '').strip().replace(',', '').replace(' ', '')
-        try:
-            amount = Decimal(text)
-        except (InvalidOperation, TypeError, ValueError):
-            raise ValueError("Not a number")
-        if not amount.is_finite():
-            raise ValueError("Non-finite amount")
-        cash_amount = float(amount)
-        if not math.isfinite(cash_amount):
-            raise ValueError("Amount overflows to infinity")
-        if cash_amount < 0:
-            raise ValueError("Negative amount")
-        return cash_amount
+        return float(parse_typed_money(raw_text))
 
     @staticmethod
     async def _clear_delivery_cash_flow(
@@ -199,7 +174,8 @@ class StatusUpdateHandler(BaseHandler):
         expected_cash = format_currency(session.get('expected_cash'), language=language)
         expected_on_hand = format_currency(session.get('expected_cash_on_hand'), language=language)
         declared_cash = session.get('declared_cash')
-        declared_variance = format_currency(session.get('declared_variance'), language=language)
+        # The variance the screen shows is the backend's net figure (claims waiting are not a shortfall).
+        declared_variance = format_currency(session.get('declared_variance_net'), language=language)
         session_age_days = session.get('session_age_days')
         lines = [
             f"🧾 <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
@@ -225,8 +201,20 @@ class StatusUpdateHandler(BaseHandler):
             lines.append(
                 f"⚠️ {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
             )
+        expenses_approved = session.get('expenses_approved_total') or 0
+        expenses_waiting = session.get('expenses_waiting_total') or 0
+        if expenses_approved > 0:
+            lines.append(
+                f"💵 {i18n.get('staff.delivery.expenses_approved_label', language)}: "
+                f"{format_currency(expenses_approved, language=language)}"
+            )
+        if expenses_waiting > 0:
+            lines.append(
+                f"⏳ {i18n.get('staff.delivery.expenses_waiting_label', language)}: "
+                f"{format_currency(expenses_waiting, language=language)}"
+            )
         # Branch on the RAW value: `status` is now a localized label.
-        if raw_status == 'partial':
+        if raw_status == 'partial' or expenses_waiting > 0:
             remaining = session.get('remaining_cash_to_submit') or 0
             lines.append(
                 f"📌 {i18n.get('staff.delivery.remaining_to_submit', language)}: "
@@ -914,10 +902,53 @@ class StatusUpdateHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @staticmethod
+    def _hand_in_trip_closed(response) -> bool:
+        """True when a hand-in tap was refused because the trip its button was drawn for has since closed
+        (``RECONCILIATION_SESSION_CHANGED``). Nothing was recorded.
+
+        Most often it is the driver's own second tap on a hand-in that closed the trip: updates for one chat run in
+        order, so by then the first tap has turned the tapped message into its "✅" confirmation.
+        """
+        return getattr(response, 'error_code', None) == 'RECONCILIATION_SESSION_CHANGED'
+
+    @staticmethod
+    def _hand_in_figure_changed(response) -> bool:
+        """True when a hand-in tap was refused because the claims waiting on the trip moved since its button was
+        drawn (``STATE_CHANGED`` with reason ``hand_in_changed``). Nothing was recorded."""
+        details = getattr(response, 'details', None)
+        return (
+            getattr(response, 'error_code', None) == 'STATE_CHANGED'
+            and isinstance(details, dict)
+            and details.get('reason') == 'hand_in_changed'
+        )
+
+    @staticmethod
+    def _handed_in_title(session: dict, language: str) -> str:
+        """The headline after a hand-in: names the claims still waiting for the office when only it can act."""
+        if 'await_expense_decision' in (session.get('next_actions') or []):
+            return i18n.get(
+                'staff.delivery.handed_in_waiting_title',
+                language,
+                waiting=format_currency(session.get('expenses_waiting_total') or 0, language=language),
+            )
+        title_key = (
+            'staff.delivery.reconciliation_partial_recorded'
+            if session.get('status') == 'partial'
+            else 'staff.delivery.reconciliation_submitted'
+        )
+        return i18n.get(title_key, language)
+
     @require_auth
     @require_delivery_driver
-    async def show_reconciliation_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show the driver's open reconciliation session."""
+    async def show_reconciliation_session(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, as_new_message: bool = False
+    ):
+        """Show the driver's open reconciliation session.
+
+        A tap redraws its own message, unless ``as_new_message``: then the tapped message is left as it is and the
+        screen arrives below it.
+        """
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
         if not token:
@@ -936,13 +967,22 @@ class StatusUpdateHandler(BaseHandler):
             text = self._format_session_summary(session, language)
             keyboard = DeliveryKeyboards.reconciliation_actions(
                 language,
-                can_submit=session.get('status') in {'open', 'partial', 'overdue'},
+                # The backend decides what the driver may do (`next_actions`): while only the office can act
+                # on a waiting claim there is nothing to hand in.
+                can_submit='submit_reconciliation' in (session.get('next_actions') or []),
                 remaining_amount=session.get('remaining_cash_to_submit'),
+                session_id=session.get('id'),
+                basis=session.get('expenses_waiting_total'),
             )
 
-            if update.callback_query:
-                await update.callback_query.answer()
-                await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            query = update.callback_query
+            if query:
+                await query.answer()
+            if query and as_new_message:
+                # The tapped message stays as it is (it may be too old to reach); the screen is a new message.
+                await update.effective_chat.send_message(text, reply_markup=keyboard, parse_mode='HTML')
+            elif query:
+                await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
             else:
                 await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
 
@@ -1004,8 +1044,8 @@ class StatusUpdateHandler(BaseHandler):
         await query.answer()
         language = await self._get_language(update, context)
 
-        frozen_amount = DeliveryKeyboards.parse_handoff_callback(getattr(query, 'data', None))
-        if frozen_amount is None:
+        tap = DeliveryKeyboards.parse_handoff_callback(getattr(query, 'data', None))
+        if tap is None:
             # The tap carried no figure (a button rendered before the amount was
             # frozen into the callback, or a malformed payload). Writing here
             # would mean handing the amount decision to the server — the defect
@@ -1021,22 +1061,32 @@ class StatusUpdateHandler(BaseHandler):
         try:
             async with api_client as client:
                 response = await client.submit_reconciliation_session(
-                    token, {'declared_cash': float(frozen_amount)}
+                    token,
+                    {
+                        'declared_cash': float(tap.amount),
+                        'session_id': tap.session_id,
+                        'basis': float(tap.basis),
+                    },
                 )
 
             if not response.success:
+                if self._hand_in_trip_closed(response):
+                    # The tapped message may already be this trip's "✅" confirmation (a double tap): leave it as it
+                    # is and send the current Cash screen below it.
+                    await self.show_reconciliation_session(update, context, as_new_message=True)
+                    return
+                if self._hand_in_figure_changed(response):
+                    # The button was drawn for claims that have since been decided: draw the screen again in place,
+                    # with a fresh button.
+                    await self.show_reconciliation_session(update, context)
+                    return
                 await self._handle_api_response_error(update, response, language)
                 return
 
             await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
-            title_key = (
-                'staff.delivery.reconciliation_partial_recorded'
-                if session.get('status') == 'partial'
-                else 'staff.delivery.reconciliation_submitted'
-            )
             message = (
-                f"✅ {i18n.get(title_key, language)}"
+                f"✅ {self._handed_in_title(session, language)}"
                 f"\n\n{self._format_session_summary(session, language)}"
             )
             await query.edit_message_text(
@@ -1078,16 +1128,15 @@ class StatusUpdateHandler(BaseHandler):
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
+                if response.error_code == 'RECONCILIATION_EXPENSES_WAITING':
+                    # The refusal names the rule; the Cash screen carries the figure to hand in.
+                    await self._clear_delivery_cash_flow(context, update)
+                    await self.show_reconciliation_session(update, context)
                 return ConversationHandler.END
 
             await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
-            title_key = (
-                'staff.delivery.reconciliation_partial_recorded'
-                if session.get('status') == 'partial'
-                else 'staff.delivery.reconciliation_submitted'
-            )
-            success_title = i18n.get(title_key, language)
+            success_title = self._handed_in_title(session, language)
             message = f"✅ {success_title}\n\n{self._format_session_summary(session, language)}"
             await update.message.reply_text(
                 message,

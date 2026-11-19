@@ -24,6 +24,7 @@ from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import (
     TELEGRAM_TEXT_LIMIT,
     escape_html,
+    format_currency,
     format_delivery_window_line,
     format_fail_reason,
     format_local_date,
@@ -37,6 +38,9 @@ from staff_bot.utils.formatters import (
 )
 from shared.redis_failure import report_redis_failure
 from shared.staff_constants import (
+    DRIVER_EXPENSE_EVENT_APPROVED,
+    DRIVER_EXPENSE_EVENT_APPROVED_LESS,
+    DRIVER_EXPENSE_EVENTS,
     BOTTLE_EVENT_JOIN_APPROVED,
     BOTTLE_EVENT_JOIN_REQUESTED,
     BOTTLE_EVENT_TRANSFER_CONFIRMED,
@@ -447,6 +451,30 @@ def _render_sales_event(
             callback_data=f"staff_sales_outlet_{payload.get('outlet_id')}",
         )
     return text, InlineKeyboardMarkup([[button]]), True
+
+
+def _render_expense_event(event: str, payload: dict, language: str) -> str:
+    """One decision on an expense claim as the driver reads it. Every figure is a field the backend
+    published, the part of an approved-for-less claim he still hands in (`difference`) included."""
+    amount = payload.get('amount') or 0
+    approved = payload.get('approved_amount')
+    difference = payload.get('difference')
+    values = {
+        'category': i18n.get(f"staff.expense.category.{payload.get('category')}", language),
+        'amount': format_currency(amount, language=language),
+        'hand_in_now': format_currency(payload.get('hand_in_now') or 0, language=language),
+        'reason': escape_html(payload.get('reason') or ''),
+    }
+    if event == DRIVER_EXPENSE_EVENT_APPROVED_LESS:
+        if approved is not None and difference is not None:
+            values['approved_amount'] = format_currency(approved, language=language)
+            values['difference'] = format_currency(difference, language=language)
+        else:
+            # A push queued before the backend published the figures: say it was approved, never a half-filled line.
+            event = DRIVER_EXPENSE_EVENT_APPROVED
+            if approved is not None:
+                values['amount'] = format_currency(approved, language=language)
+    return i18n.get(f'staff.expense.notify.{event}', language, **values)
 
 
 def _render_bottle_event(event: str, payload: dict, language: str) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
@@ -882,6 +910,7 @@ class StaffWebhookServer:
             '/internal/delivery-failed': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/sales-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/bottle-event': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/expense-event': _TokenBucket(rate_per_sec=20, burst=60),
             '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
             '/internal/reload-translations': _TokenBucket(rate_per_sec=1, burst=5),
@@ -923,6 +952,7 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/delivery-failed', self.delivery_failed_handler)
         self.app.router.add_post('/internal/sales-event', self.sales_event_handler)
         self.app.router.add_post('/internal/bottle-event', self.bottle_event_handler)
+        self.app.router.add_post('/internal/expense-event', self.expense_event_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
         self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
         self.app.router.add_post('/internal/pool-insertion-suggestion', self.pool_insertion_suggestion_handler)
@@ -1295,6 +1325,56 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Notification sent'})
         except Exception as e:
             logger.error(f"Error handling bottle event: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def expense_event_handler(self, request):
+        """Push one decision on a driver's expense claim to his chat.
+
+        POST /internal/expense-event
+          {telegram_id, event, event_id, payload}
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
+            telegram_id = data.get('telegram_id')
+            event = data.get('event')
+            payload = data.get('payload') or {}
+            if not telegram_id or event not in DRIVER_EXPENSE_EVENTS:
+                return web.json_response(
+                    {'success': False, 'message': 'Missing telegram_id or unknown event'}, status=400
+                )
+            event_id = data.get('event_id')
+            fallback_key = (
+                f"expense:{event_id}" if event_id
+                else f"expense:{event}:{telegram_id}:{payload.get('expense_id')}"
+            )
+            if await self._is_duplicate_event(event_id, fallback_key):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            text = _render_expense_event(event, payload, language)
+            try:
+                await self.bot_app.bot.send_message(chat_id=telegram_id, text=text, parse_mode='HTML')
+            except Exception as e:
+                # Same contract as `bottle_event_handler`: a blocked driver keeps the slot, anything
+                # else frees it and answers 502 so `push_expense_event` retries.
+                _log_notify_failure(f"Failed to send expense event {event} to {telegram_id}", e)
+                if _is_recipient_unreachable(e):
+                    return web.json_response({'success': False, 'message': 'Recipient unreachable'})
+                await self._release_event(event_id, fallback_key)
+                return web.json_response({'success': False, 'message': 'Send failed'}, status=502)
+            return web.json_response({'success': True, 'message': 'Notification sent'})
+        except Exception as e:
+            logger.error(f"Error handling expense event: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     async def order_reassigned_handler(self, request):

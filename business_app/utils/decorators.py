@@ -192,12 +192,22 @@ def admin_role_permissions(role_value: str) -> Tuple[str, ...]:
     "cancel_announced_price_change" are
     intentionally Admin-only: they are not granted to MANAGER/OPERATOR, so only the ADMIN "all"
     wildcard satisfies them.
+
+    "review_driver_expenses" (`DRIVER_EXPENSE_REVIEW_PERMISSIONS`) is held by MANAGER and, through
+    "all", by ADMIN; OPERATOR does not hold it.
     """
     # This would integrate with a permission system; for now, basic role-based checks.
     if role_value == UserRole.ADMIN.value:
         return ("all",)  # Admin has all permissions
     if role_value == UserRole.MANAGER.value:
-        return ("view_users", "manage_orders", "view_reports", "manage_products", "view_analytics")
+        return (
+            "view_users",
+            "manage_orders",
+            "view_reports",
+            "manage_products",
+            "view_analytics",
+            "review_driver_expenses",
+        )
     if role_value == UserRole.OPERATOR.value:
         return ("view_orders", "update_orders", "view_products")
     return ()

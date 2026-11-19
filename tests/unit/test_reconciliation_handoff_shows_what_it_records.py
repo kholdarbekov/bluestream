@@ -484,9 +484,11 @@ def test_the_label_and_the_callback_are_one_frozen_figure(app, db, bot, driver, 
     _, markup = open_the_screen(bot, context)
     button = handoff_button(markup)
 
-    assert DeliveryKeyboards.parse_handoff_callback(button.callback_data) == figure_a_human_reads(
-        button.text
-    )
+    tap = DeliveryKeyboards.parse_handoff_callback(button.callback_data)
+    assert tap.amount == figure_a_human_reads(button.text)
+    # The button also names the trip it was drawn for and the claims waiting on it (none here).
+    assert tap.session_id == session_id
+    assert tap.basis == Decimal("0.00")
 
 
 @pytest.mark.unit

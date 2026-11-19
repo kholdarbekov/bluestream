@@ -4183,6 +4183,54 @@ class CashCollectionService:
                 error_code="EVENT_FUNDS_PREPAYMENT_RETURN",
             )
 
+    @staticmethod
+    def _expense_floor_refusal(
+        event_id: int, session: DriverCashSession, *, change: Decimal = Decimal("0.00")
+    ) -> Optional[ValidationError]:
+        """The refusal for a correction of collection ``event_id`` that would take its trip's on hand below the
+        expense floor (``correction_below_expense_floor``), or None."""
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        why = DriverReconciliationService().correction_below_expense_floor(session, change=change)
+        if why is None:
+            return None
+        return ValidationError(f"Collection {event_id}: {why}", error_code="EVENT_FUNDS_DRIVER_EXPENSE")
+
+    def _refuse_below_expense_floor_under_lock(
+        self, *, event_id: int, session_id: int, replacement_id: int, commit: bool
+    ) -> None:
+        """``adjust_event_amount``'s authoritative floor check, on the figures the replacement just refreshed.
+
+        The session row is re-read under the lock ``reverse_collection_event`` already holds, so no lock moves. Only a
+        claim that committed after the unlocked pre-check reaches a refusal here. The whole correction rolls back:
+        here when ``commit`` (the event-adjust route has no rollback of its own), otherwise in the caller's
+        ``atomic_transaction``. The reversal's and the replacement's audit rows were committed through the audit
+        logger's own session and outlive that rollback, so one more entry records that they were undone.
+        """
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        session = DriverReconciliationService().lock_session(session_id)
+        refusal = self._expense_floor_refusal(event_id, session) if session is not None else None
+        if refusal is None:
+            return
+        if commit:
+            db.session.rollback()
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_REFUNDED,
+            action="cash_collection_reversal_refused",
+            severity=AuditSeverity.HIGH,
+            resource_type="cash_collection_event",
+            resource_id=str(event_id),
+            success=False,
+            error_message="EVENT_FUNDS_DRIVER_EXPENSE: the reversal would take back cash an approved expense paid out",
+            additional_data={
+                "driver_cash_session_id": session_id,
+                "error_code": "EVENT_FUNDS_DRIVER_EXPENSE",
+                "replacement_event_id": replacement_id,
+            },
+        )
+        raise refusal
+
     def reverse_collection_event(
         self,
         event_id: int,
@@ -4337,6 +4385,7 @@ class CashCollectionService:
             raise ValidationError("Cannot adjust a voided cash collection event")
         self._refuse_if_funds_prepayment_return(event.id)
 
+        original_amount = self._to_decimal(event.amount)
         if event.driver_cash_session_id:
             session = DriverCashSession.query.get(event.driver_cash_session_id)
             if session:
@@ -4348,8 +4397,13 @@ class CashCollectionService:
                 )
                 if status_value not in allowed:
                     raise ValidationError(f"Cannot adjust event on session with status '{status_value}'")
+                # Unlocked pre-check, before anything below writes: the reversal's audit row commits through the
+                # audit logger's own session, so a refusal here leaves none. A claim that commits after this read
+                # is caught under the session lock, after the replacement's refresh.
+                refusal = self._expense_floor_refusal(event.id, session, change=normalized_amount - original_amount)
+                if refusal is not None:
+                    raise refusal
 
-        original_amount = self._to_decimal(event.amount)
         original_context = {
             "customer_id": event.customer_id,
             "collector_user_id": event.collector_user_id,
@@ -4410,6 +4464,12 @@ class CashCollectionService:
             bypass_driver_block_check=True,
             replay_scope=frozen_scope,
         )
+
+        session_id = original_context["driver_cash_session_id"]
+        if session_id:
+            self._refuse_below_expense_floor_under_lock(
+                event_id=event.id, session_id=session_id, replacement_id=replacement.id, commit=commit
+            )
 
         replacement_metadata = dict(replacement.entry_metadata or {})
         replacement_metadata.update(

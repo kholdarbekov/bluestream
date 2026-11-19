@@ -3321,7 +3321,10 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 671 -> 670: POST /api/v1/delivery/driver/update-location (delivery.update_driver_location) removed (Task Z1,
     # 2026-11-17): no client called it and both jobs it published were broken; the staff bot's shared location now
     # marks the stop arrived. Unrelated to place-merge; only the count moved.
-    assert len(routes) == 670
+    # 670 -> 681: the driver cash expenses plan (2026-11-18) added the staff bot's expense routes, the admin Driver
+    # expenses reads and decisions, and the badge/receipt routes. Unrelated to place-merge; only the estate-wide
+    # count moved.
+    assert len(routes) == 681
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

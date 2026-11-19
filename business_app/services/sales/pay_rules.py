@@ -27,9 +27,11 @@ from sqlalchemy.exc import IntegrityError
 
 from business_app.models.order import Order
 from business_app.models.user import User
+from business_app.services.self_decision import check_self_decision as shared_check_self_decision
+from business_app.services.self_decision import is_self, self_decision_refused  # noqa: F401 (re-exported for callers)
 from business_app.utils import local_windows
 from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
-from business_app.utils.exceptions import ForbiddenError, ValidationError
+from business_app.utils.exceptions import ValidationError
 from business_app.utils.payment_projection import get_payment_projection
 from business_app.utils.timezone_utils import ensure_utc
 from shared.business_config import MAX_PAY_AMOUNT
@@ -277,23 +279,6 @@ def lost_slot_race(exc: IntegrityError, keys: Mapping[str, str]) -> bool:
 # ------------------------------------------------------------------ self-decision (D-Q11)
 
 
-def is_self(agent_user_id: int, actor_user_id: Optional[int]) -> bool:
-    """The one spelling of "a decision about the actor's own pay". The write guard, its check-mode
-    twin and the statement tag (§4.13) all call it. A system write has no actor and is never self."""
-    return actor_user_id is not None and int(agent_user_id) == int(actor_user_id)
-
-
-def self_decision_refused(agent_user_id: int, actor: User) -> bool:
-    """The guard in check mode: True when `actor` may NOT decide about `agent_user_id`, i.e. a
-    non-admin deciding about themselves. `check_self_decision` raises exactly when this is True, and
-    OA1 publishes `can_decide` from it, so the button and the refusal cannot disagree.
-
-    The role is read from the users row (`User.is_admin`), never from `g.current_user_role`, whose
-    type differs between decorators.
-    """
-    return is_self(agent_user_id, actor.id) and not actor.is_admin
-
-
 def check_self_decision(agent_user_id: int, actor: User) -> bool:
     """D-Q11 (owner, 2026-09-28): refuse a non-admin deciding about their own pay.
 
@@ -301,15 +286,15 @@ def check_self_decision(agent_user_id: int, actor: User) -> bool:
     decide about themselves: True comes back, and the caller audits it with `self_decided`. In
     practice the refusal meets a manager with an agent profile proposing about themselves (M2), or
     deciding a held order they placed or whose outlet they onboarded (OA2/OA3, called once per
-    decision subject, I-24).
+    decision subject, I-24). The rule itself lives in `services.self_decision`.
     """
-    if self_decision_refused(agent_user_id, actor):
-        raise ForbiddenError(
-            "You cannot propose or decide anything about your own pay",
-            error_code="SALES_PAY_SELF_DECISION",
-            details={"agent_user_id": int(agent_user_id)},
-        )
-    return is_self(agent_user_id, actor.id)
+    return shared_check_self_decision(
+        agent_user_id,
+        actor,
+        error_code="SALES_PAY_SELF_DECISION",
+        message="You cannot propose or decide anything about your own pay",
+        details={"agent_user_id": int(agent_user_id)},
+    )
 
 
 # ------------------------------------------------------------------ new-outlet bonus days (C5, C14)

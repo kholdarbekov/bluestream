@@ -281,17 +281,23 @@ def validation_error_response(*args, **kwargs):
     )
 
 
-def conflict_response(message: str = "Resource already exists"):
+def conflict_response(message: str = "Resource already exists", *, error_code: Optional[str] = None):
     """
     Create a 409 Conflict response
 
     Args:
         message: Error message
+        error_code: Optional machine-readable code, surfaced as ``data.error_code`` (the envelope
+            ``validation_error_response`` uses). Omitted when None.
 
     Returns:
         Flask response tuple (json, 409)
     """
-    return error_response(message=message, status_code=409)
+    return error_response(
+        message=message,
+        status_code=409,
+        data={"error_code": error_code} if error_code else None,
+    )
 
 
 def state_changed_response(details: Optional[Dict[str, Any]] = None):
@@ -307,17 +313,44 @@ def state_changed_response(details: Optional[Dict[str, Any]] = None):
     )
 
 
+def staff_state_changed_body(details: Dict[str, Any]):
+    """409 `exceptions.StateChangedError` in the top-level envelope the staff clients parse (`error_code`
+    STATE_CHANGED, `details` as given, "This changed. Refresh to see the latest." in the request's language).
+
+    Rolls nothing back: each caller rolls its refused write back itself, before it draws anything it adds to
+    `details` (the price change's quote). `handle_api_exception` cannot answer it, since it maps by exact type."""
+    from business_app.utils.error_handlers import ErrorResponse
+    from business_app.utils.translations import get_translation
+
+    body, status = ErrorResponse.build_error_response(
+        "CONFLICT",
+        get_translation(STATE_CHANGED_MESSAGE_KEY),
+        details=details,
+        error_code="STATE_CHANGED",
+        status_code=409,
+    )
+    return jsonify(body), status
+
+
+def staff_state_changed_response(exc: StateChangedError):
+    """A staff write refused because the screen it was drawn from no longer holds (the Cash screen's hand-in
+    button): rolls the refused write back, then answers `staff_state_changed_body` with the error's details. For
+    the staff routes, which never touch the session themselves."""
+    from business_app import db
+
+    db.session.rollback()
+    return staff_state_changed_body(exc.details)
+
+
 def price_changed_response(exc: StateChangedError, requote: Callable[[], Dict[str, Any]], *, envelope: str):
     """409 for a create whose shown total no longer holds: the refusal plus the quote the screen must show now.
 
     Rolls the session back FIRST (the refused write must leave nothing behind, not even the courtesy claim), then
     asks `requote` for the estimate of the same checkout; a quote that cannot be drawn (`ValidationError`) is `None`.
     `envelope` is the shape the caller's clients parse: "customer" is the data envelope (`data.reason_code`,
-    `data.reason`, `data.quote`), "staff" the top-level one (`error_code`, `details.reason`, `details.quote`)."""
+    `data.reason`, `data.quote`), "staff" the top-level one (`staff_state_changed_body`)."""
     from business_app import db
-    from business_app.utils.error_handlers import ErrorResponse
     from business_app.utils.exceptions import ValidationError
-    from business_app.utils.translations import get_translation
 
     db.session.rollback()
     try:
@@ -327,14 +360,7 @@ def price_changed_response(exc: StateChangedError, requote: Callable[[], Dict[st
     details = {**(exc.details or {}), "quote": quote}
     if envelope == "customer":
         return state_changed_response(details)
-    body, status = ErrorResponse.build_error_response(
-        "CONFLICT",
-        get_translation(STATE_CHANGED_MESSAGE_KEY),
-        details=details,
-        error_code="STATE_CHANGED",
-        status_code=409,
-    )
-    return jsonify(body), status
+    return staff_state_changed_body(details)
 
 
 def internal_error_response(message: str = "Internal server error", error_id: str = None):
@@ -370,6 +396,8 @@ __all__ = [
     "validation_error_response",
     "conflict_response",
     "state_changed_response",
+    "staff_state_changed_body",
+    "staff_state_changed_response",
     "price_changed_response",
     "internal_error_response",
 ]

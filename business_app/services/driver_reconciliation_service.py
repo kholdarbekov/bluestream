@@ -8,10 +8,11 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app import db
+from business_app.models.driver_expense import DriverCashExpense
 from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
@@ -31,16 +32,18 @@ from shared.enums import (
     UserRole,
 )
 from shared.staff_constants import RECONCILIATION_RISK_FLAGS
-from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
+from business_app.utils.exceptions import ConflictError, NotFoundError, StateChangedError, ValidationError
 from business_app.utils.local_windows import parse_date_range
+from business_app.utils.validation_helpers import parse_money_amount
 
 
 class CashFigures(NamedTuple):
     """A driver cash session's money, the one set of figures every reader and the close rule share.
 
     ``gross`` is what the driver collected (``expected_cash``), ``on_hand`` what he still holds after the
-    prepayment he handed back from this trip (``expected_cash_on_hand``), ``handed_in`` what he has handed in
-    (unvoided handoffs, ``declared_cash``).
+    prepayment he handed back from this trip and the expenses the office approved on it
+    (``expected_cash_on_hand``), ``handed_in`` what he has handed in (unvoided handoffs, ``declared_cash``).
+    A claim still waiting changes none of them; it lowers only "Hand in now" (``cash_held_now``).
     """
 
     gross: Decimal
@@ -49,12 +52,14 @@ class CashFigures(NamedTuple):
 
     @property
     def remaining_to_hand_in(self) -> Decimal:
-        """What the driver still owes the office. Negative when he handed in more than he holds (unclamped)."""
+        """What the driver still owes the office, before the claims waiting on the trip (``cash_held_now`` nets
+        those). Negative when he handed in more than he holds (unclamped)."""
         return self.on_hand - self.handed_in
 
     @property
     def handed_back(self) -> Decimal:
-        """What the driver paid customers back out of this trip's cash (live current-trip payouts): gross − on hand."""
+        """What left the driver's pocket out of this trip's cash (live current-trip payouts and approved
+        expenses): gross − on hand."""
         return self.gross - self.on_hand
 
     @classmethod
@@ -66,6 +71,14 @@ class CashFigures(NamedTuple):
             on_hand=to_decimal(session.expected_cash_on_hand),
             handed_in=to_decimal(session.declared_cash or 0),
         )
+
+
+class ExpenseTotals(NamedTuple):
+    """A trip's expense claims in money: ``waiting`` (pending claims, at the amount claimed) and ``approved``
+    (approved claims, at the amount approved)."""
+
+    waiting: Decimal
+    approved: Decimal
 
 
 class DriverReconciliationService:
@@ -84,6 +97,13 @@ class DriverReconciliationService:
         "clerical_correction",
         "other",
     }
+    VERIFY_ALLOWED_STATUSES = {
+        DriverCashSessionStatus.OPEN.value,
+        DriverCashSessionStatus.PARTIAL.value,
+        DriverCashSessionStatus.SUBMITTED.value,
+        DriverCashSessionStatus.OVERDUE.value,
+        DriverCashSessionStatus.MISMATCH.value,
+    }
     RESOLUTION_ALLOWED_STATUSES = {
         DriverCashSessionStatus.MISMATCH.value,
         DriverCashSessionStatus.OVERDUE.value,
@@ -97,6 +117,13 @@ class DriverReconciliationService:
         DriverCashSessionStatus.OPEN.value,
         DriverCashSessionStatus.PARTIAL.value,
         DriverCashSessionStatus.OVERDUE.value,
+    }
+    # The office's three actions on a trip and the statuses each may act on: the one home of these sets, which
+    # ``office_action_block`` (and through it every route and every published ``can_*`` flag) reads.
+    OFFICE_ACTION_STATUSES = {
+        "verify": VERIFY_ALLOWED_STATUSES,
+        "resolve": RESOLUTION_ALLOWED_STATUSES,
+        "force_close": FORCE_CLOSE_ALLOWED_STATUSES,
     }
     REOPEN_ALLOWED_STATUSES = {
         DriverCashSessionStatus.SUBMITTED.value,
@@ -227,7 +254,47 @@ class DriverReconciliationService:
 
         return sorted(set(flags))
 
-    def _build_next_actions(self, session: DriverCashSession) -> List[str]:
+    @staticmethod
+    def awaits_office_only(held_now: Decimal, waiting: Decimal) -> bool:
+        """Only the office can act now: claims wait on the trip and nothing is left to hand in.
+
+        The one answer for the bot's ``await_expense_decision``, the hand-in default and the reminder skip."""
+        zero = Decimal("0.00")
+        return waiting > zero and held_now <= zero
+
+    def office_action_block(self, session: DriverCashSession, operation: str, *, waiting: Decimal) -> Optional[str]:
+        """Why the office may not ``operation`` (``verify``, ``resolve`` or ``force_close``) the trip now, or None.
+
+        ``session_status`` when its status is not in the operation's set (checked first), ``expenses_pending`` when
+        claims still wait on it (``waiting``, the caller's ``_sum_waiting_expenses`` read). The ONE rule: each office
+        action refuses by it, and every session read publishes it as ``can_<operation>`` / ``<operation>_block_code``.
+        """
+        if self._status_value(session.status) not in self.OFFICE_ACTION_STATUSES[operation]:
+            return "session_status"
+        if waiting > Decimal("0.00"):
+            return "expenses_pending"
+        return None
+
+    def _refuse_office_action(self, session: DriverCashSession, operation: str, *, waiting: Decimal) -> None:
+        """Raise ``office_action_block``'s refusal: each action's own status refusal (verify and resolve a
+        ``ValidationError``, force-close ``CASH_SESSION_NOT_FORCE_CLOSEABLE``), or ``CASH_SESSION_EXPENSES_PENDING``."""
+        code = self.office_action_block(session, operation, waiting=waiting)
+        if code == "session_status":
+            status = self._status_value(session.status)
+            if operation == "force_close":
+                raise ConflictError(
+                    f"Session is {status}, cannot force close",
+                    error_code="CASH_SESSION_NOT_FORCE_CLOSEABLE",
+                )
+            raise ValidationError(f"Cannot {operation} session with current status '{status}'")
+        if code == "expenses_pending":
+            raise ConflictError(
+                "Decide the driver's waiting expenses on this trip first",
+                error_code="CASH_SESSION_EXPENSES_PENDING",
+                details={"expenses_waiting_total": float(waiting)},
+            )
+
+    def _build_next_actions(self, session: DriverCashSession, *, held_now: Decimal, waiting: Decimal) -> List[str]:
         status = self._status_value(session.status)
         actions: List[str] = []
         if status in {
@@ -235,10 +302,12 @@ class DriverReconciliationService:
             DriverCashSessionStatus.PARTIAL.value,
             DriverCashSessionStatus.OVERDUE.value,
         }:
-            actions.append("submit_reconciliation")
+            actions.append(
+                "await_expense_decision" if self.awaits_office_only(held_now, waiting) else "submit_reconciliation"
+            )
         if status == DriverCashSessionStatus.SUBMITTED.value:
             actions.append("await_admin_verification")
-        if status in self.RESOLUTION_ALLOWED_STATUSES:
+        if self.office_action_block(session, "resolve", waiting=waiting) is None:
             actions.append("resolve_session")
         return actions
 
@@ -248,14 +317,23 @@ class DriverReconciliationService:
         *,
         include_events: bool = False,
         event_stats: Optional[Dict[str, Any]] = None,
+        expense_totals: Optional[ExpenseTotals] = None,
     ) -> Dict[str, Any]:
+        """The session as every screen reads it. ``remaining_cash_to_submit`` is "Hand in now" (``cash_held_now``,
+        never below 0). ``can_<action>`` / ``<action>_block_code`` are ``office_action_block`` for verify, resolve
+        and force_close: the screen's buttons. ``expense_totals`` is a list's batched read
+        (``expense_totals_for_sessions``); without it the session reads its own."""
         payload = session.to_dict()
         driver = session.driver_user
         events = list(session.cash_collection_events or []) if include_events else []
         stats = event_stats or {}
         figures = CashFigures.from_session(session)
         cumulative_declared = figures.handed_in
-        remaining = max(Decimal("0.00"), figures.remaining_to_hand_in)
+        if expense_totals is None:
+            expense_totals = self.expense_totals_for_sessions([session.id])[session.id]
+        waiting = expense_totals.waiting
+        held_now = self.cash_held_now(session, waiting=waiting)
+        remaining = max(Decimal("0.00"), held_now)
         payload.update(
             {
                 "driver_name": driver.full_name if driver else None,
@@ -265,11 +343,18 @@ class DriverReconciliationService:
                 "total_cash_collected": float(session.gross_cash_collected or 0),
                 "session_age_days": self._session_age_days(session),
                 "is_warning_due": self._is_warning_due(session),
-                "next_actions": self._build_next_actions(session),
+                "next_actions": self._build_next_actions(session, held_now=held_now, waiting=waiting),
                 "cumulative_declared_cash": float(cumulative_declared),
                 "remaining_cash_to_submit": float(remaining),
+                "expenses_waiting_total": float(waiting),
+                "expenses_approved_total": float(expense_totals.approved),
+                "declared_variance_net": float(self.declared_variance_net(session, waiting)),
             }
         )
+        for operation in self.OFFICE_ACTION_STATUSES:
+            block_code = self.office_action_block(session, operation, waiting=waiting)
+            payload[f"can_{operation}"] = block_code is None
+            payload[f"{operation}_block_code"] = block_code
         if include_events and "delivery_count" not in stats:
             payload["delivery_count"] = len({event.delivery_id for event in events if event.delivery_id})
         if include_events:
@@ -282,6 +367,22 @@ class DriverReconciliationService:
             ]
             payload["voided_handoffs"] = [
                 handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is not None
+            ]
+            claims = (
+                DriverCashExpense.query.filter(DriverCashExpense.driver_cash_session_id == session.id)
+                .order_by(DriverCashExpense.submitted_at.desc(), DriverCashExpense.id.desc())
+                .all()
+            )
+            payload["expenses"] = [
+                {
+                    "id": claim.id,
+                    "category": claim.category,
+                    "amount": float(claim.amount),
+                    "approved_amount": float(claim.approved_amount) if claim.approved_amount is not None else None,
+                    "status": claim.status,
+                    "submitted_at": claim.submitted_at.isoformat() if claim.submitted_at else None,
+                }
+                for claim in claims
             ]
         return payload
 
@@ -373,14 +474,6 @@ class DriverReconciliationService:
                 DriverCashSessionStatus.SUBMITTED.value,
                 DriverCashSessionStatus.OVERDUE.value,
             },
-            "verify": {
-                DriverCashSessionStatus.OPEN.value,
-                DriverCashSessionStatus.PARTIAL.value,
-                DriverCashSessionStatus.SUBMITTED.value,
-                DriverCashSessionStatus.OVERDUE.value,
-                DriverCashSessionStatus.MISMATCH.value,
-            },
-            "resolve": self.RESOLUTION_ALLOWED_STATUSES,
         }.get(operation, set())
         if status not in allowed:
             raise ValidationError(f"Cannot {operation} session with current status '{status}'")
@@ -418,6 +511,21 @@ class DriverReconciliationService:
         if for_update:
             query = query.with_for_update(key_share=True).populate_existing()
         return query.first()
+
+    def active_session_conflict(self, session: DriverCashSession) -> Optional[DriverCashSession]:
+        """The driver's other live session (open, overdue or partial) that reopening ``session`` would collide with,
+        or None."""
+        return (
+            DriverCashSession.query.filter(
+                DriverCashSession.driver_user_id == session.driver_user_id,
+                DriverCashSession.id != session.id,
+                DriverCashSession.status.in_(
+                    [DriverCashSessionStatus(status) for status in sorted(self.ACTIVE_STATUSES)]
+                ),
+            )
+            .order_by(DriverCashSession.session_started_at.desc(), DriverCashSession.id.desc())
+            .first()
+        )
 
     def lock_session(self, session_id: int) -> Optional[DriverCashSession]:
         """Session ``session_id`` under the same row lock as ``find_active_session(for_update=True)``, or None."""
@@ -506,11 +614,112 @@ class DriverReconciliationService:
         )
         return self._to_decimal(total)
 
+    def _sum_approved_expenses(self, session: DriverCashSession) -> Decimal:
+        """What the office approved out of THIS session's cash: ``approved_amount`` over its approved claims."""
+        if session.id is None:
+            return Decimal("0.00")
+        return self.expense_totals_for_sessions([session.id])[session.id].approved
+
+    def _sum_waiting_expenses(self, session: DriverCashSession) -> Decimal:
+        """The claims still waiting on THIS session: ``amount`` over its pending claims."""
+        if session.id is None:
+            return Decimal("0.00")
+        return self.expense_totals_for_sessions([session.id])[session.id].waiting
+
+    def expense_totals_for_sessions(self, session_ids: List[int]) -> Dict[int, ExpenseTotals]:
+        """Each session's ``ExpenseTotals`` in ONE grouped read over ``driver_cash_expenses``, so a list does not
+        run a query per row. Every id asked for has an entry; a session without claims gets zeros."""
+        zero = Decimal("0.00")
+        totals = {session_id: ExpenseTotals(waiting=zero, approved=zero) for session_id in session_ids}
+        if not session_ids:
+            return totals
+        rows = (
+            db.session.query(
+                DriverCashExpense.driver_cash_session_id,
+                func.sum(
+                    case(
+                        (DriverCashExpense.status == DriverCashExpense.PENDING, DriverCashExpense.amount),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (DriverCashExpense.status == DriverCashExpense.APPROVED, DriverCashExpense.approved_amount),
+                        else_=0,
+                    )
+                ),
+            )
+            .filter(
+                DriverCashExpense.driver_cash_session_id.in_(session_ids),
+                DriverCashExpense.status.in_([DriverCashExpense.PENDING, DriverCashExpense.APPROVED]),
+            )
+            .group_by(DriverCashExpense.driver_cash_session_id)
+            .all()
+        )
+        for session_id, waiting, approved in rows:
+            totals[session_id] = ExpenseTotals(waiting=self._to_decimal(waiting), approved=self._to_decimal(approved))
+        return totals
+
+    def cash_held_now(self, session: DriverCashSession, *, waiting: Optional[Decimal] = None) -> Decimal:
+        """The trip's "Hand in now": what the driver still owes the office minus the claims waiting on it. Unclamped.
+
+        The ONLY answer to "how much should he hand in now". It reads the STORED figures (every writer of an
+        active trip refreshes them under the session lock) and never calls ``cash_figures``, so a handoff still
+        runs one payout SUM per refresh. ``waiting`` is the caller's ``_sum_waiting_expenses`` read, when it has one.
+        """
+        if waiting is None:
+            waiting = self._sum_waiting_expenses(session)
+        return CashFigures.from_session(session).remaining_to_hand_in - waiting
+
+    def expense_floor(self, session: DriverCashSession) -> Optional[Decimal]:
+        """The lowest on hand a collected-cash correction may leave the trip at, or None for no floor (today's rule).
+
+        While a claim waits on the trip, its cash stays with the driver until the office decides, so a correction may
+        not take on hand below what he handed in plus the claims waiting: exactly "Hand in now" ≥ 0 (owner Q2,
+        2026-11-18). With no claim waiting there is no floor; a closed trip never has one, as no claim waits on it.
+        Reads the STORED figures, as ``cash_held_now`` does.
+        """
+        waiting = self._sum_waiting_expenses(session)
+        if waiting <= Decimal("0.00"):
+            return None
+        return CashFigures.from_session(session).handed_in + waiting
+
+    def correction_below_expense_floor(
+        self, session: DriverCashSession, *, change: Decimal = Decimal("0.00")
+    ) -> Optional[str]:
+        """Why a collected-cash correction that moves the trip's collected cash by ``change`` is refused, or None.
+
+        The ONE comparison against ``expense_floor``: the correction preview's hint, ``adjust_event_amount``'s
+        unlocked pre-check, and its check under the session lock once the correction is applied and refreshed
+        (``change`` 0) all ask it.
+        """
+        floor = self.expense_floor(session)
+        if floor is None:
+            return None
+        after = CashFigures.from_session(session).on_hand + change
+        if after >= floor:
+            return None
+        return (
+            f"this correction would leave trip #{session.id} {after} on hand, below what the driver handed in plus "
+            f"the expenses waiting ({floor}); decide the waiting expense first"
+        )
+
+    @staticmethod
+    def declared_variance_net(session: DriverCashSession, waiting: Decimal) -> Decimal:
+        """The declared variance shown while claims wait: handed in − on hand + waiting, so a driver who handed in
+        exactly "Hand in now" shows 0. 0 while nothing is handed in, as the stored ``declared_variance``, which
+        stays the raw audit figure."""
+        if session.declared_cash is None:
+            return Decimal("0.00")
+        figures = CashFigures.from_session(session)
+        return figures.handed_in - figures.on_hand + waiting
+
     def cash_figures(self, session: DriverCashSession) -> CashFigures:
         """The session's figures summed live from its rows. Mutates nothing (a preview may call it).
 
-        on_hand = gross − live current-trip payouts: a prepayment handed back from the trip's cash leaves
-        the driver's pocket, while what he collected stays what it was.
+        on_hand = gross − live current-trip payouts − approved expenses: a prepayment handed back from the
+        trip's cash, or an expense the office approved on it, leaves the driver's pocket, while what he
+        collected stays what it was. A claim still waiting changes nothing here.
         """
         gross = self._to_decimal(
             db.session.query(func.coalesce(func.sum(CashCollectionEvent.amount), 0))
@@ -522,7 +731,7 @@ class DriverReconciliationService:
         )
         return CashFigures(
             gross=gross,
-            on_hand=gross - self._sum_live_payouts(session),
+            on_hand=gross - self._sum_live_payouts(session) - self._sum_approved_expenses(session),
             handed_in=self._sum_handoffs(session),
         )
 
@@ -532,7 +741,9 @@ class DriverReconciliationService:
 
         An empty session (nothing held, nothing handed in) stays open, unless a prepayment return from
         this trip's cash is what emptied it: then it closes at zero, because the driver has nothing left
-        to submit. ``submit_session`` and ``apply_payout_effect`` both decide through this one rule.
+        to submit. An expense the office approves out of the trip's cash counts the same way, so an approval
+        can also empty the trip and close it. ``submit_session`` and ``apply_payout_effect`` both decide
+        through this one rule.
         """
         zero = Decimal("0.00")
         return handed_in >= on_hand and (on_hand > zero or handed_in > zero or has_live_payout)
@@ -541,6 +752,7 @@ class DriverReconciliationService:
         """Refresh the session's stored figures, then (the figures, whether ``session_closes`` says it closes now).
 
         The ONE place a handoff and a prepayment return ask the close rule, so they cannot ask it differently.
+        An approved expense asks it here too (``apply_payout_effect``), so the approval that empties a trip closes it.
         The live-payout test reads the stored figures (gross − on hand), so the payout SUM runs once, in the refresh.
         """
         self.refresh_expected_cash(session)
@@ -591,6 +803,32 @@ class DriverReconciliationService:
         session.risk_flags = self._build_risk_flags(session)
         return session
 
+    @staticmethod
+    def _refuse_a_hand_in_past_waiting_claims(
+        declared: Optional[Decimal], basis: Any, *, held_now: Decimal, waiting: Decimal
+    ) -> None:
+        """While claims wait on the trip, a hand-in never goes past "Hand in now" (``held_now``): the cash a claim
+        waits on stays with the driver until the office decides. With no claim waiting, nothing is refused here.
+
+        A button carries ``basis``, the waiting total it was drawn with. One drawn on other claims (an unreadable
+        basis counts as other), or whose amount no longer fits, is redrawn: ``StateChangedError`` with reason
+        ``hand_in_changed``. A typed amount (no basis) above "Hand in now" is refused with the figure to hand in.
+        """
+        over = waiting > Decimal("0.00") and declared is not None and declared > held_now
+        if basis is not None:
+            try:
+                drawn_on = parse_money_amount(basis, error_code="STATE_CHANGED", allow_zero=True)
+            except ValidationError:
+                drawn_on = None
+            if over or drawn_on != waiting:
+                raise StateChangedError(details={"reason": "hand_in_changed"})
+        elif over:
+            raise ConflictError(
+                "Some of your cash is waiting for an expense decision; hand in at most the amount to hand in now",
+                details={"hand_in_now": float(held_now), "expenses_waiting_total": float(waiting)},
+                error_code="RECONCILIATION_EXPENSES_WAITING",
+            )
+
     def submit_session(
         self,
         *,
@@ -598,6 +836,8 @@ class DriverReconciliationService:
         declared_cash: Any = None,
         notes: Optional[str] = None,
         submitted_by_user_id: Optional[int] = None,
+        session_id: Optional[int] = None,
+        basis: Any = None,
     ) -> DriverCashSession:
         """Record a cash handoff toward closing the driver's active session.
 
@@ -611,22 +851,31 @@ class DriverReconciliationService:
         rollout because it masked legitimate over-payments and gave us no way
         to track legitimate under-payments separately.
 
-        When ``declared_cash`` is ``None`` the call resolves to the remaining
-        balance (``expected_cash_on_hand - already-handed-off``), so the
-        "Submit expected cash" button always settles the remainder rather
-        than re-stamping the full expected total.
+        When ``declared_cash`` is ``None`` the call resolves to "Hand in now"
+        (``cash_held_now``), so the "settle everything" button settles the
+        remainder net of the claims waiting on the trip rather than re-stamping
+        the full expected total. When claims wait and nothing is left to hand
+        in, it is refused (``RECONCILIATION_NOTHING_TO_SUBMIT``), never finalized.
+
+        While claims wait on the trip, a hand-in never goes past "Hand in now"
+        (``_refuse_a_hand_in_past_waiting_claims``). ``session_id`` and ``basis``
+        come from the Cash screen's button: the trip it was drawn on and the
+        waiting total it was drawn with.
 
         It holds the session row lock (``for_update``) from the read to the
         commit, so a prepayment return from this trip's cash recorded at the same
         moment is either already in on_hand here or waits and sees this handoff.
         If the session the driver was settling closed while this call waited (a
-        return that emptied it, his own earlier tap, an admin close), the handoff
+        return that emptied it, his own earlier tap, an admin close), or the
+        button was drawn on a trip that is no longer the active one, the handoff
         is refused (409 ``RECONCILIATION_SESSION_CHANGED``): his figure belongs
-        to that trip, never to the empty one opened after it.
+        to that trip, never to the one opened after it.
         """
         settling = self.find_active_session(driver_user_id)
         session = self.get_or_create_session(driver_user_id=driver_user_id, for_update=True)
-        if settling is not None and session.id != settling.id:
+        closed_under_tap = settling is not None and session.id != settling.id
+        drawn_on_another_trip = session_id is not None and session_id != session.id
+        if closed_under_tap or drawn_on_another_trip:
             raise ConflictError(
                 "Your cash session closed while this handoff was being recorded; nothing was recorded",
                 error_code="RECONCILIATION_SESSION_CHANGED",
@@ -637,11 +886,12 @@ class DriverReconciliationService:
         self.refresh_expected_cash(session)
         figures = CashFigures.from_session(session)
         prior_declared = figures.handed_in
+        waiting = self._sum_waiting_expenses(session)
+        held_now = self.cash_held_now(session, waiting=waiting)
+        declared = None if declared_cash is None else self._to_decimal(declared_cash)
+        self._refuse_a_hand_in_past_waiting_claims(declared, basis, held_now=held_now, waiting=waiting)
 
-        if declared_cash is None:
-            target_amount = figures.remaining_to_hand_in
-        else:
-            target_amount = self._to_decimal(declared_cash)
+        target_amount = held_now if declared is None else declared
 
         recorder_id = submitted_by_user_id or driver_user_id
         handoff = None
@@ -649,16 +899,18 @@ class DriverReconciliationService:
         if target_amount <= Decimal("0.00"):
             # Nothing left to hand off. The "settle everything" button
             # (declared_cash is None) on a session that already carries handoffs
-            # means "finalize me" — close it without recording an empty handoff.
-            # A discrete manual amount, or a session with no prior handoffs, is
-            # still an error (you cannot record a zero/negative handoff, and an
-            # empty session has nothing to reconcile).
-            if declared_cash is not None or prior_declared <= Decimal("0.00"):
-                if declared_cash is None:
-                    raise ValidationError("No cash to reconcile", error_code="RECONCILIATION_NOTHING_TO_SUBMIT")
+            # means "finalize me" — close it without recording an empty handoff —
+            # unless claims still wait on the trip: then only the office can act
+            # (awaits_office_only) and the trip stays open. A discrete manual
+            # amount, or a session with no prior handoffs, is still an error (you
+            # cannot record a zero/negative handoff, and an empty session has
+            # nothing to reconcile).
+            if declared is not None:
                 raise ValidationError(
                     "Handoff amount must be positive", error_code="RECONCILIATION_AMOUNT_NOT_POSITIVE"
                 )
+            if prior_declared <= Decimal("0.00") or self.awaits_office_only(held_now, waiting):
+                raise ValidationError("No cash to reconcile", error_code="RECONCILIATION_NOTHING_TO_SUBMIT")
         else:
             handoff = DriverCashHandoff(
                 driver_cash_session_id=session.id,
@@ -736,9 +988,10 @@ class DriverReconciliationService:
         return next_session
 
     def apply_payout_effect(self, session: DriverCashSession, *, actor_user_id: int) -> Optional[DriverCashSession]:
-        """After a prepayment return from this trip's cash was written against ``session`` (and flushed):
-        lower what the driver holds, and close the session when, by ``session_closes``, nothing is left
-        to hand in. Returns the driver's next session when it closed, else None. Never commits.
+        """After a cash-out from this trip (a prepayment return or an approved expense) was written against
+        ``session`` (and flushed): lower what the driver holds, and close the session when, by
+        ``session_closes``, nothing is left to hand in. Returns the driver's next session when it closed,
+        else None. Never commits.
 
         The caller holds the session row lock (the payout planner's lock 3).
         """
@@ -746,6 +999,38 @@ class DriverReconciliationService:
         if closes:
             return self._close_session(session, actor_user_id=actor_user_id, now=self._now_utc())
         return None
+
+    @staticmethod
+    def audit_session_closed_by_cash_out(
+        session: DriverCashSession,
+        next_session: DriverCashSession,
+        *,
+        actor_user_id: int,
+        cause: str,
+        cause_id: int,
+    ) -> None:
+        """A cash-out from this trip (``cause``: ``payout`` or ``expense``) left the driver nothing to hand in,
+        so it closed his trip's cash session. Audited after the commit, by one shape for every cause."""
+        if cause not in ("payout", "expense"):
+            raise ValueError(f"Unknown cash-out cause: {cause}")
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action=f"driver_cash_session_closed_by_{cause}",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="driver_cash_session",
+            resource_id=str(session.id),
+            additional_data={
+                "driver_user_id": session.driver_user_id,
+                f"{cause}_id": cause_id,
+                "actor_user_id": actor_user_id,
+                "expected_cash": str(session.expected_cash),
+                "expected_cash_on_hand": str(session.expected_cash_on_hand),
+                "declared_cash": str(session.declared_cash) if session.declared_cash is not None else None,
+                "declared_variance": str(session.declared_variance),
+                "status": session.status.value,
+                "next_driver_cash_session_id": next_session.id,
+            },
+        )
 
     def verify_session(
         self,
@@ -760,7 +1045,7 @@ class DriverReconciliationService:
         session = self.lock_session(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")
-        self._assert_session_transition(session, operation="verify")
+        self._refuse_office_action(session, "verify", waiting=self._sum_waiting_expenses(session))
         if reason_code not in self.VERIFY_REASON_CODES:
             raise ValidationError("Invalid verify reason_code")
 
@@ -820,7 +1105,7 @@ class DriverReconciliationService:
         session = self.lock_session(session_id)
         if not session:
             raise NotFoundError("Driver cash session not found")
-        self._assert_session_transition(session, operation="resolve")
+        self._refuse_office_action(session, "resolve", waiting=self._sum_waiting_expenses(session))
         if not resolution_notes:
             raise ValidationError("Resolution notes are required")
         if reason_code not in self.RESOLUTION_REASON_CODES:
@@ -877,7 +1162,9 @@ class DriverReconciliationService:
         balance). Transitions straight to FORCE_CLOSED with a mandatory reason.
         The admin may optionally record the cash they physically counted, which
         stamps verified_cash / verified_variance the same way verify_session
-        does. Existing handoffs and declared_cash are left intact.
+        does. Existing handoffs and declared_cash are left intact. Refused
+        while the driver's expense claims still wait on the trip
+        (``office_action_block``), as verify and resolve are.
 
         It takes the session row lock first: the session is ACTIVE, so a
         prepayment return from this trip's cash may be changing on_hand.
@@ -887,11 +1174,7 @@ class DriverReconciliationService:
             raise NotFoundError("Driver cash session not found")
 
         status = self._status_value(session.status)
-        if status not in self.FORCE_CLOSE_ALLOWED_STATUSES:
-            raise ConflictError(
-                f"Session is {status}, cannot force close",
-                error_code="CASH_SESSION_NOT_FORCE_CLOSEABLE",
-            )
+        self._refuse_office_action(session, "force_close", waiting=self._sum_waiting_expenses(session))
         if not reason or not reason.strip():
             raise ValidationError("A reason is required for force-closing a session")
 
@@ -966,19 +1249,10 @@ class DriverReconciliationService:
                 f"Cannot reopen session with current status '{status}'",
             )
 
-        # Partial unique index uq_driver_cash_sessions_driver_active permits at
-        # most one session per driver in {open, overdue}. If a newer one exists,
-        # the admin must first resolve it (verify/resolve) so re-opening this
-        # older session does not collide.
-        active_conflict = (
-            DriverCashSession.query.filter(
-                DriverCashSession.driver_user_id == session.driver_user_id,
-                DriverCashSession.id != session.id,
-                DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]),
-            )
-            .order_by(DriverCashSession.session_started_at.desc())
-            .first()
-        )
+        # The partial unique index uq_driver_cash_sessions_driver_active allows one open, overdue or
+        # partial session per driver. If a newer one exists, the admin must first resolve it
+        # (verify/resolve) so re-opening this older session does not collide.
+        active_conflict = self.active_session_conflict(session)
         if active_conflict:
             raise ConflictError(
                 f"Cannot reopen session {session.id}: driver has another active "
@@ -1104,7 +1378,11 @@ class DriverReconciliationService:
                 if self._reminder_due(session, reference_time=reference_time, interval_minutes=interval_minutes):
                     if session.status == DriverCashSessionStatus.OPEN:
                         self._mark_overdue(session)
-                    due_sessions.append((session, "overdue"))
+                    # Everything he holds waits for the office: managers still see the session overdue, but there
+                    # is nothing for him to hand in, so he is not reminded (the bot's ``await_expense_decision``).
+                    waiting = self._sum_waiting_expenses(session)
+                    if not self.awaits_office_only(self.cash_held_now(session, waiting=waiting), waiting):
+                        due_sessions.append((session, "overdue"))
             db.session.commit()
 
         return due_sessions
@@ -1168,12 +1446,18 @@ class DriverReconciliationService:
             if stage == "overdue"
             else "staff.notification.reconciliation_reminder_due"
         )
-        body = get_translation(
-            body_key,
-            language=driver_language,
-            date=session.session_started_at.date().isoformat(),
-            expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
-        )
+        body_args = {
+            "date": session.session_started_at.date().isoformat(),
+            "expected_cash": f"{float(session.expected_cash_on_hand or 0):,.0f}",
+        }
+        # While claims wait on the trip the reminder names what he can hand in now beside what waits. The key and
+        # its arguments are decided ONCE: the Telegram text and the in-app notification both use this pair.
+        waiting = self._sum_waiting_expenses(session)
+        if waiting > Decimal("0.00"):
+            body_key = "staff.notification.reconciliation_reminder_overdue_expenses_waiting"
+            body_args["hand_in_now"] = f"{float(self.cash_held_now(session, waiting=waiting)):,.0f}"
+            body_args["waiting"] = f"{float(waiting):,.0f}"
+        body = get_translation(body_key, language=driver_language, **body_args)
         subject = get_translation(
             "staff.notification.subject.driver_cash_reconciliation",
             language=driver_language,
@@ -1190,12 +1474,7 @@ class DriverReconciliationService:
                     "staff.notification.subject.driver_cash_reconciliation",
                     language=target_lang,
                 )
-            return get_translation(
-                body_key,
-                language=target_lang,
-                date=session.session_started_at.date().isoformat(),
-                expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
-            )
+            return get_translation(body_key, language=target_lang, **body_args)
 
         template = SimpleNamespace(
             subject=subject,
@@ -1457,12 +1736,14 @@ class DriverReconciliationService:
 
         session_ids = [session.id for session in pagination.items]
         event_stats = self._event_stats_for_sessions(session_ids)
+        expense_totals = self.expense_totals_for_sessions(session_ids)
         items = []
         for session in pagination.items:
             items.append(
                 self._serialize_session(
                     session,
                     event_stats=event_stats.get(session.id),
+                    expense_totals=expense_totals[session.id],
                 )
             )
 
@@ -1543,6 +1824,7 @@ class DriverReconciliationService:
                 "verified_cash": 0.0,
                 "declared_variance": 0.0,
                 "verified_variance": 0.0,
+                "expenses_approved_total": 0.0,
                 "open_session_count": 0,
                 "partial_session_count": 0,
                 "submitted_session_count": 0,
@@ -1572,10 +1854,12 @@ class DriverReconciliationService:
             "verified_cash_total": 0.0,
             "declared_variance_total": 0.0,
             "verified_variance_total": 0.0,
+            "expenses_approved_total": 0.0,
             "driver_count": 0,
         }
 
         event_stats = self._event_stats_for_sessions([session.id for session in sessions])
+        expense_totals = self.expense_totals_for_sessions([session.id for session in sessions])
         for session in sessions:
             driver = session.driver_user
             row = driver_rows[session.driver_user_id]
@@ -1592,6 +1876,7 @@ class DriverReconciliationService:
             row["verified_cash"] += float(session.verified_cash or 0)
             row["declared_variance"] += float(session.declared_variance or 0)
             row["verified_variance"] += float(session.verified_variance or 0)
+            row["expenses_approved_total"] += float(expense_totals[session.id].approved)
             row["delivery_count"] += int(event_stats.get(session.id, {}).get("delivery_count", 0))
             if session.status == DriverCashSessionStatus.OPEN:
                 row["open_session_count"] += 1
@@ -1638,6 +1923,7 @@ class DriverReconciliationService:
             summary["verified_cash_total"] += float(session.verified_cash or 0)
             summary["declared_variance_total"] += float(session.declared_variance or 0)
             summary["verified_variance_total"] += float(session.verified_variance or 0)
+            summary["expenses_approved_total"] += float(expense_totals[session.id].approved)
 
         summary["driver_count"] = len(driver_rows)
         report = sorted(

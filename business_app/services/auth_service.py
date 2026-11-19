@@ -29,6 +29,7 @@ from shared.validators import (
     normalize_phone_number,
 )
 from business_app.services.session_revocation_service import REVOKED_BY_PASSWORD_RESET, SessionRevocationService
+from business_app.services.driver_expense.permissions import DRIVER_EXPENSE_REVIEW_PERMISSIONS
 from business_app.services.price_change.permissions import (
     PRICE_CHANGE_CANCEL_ANNOUNCED_PERMISSIONS,
     PRICE_CHANGE_MANAGE_PERMISSIONS,
@@ -1652,6 +1653,8 @@ class AuthService:
             "can_view_price_changes": False,
             "can_manage_price_changes": False,
             "can_cancel_announced_price_changes": False,
+            # Driver expense claims (spec 2026-11-17 §6.8): derived below from the route guards' own tuple.
+            "can_review_driver_expenses": False,
         }
         # Get role value for comparison (handle both enum and string)
         role_value = user.role.value if hasattr(user.role, "value") else user.role
@@ -1708,6 +1711,9 @@ class AuthService:
         permissions["can_cancel_announced_price_changes"] = has_admin_permission(
             user, PRICE_CHANGE_CANCEL_ANNOUNCED_PERMISSIONS
         )
+        # - can_review_driver_expenses: the Driver expenses page, its menu entry and badge read it;
+        #   `validate_admin_action(list(DRIVER_EXPENSE_REVIEW_PERMISSIONS))` guards every /admin/driver-expenses route.
+        permissions["can_review_driver_expenses"] = has_admin_permission(user, DRIVER_EXPENSE_REVIEW_PERMISSIONS)
 
         return permissions
 

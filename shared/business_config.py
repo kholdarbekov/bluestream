@@ -575,3 +575,10 @@ REORDER_REMINDER_FRESH_DAYS = _reminder_knob("REORDER_REMINDER_FRESH_DAYS", int)
 REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS = _reminder_knob("REORDER_REMINDER_LIVE_ORDER_GRACE_DAYS", int)
 REORDER_REMINDER_LOCAL_TIME = _reminder_knob("REORDER_REMINDER_LOCAL_TIME")
 ADMIN_UI_BASE_URL = _reminder_knob("ADMIN_UI_BASE_URL")
+
+
+# --- Driver cash expenses (spec 2026-11-17) ---------------------------------------------------
+# The daily digest lists claims that have waited longer than this.
+DRIVER_EXPENSE_DIGEST_AFTER_HOURS = 24
+# "My expenses" shows this many decided claims.
+DRIVER_EXPENSE_DECIDED_SHOWN = 10

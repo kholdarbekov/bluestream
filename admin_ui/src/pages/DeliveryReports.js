@@ -16,6 +16,7 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -41,6 +42,7 @@ import { DEFAULT_PAGE_SIZE } from '../utils/constants';
 import { formatDateTimeSeconds } from '../utils/dateUtils';
 import { describeAllocationScope } from '../utils/cashScopeDisplay';
 import { resolveCollectScope } from '../utils/codCollectScope';
+import { categoryLabel, statusLabel } from '../components/driverExpenses/expenseCopy';
 
 const ADJUSTABLE_SESSION_STATUSES = new Set(['submitted', 'partial', 'mismatch', 'overdue']);
 
@@ -314,8 +316,21 @@ const DeliveryReports = () => {
     [sessionDetail, sessions, selectedSessionId]
   );
 
-  const canReviewSession = (session) => session.status === 'submitted';
-  const canResolveSession = (session) => session.status === 'mismatch' || session.blocked_from_cod;
+  // Every office button reads the backend's answer (`can_<action>` / `<action>_block_code`); the one block the page
+  // explains is the driver's waiting expenses, as a disabled button with a tooltip. Any other block hides the button.
+  const officeAction = (session, operation, button) => {
+    if (session[`can_${operation}`]) {
+      return button;
+    }
+    if (session[`${operation}_block_code`] === 'expenses_pending') {
+      return (
+        <Tooltip title={t('staff:driver_expenses_block_pending', "Decide the driver's waiting expenses first")}>
+          <span>{React.cloneElement(button, { disabled: true, onClick: undefined })}</span>
+        </Tooltip>
+      );
+    }
+    return null;
+  };
 
   const openAdjustModal = (event) => {
     setAdjustEvent(event);
@@ -374,8 +389,6 @@ const DeliveryReports = () => {
     setForceCloseOpen(true);
   };
 
-  const canForceCloseSession = (session) =>
-    isAdmin() && ['open', 'partial', 'overdue'].includes(session.status);
 
   const reportColumns = [
     {
@@ -413,6 +426,12 @@ const DeliveryReports = () => {
       title: t('staff:submitted_sessions', 'Awaiting Count'),
       dataIndex: 'submitted_session_count',
       key: 'submitted_session_count',
+    },
+    {
+      title: t('staff:driver_expenses_column', 'Expenses'),
+      dataIndex: 'expenses_approved_total',
+      key: 'expenses_approved_total',
+      render: money,
     },
   ];
 
@@ -459,8 +478,14 @@ const DeliveryReports = () => {
     },
     {
       title: t('staff:cash_to_hand_in', 'To hand in'),
-      dataIndex: 'expected_cash_on_hand',
-      key: 'expected_cash_on_hand',
+      dataIndex: 'remaining_cash_to_submit',
+      key: 'remaining_cash_to_submit',
+      render: money,
+    },
+    {
+      title: t('staff:driver_expenses_column', 'Expenses'),
+      dataIndex: 'expenses_approved_total',
+      key: 'expenses_approved_total',
       render: money,
     },
     {
@@ -495,26 +520,36 @@ const DeliveryReports = () => {
           <Button icon={<EyeOutlined />} onClick={() => openSessionDetail(record.id)}>
             {t('common:view', 'View')}
           </Button>
-          {canReviewSession(record) ? (
+          {officeAction(
+            record,
+            'verify',
             <Button icon={<CheckOutlined />} type="primary" onClick={() => openVerifyModal(record, 'approve')}>
               {t('staff:approve', 'Approve')}
             </Button>
-          ) : null}
-          {canReviewSession(record) ? (
+          )}
+          {officeAction(
+            record,
+            'verify',
             <Button danger icon={<ExclamationCircleOutlined />} onClick={() => openVerifyModal(record, 'reject')}>
               {t('staff:reject', 'Reject')}
             </Button>
-          ) : null}
-          {canResolveSession(record) ? (
+          )}
+          {officeAction(
+            record,
+            'resolve',
             <Button icon={<ToolOutlined />} onClick={() => openResolveModal(record)}>
               {t('staff:resolve', 'Resolve')}
             </Button>
-          ) : null}
-          {canForceCloseSession(record) ? (
-            <Button danger icon={<StopOutlined />} onClick={() => openForceCloseModal(record)}>
-              {t('staff:force_close', 'Force Close')}
-            </Button>
-          ) : null}
+          )}
+          {isAdmin()
+            ? officeAction(
+                record,
+                'force_close',
+                <Button danger icon={<StopOutlined />} onClick={() => openForceCloseModal(record)}>
+                  {t('staff:force_close', 'Force Close')}
+                </Button>
+              )
+            : null}
         </Space>
       ),
     },
@@ -962,7 +997,12 @@ const DeliveryReports = () => {
               <Descriptions.Item label={t('staff:verified_cash', 'Verified Cash')}>
                 {selectedSession.verified_cash == null ? '—' : money(selectedSession.verified_cash)}
               </Descriptions.Item>
-              <Descriptions.Item label={t('staff:declared_variance', 'Declared Variance')}>{money(selectedSession.declared_variance)}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:declared_variance', 'Declared Variance')}>{money(selectedSession.declared_variance_net)}</Descriptions.Item>
+              {selectedSession.expenses_waiting_total > 0 ? (
+                <Descriptions.Item label={t('staff:driver_expenses_waiting', 'Waiting for approval')}>
+                  {money(selectedSession.expenses_waiting_total)}
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label={t('staff:verified_variance', 'Verified Variance')}>{money(selectedSession.verified_variance)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:block_reason', 'Block Reason')}>{selectedSession.block_reason || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('staff:force_close_reason', 'Force Close Reason')}>
@@ -995,6 +1035,50 @@ const DeliveryReports = () => {
                 message={t('staff:driver_blocked_from_cod', 'Driver is blocked from new COD work until this session is cleared.')}
               />
             ) : null}
+
+            <Divider>{t('staff:driver_expenses_section', 'Expenses on this trip')}</Divider>
+            {(selectedSession.expenses || []).length === 0 ? (
+              <Text type="secondary">{t('staff:driver_expenses_none', 'No expenses on this trip')}</Text>
+            ) : (
+              <Table
+                size="small"
+                pagination={false}
+                rowKey="id"
+                dataSource={selectedSession.expenses}
+                columns={[
+                  {
+                    title: t('staff:handoff_occurred_at', 'When'),
+                    dataIndex: 'submitted_at',
+                    key: 'submitted_at',
+                    render: (value) => (value ? formatDateTimeSeconds(value) : '—'),
+                  },
+                  {
+                    title: t('ui.driver_expenses.col_category', 'Category'),
+                    dataIndex: 'category',
+                    key: 'category',
+                    render: (value) => categoryLabel(t, value),
+                  },
+                  {
+                    title: t('ui.driver_expenses.col_claimed', 'Claimed'),
+                    dataIndex: 'amount',
+                    key: 'amount',
+                    render: money,
+                  },
+                  {
+                    title: t('ui.driver_expenses.col_approved', 'Approved'),
+                    dataIndex: 'approved_amount',
+                    key: 'approved_amount',
+                    render: (value) => (value == null ? '—' : money(value)),
+                  },
+                  {
+                    title: t('ui.driver_expenses.col_status', 'Status'),
+                    dataIndex: 'status',
+                    key: 'status',
+                    render: (value) => statusLabel(t, value),
+                  },
+                ]}
+              />
+            )}
 
             <Divider>{t('staff:cash_handoffs', 'Cash Handoffs')}</Divider>
             <Table

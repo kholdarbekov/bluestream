@@ -674,8 +674,9 @@ class AdminService {
     return response.data;
   }
 
-  async editCollectedCash(orderId, payload) {
-    const response = await api.post(`/admin/orders/${orderId}/collected-cash`, payload);
+  // `config.handledErrorCodes`: refusal codes the caller explains itself (api.js then skips its toast).
+  async editCollectedCash(orderId, payload, config) {
+    const response = await api.post(`/admin/orders/${orderId}/collected-cash`, payload, config);
     return response.data;
   }
 

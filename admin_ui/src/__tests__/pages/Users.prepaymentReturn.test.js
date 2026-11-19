@@ -180,3 +180,73 @@ describe('Users prepayment card: returning prepayment', () => {
     expect(within(untouched).queryByText('Returned')).toBeNull();
   });
 });
+
+describe('Return prepayment modal: driver expenses waiting', () => {
+  const previewWith = (overrides) => ({
+    data: {
+      data: {
+        customer_id: 11, free_balance: 50000, amount: 40000, target_balance: null, paid_by: 'driver_current_session',
+        driver_user_id: 32, card_click_amount: 0, revenue_counted_amount: 0, drawn: [],
+        warnings: { pending_orders: [], live_subscriptions: [], place_debts: [] },
+        contract_effect: [], blocking_reasons: [], is_applicable: true,
+        ...overrides,
+      },
+    },
+  });
+
+  const previewAsDriver = async (user) => {
+    staffService.getCustomerPrepaymentHistory.mockResolvedValue(historyWith({}));
+    staffService.getDeliveryPersons.mockResolvedValue({
+      data: { data: { items: [{ id: 2, user_id: 32, full_name: 'Aziz' }] } },
+    });
+    await openDetails(user);
+    await user.click(await screen.findByRole('button', { name: 'Return prepayment' }));
+    const dialog = (await screen.findByText('Amount to return')).closest('.ant-modal-content');
+    await user.click(within(dialog).getByText('Driver, from his current trip\'s cash'));
+    await user.click(within(dialog).getByRole('combobox'));
+    await user.click(await screen.findByText('Aziz'));
+    await user.type(within(dialog).getByLabelText('Reason'), 'Customer moved away');
+    await user.click(within(dialog).getByRole('button', { name: 'Preview' }));
+    return dialog;
+  };
+
+  it('says why the return limit is lower', async () => {
+    staffService.previewPrepaymentPayout.mockResolvedValue(previewWith({
+      session_effect: {
+        on_hand_before: 70000, on_hand_after: 30000, will_close: false, cap: 70000, expenses_waiting: 30000,
+      },
+    }));
+    await previewAsDriver(userEvent.setup());
+    expect(await screen.findByText(
+      "30,000 UZS of the driver's trip cash is waiting for an expense decision, so the limit is lower",
+    )).toBeInTheDocument();
+    expect(screen.getByText("The driver's trip cash")).toBeInTheDocument();
+  });
+
+  it('keeps saying why when the typed amount is over the limit', async () => {
+    staffService.previewPrepaymentPayout.mockResolvedValue(previewWith({
+      amount: 90000,
+      blocking_reasons: ['amount_exceeds_driver_cash: 90000 > 70000'],
+      session_effect: {
+        on_hand_before: 70000, on_hand_after: -20000, will_close: false, cap: 70000, expenses_waiting: 30000,
+      },
+    }));
+    await previewAsDriver(userEvent.setup());
+    expect(await screen.findByText(
+      "30,000 UZS of the driver's trip cash is waiting for an expense decision, so the limit is lower",
+    )).toBeInTheDocument();
+    expect(screen.getByText("The driver's current trip does not hold that much cash.")).toBeInTheDocument();
+    expect(screen.queryByText("The driver's trip cash")).toBeNull();
+  });
+
+  it('says nothing about expenses when none wait', async () => {
+    staffService.previewPrepaymentPayout.mockResolvedValue(previewWith({
+      session_effect: {
+        on_hand_before: 70000, on_hand_after: 30000, will_close: false, cap: 70000, expenses_waiting: 0,
+      },
+    }));
+    await previewAsDriver(userEvent.setup());
+    expect(await screen.findByText("The driver's trip cash")).toBeInTheDocument();
+    expect(screen.queryByText(/waiting for an expense decision/)).toBeNull();
+  });
+});

@@ -12,6 +12,7 @@ import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
 import DeliveryReports from './pages/DeliveryReports';
 import EtaAccuracy from './pages/EtaAccuracy';
+import DriverExpenses from './pages/DriverExpenses';
 import Dispatch from './pages/Dispatch';
 import Tryouts from './pages/Tryouts';
 import BottleTracking from './pages/BottleTracking';
@@ -94,6 +95,15 @@ function App() {
                     element={(
                       <PermissionGuard permission="can_view_eta_accuracy" fallback={<Navigate to="/dashboard" replace />}>
                         <EtaAccuracy />
+                      </PermissionGuard>
+                    )}
+                  />
+                  {/* Driver cash expenses (spec 2026-11-17 §6.8): the review permission the backend routes use. */}
+                  <Route
+                    path="/delivery/expenses"
+                    element={(
+                      <PermissionGuard permission="can_review_driver_expenses" fallback={<Navigate to="/dashboard" replace />}>
+                        <DriverExpenses />
                       </PermissionGuard>
                     )}
                   />

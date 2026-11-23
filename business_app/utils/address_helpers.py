@@ -43,3 +43,18 @@ def door_fields(address) -> Dict[str, Any]:
         "landmark": address.landmark or "" if address else "",
         "delivery_instructions": address.delivery_instructions or "" if address else "",
     }
+
+
+def _apartment_key(value: Any) -> str:
+    """An apartment as `apartments_differ` compares it; "" when unknown. A value may come straight from a request
+    body, so a JSON number is the apartment it reads as (5 is "5")."""
+    return "" if value is None else str(value).strip().casefold()
+
+
+def apartments_differ(a: Any, b: Any) -> bool:
+    """True only when both apartments are known (non-empty after strip/casefold) and they differ.
+
+    A missing apartment never separates two addresses: it is "unknown", not "different".
+    """
+    left, right = _apartment_key(a), _apartment_key(b)
+    return bool(left) and bool(right) and left != right

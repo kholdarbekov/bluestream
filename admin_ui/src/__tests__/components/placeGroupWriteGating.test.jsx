@@ -44,8 +44,8 @@ const wrap = (ui) => {
 const USER = { id: 11, first_name: 'Alice', last_name: 'Tester', phone: '+998900000001' };
 
 const suggestionMembers = [
-  { address_id: 21, user_id: 31, first_name: 'A', last_name: 'B', phone: '+99879000001', title: 'T', full_address: 'X st' },
-  { address_id: 22, user_id: 32, first_name: 'C', last_name: 'D', phone: '+99879000002', title: 'T', full_address: 'X st' },
+  { address_id: 21, user_id: 31, first_name: 'A', last_name: 'B', phone: '+99879000001', title: 'T', full_address: 'X st', display_label: 'T' },
+  { address_id: 22, user_id: 32, first_name: 'C', last_name: 'D', phone: '+99879000002', title: 'T', full_address: 'X st', display_label: 'T' },
 ];
 
 const groupDetail = {

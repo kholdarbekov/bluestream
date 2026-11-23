@@ -737,6 +737,31 @@ KEYS = {
         "uz": "Nom 1 dan 100 tagacha belgidan iborat bo'lishi kerak.",
         "ru": "Название должно содержать от 1 до 100 символов.",
     },
+    "ui.users.place_groups.kind_same_customer": {
+        "en": "Possible duplicate address",
+        "uz": "Takroriy manzil bo‘lishi mumkin",
+        "ru": "Возможный дубликат адреса",
+    },
+    "ui.users.place_groups.distance_apart": {
+        "en": "~{{distance}} m apart",
+        "uz": "~{{distance}} m oraliqda",
+        "ru": "~{{distance}} м друг от друга",
+    },
+    "ui.users.grouped_addresses.filter_all": {
+        "en": "All",
+        "uz": "Hammasi",
+        "ru": "Все",
+    },
+    "ui.users.grouped_addresses.filter_shared_place": {
+        "en": "Shared places",
+        "uz": "Umumiy joylar",
+        "ru": "Общие места",
+    },
+    "ui.users.grouped_addresses.filter_duplicates": {
+        "en": "Possible duplicates",
+        "uz": "Takroriy manzillar",
+        "ru": "Возможные дубликаты",
+    },
 }
 
 

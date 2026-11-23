@@ -10,7 +10,7 @@ in the test's own line, where no handler's `except Exception` can swallow it.
 
 import pytest
 
-from tests.integration.address_row_builders import address_row
+from tests.integration.address_row_builders import address_row, customer_list_row
 from tests.telegram_bot.ptb_harness import FakeBackend
 
 # The row the subscription-picker journeys used to seed: the removed raw-SQL table's vocabulary.
@@ -46,7 +46,7 @@ async def test_the_address_list_serves_producer_rows_and_refuses_a_row_that_drif
     backend.addresses[91] = row
 
     served = await backend.handle("GET", "/api/v1/auth/addresses")
-    assert served.data == {"data": {"addresses": [row]}}
+    assert served.data == {"data": {"addresses": [customer_list_row(row)]}}
 
     row["label"] = "Uy"  # an in-place edit can still add a key no endpoint sends
     with pytest.raises(AssertionError, match="label"):

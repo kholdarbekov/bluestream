@@ -98,14 +98,18 @@ class OperatorKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
+    def address_name(addr: Dict, language: str) -> str:
+        """A saved address as the operator's address picker and duplicate screen name it: the backend's name for it
+        (its title, else its street line), else the word for an address."""
+        return addr.get('display_label') or i18n.get('staff.operator.address', language)
+
+    @staticmethod
     def address_list(language: str, addresses: List[Dict], user_id: int) -> InlineKeyboardMarkup:
         """Address selection for order"""
         keyboard = []
         for addr in addresses:
-            # The backend's name for it: its title, else its street line.
-            title = addr.get('display_label') or i18n.get('staff.operator.address', language)
             keyboard.append([InlineKeyboardButton(
-                f"📍 {title}",
+                f"📍 {OperatorKeyboards.address_name(addr, language)}",
                 callback_data=f"staff_op_addr_{addr['id']}"
             )])
 
@@ -116,6 +120,35 @@ class OperatorKeyboards:
         keyboard.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
+        )])
+
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def address_duplicate(language: str, candidates: List[Dict], *, offer_use: bool) -> InlineKeyboardMarkup:
+        """The add-address flow's possible-duplicate screen: the saved rows the backend named, then Create anyway
+        and Back.
+
+        "Use" sends the order picker's own `staff_op_addr_<id>`, so it is drawn only while the operator is placing
+        an order for this customer (`offer_use`): the create-order conversation, parked at its address step, is
+        what claims that tap. Outside an order nothing would.
+        """
+        keyboard = []
+        if offer_use:
+            use = i18n.get('staff.operator.address_duplicate_use', language)
+            for addr in candidates:
+                keyboard.append([InlineKeyboardButton(
+                    f"📍 {use}: {OperatorKeyboards.address_name(addr, language)[:24]}",
+                    callback_data=f"staff_op_addr_{addr['id']}"
+                )])
+
+        keyboard.append([InlineKeyboardButton(
+            f"➕ {i18n.get('staff.operator.address_duplicate_create_anyway', language)}",
+            callback_data="staff_op_dup_create"
+        )])
+        keyboard.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_op_dup_back"
         )])
 
         return InlineKeyboardMarkup(keyboard)

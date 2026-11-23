@@ -25,7 +25,15 @@ from business_app.models.customer_link import (
 )
 from business_app.models.loyalty import ReferralProgram
 from business_app.models.order import Order
+from business_app.models.shared_place_case import SHARED_PLACE_OPEN_STATUSES, SharedPlaceCase
 from business_app.models.user import User, UserAddress
+from business_app.services.address_guard_service import (
+    as_point,
+    distance_m,
+    is_possible_duplicate_pair,
+    within_duplicate_reach,
+)
+from business_app.utils.address_helpers import address_display_label
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.helpers import calculate_distance
 from shared.enums import BottleLedgerEventType, OrderStatus, UserRole, UserStatus, UserType
@@ -61,6 +69,12 @@ _KEEP = object()
 
 # Ids per IN list in the batched place reads below.
 _PLACE_BATCH = 500
+
+# The two kinds of place-group suggestion (spec 2026-11-18-duplicate-address-guard §6.10): customers who share a
+# place, and one customer's two addresses that may be one place. The admin reads filter on them.
+SHARED_PLACE_SUGGESTION = "shared_place"
+SAME_CUSTOMER_SUGGESTION = "same_customer"
+PLACE_SUGGESTION_KINDS = (SHARED_PLACE_SUGGESTION, SAME_CUSTOMER_SUGGESTION)
 
 
 class CustomerLinkService:
@@ -2566,6 +2580,10 @@ class CustomerLinkService:
         (``business_app/models/user.py``), NOT a column — it CANNOT appear in a
         SQL filter. The INDIVIDUAL filter already excludes every entity user,
         and grocery stores are ``user_type=ENTITY``.
+
+        ``apartment_number`` is read only by the same-customer arm's duplicate
+        test (``_same_customer_pairs``); the clusterer ignores it.
+        ``street_address`` is read only by ``_member``'s ``display_label``.
         """
         return (
             db.session.query(
@@ -2573,8 +2591,10 @@ class CustomerLinkService:
                 UserAddress.user_id,
                 UserAddress.latitude,
                 UserAddress.longitude,
+                UserAddress.apartment_number,
                 UserAddress.title,
                 UserAddress.full_address,
+                UserAddress.street_address,
                 User.first_name,
                 User.last_name,
                 User.phone,
@@ -2597,6 +2617,33 @@ class CustomerLinkService:
         its own — nor a default literal (single-default rule).
         """
         return current_app.config["PLACE_SUGGESTION_RADIUS_M"] / 1000.0
+
+    @staticmethod
+    def _member(row) -> dict:
+        """One address of a suggestion, as both arms' rows carry it in ``members``. ``display_label`` is the one
+        display rule (``address_display_label``): the admin panels print it and derive nothing."""
+        return {
+            "address_id": row.id,
+            "user_id": row.user_id,
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "phone": row.phone,
+            "title": row.title,
+            "full_address": row.full_address,
+            "display_label": address_display_label(row),
+        }
+
+    @staticmethod
+    def _cross_customer_components(components) -> List[List[dict]]:
+        """The clusterer's components that hold at least 2 distinct customers: the only ones the shared-place arm
+        shows, and the only ones whose fingerprint a dismissal may stamp.
+
+        🔴 THE ONE EXPRESSION of "this component has at least 2 distinct customers". The shared-place read, the
+        same-customer arm's one-arm rule and ``dismiss_place_suggestion`` all call it: if any of them decided it
+        differently, a dismissal would stamp a fingerprint that the arm showing the pair never produces, and the
+        admin's "not the same place" would be silently forgotten (plan E19).
+        """
+        return [members for members in components if len({m["user_id"] for m in members}) >= 2]
 
     @staticmethod
     def _cluster_addresses_by_radius(rows, radius_km: float) -> List[List[dict]]:
@@ -2677,15 +2724,7 @@ class CustomerLinkService:
         for row in rows:
             if row.latitude is None or row.longitude is None:  # defensive; the query filters these
                 continue
-            members_by_id[row.id] = {
-                "address_id": row.id,
-                "user_id": row.user_id,
-                "first_name": row.first_name,
-                "last_name": row.last_name,
-                "phone": row.phone,
-                "title": row.title,
-                "full_address": row.full_address,
-            }
+            members_by_id[row.id] = CustomerLinkService._member(row)
             if cell_deg is not None:
                 rows_by_coord.setdefault((row.latitude, row.longitude), []).append(row)
 
@@ -2741,14 +2780,34 @@ class CustomerLinkService:
             key=lambda members: [m["address_id"] for m in members],
         )
 
-    def get_place_group_suggestions(self, limit: int = 20, user_id: Optional[int] = None) -> list:
-        """Co-located ungrouped address sets ranked by distinct-customer count.
+    def get_place_group_suggestions(
+        self, limit: int = 20, user_id: Optional[int] = None, kind: Optional[str] = None
+    ) -> list:
+        """Possible places to group, from two arms over one pool of ungrouped individual addresses with a pin:
+        ``shared_place`` rows (co-located addresses of at least 2 customers, ``_shared_place_rows``) first, then
+        ``same_customer`` rows (one customer's two addresses that may be one place, ``_same_customer_pairs``).
 
-        Excludes already-grouped addresses and grocery/entity owners; a
-        pairwise PlaceSuggestionDismissal with the point's CURRENT fingerprint
+        ``kind`` (one of ``PLACE_SUGGESTION_KINDS``, or None for both) keeps one arm, before ``limit`` cuts the
+        list; any other value is a ``ValidationError``. ``user_id`` keeps the rows that hold that customer.
+        NEVER reads or writes CustomerDistinctPair — "same place" must not imply "same/different person".
+        """
+        if kind is not None and kind not in PLACE_SUGGESTION_KINDS:
+            raise ValidationError("kind must be shared_place or same_customer")
+        rows = self._ungrouped_individual_address_query().all()
+        components = self._cluster_addresses_by_radius(rows, self._place_suggestion_radius_km())
+        results = []
+        if kind != SAME_CUSTOMER_SUGGESTION:
+            results.extend(self._shared_place_rows(components, user_id))
+        if kind != SHARED_PLACE_SUGGESTION:
+            results.extend(self._same_customer_pairs(rows, components, user_id))
+        return results[: max(1, int(limit or 20))]
+
+    def _shared_place_rows(self, components, user_id: Optional[int]) -> list:
+        """Co-located ungrouped address sets of at least 2 customers, ranked by distinct-customer count.
+
+        A pairwise PlaceSuggestionDismissal with the point's CURRENT fingerprint
         suppresses the point (new members change the fingerprint and
-        re-surface it). NEVER reads or writes CustomerDistinctPair — "same
-        place" must not imply "same/different person".
+        re-surface it).
 
         Co-location is a true PLACE_SUGGESTION_RADIUS_M radius over connected
         components, computed by ``_cluster_addresses_by_radius`` over the FULL
@@ -2759,11 +2818,7 @@ class CustomerLinkService:
         about the point's membership — which silently voids the dismissal
         (plan E19).
         """
-        components = self._cluster_addresses_by_radius(
-            self._ungrouped_individual_address_query().all(), self._place_suggestion_radius_km()
-        )
-
-        candidate_components = [members for members in components if len({m["user_id"] for m in members}) >= 2]
+        candidate_components = self._cross_customer_components(components)
         if user_id is not None:
             candidate_components = [
                 members for members in candidate_components if any(m["user_id"] == user_id for m in members)
@@ -2791,6 +2846,7 @@ class CustomerLinkService:
             distinct = len({m["user_id"] for m in members})
             results.append(
                 {
+                    "kind": SHARED_PLACE_SUGGESTION,
                     "address_ids": address_ids,
                     "distinct_customer_count": distinct,
                     "score": float(distinct),
@@ -2800,7 +2856,82 @@ class CustomerLinkService:
             )
         # Strongest signal first; address ids break ties so paging is stable.
         results.sort(key=lambda r: (-r["distinct_customer_count"], -len(r["address_ids"]), r["address_ids"]))
-        return results[: max(1, int(limit or 20))]
+        return results
+
+    def _same_customer_pairs(self, rows, components, user_id: Optional[int]) -> list:
+        """One customer's two ungrouped addresses that may be one place (spec 2026-11-18 §6.10): every pair, lower id
+        first, that ``is_possible_duplicate_pair`` accepts, nearest first (ties by address ids).
+
+        Pairs, not components: the duplicate rule is not transitive. A pair is skipped when:
+        - both addresses lie in one cross-customer component (``_cross_customer_components``), shown or dismissed:
+          that pair is the shared-place arm's, so one dismissal row can never be claimed by both arms;
+        - either address has an open shared-place case (``SHARED_PLACE_OPEN_STATUSES``): that review can group the
+          addresses itself, and the pair comes back once the case is settled;
+        - a PlaceSuggestionDismissal for the pair carries the pair's own fingerprint, the one
+          ``dismiss_place_suggestion`` stamps for it.
+        """
+        shared_component_of = {
+            member["address_id"]: index
+            for index, members in enumerate(self._cross_customer_components(components))
+            for member in members
+        }
+        own_rows = {}
+        for row in rows:
+            if user_id is None or row.user_id == user_id:
+                own_rows.setdefault(row.user_id, []).append(row)
+        pairs = []
+        for addresses in own_rows.values():
+            addresses.sort(key=lambda row: row.id)
+            # A stored row that is no point to the guard (`as_point` is None) pairs with nothing.
+            located = [
+                (row, point)
+                for row in addresses
+                if (point := as_point(row.latitude, row.longitude, row.apartment_number)) is not None
+            ]
+            for i, (a, point_a) in enumerate(located):
+                component_a = shared_component_of.get(a.id)
+                for b, point_b in located[i + 1 :]:
+                    if component_a is not None and component_a == shared_component_of.get(b.id):
+                        continue
+                    # The guard's own pre-filter first: without it a customer with k addresses costs k^2/2 geodesic
+                    # calls on every estate-wide read (test_the_clusterer_stays_within_its_wall_clock_budget).
+                    if within_duplicate_reach(point_a, point_b) and is_possible_duplicate_pair(point_a, point_b):
+                        pairs.append((a, b, round(distance_m(point_a, point_b))))
+        if not pairs:
+            return []
+
+        pair_ids = {row.id for a, b, _ in pairs for row in (a, b)}
+        under_review = {
+            address_id
+            for (address_id,) in db.session.query(SharedPlaceCase.address_id).filter(
+                SharedPlaceCase.address_id.in_(pair_ids), SharedPlaceCase.status.in_(SHARED_PLACE_OPEN_STATUSES)
+            )
+        }
+        dismissed = {
+            (d.address_id_low, d.address_id_high, d.signal_fingerprint)
+            for d in PlaceSuggestionDismissal.query.filter(
+                PlaceSuggestionDismissal.address_id_low.in_(pair_ids),
+                PlaceSuggestionDismissal.address_id_high.in_(pair_ids),
+            )
+        }
+
+        results = []
+        for a, b, distance in pairs:
+            fingerprint = self._point_fingerprint([a.id, b.id])
+            if a.id in under_review or b.id in under_review or (a.id, b.id, fingerprint) in dismissed:
+                continue
+            results.append(
+                {
+                    "kind": SAME_CUSTOMER_SUGGESTION,
+                    "address_ids": [a.id, b.id],
+                    "members": [self._member(a), self._member(b)],
+                    "distance_m": distance,
+                    "distinct_customer_count": 1,
+                    "signal_fingerprint": fingerprint,
+                }
+            )
+        results.sort(key=lambda r: (r["distance_m"], r["address_ids"]))
+        return results
 
     def dismiss_place_suggestion(
         self, address_id_a: int, address_id_b: int, acting_admin_id: int, reason: str
@@ -2818,20 +2949,24 @@ class CustomerLinkService:
         if addr_a is None or addr_b is None:
             raise ValidationError("Address not found", error_code="CUSTOMER_LINK_ADDRESS_NOT_FOUND")
 
-        # Fingerprint of the shared component's current ungrouped set; fallback
-        # to the pair itself when the two are not co-located.
+        # The fingerprint of the row that showed the pair: the cross-customer
+        # component holding both (the shared-place arm's row), else the pair
+        # itself (the same-customer arm's row, or two addresses not co-located).
+        # A component of one customer is never shown, so it is never stamped.
         #
         # 🔴 This runs the SAME clusterer (_cluster_addresses_by_radius) over the
-        # SAME pool (_ungrouped_individual_address_query) as
-        # get_place_group_suggestions — one pool, one clusterer, two consumers.
-        # The two fingerprints then cannot diverge, because they are computed
-        # from the same objects. If they ever did, this dismissal would stamp a
+        # SAME pool (_ungrouped_individual_address_query), with the SAME
+        # cross-customer filter (_cross_customer_components), as
+        # get_place_group_suggestions — one pool, one clusterer, one filter. The
+        # fingerprints then cannot diverge, because they are computed from the
+        # same objects. If they ever did, this dismissal would stamp a
         # fingerprint the suggestion engine never produces and the admin's "not
         # the same place" would be silently forgotten forever (plan E19).
         fingerprint = self._point_fingerprint([address_id_a, address_id_b])
-        for members in self._cluster_addresses_by_radius(
+        components = self._cluster_addresses_by_radius(
             self._ungrouped_individual_address_query().all(), self._place_suggestion_radius_km()
-        ):
+        )
+        for members in self._cross_customer_components(components):
             component_ids = [m["address_id"] for m in members]
             if address_id_a in component_ids and address_id_b in component_ids:
                 fingerprint = self._point_fingerprint(component_ids)

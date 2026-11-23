@@ -2815,6 +2815,13 @@
     "rule": "/api/v1/auth/addresses/<int:address_id>"
   },
   {
+    "endpoint": "auth.move_user_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/addresses/<int:address_id>/move"
+  },
+  {
     "endpoint": "auth.set_default_address",
     "methods": [
       "PATCH"

@@ -1619,7 +1619,7 @@ class StaffWebhookServer:
 
         POST /internal/order-address-changed
           {event_id, telegram_id, delivery_id, delivery_address_id, order_info, old_address,
-           new_address, lat, lng, door}
+           new_address, lat, lng, door, pin_moved_m (only for a pin move)}
 
         The guards, the claim before the send and the release after a failed one are
         `delivery_failed_handler`'s, for the same reason: `notify_order_address_changed`
@@ -1662,21 +1662,32 @@ class StaffWebhookServer:
             # address makes Telegram refuse the whole message (RF1).
             language = await i18n.get_user_language(telegram_id)
             order_info = data.get('order_info') or {}
-            text = i18n.get(
-                'staff.notification.order_address_changed', language,
-                number=escape_html(order_info.get('order_number')),
-                old=escape_html(data.get('old_address') or "—"),
-                new=escape_html(data.get('new_address')),
-            )
+            if data.get('pin_moved_m') is not None:
+                # A pin move (spec 2026-11-18 §6.9): the copy says the pin moved and how far.
+                text = i18n.get(
+                    'staff.notification.order_address_pin_moved', language,
+                    number=escape_html(order_info.get('order_number')),
+                    distance=int(data['pin_moved_m']),
+                    new=escape_html(data.get('new_address')),
+                )
+            else:
+                text = i18n.get(
+                    'staff.notification.order_address_changed', language,
+                    number=escape_html(order_info.get('order_number')),
+                    old=escape_html(data.get('old_address') or "—"),
+                    new=escape_html(data.get('new_address')),
+                )
             keyboard = DeliveryKeyboards.address_changed_actions(
                 language, delivery_id, data.get('lat'), data.get('lng')
             )
 
             event_id = data.get('event_id')
-            # Used only when Redis is down. The new address is in it, so a second change of
-            # the same stop is a new alert, not a replay of the first.
+            # Used only when Redis is down. The new address and its pin are in it, so a second
+            # change of the same stop, or a second pin of the same address, is a new alert, not
+            # a replay of the first.
             fallback_key = (
                 f"order_address_changed:{telegram_id}:{delivery_id}:{data.get('delivery_address_id')}"
+                f":{data.get('lat')}:{data.get('lng')}"
             )
             if await self._is_duplicate_event(event_id, fallback_key):
                 return web.json_response({'success': True, 'message': 'Already processed'})

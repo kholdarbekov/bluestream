@@ -132,6 +132,7 @@ const suggestion = (overrides = {}) => ({
       phone: '+998900000021',
       title: 'Office',
       full_address: 'Office st 9',
+      display_label: 'Office',
     },
     {
       address_id: 22,
@@ -141,6 +142,7 @@ const suggestion = (overrides = {}) => ({
       phone: '+998900000022',
       title: 'Office',
       full_address: 'Office st 9',
+      display_label: 'Office',
     },
   ],
   ...overrides,

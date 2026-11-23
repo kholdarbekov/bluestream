@@ -1066,7 +1066,9 @@ def test_full_address_and_address_id_fallbacks_render_and_escape(
     solo = world.user("Solo")
     titled = world.address(solo, None, full_address="5 <b>Baker</b> St")
     # A pin-drop with neither title nor address, through the REAL route.
-    bare = create_address_via_api(client, app, solo, latitude=LAT, longitude=LNG)
+    # Duplicate guard: `titled` already sits at (LAT, LNG), so the pin-drop goes
+    # ~222 m north (4x the 50 m radius) to be a distinct place, not a duplicate.
+    bare = create_address_via_api(client, app, solo, latitude=LAT + 0.002, longitude=LNG)
     assert bare.title is None and not bare.full_address
     world.deliver(solo, titled, 1)
 

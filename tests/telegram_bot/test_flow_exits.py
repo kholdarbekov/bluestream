@@ -75,7 +75,7 @@ EXITS_FROM_A_SAVED_PROMPT = [
 ]
 
 # Each prompt seeded exactly as its arming site writes it
-# (support.py:57-63, profile.py:2152, 2218, 4173-4177, 4253-4257).
+# (support.py:57-63, profile.py:2152, 2218, 4173-4177, 4253-4257, edit_location_handler).
 ARMED_AS_THE_BOT_ARMS_IT = {
     "support_message": {
         "support_order_id": 555,
@@ -86,6 +86,11 @@ ARMED_AS_THE_BOT_ARMS_IT = {
     "edit_profile_birthday": {},
     "edit_address_title": {"edit_address_id": "901"},
     "edit_address_instructions": {"edit_address_id": "901"},
+    "relocate_address": {
+        "relocate_address_id": 901,
+        "relocate_label": "Uy",
+        "armed_at": datetime.now(timezone.utc).isoformat(),
+    },
 }
 
 

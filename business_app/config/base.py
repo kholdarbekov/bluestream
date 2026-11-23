@@ -666,6 +666,10 @@ class BaseConfig:
     SHARED_PLACE_CANDIDATE_RADIUS_M = business_config.SHARED_PLACE_CANDIDATE_RADIUS_M
     SHARED_PLACE_DRIVER_ANSWER_WINDOW_S = business_config.SHARED_PLACE_DRIVER_ANSWER_WINDOW_S
 
+    # Duplicate-address guard radii, metres (see business_config).
+    ADDRESS_DUPLICATE_RADIUS_M = business_config.ADDRESS_DUPLICATE_RADIUS_M
+    ADDRESS_MOVE_MAX_M = business_config.ADDRESS_MOVE_MAX_M
+
     # Security Configuration
     PASSWORD_MIN_LENGTH = business_config.PASSWORD_MIN_LENGTH
     MAX_LOGIN_ATTEMPTS = business_config.MAX_LOGIN_ATTEMPTS

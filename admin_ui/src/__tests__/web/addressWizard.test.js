@@ -59,7 +59,7 @@ async function settle(window, rounds = 30) {
 const escapeJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
 
 /** `answers` maps "METHOD /api/v1/path" to an answer or a queue of answers; every request is recorded. */
-async function boot(answers) {
+async function boot(answers, { leaflet = null } = {}) {
   const base = { api_base_url: '/api/v1', current_user: null, is_authenticated: true, login_url: '/login', language: 'ru', i18n: {} };
   const dom = new JSDOM(
     '<!doctype html><html lang="ru"><body>' +
@@ -80,6 +80,8 @@ async function boot(answers) {
     return Promise.resolve({ ok: answer.status < 400, status: answer.status, json: async () => JSON.parse(JSON.stringify(answer.body)) });
   };
   SCRIPTS.forEach((source) => window.eval(source));
+  // A fake Leaflet through the loader the wizard asks, so a map tap and a marker drag can be driven.
+  if (leaflet) window.AEMap.load = () => Promise.resolve(leaflet);
   if (window.document.readyState !== 'loading') window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
   await settle(window);
   const document = window.document;
@@ -93,6 +95,33 @@ async function boot(answers) {
   };
   const sent = (key) => requests.filter((request) => request.key === key);
   return { window, document, requests, sent, $1, $$, click, type };
+}
+
+/** The slice of Leaflet the wizard touches. It records the map's handlers and every marker (options, handlers). */
+function fakeLeaflet() {
+  const rec = { mapHandlers: {}, markers: [] };
+  const chain = () => ({ addTo() { return this; }, getBounds() { return {}; } });
+  const map = {
+    on(event, handler) { rec.mapHandlers[event] = handler; return this; },
+    setView() { return this; }, fitBounds() {}, invalidateSize() {}, removeLayer() {}, getZoom: () => 16,
+  };
+  const L = {
+    map: () => map,
+    tileLayer: chain,
+    polygon: chain,
+    marker: (latlng, options) => {
+      const marker = {
+        options, handlers: {}, at: { lat: latlng[0], lng: latlng[1] },
+        addTo() { return this; },
+        on(event, handler) { this.handlers[event] = handler; return this; },
+        setLatLng(ll) { this.at = { lat: ll[0], lng: ll[1] }; return this; },
+        getLatLng() { return this.at; },
+      };
+      rec.markers.push(marker);
+      return marker;
+    },
+  };
+  return { L, rec };
 }
 
 const GEO_ANSWER = { 'GET /api/v1/addresses/geo-config': ok(GEO) };
@@ -273,5 +302,312 @@ describe('/addresses: the list and the address wizard', () => {
 
     expect(sent('DELETE /api/v1/auth/addresses/67')).toHaveLength(1);
     expect(sent(LIST)).toHaveLength(2);
+  });
+
+  // ---- the duplicate-address guard: where the point came from, the duplicate pane, the locked map ------------------
+  const PIN = { lat: 41.2856, lng: 69.2034 };            // the point NEW sits at
+  const NEW_AT_PIN = { ...NEW, latitude: PIN.lat, longitude: PIN.lng };
+  const CANDIDATE = {
+    id: 67, title: 'Home', display_label: 'Home', full_address: 'Toshkent, Chilonzor tumani, Bunyodkor 5', district: 'chilanzar',
+    latitude: PIN.lat, longitude: PIN.lng, is_default: false, is_business: false, distance_m: 14,
+  };
+  const OTHER = { ...CANDIDATE, id: 68, title: null, display_label: 'Toshkent, Chilonzor tumani', distance_m: 33 };
+  const DUPLICATE = (details) => ({
+    status: 409,
+    body: { success: false, message: 'You already have an address saved at this spot.', error_code: 'ADDRESS_POSSIBLE_DUPLICATE', details },
+  });
+  const DUP_TEXT = {
+    use: 'Выбрать этот адрес', move: 'Перенести на новую точку', fresh: 'Сохранить как новый адрес', anyway: 'Всё равно сохранить',
+  };
+  const POST_ADDRESS = 'POST /api/v1/auth/addresses';
+  const GEOCODER = {
+    'POST /api/v1/addresses/geocode': ok({ latitude: PIN.lat, longitude: PIN.lng, formatted_address: 'x' }),
+    'POST /api/v1/addresses/reverse-geocode': ok({ formatted_address: NEW.full_address, district_key: 'chilanzar' }),
+  };
+
+  /** Step 1 by search (point_source "search") or by a map tap ("map_pin"), then the details, then Save. */
+  async function newAddressSavedFrom(h, how) {
+    const { window, click, type, $$ } = h;
+    window.AddressWizard.open({ onSaved: (address, meta) => h.saved.push([address, meta]) });
+    await settle(window);
+    if (how === 'tap') {
+      h.leaflet.rec.mapHandlers.click({ latlng: { lat: PIN.lat, lng: PIN.lng } });
+      await settle(window);
+    } else {
+      type('#addressSearchInput', 'Bunyodkor 5');
+      await click('#searchAddressBtn');
+    }
+    await click('#wizardNextBtn');
+    $$('.quick-title-btn')[0].click();
+    type('#streetAddress', NEW.street_address);
+    type('#floorNumber', NEW.floor_number);
+    type('#apartmentNumber', NEW.apartment_number);
+    type('#landmark', NEW.landmark);
+    await click('#wizardNextBtn');
+    type('#deliveryInstructions', NEW.delivery_instructions);
+    await click('#wizardSaveBtn');
+  }
+
+  async function bootDuplicate(answers) {
+    const leaflet = fakeLeaflet();
+    const h = await boot({ ...GEO_ANSWER, ...GEOCODER, [LIST]: ok({ addresses: [MAIN] }), ...answers }, { leaflet: leaflet.L });
+    h.leaflet = leaflet;
+    h.saved = [];
+    return h;
+  }
+
+  it('a search-sourced point sends point_source "search"; a tap and a drag send "map_pin"', async () => {
+    const h = await bootDuplicate({ [POST_ADDRESS]: ok({ address: { ...NEW, id: 90 } }, 201) });
+
+    await newAddressSavedFrom(h, 'search');
+    await newAddressSavedFrom(h, 'tap');
+    // Dragging the marker of a point that came from search turns it into a placed pin.
+    h.window.AddressWizard.open();
+    await settle(h.window);
+    h.type('#addressSearchInput', 'Bunyodkor 5');
+    await h.click('#searchAddressBtn');
+    const marker = h.leaflet.rec.markers.at(-1);
+    marker.at = { lat: 41.3, lng: 69.3 };
+    marker.handlers.dragend({ target: marker });
+    await settle(h.window);
+    await h.click('#wizardNextBtn');
+    h.$$('.quick-title-btn')[0].click();
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardSaveBtn');
+
+    expect(h.sent(POST_ADDRESS).map((r) => [r.body.point_source, r.body.latitude, r.body.longitude])).toEqual([
+      ['search', PIN.lat, PIN.lng],
+      ['map_pin', PIN.lat, PIN.lng],
+      ['map_pin', 41.3, 69.3],
+    ]);
+  });
+
+  it('my location sends point_source "gps"', async () => {
+    const h = await bootDuplicate({ [POST_ADDRESS]: ok({ address: { ...NEW, id: 90 } }, 201) });
+    h.window.navigator.geolocation = { getCurrentPosition: (done) => done({ coords: { latitude: PIN.lat, longitude: PIN.lng } }) };
+    h.window.AddressWizard.open();
+    await settle(h.window);
+    await h.click('#useMyLocationBtn');
+    await h.click('#wizardNextBtn');
+    h.$$('.quick-title-btn')[0].click();
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardSaveBtn');
+
+    expect(h.sent(POST_ADDRESS).map((r) => r.body.point_source)).toEqual(['gps']);
+  });
+
+  it('a 409 opens the duplicate pane; “Use this address” hands the full row to onSaved and sends nothing', async () => {
+    const h = await bootDuplicate({ [POST_ADDRESS]: DUPLICATE({ move_address_id: null, candidates: [CANDIDATE, OTHER] }) });
+    const events = [];
+    h.window.document.addEventListener('ae:address-saved', (event) => events.push(event.detail));
+
+    await newAddressSavedFrom(h, 'search');
+
+    const pane = h.$1('#addressWizardDuplicate');
+    expect(pane.hidden).toBe(false);
+    const cards = h.$$('#addressWizardDuplicate [data-candidate-id]');
+    expect(cards.map((card) => card.dataset.candidateId)).toEqual(['67', '68']);
+    expect(cards[0].textContent).toContain('Home');
+    expect(cards[0].textContent).toContain('Toshkent, Chilonzor tumani, Bunyodkor 5');   // the line under a title
+    expect(cards[0].textContent).toContain('~14 м отсюда');
+    expect(cards[1].textContent).toContain('~33 м отсюда');
+    expect(cards[1].querySelectorAll('.ae-dup__line')).toHaveLength(0);                  // untitled: the label is the line
+    expect(h.$$('#addressWizardDuplicate [data-action="duplicate-move"]')).toHaveLength(0);
+    expect(h.$1('#addressWizardModal .modal-footer').hidden).toBe(true);
+
+    const before = h.requests.length;
+    await h.click('#addressWizardDuplicate [data-candidate-id="67"] [data-action="duplicate-use"]');
+
+    expect(h.saved).toEqual([[CANDIDATE, { created: false }]]);
+    expect(h.requests.length).toBe(before);
+    expect(events).toEqual([]);
+    expect(h.$1('#addressWizardModal').classList.contains('show')).toBe(false);
+  });
+
+  it('Move shows only on move_address_id and posts payload + confirm to that move route', async () => {
+    const moved = { ...CANDIDATE, latitude: PIN.lat, longitude: PIN.lng };
+    const h = await bootDuplicate({
+      [POST_ADDRESS]: DUPLICATE({ move_address_id: 67, candidates: [CANDIDATE, OTHER] }),
+      'POST /api/v1/auth/addresses/67/move': ok({ address: moved }),
+    });
+    const events = [];
+    h.window.document.addEventListener('ae:address-saved', (event) => events.push(event.detail));
+
+    await newAddressSavedFrom(h, 'tap');
+
+    const moves = h.$$('#addressWizardDuplicate [data-action="duplicate-move"]');
+    expect(moves).toHaveLength(1);
+    expect(h.$1('#addressWizardDuplicate [data-candidate-id="67"] [data-action="duplicate-move"]')).toBe(moves[0]);
+    expect(h.$1('#addressWizardDuplicate [data-candidate-id="67"]').textContent).toContain(
+      'Название и сохранённые детали останутся; то, что вы ввели, дополнит только пустые поля.',
+    );
+    await h.click('#addressWizardDuplicate [data-action="duplicate-move"]');
+
+    expect(h.sent('POST /api/v1/auth/addresses/67/move').map((r) => r.body)).toEqual([
+      { ...NEW_AT_PIN, point_source: 'map_pin', confirm_duplicate: true },
+    ]);
+    expect(h.sent(POST_ADDRESS)).toHaveLength(1);
+    expect(h.saved).toEqual([[moved, { created: false }]]);
+    expect(events).toEqual([{ address: moved, created: false }]);
+    expect(h.$1('#addressWizardModal').classList.contains('show')).toBe(false);
+  });
+
+  it('a refused Move shows the server’s words and drops the Move button', async () => {
+    const h = await bootDuplicate({
+      [POST_ADDRESS]: DUPLICATE({ move_address_id: 67, candidates: [CANDIDATE] }),
+      'POST /api/v1/auth/addresses/67/move': {
+        status: 400,
+        body: { success: false, message: 'Your order is already on its way to this address.', error_code: 'ADDRESS_PIN_WITH_DRIVER', details: { reason: 'WITH_DRIVER' } },
+      },
+    });
+    await newAddressSavedFrom(h, 'tap');
+    await h.click('#addressWizardDuplicate [data-action="duplicate-move"]');
+
+    expect(h.$$('#addressWizardDuplicate [data-action="duplicate-move"]')).toHaveLength(0);
+    expect(h.$1('#addressWizardDuplicate').textContent).toContain('Your order is already on its way to this address.');
+    expect(h.$$('#addressWizardDuplicate [data-action="duplicate-use"]')).toHaveLength(1);
+    expect(h.saved).toEqual([]);
+  });
+
+  it('“Save as a new address” posts the same body again with confirm_duplicate: true', async () => {
+    const created = { ...NEW, id: 91 };
+    const h = await bootDuplicate({
+      [POST_ADDRESS]: [DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }), ok({ address: created }, 201)],
+    });
+    await newAddressSavedFrom(h, 'search');
+    expect(h.$1('#addressWizardDuplicate [data-action="duplicate-new"]').textContent).toBe(DUP_TEXT.fresh);
+    await h.click('#addressWizardDuplicate [data-action="duplicate-new"]');
+
+    expect(h.sent(POST_ADDRESS).map((r) => r.body)).toEqual([NEW, { ...NEW, confirm_duplicate: true }]);
+    expect(h.saved).toEqual([[created, { created: true }]]);
+    expect(h.$1('#addressWizardModal').classList.contains('show')).toBe(false);
+  });
+
+  it('a new address’s pane offers Back: the form comes back at the map step with what was typed, nothing sent', async () => {
+    const h = await bootDuplicate({
+      [POST_ADDRESS]: DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }),
+    });
+    await newAddressSavedFrom(h, 'search');
+
+    const footer = h.$$('#addressWizardDuplicateActions [data-action]').map((node) => node.dataset.action);
+    expect(footer).toEqual(['duplicate-new', 'duplicate-back']);
+    expect(h.$1('#addressWizardDuplicateActions [data-action="duplicate-back"]').textContent).toBe('Назад');
+
+    await h.click('#addressWizardDuplicate [data-action="duplicate-back"]');
+
+    expect(h.$1('#addressWizardDuplicate').hidden).toBe(true);
+    expect(h.$1('#addressWizardForm').hidden).toBe(false);
+    expect(h.$1('#addressWizardModal .modal-footer').hidden).toBe(false);
+    expect(h.$1('#wizardStep1').classList.contains('is-active')).toBe(true);
+    expect(h.$1('#addressWizardModal').classList.contains('show')).toBe(true);
+    expect(h.sent(POST_ADDRESS)).toHaveLength(1);
+    // What the customer typed is still there: saving again sends the same body.
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardSaveBtn');
+    expect(h.sent(POST_ADDRESS).map((r) => r.body)).toEqual([NEW, NEW]);
+  });
+
+  it('the pane takes the focus when it opens, for a new address and for an edit', async () => {
+    const fresh = await bootDuplicate({ [POST_ADDRESS]: DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }) });
+    await newAddressSavedFrom(fresh, 'search');
+    expect(fresh.document.activeElement.id).toBe('addressWizardDuplicateTitle');
+
+    const edit = await bootDuplicate({
+      [LIST]: ok({ addresses: [MAIN, BRANCH] }),
+      'PUT /api/v1/auth/addresses/67': DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }),
+    });
+    await edit.click('.ae-addr-card[data-address-id="67"] [data-action="edit-address"]');
+    await edit.click('#wizardNextBtn');
+    await edit.click('#wizardSaveBtn');
+    expect(edit.$1('#addressWizardDuplicate').hidden).toBe(false);
+    expect(edit.document.activeElement.id).toBe('addressWizardDuplicateTitle');
+  });
+
+  it('editing offers only Save anyway and Back; Save anyway repeats the PUT with confirm_duplicate: true', async () => {
+    const edited = { ...BRANCH, ...EDIT, id: 67 };
+    const h = await bootDuplicate({
+      [LIST]: [ok({ addresses: [MAIN, BRANCH] }), ok({ addresses: [MAIN, edited] })],
+      'PUT /api/v1/auth/addresses/67': [
+        DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }),
+        DUPLICATE({ move_address_id: null, candidates: [CANDIDATE] }),
+        ok({ address: edited }),
+      ],
+    });
+    await h.click('.ae-addr-card[data-address-id="67"] [data-action="edit-address"]');
+    h.type('#addressTitle', EDIT.title);
+    h.type('#floorNumber', '');
+    h.type('#landmark', '');
+    await h.click('#wizardNextBtn');
+    h.$1('#isDefault').checked = true;
+    h.$1('#isBusiness').checked = true;
+    await h.click('#wizardSaveBtn');
+
+    const actions = h.$$('#addressWizardDuplicate [data-action]').map((node) => node.dataset.action);
+    expect(actions).toEqual(['duplicate-anyway', 'duplicate-back']);
+    expect(h.$1('#addressWizardDuplicate [data-action="duplicate-anyway"]').textContent).toBe(DUP_TEXT.anyway);
+
+    // Back: the pane closes, the wizard returns to the map step, nothing is sent.
+    await h.click('#addressWizardDuplicate [data-action="duplicate-back"]');
+    expect(h.$1('#addressWizardDuplicate').hidden).toBe(true);
+    expect(h.$1('#wizardStep1').classList.contains('is-active')).toBe(true);
+    expect(h.sent('PUT /api/v1/auth/addresses/67')).toHaveLength(1);
+
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardNextBtn');
+    await h.click('#wizardSaveBtn');
+    await h.click('#addressWizardDuplicate [data-action="duplicate-anyway"]');
+
+    expect(h.sent('PUT /api/v1/auth/addresses/67').map((r) => r.body)).toEqual([
+      EDIT, EDIT, { ...EDIT, confirm_duplicate: true },
+    ]);
+    expect(h.sent('POST /api/v1/auth/addresses/67/move')).toHaveLength(0);
+  });
+
+  it('a row with pin_move_refusal opens with a locked map and its reason', async () => {
+    const h = await bootDuplicate({
+      [LIST]: ok({ addresses: [MAIN, { ...BRANCH, pin_move_refusal: 'WITH_DRIVER' }] }),
+      'POST /api/v1/addresses/geocode': ok({ latitude: 41.31, longitude: 69.25 }),
+    });
+    await h.click('.ae-addr-card[data-address-id="67"] [data-action="edit-address"]');
+    await h.click('#wizardPrevBtn');
+
+    expect(h.leaflet.rec.markers.at(-1).options.draggable).toBe(false);
+    expect(h.$1('#searchAddressBtn').disabled).toBe(true);
+    expect(h.$1('#useMyLocationBtn').disabled).toBe(true);
+    const note = h.$1('#addressWizardPinLocked');
+    expect(note.hidden).toBe(false);
+    expect(note.textContent).toContain('Ваш заказ уже едет по этому адресу.');
+
+    // A tap on the map, and a drag of the marker, change nothing.
+    h.leaflet.rec.mapHandlers.click({ latlng: { lat: 41.31, lng: 69.25 } });
+    const marker = h.leaflet.rec.markers.at(-1);
+    marker.at = { lat: 41.32, lng: 69.26 };
+    marker.handlers.dragend({ target: marker });
+    await settle(h.window);
+    expect(h.$1('#selectedLatitude').value).toBe(String(BRANCH.latitude));
+    expect(h.sent('POST /api/v1/addresses/reverse-geocode')).toHaveLength(0);
+
+    // The next address opens unlocked again.
+    h.window.AddressWizard.open({});
+    await settle(h.window);
+    expect(h.$1('#addressWizardPinLocked').hidden).toBe(true);
+    expect(h.$1('#searchAddressBtn').disabled).toBe(false);
+    expect(h.$1('#useMyLocationBtn').disabled).toBe(false);
+  });
+
+  it('shows the reason for each pin_move_refusal in the page’s words', async () => {
+    const h = await bootDuplicate({});
+    const reasons = {};
+    for (const refusal of ['WITH_DRIVER', 'SHARED_PLACE', 'OUTLET']) {
+      h.window.AddressWizard.open({ address: { ...BRANCH, pin_move_refusal: refusal } });
+      await settle(h.window);
+      reasons[refusal] = h.$1('#addressWizardPinLocked').textContent.trim();
+    }
+
+    expect(reasons.WITH_DRIVER).toContain('Ваш заказ уже едет по этому адресу.');
+    expect(reasons.SHARED_PLACE).toContain('общий с другими клиентами');
+    expect(reasons.OUTLET).toContain('принадлежит филиалу');
+    expect(new Set(Object.values(reasons)).size).toBe(3);
   });
 });

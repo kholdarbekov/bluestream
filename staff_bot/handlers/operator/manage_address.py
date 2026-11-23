@@ -20,11 +20,28 @@ from staff_bot.utils.formatters import escape_html
 logger = logging.getLogger(__name__)
 
 # Conversation states
-ENTER_LABEL, ENTER_ADDRESS, ENTER_DISTRICT, ENTER_NOTES, CONFIRM_ADDRESS = range(40, 45)
+ENTER_LABEL, ENTER_ADDRESS, ENTER_DISTRICT, ENTER_NOTES, CONFIRM_ADDRESS, ADDRESS_DUPLICATE = range(40, 46)
 
 
 class ManageAddressHandler(BaseHandler):
     """Handle client address management"""
+
+    # Everything the add-address conversation keeps in user_data: the draft, the client it is for, and the saved
+    # rows a possible-duplicate answer named. Its timeout clears only these (bot.py `_flow_timeout(own_keys=...)`),
+    # and choosing an address in the order picker drops them (create_order.py `select_address`).
+    ADD_ADDRESS_FLOW_KEYS = ('new_address', 'adding_address_for', 'address_duplicate')
+
+    @classmethod
+    def drop_add_address_flow(cls, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """End the add-address flow's user_data: saved, cancelled, or left for an address the picker offered."""
+        for key in cls.ADD_ADDRESS_FLOW_KEYS:
+            context.user_data.pop(key, None)
+
+    @staticmethod
+    def _ordering_for(context: ContextTypes.DEFAULT_TYPE, user_id) -> bool:
+        """Is this operator placing an order for this customer right now (the create-order conversation, parked
+        at its address step while this flow adds one)?"""
+        return (context.user_data.get('new_order') or {}).get('client_id') == user_id
 
     @require_auth
     @require_operator
@@ -429,27 +446,29 @@ class ManageAddressHandler(BaseHandler):
         else:
             flow['delivery_notes'] = notes
 
-        # Show confirmation
-        addr = flow
+        text, keyboard = self._render_confirm_summary(flow, language)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return CONFIRM_ADDRESS
+
+    @staticmethod
+    def _render_confirm_summary(flow: dict, language: str):
+        """The confirm screen: the typed address read back, with Confirm and Cancel. Returns (text, keyboard)."""
         lines = [
             f"📍 <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
-            f"🏷 {escape_html(addr.get('title', ''))}",
-            f"📍 {escape_html(addr.get('full_address', ''))}",
+            f"🏷 {escape_html(flow.get('title', ''))}",
+            f"📍 {escape_html(flow.get('full_address', ''))}",
         ]
-        if addr.get('district'):
-            lines.append(f"🏘 {escape_html(addr['district'])}")
-        if addr.get('delivery_notes'):
-            lines.append(f"💬 {escape_html(addr['delivery_notes'])}")
+        if flow.get('district'):
+            lines.append(f"🏘 {escape_html(flow['district'])}")
+        if flow.get('delivery_notes'):
+            lines.append(f"💬 {escape_html(flow['delivery_notes'])}")
 
-        text = '\n'.join(lines)
         keyboard = CommonKeyboards.confirm_cancel(
             language,
             confirm_data="staff_op_confirm_address",
             cancel_data="staff_back_to_main"
         )
-
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
-        return CONFIRM_ADDRESS
+        return '\n'.join(lines), keyboard
 
     @require_auth
     @require_operator
@@ -463,6 +482,78 @@ class ManageAddressHandler(BaseHandler):
             await self._handle_auth_error(update, language)
             return ConversationHandler.END
 
+        return await self._save_address(update, context, language, token, confirm_duplicate=False)
+
+    @require_auth
+    @require_operator
+    async def create_anyway(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Create anyway, on the possible-duplicate screen: post the same draft again, saying the operator has seen
+        the saved rows the backend named."""
+        if await self._require_flow(update, context, 'new_address') is None:
+            return ConversationHandler.END
+
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return ConversationHandler.END
+
+        return await self._save_address(update, context, language, token, confirm_duplicate=True)
+
+    @require_auth
+    @require_operator
+    async def duplicate_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Back from the possible-duplicate screen to the confirm summary, with the typed address intact."""
+        flow = await self._require_flow(update, context, 'new_address')
+        if flow is None:
+            return ConversationHandler.END
+
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        # The named rows belong to the screen being left; Confirm asks the backend again.
+        context.user_data.pop('address_duplicate', None)
+
+        text, keyboard = self._render_confirm_summary(flow, language)
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return CONFIRM_ADDRESS
+
+    async def _show_duplicate(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str,
+                              user_id: int, response) -> int:
+        """The backend's 409 `ADDRESS_POSSIBLE_DUPLICATE`: name the saved rows next to this pin and ask.
+
+        The draft stays: Create anyway posts it again and Back returns to its summary. Each row is named with its
+        distance, plus its street line when it has a title (without one, the name already is the street line).
+        """
+        candidates = list((response.details or {}).get('candidates') or [])
+        context.user_data['address_duplicate'] = {'candidates': candidates}
+
+        lines = [i18n.get('staff.operator.address_duplicate_prompt', language)]
+        for row in candidates:
+            name = escape_html(OperatorKeyboards.address_name(row, language))
+            lines.append(f"📍 {name} · ~{row.get('distance_m')} m")
+            if row.get('title') and row.get('full_address'):
+                lines.append(f"    {escape_html(row['full_address'])}")
+
+        await update.callback_query.edit_message_text(
+            '\n'.join(lines),
+            reply_markup=OperatorKeyboards.address_duplicate(
+                language, candidates, offer_use=self._ordering_for(context, user_id)
+            ),
+            parse_mode='HTML'
+        )
+        return ADDRESS_DUPLICATE
+
+    async def _save_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str, token: str,
+                            *, confirm_duplicate: bool) -> int:
+        """POST the draft for the client and render the outcome; the conversation's next state.
+
+        `confirm_duplicate` adds `"confirm_duplicate": true` to the body (Create anyway). A possible-duplicate answer
+        keeps the conversation on its own screen; anything else ends it.
+        """
+        query = update.callback_query
         try:
             user_id = context.user_data.get('adding_address_for')
             addr_data = context.user_data.get('new_address', {})
@@ -471,15 +562,17 @@ class ManageAddressHandler(BaseHandler):
                 await self._handle_error(update, context)
                 return ConversationHandler.END
 
+            body = {**addr_data, 'confirm_duplicate': True} if confirm_duplicate else addr_data
             async with api_client as client:
-                response = await client.add_client_address(token, user_id, addr_data)
+                response = await client.add_client_address(token, user_id, body)
 
             if not response.success:
+                if response.error_code == 'ADDRESS_POSSIBLE_DUPLICATE':
+                    return await self._show_duplicate(update, context, language, user_id, response)
                 await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
-            active_order = context.user_data.get('new_order') or {}
-            if active_order.get('client_id') == user_id:
+            if self._ordering_for(context, user_id):
                 # Continue operator order flow: return directly to address selection.
                 list_response = await client.get_user_addresses(token, user_id)
                 if list_response.success:
@@ -510,16 +603,14 @@ class ManageAddressHandler(BaseHandler):
             logger.error(f"Error saving address: {e}", exc_info=True)
             await self._handle_error(update, context)
 
-        context.user_data.pop('new_address', None)
-        context.user_data.pop('adding_address_for', None)
+        self.drop_add_address_flow(context)
         return ConversationHandler.END
 
     @require_auth
     @require_operator
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address creation"""
-        context.user_data.pop('new_address', None)
-        context.user_data.pop('adding_address_for', None)
+        self.drop_add_address_flow(context)
         language = await self._get_language(update, context)
 
         text = i18n.get('staff.cancelled', language)

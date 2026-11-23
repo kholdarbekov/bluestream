@@ -2135,6 +2135,11 @@ const Orders = () => {
                           })}
                         </div>
                       ) : null}
+                      {typeof record.diff.pin_moved_m === 'number' ? (
+                        <div>
+                          {t('ui.orders.history_pin_moved', 'Pin moved ~{{distance}} m', { distance: record.diff.pin_moved_m })}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div style={{ padding: 8 }}>

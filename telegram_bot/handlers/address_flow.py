@@ -22,7 +22,7 @@ from handlers.conversation_states import (
     SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
     ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
     ADDRESS_APARTMENT, ADDRESS_FLOOR,
-    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM, ADDRESS_DUPLICATE,
     PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME, PHONE_VERIFY_OTP,
     LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
 )
@@ -80,7 +80,8 @@ class RenderTarget(Protocol):
         text: str,
         keyboard: Optional[InlineKeyboardMarkup] = None,
         parse_mode: Optional[str] = None,
-    ) -> None:
+    ) -> Any:
+        """Returns the message now showing `text` (the edited one, or the one sent), or None when unknown."""
         ...
 
     async def send_markdown_or_plain(

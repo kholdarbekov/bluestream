@@ -44,7 +44,7 @@ OUTSIDE = (40.5, 70.9)
 @pytest.fixture
 def checkout_copy(app, db):
     """The storefront rows the backend seed ships (landing.*, cabinet.*) plus the checkout group's own rows."""
-    seed_copy(db, ("landing.", "web.display_labels", "cabinet."))
+    seed_copy(db, ("landing.", "web.display_labels", "cabinet.", "api.addresses.error.pin_"))
     for language, rows in CHECKOUT.items():
         for key, value in rows.items():
             db.session.add(Translation(key=key, language=language, value=value, category=CATEGORY, is_active=True))

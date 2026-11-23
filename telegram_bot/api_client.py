@@ -967,6 +967,11 @@ class BusinessAPIClient:
         return await self._make_request('PUT', f'/api/v1/auth/addresses/{address_id}',
                                        user_token=user_token, data=address_data)
 
+    async def move_user_address(self, user_token: str, address_id: int, address_data: Dict) -> APIResponse:
+        """Move an existing address's pin (body carries point_source and confirm_duplicate)"""
+        return await self._make_request('POST', f'/api/v1/auth/addresses/{address_id}/move',
+                                       user_token=user_token, data=address_data)
+
     async def delete_user_address(self, user_token: str, address_id: int) -> APIResponse:
         """Delete address"""
         return await self._make_request('DELETE', f'/api/v1/auth/addresses/{address_id}',

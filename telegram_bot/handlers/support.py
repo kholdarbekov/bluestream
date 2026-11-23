@@ -55,8 +55,8 @@ class SupportHandlers(BaseHandler):
             except Exception as exc:
                 logger.warning("Order lookup failed while arming issue report %s: %s", order_id, exc)
 
-            await self.user_repo.arm_awaiting_input(
-                user_id,
+            await self._arm_awaiting_input(
+                update, context, user_id,
                 'support_message',
                 support_order_id=order_id,
                 support_order_number=order_number,

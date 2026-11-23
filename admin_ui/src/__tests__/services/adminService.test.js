@@ -1057,7 +1057,17 @@ describe('AdminService', () => {
 
       await adminService.getPlaceGroupSuggestions(11);
 
-      expect(api.get).toHaveBeenCalledWith('/admin/users/11/place-group-suggestions');
+      expect(api.get).toHaveBeenCalledWith('/admin/users/11/place-group-suggestions', { params: {} });
+    });
+
+    it('narrows a user\'s place-group suggestions by kind only when one is given', async () => {
+      api.get.mockResolvedValue({ data: { success: true, data: { suggestions: [] } } });
+
+      await adminService.getPlaceGroupSuggestions(11, { kind: 'same_customer' });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/11/place-group-suggestions', {
+        params: { kind: 'same_customer' }
+      });
     });
 
     it('dismisses a place suggestion pairwise (never the person-dismiss route)', async () => {

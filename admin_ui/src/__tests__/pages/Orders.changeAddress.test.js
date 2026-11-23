@@ -314,3 +314,20 @@ it('shows a branch line when one side has no branch (null is a dash)', async () 
   const detailModal = await expandHistory();
   expect(await within(detailModal).findByText('Branch: — → Branch B')).toBeInTheDocument();
 });
+
+it('shows "Pin moved ~120 m" when the diff carries pin_moved_m', async () => {
+  mount({ history: [changeEntry({
+    address_before: SNAP_HOME, address_after: SNAP_HOME, branch_before: BRANCH_A, branch_after: BRANCH_A, pin_moved_m: 120,
+  })] });
+  const detailModal = await expandHistory();
+  expect(await within(detailModal).findByText('Pin moved ~120 m')).toBeInTheDocument();
+});
+
+it('shows no pin line when the diff has no pin_moved_m', async () => {
+  mount({ history: [changeEntry({
+    address_before: SNAP_HOME, address_after: SNAP_OFFICE, branch_before: BRANCH_A, branch_after: BRANCH_A,
+  })] });
+  const detailModal = await expandHistory();
+  await within(detailModal).findByText('Address: Home: Chilonzor 5 → Office: Yunusobod 7');
+  expect(within(detailModal).queryByText(/Pin moved/)).toBeNull();
+});

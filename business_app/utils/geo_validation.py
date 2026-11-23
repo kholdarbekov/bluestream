@@ -19,13 +19,29 @@ Enforcement is layered:
 
 from typing import Optional
 
-from shared.constants import is_within_tashkent
+from shared.constants import TASHKENT_COORDINATES, TASHKENT_DISTRICTS, is_within_tashkent
 from business_app.utils.exceptions import ValidationError
 
 # Reuses the same translation key already served by the reverse-geocode endpoint
 # so the message is consistent across every channel.
 _OUTSIDE_AREA_KEY = "api.addresses.error.coordinates_outside_supported_area"
 _OUTSIDE_AREA_FALLBACK = "The selected location is outside our delivery area (Tashkent)."
+
+
+# Placeholder points a geocoder or the UI falls back to when it has no real pin: the city centre and every
+# district centre. A saved pin equal to one of these (after rounding to 6 places) is not a placed pin.
+_FALLBACK_POINTS = frozenset(
+    {(round(TASHKENT_COORDINATES["latitude"], 6), round(TASHKENT_COORDINATES["longitude"], 6))}
+    | {(round(d["center"][0], 6), round(d["center"][1], 6)) for d in TASHKENT_DISTRICTS.values()}
+)
+
+
+def is_fallback_point(latitude, longitude) -> bool:
+    """True when the pair is the city centre or a district centre; missing or non-numeric values are False."""
+    try:
+        return (round(float(latitude), 6), round(float(longitude), 6)) in _FALLBACK_POINTS
+    except (TypeError, ValueError):
+        return False
 
 
 def is_in_delivery_zone(latitude, longitude) -> bool:

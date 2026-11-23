@@ -55,6 +55,7 @@ def flow_copy(app, db):
             "web.payment_return.",
             "web.checkout.window_",
             "api.subscriptions.time.",
+            "api.addresses.error.pin_",  # the address wizard's locked-map reasons
             "Discount",
             "Reward discount",
             "{tier} website discount",

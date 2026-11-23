@@ -3324,7 +3324,9 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # 670 -> 681: the driver cash expenses plan (2026-11-18) added the staff bot's expense routes, the admin Driver
     # expenses reads and decisions, and the badge/receipt routes. Unrelated to place-merge; only the estate-wide
     # count moved.
-    assert len(routes) == 681
+    # 681 -> 682: POST /api/v1/auth/addresses/<int:address_id>/move (auth.move_user_address), duplicate-address
+    # guard Task 5. Unrelated to place-merge; only the estate-wide count moved.
+    assert len(routes) == 682
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]
     assert entry["endpoint"] == "admin.get_place_group_merge_preview"

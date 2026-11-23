@@ -3,6 +3,8 @@ import api, { getCookie } from './api';
 // A customer's video (up to Telegram's 20 MB) comes through the Pi and Telegram; the instance-wide
 // 10 s cut an 11 MB one off mid-download in production.
 const SUPPORT_ATTACHMENT_TIMEOUT_MS = 60000;
+// The duplicate-address guard's 409 is explained by a dialog on the Users page, so api.js stays silent for it.
+const ADDRESS_DUPLICATE_CONFIG = { handledErrorCodes: ['ADDRESS_POSSIBLE_DUPLICATE'] };
 
 // The `error_code`s the basket quote refuses with, read off `_admin_order_request` and `OrderService.price_order`: the
 // order's lines and minimums. The quote panel prints their sentence itself, so api.js does not toast them too.
@@ -476,8 +478,11 @@ class AdminService {
   // below can only answer "who might share a place with THIS customer", so an
   // admin had to suspect someone before they could look. A suggestion is not a
   // grouping: every row still needs `createPlaceGroup` with a reason.
-  async getGlobalPlaceGroupSuggestions({ limit = 20 } = {}) {
-    const response = await api.get('/admin/place-group-suggestions', { params: { limit } });
+  // `kind` ('shared_place' | 'same_customer') narrows the list; omitted = both.
+  async getGlobalPlaceGroupSuggestions({ limit = 20, kind } = {}) {
+    const params = { limit };
+    if (kind) params.kind = kind;
+    const response = await api.get('/admin/place-group-suggestions', { params });
     return response.data;
   }
 
@@ -537,8 +542,10 @@ class AdminService {
     return response.data;
   }
 
-  async getPlaceGroupSuggestions(userId) {
-    const response = await api.get(`/admin/users/${userId}/place-group-suggestions`);
+  async getPlaceGroupSuggestions(userId, { kind } = {}) {
+    const params = {};
+    if (kind) params.kind = kind;
+    const response = await api.get(`/admin/users/${userId}/place-group-suggestions`, { params });
     return response.data;
   }
 
@@ -565,13 +572,14 @@ class AdminService {
     return response.data;
   }
 
+  // The guard's 409 is explained by a dialog on the page, so api.js stays silent for it.
   async createUserAddress(userId, addressData) {
-    const response = await api.post(`/admin/users/${userId}/addresses`, addressData);
+    const response = await api.post(`/admin/users/${userId}/addresses`, addressData, ADDRESS_DUPLICATE_CONFIG);
     return response.data;
   }
 
   async updateUserAddress(userId, addressId, addressData) {
-    const response = await api.put(`/admin/users/${userId}/addresses/${addressId}`, addressData);
+    const response = await api.put(`/admin/users/${userId}/addresses/${addressId}`, addressData, ADDRESS_DUPLICATE_CONFIG);
     return response.data;
   }
 

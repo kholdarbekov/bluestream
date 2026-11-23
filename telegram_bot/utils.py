@@ -749,9 +749,16 @@ async def arm_location_request(context: ContextTypes.DEFAULT_TYPE,
     # take down the prompt itself. The in-memory marker above is still the fast
     # path; `is_awaiting_location_stale` bounds both.
     # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
+    #
+    # This pin is for a NEW address, so an Edit-location prompt still armed
+    # (`relocate_address`, which the pin router checks first) is disarmed: the
+    # pin must never move the address that prompt named.
+    # tests/telegram_bot/test_edit_location_journey.py
     if user_id is not None:
         try:
-            await BotUserRepository(db_manager).remember_pin_prompt(
+            repository = BotUserRepository(db_manager)
+            await repository.disarm(user_id, 'relocate_address')
+            await repository.remember_pin_prompt(
                 user_id, context.user_data['awaiting_location_at'],
             )
         except Exception as arm_error:

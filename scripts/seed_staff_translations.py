@@ -604,6 +604,24 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "📍 {number}-buyurtma: yetkazib berish manzili o'zgardi.\nOldin: {old}\nEndi: {new}",
         "ru": "📍 Заказ {number}: адрес доставки изменён.\nБыло: {old}\nСтало: {new}",
     },
+    # The pin-moved alert: the same driver message when the payload carries `pin_moved_m` (a pin move, by an admin
+    # or a customer, so the copy never says who moved it). `{distance}` is whole metres; `{new}` is HTML-escaped.
+    # It quotes the alert's own maps button (`staff.delivery.open_maps`, first row of
+    # `DeliveryKeyboards.address_changed_actions`) as seeded in each language. uz/ru NATIVE-READ.
+    "staff.notification.order_address_pin_moved": {
+        "en": (
+            "📍 Order {number}: the map pin of this address was moved (~{distance} m). "
+            "Tap “Open Maps” for the new point.\n{new}"
+        ),
+        "uz": (
+            "📍 {number}-buyurtma: manzil nuqtasi ko'chirildi (~{distance} m). "
+            "Yangi nuqta uchun «Xaritani ochish» tugmasini bosing.\n{new}"
+        ),
+        "ru": (
+            "📍 Заказ {number}: точка адреса перенесена (~{distance} м). "
+            "Новая точка — по кнопке «Открыть карты».\n{new}"
+        ),
+    },
     # The failed-delivery alert (spec 2026-09-25-failed-delivery-awaits-new-date §4.1, F7),
     # sent to operators, admins and managers by `webhook_server._render_delivery_failed_alert`.
     # `{reason}` arrives already translated from the failure-reason family; `{name}` is the
@@ -3164,6 +3182,10 @@ DELIVERY_TEXT_TRANSLATIONS = {
 OPERATOR_TEXT_TRANSLATIONS = {
     "add_address": {"en": "Add Address", "uz": "Manzil qoshish", "ru": "Добавить адрес"},
     "add_more_or_done": {"en": "Add more products or finish selection.", "uz": "Yana mahsulot qoshing yoki yakunlang.", "ru": "Добавьте еще товары или завершите выбор."},
+    # The possible-duplicate screen of the operator's add-address flow (manage_address.py; glyphs are in code).
+    "address_duplicate_create_anyway": {"en": "Create anyway", "uz": "Baribir yaratish", "ru": "Всё равно создать"},
+    "address_duplicate_prompt": {"en": "This customer already has an address close to this pin:", "uz": "Mijozning shu nuqtaga yaqin manzili bor:", "ru": "У клиента уже есть адрес рядом с этой точкой:"},
+    "address_duplicate_use": {"en": "Use this address", "uz": "Shu manzilni tanlash", "ru": "Выбрать этот адрес"},
     "address_not_found": {"en": "That address could not be found on the map. Check the spelling or attach a pin with the button below.", "uz": "Bu manzil xaritada topilmadi. Imloni tekshiring yoki quyidagi tugma orqali joylashuvni yuboring.", "ru": "Этот адрес не найден на карте. Проверьте написание или отправьте геометку кнопкой ниже."},
     "address_saved": {"en": "Address saved successfully.", "uz": "Manzil muvaffaqiyatli saqlandi.", "ru": "Адрес успешно сохранен."},
     "addresses_title": {"en": "Client Addresses", "uz": "Mijoz manzillari", "ru": "Адреса клиента"},

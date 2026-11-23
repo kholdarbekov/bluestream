@@ -97,7 +97,7 @@ from staff_bot.handlers.operator.create_order import (
 from staff_bot.handlers.operator.manage_address import (
     ManageAddressHandler,
     ENTER_LABEL, ENTER_ADDRESS, ENTER_DISTRICT,
-    ENTER_NOTES as ADDR_ENTER_NOTES, CONFIRM_ADDRESS
+    ENTER_NOTES as ADDR_ENTER_NOTES, CONFIRM_ADDRESS, ADDRESS_DUPLICATE
 )
 from staff_bot.handlers.operator.recent_orders import RecentOrdersHandler
 from staff_bot.handlers.operator.orders_pool_view import OperatorOrdersPoolViewHandler
@@ -1231,7 +1231,16 @@ class StaffBot:
                     menu_escape,
                     CallbackQueryHandler(manage_address_handler.confirm_address, pattern="^staff_op_confirm_address$")
                 ],
-                ConversationHandler.TIMEOUT: _flow_timeout(),
+                # The backend's possible-duplicate answer. Deliberately no `staff_op_addr_` handler for its "Use"
+                # buttons: `staff_create_order`, registered first in this group and parked at ORDER_SELECT_ADDRESS,
+                # claims that tap exactly as it claims a picker tap. Its `select_address` drops this flow's keys,
+                # so the timeout below then ends this conversation in silence.
+                ADDRESS_DUPLICATE: [
+                    menu_escape,
+                    CallbackQueryHandler(manage_address_handler.create_anyway, pattern="^staff_op_dup_create$"),
+                    CallbackQueryHandler(manage_address_handler.duplicate_back, pattern="^staff_op_dup_back$"),
+                ],
+                ConversationHandler.TIMEOUT: _flow_timeout(own_keys=manage_address_handler.ADD_ADDRESS_FLOW_KEYS),
             },
             fallbacks=[
                 CommandHandler("cancel", manage_address_handler.cancel),

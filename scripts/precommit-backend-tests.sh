@@ -109,13 +109,16 @@ fi
 # Worksteal schedules dynamically and doesn't hit this bug. CI runners have
 # 2–4 cores so pytest.ini's loadfile stays safe there.
 #
-# Worker count is sized from the Docker VM, not hard-coded. Each xdist worker
-# peaks at ~0.85 GB (measured 2026-10-17: 3.4 GB for 4 workers) and the rest of
-# the compose stack holds ~2.5 GB of the same VM; too many workers OOM-kill
-# random test processes ("node down: Not properly terminated"). So a worker
-# needs a CPU plus 1 GB beyond that reserve. Capped at 12: conftest maps worker
-# gwN to Redis DB 15-N, and DBs 0-2 belong to the live stack (app + broker,
-# telegram_bot, staff_bot). PYTEST_WORKERS=<n> overrides.
+# Worker count is sized from the Docker VM, not hard-coded, by
+# scripts/backend-test-workers.sh (the rule and its numbers live there only).
+# Too many workers for the VM's FREE memory get OOM-killed mid-run ("node down:
+# Not properly terminated"; the VM's dmesg shows "Out of memory: Killed process
+# … (python3.13)"): on 2026-11-23 a fixed 2.5 GB reserve started 7 workers into
+# ~5.6 GB and every full run lost 3. So the runner reads the VM's MemAvailable
+# inside the running business_app container (its /proc/meminfo is the VM's)
+# and hands it to the sizer with the CPUs and the total. PYTEST_WORKERS=<n>
+# overrides, still capped at 12 (conftest maps gwN to Redis DB 15-N, and DBs
+# 0-2 belong to the live stack: app + broker, telegram_bot, staff_bot).
 # Bot tests call api_client via BUSINESS_APP_URL, which .env points at the live
 # business_app. Override it to an unroutable host so an unmocked bot call fails
 # fast instead of writing to prod.
@@ -165,24 +168,42 @@ fi
 
 docker_cpus="$(docker info --format '{{.NCPU}}')"
 docker_mem_mib=$(( $(docker info --format '{{.MemTotal}}') / 1048576 ))
-workers=$(( (docker_mem_mib - 2560) / 1024 ))
-if (( workers > docker_cpus )); then workers=${docker_cpus}; fi
-if (( workers > 12 )); then workers=12; fi
-if (( workers < 1 )); then workers=1; fi
-workers="${PYTEST_WORKERS:-${workers}}"
+vm_free_mib="$(docker exec "${business_app_cid}" awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo 2>/dev/null || true)"
+sizer="${repo_root}/scripts/backend-test-workers.sh"
+sizing="$(bash "${sizer}" "${docker_cpus}" "${docker_mem_mib}" "${vm_free_mib}" "${PYTEST_WORKERS:-}")"
+read -r workers worker_limit <<<"${sizing}"
+if [[ "${vm_free_mib}" =~ ^[0-9]+$ ]]; then
+    mem_note=", $(( vm_free_mib / 1024 )).$(( vm_free_mib % 1024 * 10 / 1024 )) GiB free"
+else
+    mem_note=", free memory unknown"
+fi
 
 # Argument passthrough. With no args we run the whole suite sharded across the
 # workers above (the pre-commit behaviour) and report the 25 slowest tests. With
-# args we forward them verbatim and drop -n, because xdist sharding a single
-# test just adds startup cost and scrambles the failure output TDD depends on.
+# args we forward them verbatim. pytest.ini's addopts carries `-n auto` (one
+# worker per CPU, blind to memory), so an args run gets the sized `-n` as well
+# (a later -n wins) — unless its own arguments choose the workers or need a
+# serial run, which the sizer decides (--caller-sets-workers).
+caller_sets_workers=false
+if [ "$#" -gt 0 ] && bash "${sizer}" --caller-sets-workers "$@"; then
+    caller_sets_workers=true
+fi
 if [ "$#" -eq 0 ]; then
     pytest_args="tests/ --no-cov --no-header --dist=worksteal -n ${workers} --durations=25"
+elif [[ "${caller_sets_workers}" == true ]]; then
+    printf -v quoted '%q ' "$@"
+    pytest_args="${quoted}--no-cov --no-header"
 else
     # %q escapes each argument so the container's shell re-parses the exact
     # original argument boundaries. Without this, "$*" flattens the arguments
     # and `-k "a or b"` arrives at pytest as three separate tokens.
     printf -v quoted '%q ' "$@"
-    pytest_args="${quoted}--no-cov --no-header"
+    pytest_args="${quoted}--no-cov --no-header -n ${workers}"
+fi
+if [[ "${caller_sets_workers}" == true ]]; then
+    header_workers="as the arguments set"
+else
+    header_workers="${workers}, by ${worker_limit}"
 fi
 
 # Every run is also written to logs/test-runs/ (gitignored; newest 20 kept), so
@@ -194,7 +215,7 @@ mkdir -p "${log_dir}"
 ls -1t "${log_dir}"/backend-*.log 2>/dev/null | tail -n +20 | while read -r old; do rm -f "${old}"; done || true
 log_file="${log_dir}/backend-$(date +%Y%m%d-%H%M%S).log"
 started=$(date +%s)
-echo "▶ $(date '+%F %T')  workers=${workers} (Docker VM: ${docker_cpus} CPUs, $(( docker_mem_mib / 1024 )) GiB)  log: ${log_file#"${repo_root}"/}" | tee "${log_file}"
+echo "▶ $(date '+%F %T')  workers=${header_workers} (Docker VM: ${docker_cpus} CPUs, $(( docker_mem_mib / 1024 )) GiB${mem_note})  log: ${log_file#"${repo_root}"/}" | tee "${log_file}"
 
 set +e
 docker run --rm --init \

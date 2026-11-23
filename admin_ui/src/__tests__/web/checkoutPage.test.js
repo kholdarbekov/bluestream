@@ -236,6 +236,37 @@ describe('/checkout', () => {
     expect(sent(ESTIMATE).at(-1).body.delivery_address_id).toBe(90);
   });
 
+  it('“Use this address” after a 409 selects the existing card with its door notes and quotes it', async () => {
+    const existing = {
+      id: 102, title: 'Home', display_label: 'Home', full_address: 'x', delivery_instructions: 'Gate 2, code 45', is_default: false, distance_m: 9,
+    };
+    const { $1, $$, sent, click, type } = await boot({
+      'POST /api/v1/addresses/geocode': ok({ latitude: NEW.latitude, longitude: NEW.longitude, formatted_address: 'x' }),
+      'POST /api/v1/addresses/reverse-geocode': ok({ formatted_address: NEW.full_address, district_key: 'chilanzar' }),
+      'POST /api/v1/auth/addresses': {
+        status: 409,
+        body: { success: false, message: 'x', error_code: 'ADDRESS_POSSIBLE_DUPLICATE', details: { move_address_id: null, candidates: [existing] } },
+      },
+    });
+    await click('#address-grid [data-action="show-add-address"]');
+    type('#addressSearchInput', 'Bunyodkor 5');
+    await click('#searchAddressBtn');
+    await click('#wizardNextBtn');
+    type('#addressTitle', NEW.title);
+    await click('#wizardNextBtn');
+    await click('#wizardSaveBtn');
+    const quotes = sent(ESTIMATE).length;
+    await click('#addressWizardDuplicate [data-candidate-id="102"] [data-action="duplicate-use"]');
+
+    expect(sent('POST /api/v1/auth/addresses')).toHaveLength(1);
+    expect($1('.address-card[data-address-id="102"]').classList.contains('selected')).toBe(true);
+    expect($1('.address-card[data-address-id="101"]').classList.contains('selected')).toBe(false);
+    expect($1('.address-card[data-address-id="102"] .ae-co-addr__note span').textContent).toBe('Gate 2, code 45');
+    expect($$('.address-card[data-address-id="102"]')).toHaveLength(1);
+    expect(sent(ESTIMATE).length).toBe(quotes + 1);
+    expect(sent(ESTIMATE).at(-1).body.delivery_address_id).toBe(102);
+  });
+
   it('a customer with no address gets the empty state, whose button opens the wizard ticking “main address”', async () => {
     const { $1, sent, click } = await boot({}, (document) => {
       document.querySelectorAll('#address-grid .address-card').forEach((card) => card.remove());

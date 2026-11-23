@@ -23,11 +23,17 @@ const { Text } = Typography;
 const { TextArea } = Input;
 
 /** One label shape for every address the picker can show (search hit or suggestion member). */
-const addressOptionLabel = ({ firstName, lastName, phone, title, fullAddress }) => {
+const addressOptionLabel = ({ firstName, lastName, phone, where }) => {
   const who = [firstName, lastName].filter(Boolean).join(' ');
-  const where = title || fullAddress;
   return [[who, phone].filter(Boolean).join(' · '), where].filter(Boolean).join(' — ');
 };
+
+/**
+ * The address half of every option. A suggestion member publishes `display_label` (the backend's display
+ * rule), printed as it comes; a source that publishes none (a search hit, a shared-place case member)
+ * is named by its title, else its street line.
+ */
+const optionAddressText = (row) => row.display_label || row.title || row.full_address;
 
 const searchHitToOption = (hit) => ({
   value: hit.address_id,
@@ -35,8 +41,7 @@ const searchHitToOption = (hit) => ({
     firstName: hit.owner?.first_name,
     lastName: hit.owner?.last_name,
     phone: hit.owner?.phone,
-    title: hit.title,
-    fullAddress: hit.full_address,
+    where: optionAddressText(hit),
   }),
 });
 
@@ -46,8 +51,7 @@ const suggestionMemberToOption = (member) => ({
     firstName: member.first_name,
     lastName: member.last_name,
     phone: member.phone,
-    title: member.title,
-    fullAddress: member.full_address,
+    where: optionAddressText(member),
   }),
 });
 

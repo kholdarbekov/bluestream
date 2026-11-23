@@ -115,7 +115,7 @@ def _per_worker_redis_url(base_url: str) -> str:
     Map ``gwN`` to ``DB (15 - N mod 15)`` so workers stay isolated within
     Redis's default 16-DB range. DBs 0-2 belong to the live compose stack
     (app + broker, telegram_bot, staff_bot), so at most 12 workers are safe —
-    scripts/precommit-backend-tests.sh caps its worker count there. Falls back to ``base_url`` for
+    scripts/backend-test-workers.sh caps the runner's worker count there. Falls back to ``base_url`` for
     the master process or unrecognised worker names.
     """
     worker = os.environ.get('PYTEST_XDIST_WORKER', 'master')

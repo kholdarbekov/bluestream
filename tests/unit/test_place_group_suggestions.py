@@ -22,6 +22,7 @@ from business_app.services import customer_link_service as cls_module
 from business_app.services.customer_link_service import CustomerLinkService
 from business_app.utils.password_security import hash_password
 from shared.enums import EntitySubtype, UserRole, UserStatus, UserType
+from tests.integration.address_guard_geometry import at
 
 # Tashkent-center coordinates (inside TASHKENT_POLYGON — the UserAddress
 # before_insert zone listener rejects out-of-zone coords).
@@ -153,6 +154,37 @@ class TestPlaceGroupSuggestions:
         mine = svc.get_place_group_suggestions(user_id=u1.id)
         assert len(mine) == 1
         assert u1.id in {m["user_id"] for m in mine[0]["members"]}
+
+    @pytest.mark.parametrize("dismissed", ["shared_place", "same_customer"])
+    def test_e19_mixed_dismissals_hide_only_their_own_row(self, app, db, dismissed):
+        """🔴 E19, both arms at once (spec 2026-11-18-duplicate-address-guard §6.10). A cross-customer component
+        {a, b, y} and the owner's own pair (a, d), d outside the component: one row per arm. Dismissing either row
+        (its first two members, as the admin panels send it) hides that row only, so each arm's fingerprint is the
+        one the dismissal stamped."""
+        place_m = app.config["PLACE_SUGGESTION_RADIUS_M"]
+        duplicate_m = app.config["ADDRESS_DUPLICATE_RADIUS_M"]
+        apart = (place_m + duplicate_m) / 2
+        assert place_m + 2 <= apart <= duplicate_m - 2
+        owner = _customer(db, "owner@example.com", "+998790000001")
+        coworker = _customer(db, "coworker@example.com", "+998790000002")
+        visitor = _customer(db, "visitor@example.com", "+998790000003")
+        admin = _customer(db, "adm@example.com", "+998790000009")
+        a = _address(db, owner, *at())
+        b = _address(db, coworker, *at(place_m - 2))
+        y = _address(db, visitor, *at(-(place_m - 2)))
+        d = _address(db, owner, *at(east_m=apart))
+        svc = CustomerLinkService()
+        rows = svc.get_place_group_suggestions()
+        assert [(row["kind"], row["address_ids"]) for row in rows] == [
+            ("shared_place", [a.id, b.id, y.id]),
+            ("same_customer", [a.id, d.id]),
+        ]
+
+        target = next(row for row in rows if row["kind"] == dismissed)
+        first, second = target["members"][:2]
+        svc.dismiss_place_suggestion(first["address_id"], second["address_id"], acting_admin_id=admin.id, reason="no")
+
+        assert svc.get_place_group_suggestions() == [row for row in rows if row is not target]
 
 
 @pytest.mark.unit

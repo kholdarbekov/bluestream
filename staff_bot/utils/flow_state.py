@@ -169,6 +169,9 @@ PENDING_FLOW_USER_DATA_KEYS = (
     'available_products',
     'selecting_product_id',
     'adding_address_for',
+    # The saved addresses the backend named when it asked "possible duplicate?" (`manage_address.py`, state 45).
+    # WRITE-side rule: the add-address conversation stamps it, so a menu tap must drop it.
+    'address_duplicate',
     'managing_addresses_for',
     # -- Inline-keyboard flows whose entire record is a loose key.  Nothing
     #    cleared these before, so an abandoned flow stayed armed with numbers

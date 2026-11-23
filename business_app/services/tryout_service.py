@@ -237,21 +237,51 @@ class TryoutService:
         }
 
     @staticmethod
-    def _upsert_converted_user_address(auth_service: AuthService, user_id: int, snapshot: Dict[str, Any]) -> None:
+    def _upsert_converted_user_address(
+        auth_service: AuthService,
+        user_id: int,
+        snapshot: Dict[str, Any],
+        *,
+        outlet_linked: bool,
+        actor_id: int,
+    ) -> None:
+        """Put the try-out's address on the customer without duplicating one they already hold (spec §6.4).
+
+        A try-out of a customer (not outlet-linked) whose pin is within the duplicate radius of one of their own
+        saved addresses adopts the nearest one: its pin, title and written line stay, it becomes the default, and
+        the try-out's door notes fill it only when it has none. Otherwise the address with the same written line is
+        updated, and never has its pin moved by the customer rules: a pinless one takes the snapshot's pin as an
+        admin write (the zone check still applies). Otherwise a new address is added, the admin having confirmed it.
+        """
+        from business_app.services.address_guard_service import pin_changed, possible_duplicates
+        from business_app.services.address_pin_service import AddressPinService
+
+        notes = snapshot.get("delivery_notes")
+        latitude, longitude = snapshot.get("latitude"), snapshot.get("longitude")
+        if not outlet_linked:
+            candidates = possible_duplicates(user_id, latitude, longitude)
+            if candidates:
+                nearest = candidates[0][0]
+                if notes and not nearest.delivery_instructions:
+                    auth_service.update_user_address(user_id, nearest.id, {"delivery_instructions": notes})
+                if not nearest.is_default:
+                    auth_service.set_default_user_address(user_id, nearest.id)
+                return
+
         payload = {
             "title": snapshot.get("label") or "Try-out",
             "full_address": snapshot.get("full_address"),
             "district": snapshot.get("district"),
             "city": snapshot.get("city") or "Tashkent",
-            "latitude": snapshot.get("latitude"),
-            "longitude": snapshot.get("longitude"),
+            "latitude": latitude,
+            "longitude": longitude,
             "is_default": True,
         }
         # The address's own key: `update_user_address` takes no `delivery_notes`, so a conversion onto an existing
         # address used to drop the try-out's door notes. Only real notes are handed over: a try-out without any must
         # not wipe the door notes that address already holds.
-        if snapshot.get("delivery_notes"):
-            payload["delivery_instructions"] = snapshot["delivery_notes"]
+        if notes:
+            payload["delivery_instructions"] = notes
         existing = (
             UserAddress.query.filter_by(
                 user_id=user_id,
@@ -261,12 +291,25 @@ class TryoutService:
             .first()
         )
         if existing:
-            auth_service.update_user_address(user_id, existing.id, payload)
-            if not existing.is_default:
-                auth_service.set_default_user_address(user_id, existing.id)
+            if existing.latitude is None and pin_changed(existing, {"latitude": latitude, "longitude": longitude}):
+                # A pinless address gets its first pin as a staff write, never through the customer pin rules
+                # (SHARED_PLACE / OUTLET / the duplicate question must not refuse an admin's conversion). First, so
+                # its zone check refuses (400) before anything below is written.
+                AddressPinService.change_pin(
+                    existing,
+                    {"latitude": float(latitude), "longitude": float(longitude)},
+                    actor=db.session.get(User, actor_id),
+                    customer_rules=False,
+                    confirm_duplicate=True,
+                )
+            # The matched address keeps its pin: the plain update carries no point, so no pin rule runs on it. It
+            # makes the address the default too (`is_default` in the payload).
+            auth_service.update_user_address(
+                user_id, existing.id, {k: v for k, v in payload.items() if k not in ("latitude", "longitude")}
+            )
             return
 
-        auth_service.add_user_address(user_id, payload)
+        auth_service.add_user_address(user_id, payload, confirm_duplicate=True)
 
     @staticmethod
     def _validate_and_build_items(items_payload: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1127,7 +1170,13 @@ class TryoutService:
         else:
             auth_service = AuthService()
         snapshot = tryout.address_snapshot or {}
-        TryoutService._upsert_converted_user_address(auth_service, user.id, snapshot)
+        TryoutService._upsert_converted_user_address(
+            auth_service,
+            user.id,
+            snapshot,
+            outlet_linked=tryout.outlet_id is not None,
+            actor_id=int(actor_user_id),
+        )
         tryout.converted_user_id = user.id
         tryout.converted_at = datetime.now(UTC)
         tryout.outcome = TryoutOutcome.CONVERTED

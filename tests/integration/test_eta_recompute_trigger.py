@@ -258,6 +258,8 @@ def test_an_address_change_requests_a_recompute(app, db, monkeypatch, recompute_
             )
         )
     else:
+        # The address has an order, so the customer's pin may move at most ADDRESS_MOVE_MAX_M: 100 m further north.
+        latitude, longitude = point_at_km(3.1)
         _trigger_on(app, monkeypatch)
         _ok(
             app.test_client().put(

@@ -21,6 +21,7 @@ from flasgger import swag_from
 
 from business_app.utils.auth_cookies import set_login_cookies
 from business_app.utils.service_factory import get_auth_service
+from business_app.services.address_guard_service import pin_move_refusals, take_confirm_flag, take_point_source
 from business_app.services.auth_service import SmsCodeStillValid
 from business_app.utils.decorators import (
     validate_json,
@@ -1324,7 +1325,9 @@ def get_user_addresses():
       - Bearer: []
     responses:
       200:
-        description: User addresses retrieved successfully
+        description: >-
+          User addresses retrieved successfully. Each row is an Address plus `pin_move_refusal`: why the customer
+          may not move this address's pin (`WITH_DRIVER`, `SHARED_PLACE` or `OUTLET`), else null.
         schema:
           type: object
           properties:
@@ -1338,11 +1341,19 @@ def get_user_addresses():
                   type: array
                   items:
                     type: object
+                    properties:
+                      pin_move_refusal:
+                        type: string
+                        nullable: true
+                        enum: [WITH_DRIVER, SHARED_PLACE, OUTLET]
     """
     user_id = get_jwt_identity()
     addresses = get_auth_service().get_user_addresses(user_id)
+    refusals = pin_move_refusals(user_id)
 
-    return success_response(data={"addresses": [addr.to_dict() for addr in addresses]})
+    return success_response(
+        data={"addresses": [{**addr.to_dict(), "pin_move_refusal": refusals.get(addr.id)} for addr in addresses]}
+    )
 
 
 @auth_bp.route("/addresses", methods=["POST"])
@@ -1408,6 +1419,17 @@ def add_user_address():
             apartment_number:
               type: string
               example: "14"
+            confirm_duplicate:
+              type: boolean
+              description: >-
+                Only a JSON `true` confirms that the point is a new place although a saved address is within the
+                duplicate radius. Never stored; it never bypasses the delivery-zone check.
+            point_source:
+              type: string
+              enum: [map_pin, gps, search, typed]
+              description: >-
+                How the point was chosen. Only `map_pin` and `gps` may be offered a move of the nearest saved
+                address in the 409. Never stored.
     responses:
       201:
         description: >-
@@ -1422,11 +1444,20 @@ def add_user_address():
                 address:
                   $ref: '#/definitions/Address'
       400:
-        description: Validation error
+        description: Validation error (including the delivery-zone refusal)
+      409:
+        description: >-
+          `ADDRESS_POSSIBLE_DUPLICATE`: a saved address of the customer is within the duplicate radius.
+          `details` = `{move_address_id: int|null, candidates: [Address + distance_m]}`; resend with
+          `confirm_duplicate: true` to save it as a new place.
     """
     user_id = get_jwt_identity()
     data = request.get_json()
-    address = get_auth_service().add_user_address(user_id, data)
+    confirm_duplicate = take_confirm_flag(data)
+    point_source = take_point_source(data)
+    address = get_auth_service().add_user_address(
+        user_id, data, confirm_duplicate=confirm_duplicate, point_source=point_source
+    )
 
     return created_response(data={"address": address.to_dict()}, message=get_translation("address_added_successfully"))
 
@@ -1492,19 +1523,141 @@ def update_user_address(address_id):
               type: string
               example: Reception on ground floor
               description: Special delivery instructions
+            confirm_duplicate:
+              type: boolean
+              description: >-
+                Only a JSON `true` confirms a pin that lands within the duplicate radius of another saved
+                address. Never stored; it never bypasses the zone check or a pin rule.
     responses:
       200:
         description: Address updated successfully
       404:
         description: Address not found
       400:
-        description: Validation error
+        description: >-
+          Validation error. A pin change can be refused with `ADDRESS_PIN_WITH_DRIVER` (details `reason`,
+          `order_number`), `ADDRESS_PIN_SHARED_PLACE`, `ADDRESS_PIN_OUTLET` or `ADDRESS_MOVE_TOO_FAR`
+          (details `reason`). A body without a new point never changes the stored pin.
+      409:
+        description: >-
+          `ADDRESS_POSSIBLE_DUPLICATE`: the new pin is within the duplicate radius of another saved address
+          (`details.move_address_id` is null on an edit).
     """
     user_id = get_jwt_identity()
     data = request.get_json()
 
     logger.info("TEST API update_user_address: data=%s", data)
-    address = get_auth_service().update_user_address(user_id, address_id, data)
+    confirm_duplicate = take_confirm_flag(data)
+    take_point_source(data)  # an edit never offers a move; the flag is only dropped, never stored
+    address = get_auth_service().update_user_address(user_id, address_id, data, confirm_duplicate=confirm_duplicate)
+
+    return success_response(
+        data={"address": address.to_dict()}, message=get_translation("api.auth.address_updated_successfully")
+    )
+
+
+@auth_bp.route("/addresses/<int:address_id>/move", methods=["POST"])
+@jwt_required()
+@validate_json(required_fields=None)
+@handle_exceptions
+def move_user_address(address_id):
+    """
+    Move a Saved Address to a Placed Pin
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    description: >-
+      The saved address takes the pin the customer placed and keeps its id, so its orders, subscription and bottle
+      count stay attached. The bot sends only the pin; the website sends its wizard payload. Open orders to the
+      address are redirected and the driver holding the stop is told.
+    parameters:
+      - in: path
+        name: address_id
+        type: integer
+        required: true
+        description: The customer's saved address to move
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - latitude
+            - longitude
+            - point_source
+          properties:
+            latitude:
+              type: number
+              example: 41.3115
+            longitude:
+              type: number
+              example: 69.2797
+            point_source:
+              type: string
+              enum: [map_pin, gps, search, typed]
+              description: >-
+                How the point was chosen. Only `map_pin` and `gps` (a point the customer placed, not a district or
+                city-centre fallback) may move an address. Never stored.
+            full_address:
+              type: string
+              description: Replaces the saved line when non-empty; a move never clears it.
+            street_address:
+              type: string
+              description: Replaces the saved one when non-empty.
+            district:
+              type: string
+              description: Replaces the saved one when non-empty.
+            apartment_number:
+              type: string
+              description: Fills the saved one only when it is empty.
+            floor_number:
+              type: string
+              description: Fills the saved one only when it is empty.
+            delivery_instructions:
+              type: string
+              description: Fills the saved one only when it is empty.
+            landmark:
+              type: string
+              description: Fills the saved one only when it is empty.
+            confirm_duplicate:
+              type: boolean
+              description: >-
+                Only a JSON `true` confirms a pin that lands within the duplicate radius of another saved address.
+                Never stored; it never bypasses the zone check or a pin rule.
+    responses:
+      200:
+        description: >-
+          Address moved. `data.address` is the saved address (definitions/Address); `title`, `is_default`,
+          `is_business`, `city` and `country` never change.
+        schema:
+          type: object
+          properties:
+            data:
+              type: object
+              properties:
+                address:
+                  $ref: '#/definitions/Address'
+      400:
+        description: >-
+          Validation error. `ADDRESS_MOVE_NEEDS_PIN`: the body carries no placed pin. The pin rules:
+          `ADDRESS_PIN_WITH_DRIVER` (details `reason`, `order_number`), `ADDRESS_PIN_SHARED_PLACE`,
+          `ADDRESS_PIN_OUTLET` or `ADDRESS_MOVE_TOO_FAR` (details `reason`). Also the delivery-zone refusal.
+      404:
+        description: Address not found (not the customer's, or deleted)
+      409:
+        description: >-
+          `ADDRESS_POSSIBLE_DUPLICATE`: the new pin is within the duplicate radius of another saved address
+          (`details.move_address_id` is null on a move); resend with `confirm_duplicate: true`.
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    confirm_duplicate = take_confirm_flag(data)
+    point_source = take_point_source(data)
+    address = get_auth_service().move_user_address(
+        user_id, address_id, data, point_source=point_source, confirm_duplicate=confirm_duplicate
+    )
 
     return success_response(
         data={"address": address.to_dict()}, message=get_translation("api.auth.address_updated_successfully")

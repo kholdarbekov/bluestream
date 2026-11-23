@@ -20,6 +20,7 @@ production's degraded path.
 from __future__ import annotations
 
 import json
+import re
 from contextlib import asynccontextmanager
 
 import pytest
@@ -33,6 +34,7 @@ from tests.staff_bot.ptb_harness import DEFAULT_DRIVER_TELEGRAM_ID, staff_backen
 from tests.staff_bot.test_route_card_state import _FakeRedis as _CardRedis
 from tests.staff_bot.test_staff_delivery_journey_dispatcher import (  # noqa: F401  (autouse fixture)
     ACTIVE,
+    LANGUAGES,
     _SEED,
     _isolated_route_card_state,
     active_row,
@@ -51,6 +53,7 @@ ROUTE = "/internal/order-address-changed"
 # The copy the alert (and R10's refusal) draws that the delivery journeys' table does not serve.
 NEW_KEYS = (
     "staff.notification.order_address_changed",
+    "staff.notification.order_address_pin_moved",
     "staff.route.open_stop",
     "staff.error.api.delivery_address_changed",
 )
@@ -96,13 +99,14 @@ def _alert_text(*, new: str = NEW_ADDRESS) -> str:
 
 
 @asynccontextmanager
-async def _driver_hook(monkeypatch, *, card_state=False):
+async def _driver_hook(monkeypatch, *, card_state=False, language="en", translations=None):
     """A driver's bot with stop 501 on the route, and its webhook server serving HTTP.
 
     `card_state` gives the route card a Redis, so a borrow (and the screen it noted) is
     remembered: without one, `mark_borrowed` and `note_borrowed_screen` are no-ops.
+    `language` is the driver's, and `translations` serves copy in it (`build_driver`).
     """
-    harness = await build_driver(monkeypatch, extra_keys=NEW_KEYS)
+    harness = await build_driver(monkeypatch, extra_keys=NEW_KEYS, language=language, translations=translations)
     harness.desk.active = [active_row(501, "BS-1001")]
     harness.desk.serve(501)
     if card_state:
@@ -147,6 +151,19 @@ def test_the_alert_copy_passes_the_seeds_own_russian_gate():
     assert _SEED._validate_russian_translations({"staff.notification.order_address_changed"}) is None
 
 
+def test_the_pin_moved_copy_passes_the_seeds_own_russian_gate():
+    assert copy_for("staff.notification.order_address_pin_moved", "ru")
+    assert _SEED._validate_russian_translations({"staff.notification.order_address_pin_moved"}) is None
+
+
+def test_the_pin_moved_copy_writes_the_uzbek_apostrophe_as_the_address_changed_alert_does():
+    """The two driver alerts of one address change are one family: the same ASCII apostrophe (o'zgardi), never the
+    turned comma (U+2018)."""
+    neighbour = copy_for("staff.notification.order_address_changed", "uz")
+    assert "'" in neighbour and "\u2018" not in neighbour
+    assert "\u2018" not in copy_for("staff.notification.order_address_pin_moved", "uz")
+
+
 # --------------------------------------------------------------------------- #
 # The alert (D7)
 # --------------------------------------------------------------------------- #
@@ -168,6 +185,70 @@ async def test_the_alert_names_both_addresses_and_offers_navigate_and_open_stop(
         assert harness.handlers_matching(harness.updates().tap("staff_view_active_501")), (
             "the alert's Open stop button lands on no registered handler"
         )
+
+
+async def test_a_payload_without_pin_moved_m_renders_the_old_alert(monkeypatch):
+    async with _driver_hook(monkeypatch) as (harness, post, _server):
+        assert (await post(NEW))[0] == 200
+        [sent] = harness.telegram.of("sendMessage")
+    assert sent.text == _alert_text()
+
+
+async def test_a_pin_move_alert_says_the_pin_moved_and_how_far(monkeypatch):
+    """`pin_moved_m` (sent for a pin move, by an admin or a customer) switches the alert to the
+    pin-moved copy. Navigate still takes the payload's lat/lng."""
+    async with _driver_hook(monkeypatch) as (harness, post, _server):
+        status, body = await post({**NEW, "pin_moved_m": 120})
+        [sent] = harness.telegram.of("sendMessage")
+    assert (status, body) == (200, {"success": True, "message": "Notification sent"})
+    assert sent.text == copy_for("staff.notification.order_address_pin_moved", "en").format(
+        number="BS-1001", distance=120, new=NEW_ADDRESS,
+    )
+    assert "120" in sent.text and NEW_ADDRESS in sent.text
+    assert sent.reply_markup["inline_keyboard"][0][0]["url"] == NEW_URL
+
+
+# The pin-moved alert's copy and the labels of the buttons it carries (`DeliveryKeyboards.address_changed_actions`).
+PIN_MOVED_ALERT_KEYS = (
+    "staff.notification.order_address_pin_moved",
+    "staff.delivery.open_maps",
+    "staff.route.open_stop",
+)
+# A label quoted in a sentence: «uz/ru» or “en”.
+_QUOTED = re.compile(r"[«“]([^»”]+)[»”]")
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+async def test_the_pin_move_alert_names_the_button_it_carries_to_the_new_point(monkeypatch, language):
+    """The alert tells the driver which button takes them to the new point, so the one label it quotes is the label of
+    that button on the alert itself (its first row, the maps link to the new pin), as seeded in the driver's language
+    and drawn without its leading emoji."""
+    copy = {(language, key): copy_for(key, language) for key in PIN_MOVED_ALERT_KEYS}
+    async with _driver_hook(monkeypatch, language=language, translations=copy) as (harness, post, _server):
+        assert (await post({**NEW, "pin_moved_m": 120}))[0] == 200
+        [sent] = harness.telegram.of("sendMessage")
+    assert sent.text == copy_for("staff.notification.order_address_pin_moved", language).format(
+        number="BS-1001", distance=120, new=NEW_ADDRESS,
+    )
+    maps_button = sent.reply_markup["inline_keyboard"][0][0]
+    assert maps_button["url"] == NEW_URL
+    assert maps_button["text"] == f"🗺 {copy_for('staff.delivery.open_maps', language)}"
+    assert _QUOTED.findall(sent.text) == [maps_button["text"].removeprefix("🗺 ")]
+
+
+async def test_the_fallback_key_differs_for_two_pins_of_one_address(monkeypatch):
+    """With Redis down the dedup is in memory. Two pins of one address (same delivery, same
+    address id) are two alerts; a replay of the same pin is still one."""
+    async with _driver_hook(monkeypatch) as (harness, post, server):
+        server._redis_connected = False
+        first = await post(NEW)
+        second = await post({**NEW, "lat": 41.3301})
+        replay = await post(NEW)
+        sends = harness.telegram.of("sendMessage")
+    assert first == (200, {"success": True, "message": "Notification sent"})
+    assert second == (200, {"success": True, "message": "Notification sent"})
+    assert replay == (200, {"success": True, "message": "Already processed"})
+    assert len(sends) == 2
 
 
 async def test_html_in_an_address_is_escaped(monkeypatch):

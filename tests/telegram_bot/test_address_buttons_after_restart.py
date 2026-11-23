@@ -59,6 +59,10 @@ ADDRESS_BUTTONS = [
     "addr_title_other",
     "confirm_geocode",
     "retry_geocode",
+    # The duplicate-address prompt (Use / Move / Save as new; its Cancel is the one above).
+    "adup_use_63",
+    "adup_move_63",
+    "adup_new",
 ]
 
 

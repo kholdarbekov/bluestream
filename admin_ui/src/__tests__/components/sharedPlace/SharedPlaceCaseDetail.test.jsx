@@ -663,6 +663,35 @@ describe('SharedPlaceCaseDetail', () => {
     await resolvedWith({ kind: 'shared_place', target_address_id: 40, reason: 'coworkers' });
   });
 
+  /** The grouping dialog's pre-picked tags, as the admin reads them. */
+  const pickedTags = (modal) =>
+    [...modal.querySelectorAll('.ant-select-selection-item-content')].map((el) => el.textContent);
+
+  it('A lists every pre-picked address with its address: the title, else the street line', async () => {
+    const user = userEvent.setup();
+    // The case address has no title, so it is named by its street line; the candidate by its title.
+    renderCase(caseDetail({ address: { ...caseDetail().address, title: null } }));
+
+    await user.click(await choice('Shared place — different people, one place'));
+    const modal = await modalTitled('Group these addresses as one place?');
+
+    expect(pickedTags(modal)).toEqual([
+      'Bobur Yangi · +998790000011 — Chilonzor 5, 12',
+      'Akmal Karimov · +998790000021 — Office',
+    ]);
+  });
+
+  it('A onto a group lists the case address with its address', async () => {
+    const user = userEvent.setup();
+    adminService.getPlaceGroup.mockResolvedValue(GROUP_60('Gate 12'));
+    renderCase(caseDetail({ candidates: [groupedCandidate()] }));
+
+    await user.click(await choice('Shared place — different people, one place'));
+    const modal = await modalTitled('Add an address to this place group?');
+
+    expect(pickedTags(modal)).toEqual(['Bobur Yangi · +998790000011 — Home']);
+  });
+
   it('A forwards the merge review to createPlaceGroup', async () => {
     const user = userEvent.setup();
     renderCase(caseDetail());

@@ -223,6 +223,35 @@ ROWS = {
     "web.checkout.wizard.save": ("Save address", "Сохранить адрес", "Manzilni saqlash"),
     "web.checkout.wizard.saving": ("Saving…", "Сохраняем…", "Saqlanmoqda…"),
     "web.checkout.wizard.saved": ("Address saved", "Адрес сохранён", "Manzil saqlandi"),
+    # The duplicate-address guard's pane (spec 2026-11-18 §6.11). {distance} is whole metres.
+    "web.checkout.wizard.duplicate_title": (
+        "You already have this address",
+        "Этот адрес у вас уже есть",
+        "Bu manzil sizda allaqachon bor",
+    ),
+    "web.checkout.wizard.duplicate_body": (
+        "Choose the saved one and your orders and bottle count stay in one place.",
+        "Выберите сохранённый — заказы и учёт бутылей останутся в одном месте.",
+        "Saqlanganini tanlang — buyurtmalar va idishlar hisobi bir joyda qoladi.",
+    ),
+    "web.checkout.wizard.duplicate_distance": ("~{distance} m away", "~{distance} м отсюда", "~{distance} m narida"),
+    "web.checkout.wizard.duplicate_use": ("Use this address", "Выбрать этот адрес", "Shu manzilni tanlash"),
+    "web.checkout.wizard.duplicate_move": (
+        "Move it to the new pin",
+        "Перенести на новую точку",
+        "Yangi nuqtaga ko‘chirish",
+    ),
+    "web.checkout.wizard.duplicate_move_hint": (
+        "Its name and saved door details stay; what you just typed fills in anything missing.",
+        "Название и сохранённые детали останутся; то, что вы ввели, дополнит только пустые поля.",
+        "Nomi va saqlangan tafsilotlari qoladi; hozir yozganingiz faqat bo‘sh joylarni to‘ldiradi.",
+    ),
+    "web.checkout.wizard.duplicate_new": (
+        "Save as a new address",
+        "Сохранить как новый адрес",
+        "Yangi manzil sifatida saqlash",
+    ),
+    "web.checkout.wizard.duplicate_save_anyway": ("Save anyway", "Всё равно сохранить", "Baribir saqlash"),
     "web.checkout.wizard.save_failed": (
         "Couldn’t save the address. Please try again.",
         "Не удалось сохранить адрес. Попробуйте ещё раз.",

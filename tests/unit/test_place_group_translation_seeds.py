@@ -358,7 +358,8 @@ def test_ui_seed_covers_every_place_group_key_rendered_by_the_panel():
     #   * plus 3 (64) for rename from the card: the action button, the dialog
     #     title and the success toast (the dotted event label is not counted).
     #   * plus 1 (65) for `load_failed`, the card's load-error alert.
-    assert len(used) == 65
+    #   * plus 2 (67) for the same-customer duplicate row: its kind label and its distance.
+    assert len(used) == 67
 
 
 @pytest.mark.unit
@@ -371,11 +372,16 @@ def test_ui_seed_does_not_reseed_ui_common_cancel():
 
 @pytest.mark.unit
 def test_ui_seed_carries_no_stray_interpolation():
-    """None of these 2c admin strings interpolate — a ``{{x}}`` would be a typo."""
+    """None of these 2c admin strings interpolate — a ``{{x}}`` would be a typo.
+
+    The one named exception is the duplicate row's distance, which the panel fills with ``distance``.
+    """
     mod = _load("seed_place_group_ui_translations")
+    interpolating = {"ui.users.place_groups.distance_apart": {"distance"}}
     for key, langs in mod.KEYS.items():
         for lang, value in langs.items():
-            assert not _i18next_placeholders(value), f"{key}:{lang}"
+            expected = interpolating.get(key, set())
+            assert set(_i18next_placeholders(value)) == expected, f"{key}:{lang}"
 
 
 # --------------------------------------------------------------------------

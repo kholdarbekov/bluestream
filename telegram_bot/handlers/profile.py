@@ -4,16 +4,17 @@ User profile and registration handlers
 import html
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from telegram import constants, InlineKeyboardMarkup, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 
 from i18n import i18n
 from shared import reorder_reminder_copy
-from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
+from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder, duplicate_candidate_label
 from shared.constants import (
     TASHKENT_DISTRICTS,
     get_district_name,
@@ -41,7 +42,7 @@ from handlers.address_flow import (
     SELECT_LANGUAGE, PHONE, ADDRESS_LOCATION, ADDRESS_TITLE,
     ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
     ADDRESS_APARTMENT, ADDRESS_FLOOR,
-    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM, ADDRESS_DUPLICATE,
     PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME, PHONE_VERIFY_OTP,
     LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     _ADDRESS_STEPS, _SKIP_TARGETS, _ADDRESS_FIELD_DATA_KEYS,
@@ -52,7 +53,7 @@ from handlers.address_flow import (
 from handlers.conversation_states import WEB_LINK_CONFIRM
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from flow_exit import ADDRESS_FLOW_KEYS, PHONE_FLOW_KEYS, PHONE_OTP_SENT_AT
+from flow_exit import ADDRESS_FLOW_KEYS, PHONE_FLOW_KEYS, PHONE_OTP_SENT_AT, leave_all_flows, put_the_menu_back
 from menu_keyboard import is_menu_customer, send_menu_keyboard
 from utils import (
     user_middleware,
@@ -64,6 +65,7 @@ from utils import (
     user_cache,
     otp_code_in,
     is_stamp_stale,
+    AWAITING_LOCATION_STALE_MINUTES,
 )
 from config import config
 from handlers.base import BaseHandler
@@ -81,7 +83,7 @@ ADDRESS_DETAIL_MAX_LENGTH = 20
 # ``BotUserRepository.clear_awaiting_input``) — never a blanket wipe, which
 # would also throw away a concern report armed by handlers/support.py.
 _PROFILE_EDIT_PROMPTS = ('edit_profile_name', 'edit_profile_birthday')
-_ADDRESS_EDIT_PROMPTS = ('edit_address_title', 'edit_address_instructions')
+_ADDRESS_EDIT_PROMPTS = ('edit_address_title', 'edit_address_instructions', 'relocate_address')
 
 # Phone-code lifetime stamps (spec 2026-10-21 §2, "Phone-code steps"). A code is
 # good for `PHONE_OTP_EXPIRY` from the moment its SMS went out, wherever the
@@ -168,7 +170,7 @@ _ADDRESS_DETAIL_KEYS = ('apartment_number', 'floor_number', 'delivery_instructio
 _DETAIL_SYNC_SNAPSHOT_KEY = 'detail_sync_snapshot'
 
 
-def _is_shared_pin_address(context) -> bool:
+def _is_shared_pin_data(addr_data: Dict[str, Any]) -> bool:
     """True when this address came from a shared map pin rather than manual entry.
 
     The two flows meet at several steps but diverge on what comes next, and this
@@ -181,8 +183,89 @@ def _is_shared_pin_address(context) -> bool:
     block that stores latitude and longitude, and only after the delivery-zone
     guard has rejected a (0, 0)-style falsy pin.
     """
-    addr_data = context.user_data.get('temp_address_data', {})
     return addr_data.get('location_source') == 'shared'
+
+
+def _is_shared_pin_address(context) -> bool:
+    """True when the address being built in this conversation came from a shared map pin."""
+    return _is_shared_pin_data(context.user_data.get('temp_address_data', {}))
+
+
+# --- The duplicate-address prompt (spec 2026-11-18 §6.6) ----------------------
+
+# `user_data` key: the message id of the duplicate prompt the customer last answered with Use or Move. Not a flow
+# key (the flow has ended when it is set): it outlives the teardown, so a tap on that prompt queued behind the answer
+# is acked quietly by the expired-form handler (`is_answered_duplicate_prompt_tap`).
+ANSWERED_DUPLICATE_PROMPT = 'address_duplicate_answered'
+
+# The pin rule a refused move names (`details.reason` of its 400), and the copy the bot answers it with.
+PIN_REFUSAL_COPY = {
+    "WITH_DRIVER": "telegram.address.pin_with_driver",
+    "SHARED_PLACE": "telegram.address.pin_shared_place",
+    "OUTLET": "telegram.address.pin_outlet",
+    "TOO_FAR": "telegram.address.move_too_far",
+}
+
+
+@dataclass(frozen=True)
+class DuplicateRefusal:
+    """The backend's 409 `ADDRESS_POSSIBLE_DUPLICATE` on an address write.
+
+    `candidates` are the customer's saved addresses next to the new point, nearest first, each
+    `UserAddress.to_dict()` plus `distance_m`. `move_address_id` is the one the backend would let the customer move
+    to the new point, or None when it offers no Move (a typed point, an edit, or a rule that forbids the move).
+    """
+
+    candidates: list
+    move_address_id: Optional[int]
+
+
+def _duplicate_refusal(response) -> Optional[DuplicateRefusal]:
+    """The duplicate refusal a failed address write carries, or None for any other failure."""
+    if BaseHandler._response_error_code(response) != "ADDRESS_POSSIBLE_DUPLICATE":
+        return None
+    details = response.data.get("details")
+    details = details if isinstance(details, dict) else {}
+    return DuplicateRefusal(
+        candidates=list(details.get("candidates") or []),
+        move_address_id=details.get("move_address_id"),
+    )
+
+
+def _pin_refusal_reason(response) -> Optional[str]:
+    """The pin rule a failed move names (`details.reason`) when the bot has copy for it, else None."""
+    body = getattr(response, 'data', None)
+    details = body.get('details') if isinstance(body, dict) else None
+    reason = details.get('reason') if isinstance(details, dict) else None
+    return reason if reason in PIN_REFUSAL_COPY else None
+
+
+def _duplicate_candidate_lines(language: str, candidates: Sequence[Dict[str, Any]]) -> List[str]:
+    """The lines naming each saved address next to the new point, nearest first.
+
+    Each address gets `duplicate_prompt_line` (its label and distance), plus its street line when it has a title
+    (without one, the label already is the street line). The one renderer for every screen that lists these
+    candidates; it reads nothing but its arguments. The values are the customer's own text, so the lines are meant
+    for a message sent with no parse mode.
+    """
+    lines = []
+    for row in candidates:
+        lines.append(i18n.get(
+            'telegram.address.duplicate_prompt_line', language,
+            label=duplicate_candidate_label(row, language), distance=row.get('distance_m'),
+        ))
+        if row.get('title') and (row.get('full_address') or '').strip():
+            lines.append(row['full_address'])
+    return [f"   {line}" for line in lines]
+
+
+def _duplicate_prompt_text(language: str, candidates: Sequence[Dict[str, Any]]) -> str:
+    """The duplicate prompt's message: header, the candidate lines, footer."""
+    return "\n".join([
+        i18n.get('telegram.address.duplicate_prompt_header', language),
+        *_duplicate_candidate_lines(language, candidates),
+        i18n.get('telegram.address.duplicate_prompt_footer', language),
+    ])
 
 
 class ProfileHandlers(BaseHandler):
@@ -222,9 +305,7 @@ class ProfileHandlers(BaseHandler):
             # The customer navigated away from any prompt this handler group
             # armed — but a concern report armed elsewhere is not ours to throw
             # away, so only our own prompts are disarmed.
-            await self.user_repo.clear_awaiting_input(
-                user_id, *_PROFILE_EDIT_PROMPTS, *_ADDRESS_EDIT_PROMPTS
-            )
+            await self._leave_address_edit_prompts(update, context, user_id, *_PROFILE_EDIT_PROMPTS)
 
             # Get user profile from API
             async with api_client as client:
@@ -2349,7 +2430,7 @@ class ProfileHandlers(BaseHandler):
             )
             await self._ack(query)
 
-            await self.user_repo.arm_awaiting_input(user_id, 'edit_profile_name')
+            await self._arm_awaiting_input(update, context, user_id, 'edit_profile_name')
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_profile_name_prompt")
@@ -2415,7 +2496,7 @@ class ProfileHandlers(BaseHandler):
             )
             await self._ack(query)
 
-            await self.user_repo.arm_awaiting_input(user_id, 'edit_profile_birthday')
+            await self._arm_awaiting_input(update, context, user_id, 'edit_profile_birthday')
 
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_profile_birthday_start")
@@ -2474,7 +2555,7 @@ class ProfileHandlers(BaseHandler):
 
             # The address list is where an abandoned title/instructions edit
             # ends up; disarm those and leave every other flow armed.
-            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
+            await self._leave_address_edit_prompts(update, context, user_id)
 
             # Get user addresses
             async with api_client as client:
@@ -2655,6 +2736,9 @@ class ProfileHandlers(BaseHandler):
                 logger.error(f"ERROR: No location in message!")
                 return ConversationHandler.END
 
+            # A new pin starts the title step again, so a duplicate prompt still on screen no longer applies.
+            context.user_data.pop('address_duplicate_prompt', None)
+
             location = update.message.location
             logger.info(f"Location received: lat={location.latitude}, lng={location.longitude}")
 
@@ -2753,8 +2837,7 @@ class ProfileHandlers(BaseHandler):
             # of it. A manually typed address only reaches this step LAST,
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
-                await self._create_address_now(update, context, language)
-                return await self._prompt_address_step(update, context, language, 'apartment')
+                return await self._create_pin_address_and_continue(update, context, language)
 
             return await self.save_address_final(update, context)
 
@@ -2826,6 +2909,12 @@ class ProfileHandlers(BaseHandler):
             await self.user_repo.forget_pin_prompt(telegram_id)
         except Exception as e:
             logger.warning(f"Could not clear the pin prompt for {telegram_id}: {e}")
+        # The durable Edit-location prompt answers the same location keyboard, so the keyboard's Cancel row (which
+        # lands here through `cancel_address_text`) ends it too.
+        try:
+            await self.user_repo.disarm(telegram_id, 'relocate_address')
+        except Exception as e:
+            logger.warning(f"Could not disarm Edit location for {telegram_id}: {e}")
 
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address adding process"""
@@ -3123,6 +3212,8 @@ class ProfileHandlers(BaseHandler):
             'apartment_number': addr_data.get('apartment_number'),
             'floor_number': addr_data.get('floor_number'),
             'delivery_instructions': addr_data.get('delivery_instructions'),
+            # How the point was chosen, for the backend's duplicate and pin-move rules. Never None.
+            'point_source': 'map_pin' if _is_shared_pin_data(addr_data) else 'typed',
         }
         return {k: v for k, v in payload.items() if v is not None}
 
@@ -3138,7 +3229,8 @@ class ProfileHandlers(BaseHandler):
         return {key: addr_data.get(key) for key in _ADDRESS_DETAIL_KEYS}
 
     async def _create_address_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                  language: str):
+                                  language: str, *,
+                                  confirm_duplicate: bool = False) -> int | None | DuplicateRefusal:
         """Write the address the moment it is deliverable, and remember its id.
 
         A shared pin plus a title IS a deliverable address. Everything the flow
@@ -3152,6 +3244,14 @@ class ProfileHandlers(BaseHandler):
         a transient backend failure degrades to the previous behaviour instead
         of stranding the customer in a chain that can never commit.
 
+        A `DuplicateRefusal` is not a failure to defer: the backend sees a saved
+        address right there, and the caller asks the customer about it
+        (`_show_duplicate_prompt`). Deferring it would only POST the same point
+        again at the final save. `confirm_duplicate` is the customer's answer
+        "save it anyway", sent with this one request and never stored in
+        `temp_address_data`: that dict is the durable draft and the re-pin PUT's
+        source, so a stored confirmation would silently cover a later pin.
+
         CORRECTS rather than duplicates when this flow already created a row.
         `location_received` is an ENTRY POINT and the conversation sets
         `allow_reentry=True`, so PTB re-enters on a second pin even mid-flow: a
@@ -3163,6 +3263,8 @@ class ProfileHandlers(BaseHandler):
         addr_data = context.user_data.setdefault('temp_address_data', {})
         existing_id = addr_data.get('address_id')
         payload = self._build_address_payload(addr_data, language)
+        if confirm_duplicate:
+            payload['confirm_duplicate'] = True
 
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
@@ -3176,6 +3278,13 @@ class ProfileHandlers(BaseHandler):
                 response = await client.add_user_address(user_token, payload)
 
         if not response.success:
+            refusal = _duplicate_refusal(response)
+            if refusal is not None:
+                logger.info(
+                    f"Early address {'update' if existing_id else 'create'} is next to saved address(es) "
+                    f"{[row.get('id') for row in refusal.candidates]}; asking the customer"
+                )
+                return refusal
             logger.error(
                 f"Early address {'update' if existing_id else 'create'} failed "
                 f"({response.error}); deferring to the end of the flow"
@@ -3307,11 +3416,10 @@ class ProfileHandlers(BaseHandler):
 
         async def send_text(text, keyboard=None, parse_mode=None):
             if query is not None:
-                await self._edit_or_replace_callback_message(
+                return await self._edit_or_replace_callback_message(
                     query, text, reply_markup=keyboard, parse_mode=parse_mode
                 )
-            else:
-                await update.message.reply_text(text, reply_markup=keyboard, parse_mode=parse_mode)
+            return await update.message.reply_text(text, reply_markup=keyboard, parse_mode=parse_mode)
 
         async def send_markdown_or_plain(text, keyboard=None):
             message = query.message if query is not None else update.message
@@ -3775,8 +3883,7 @@ class ProfileHandlers(BaseHandler):
             # of it. A manually typed address only reaches this step LAST,
             # after geocode confirmation, so titling here is the save.
             if _is_shared_pin_address(context):
-                await self._create_address_now(update, context, language)
-                return await self._prompt_address_step(update, context, language, 'apartment')
+                return await self._create_pin_address_and_continue(update, context, language)
 
             return await self.save_address_final(update, context, is_callback=True)
 
@@ -3790,7 +3897,8 @@ class ProfileHandlers(BaseHandler):
 
         await order_handlers.checkout_handler(self.as_message_update(update), context)
 
-    async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
+    async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False,
+                                 *, confirm_duplicate: bool = False):
         """Finish the address flow: create the address, or complete the one the
         flow already created.
 
@@ -3803,6 +3911,11 @@ class ProfileHandlers(BaseHandler):
         NOT end the flow: the answers stay in `temp_address_data` and the
         conversation stays in ADDRESS_TITLE, so the customer retries with one
         tap instead of retyping seven answers.
+
+        A create the backend refuses as a possible duplicate is not a failed
+        save: the customer is asked about the saved address next to it
+        (`_show_duplicate_prompt`), and "Save as new" comes back here with
+        `confirm_duplicate`, which rides this one request only.
         """
         try:
             user_id = update.effective_user.id
@@ -3815,10 +3928,13 @@ class ProfileHandlers(BaseHandler):
                 logger.info(f"Completing address {address_id} for user {user_id}: {address_payload}")
             else:
                 address_payload = self._build_address_payload(addr_data, language)
+                if confirm_duplicate:
+                    address_payload['confirm_duplicate'] = True
                 logger.info(f"Saving address for user {user_id}: {address_payload}")
 
             # Save via API
             success = False
+            refusal = None
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if user_token:
@@ -3843,7 +3959,12 @@ class ProfileHandlers(BaseHandler):
                             f"were not applied: {response.error}"
                         )
                     else:
-                        logger.error(f"Failed to save address: {response.error}")
+                        refusal = _duplicate_refusal(response)
+                        if refusal is None:
+                            logger.error(f"Failed to save address: {response.error}")
+
+            if refusal is not None:
+                return await self._show_duplicate_prompt(update, context, language, refusal, step='final')
 
             if not success:
                 # Nothing was written, so nothing the customer answered may be
@@ -3897,6 +4018,258 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    # --- The duplicate-address prompt (spec 2026-11-18 §6.6) ------------------
+    #
+    # The backend refuses an address write that lands next to one of the
+    # customer's saved addresses (409 ADDRESS_POSSIBLE_DUPLICATE) until they
+    # confirm it. The bot asks: Use the saved address, Move it to this pin (only
+    # when the backend offers it), Save as new, or Cancel (the flow's own
+    # `cancel_address`). tests/telegram_bot/test_address_duplicate_prompt_journey.py
+
+    async def _create_pin_address_and_continue(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str, *,
+        confirm_duplicate: bool = False,
+    ) -> int:
+        """The pin flow has its title: create the address, then ask for the apartment.
+
+        When the backend sees a saved address right there, the customer is asked
+        about it instead, and "Save as new" comes back here confirmed.
+        """
+        created = await self._create_address_now(update, context, language, confirm_duplicate=confirm_duplicate)
+        if isinstance(created, DuplicateRefusal):
+            return await self._show_duplicate_prompt(update, context, language, created, step='title')
+        return await self._prompt_address_step(update, context, language, 'apartment')
+
+    async def _show_duplicate_prompt(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str,
+        refusal: DuplicateRefusal, *, step: str,
+    ) -> int:
+        """Ask about the saved address(es) next to this one, in place of the step the refusal interrupted.
+
+        `step` is where "Save as new" picks up: 'title' (the pin flow's early
+        create, then its detail chain) or 'final' (the flow's last save). Sent
+        with no parse mode: the labels and street lines are the customer's own
+        text and go out exactly as written.
+
+        One live prompt at a time: the message showing it is remembered
+        (`message_id`), and drawing the prompt again on another message takes
+        the buttons off the copy before it. Left live, that copy would answer a
+        tap made after Use or Move on the newer one with "the form timed out,
+        nothing was saved".
+        """
+        previous = (context.user_data.get('address_duplicate_prompt') or {}).get('message_id')
+        prompt = context.user_data['address_duplicate_prompt'] = {
+            'step': step,
+            'candidates': refusal.candidates,
+            'move_address_id': refusal.move_address_id,
+        }
+        keyboard = ProfileKeyboards.address_duplicate_prompt(
+            language, refusal.candidates, move_address_id=refusal.move_address_id,
+        )
+        shown = await self._send_for(update, context).send_text(
+            _duplicate_prompt_text(language, refusal.candidates), keyboard,
+        )
+        prompt['message_id'] = getattr(shown, 'message_id', None)
+        if previous is not None and shown is not None and previous != shown.message_id:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=shown.chat.id, message_id=previous, reply_markup=None,
+                )
+            except Exception as e:
+                logger.info("Could not take the buttons off the duplicate prompt drawn again below: %s", e)
+        return ADDRESS_DUPLICATE
+
+    async def _redraw_duplicate_prompt_without_move(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str, notice: str,
+    ) -> int:
+        """A Move that did not happen: `notice` replaces the tapped prompt, and the prompt is drawn again below it
+        without Move. Use, Save as new and Cancel still stand."""
+        prompt = context.user_data.get('address_duplicate_prompt') or {}
+        await self._edit_or_replace_callback_message(update.callback_query, notice)
+        # The notice took the tapped copy's place, buttons and all: no copy is left for the redraw to strip.
+        prompt.pop('message_id', None)
+        refusal = DuplicateRefusal(candidates=prompt.get('candidates') or [], move_address_id=None)
+        return await self._show_duplicate_prompt(
+            self.as_message_update(update), context, language, refusal, step=prompt.get('step'),
+        )
+
+    @staticmethod
+    def _label_on_prompt(context: ContextTypes.DEFAULT_TYPE, address_id: int, language: str) -> str:
+        """The label of saved address `address_id` as the prompt on screen names it."""
+        prompt = context.user_data.get('address_duplicate_prompt') or {}
+        row = next((c for c in prompt.get('candidates') or [] if c.get('id') == address_id), {})
+        return duplicate_candidate_label(row, language)
+
+    async def _finish_with_saved_address(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, language: str,
+        address_id: int, done_key: str, *, say_it_in_checkout: bool = False,
+    ) -> int:
+        """End the flow on the saved address the customer picked from the prompt.
+
+        From checkout the order goes on with it, exactly as the picker's
+        `address_<id>` does: the prompt becomes the payment picker. A Move
+        (`say_it_in_checkout`) changed the address, so there the prompt first
+        says what happened (`done_key`, losing its buttons) and the picker
+        comes below it (spec §6.6). Anywhere else the prompt loses its
+        buttons, and the bot says what happened (`done_key`, with the
+        address's label) and puts the menu back.
+
+        The answered prompt is remembered (`ANSWERED_DUPLICATE_PROMPT`): a tap on
+        it that was queued behind this answer reaches the expired-form handler
+        once the flow has ended, which must neither tell the customer nothing
+        was saved nor strip the picker that replaced the prompt.
+        """
+        query = update.callback_query
+        label = self._label_on_prompt(context, address_id, language)
+        origin = context.user_data.get('address_flow_origin')
+        await self.clear_address_flow_keys(context, update.effective_user.id)
+        if query.message is not None:
+            context.user_data[ANSWERED_DUPLICATE_PROMPT] = query.message.message_id
+
+        if origin == 'checkout':
+            from handlers.orders import order_handlers
+
+            if say_it_in_checkout:
+                await self._edit_or_replace_callback_message(query, i18n.get(done_key, language, label=label))
+                await order_handlers._show_payment_picker(self.as_message_update(update), context, address_id)
+            else:
+                await order_handlers._show_payment_picker(update, context, address_id)
+        else:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.info("Could not take the buttons off the answered duplicate prompt: %s", e)
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, update.effective_user.id,
+                i18n.get(done_key, language, label=label), language,
+            )
+        return ConversationHandler.END
+
+    @staticmethod
+    def is_answered_duplicate_prompt_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """A prompt button (`adup_*`) tapped on the prompt the customer already answered with Use or Move."""
+        query = update.callback_query
+        return (
+            query is not None
+            and (query.data or '').startswith('adup_')
+            and query.message is not None
+            and query.message.message_id == (context.user_data or {}).get(ANSWERED_DUPLICATE_PROMPT)
+        )
+
+    async def _end_duplicate_prompt_on_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """A prompt answer failed unexpectedly: tear the flow down as every other exit does (its keys and the
+        durable draft), then say so and put the menu back."""
+        try:
+            await self.clear_address_flow_keys(context, update.effective_user.id)
+        except Exception as e:
+            logger.warning("Could not clear the address flow after a failed prompt answer: %s", e)
+        return await self._end_flow_with_menu(update, context)
+
+    async def duplicate_prompt_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Typed text while the duplicate prompt is on screen: draw the stored prompt again.
+
+        Nothing the prompt asks is answered by text, so nothing is saved, filed
+        to Support or cleared (the durable draft stays). The prompt comes back
+        below what they typed, so its buttons are in reach.
+        """
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            prompt = context.user_data.get('address_duplicate_prompt') or {}
+            refusal = DuplicateRefusal(
+                candidates=prompt.get('candidates') or [], move_address_id=prompt.get('move_address_id'),
+            )
+            return await self._show_duplicate_prompt(update, context, language, refusal, step=prompt.get('step'))
+        except Exception as e:
+            logger.exception(f"Error in duplicate_prompt_text_received: {e}")
+            return ADDRESS_DUPLICATE
+
+    async def duplicate_use(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Use the saved address (`adup_use_<id>`). Writes nothing.
+
+        A row this flow already created (a re-pin next to a saved address) is
+        deleted first, as Cancel deletes it: the customer chose the address they
+        already had. The tap is answered first: the checkout's payment picker
+        makes its own backend calls, and a spinner left up invites a second tap.
+        """
+        try:
+            await self._ack(update.callback_query)
+            language = await i18n.get_user_language(update.effective_user.id)
+            address_id = int(update.callback_query.data.rsplit('_', 1)[-1])
+            await self._discard_created_address(update, context)
+            return await self._finish_with_saved_address(
+                update, context, language, address_id, 'telegram.address.duplicate_kept',
+            )
+        except Exception as e:
+            logger.exception(f"Error in duplicate_use: {e}")
+            return await self._end_duplicate_prompt_on_error(update, context)
+
+    async def duplicate_move(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Move the saved address the backend offered to this flow's pin (`adup_move_<id>`).
+
+        The customer has seen every saved address nearby, so the move carries
+        `confirm_duplicate`. A pin rule that refuses it now (the address changed
+        since the prompt) answers with that rule's copy; any other failure (the
+        address is gone, or not this customer's) says something went wrong.
+        Either way the prompt comes back without Move. The tap is answered
+        before the move is sent, so its spinner never invites a second tap.
+        """
+        try:
+            query = update.callback_query
+            await self._ack(query)
+            language = await i18n.get_user_language(update.effective_user.id)
+            address_id = int(query.data.rsplit('_', 1)[-1])
+            addr_data = context.user_data.get('temp_address_data') or {}
+            body = {
+                'latitude': addr_data.get('latitude'),
+                'longitude': addr_data.get('longitude'),
+                'point_source': 'map_pin',
+                'confirm_duplicate': True,
+            }
+
+            response = None
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    response = await client.move_user_address(user_token, address_id, body)
+
+            if response is not None and response.success:
+                return await self._finish_with_saved_address(
+                    update, context, language, address_id, 'telegram.address.duplicate_moved',
+                    say_it_in_checkout=True,
+                )
+
+            reason = _pin_refusal_reason(response)
+            logger.warning(
+                f"Move of address {address_id} to the new pin was refused "
+                f"({reason or getattr(response, 'error', 'no auth token')})"
+            )
+            if reason:
+                label = self._label_on_prompt(context, address_id, language)
+                notice = i18n.get(PIN_REFUSAL_COPY[reason], language, label=label)
+            else:
+                notice = i18n.get('telegram.error_occurred', language)
+            return await self._redraw_duplicate_prompt_without_move(update, context, language, notice)
+        except Exception as e:
+            logger.exception(f"Error in duplicate_move: {e}")
+            return await self._end_duplicate_prompt_on_error(update, context)
+
+    async def duplicate_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Save as a new address (`adup_new`): the refused write again, confirmed, then on from where it stopped.
+
+        The pin flow's early create goes on to the apartment step; the final
+        save finishes the flow.
+        """
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            step = (context.user_data.pop('address_duplicate_prompt', None) or {}).get('step')
+            await self._ack(update.callback_query)
+            if step == 'title':
+                return await self._create_pin_address_and_continue(update, context, language, confirm_duplicate=True)
+            return await self.save_address_final(update, context, is_callback=True, confirm_duplicate=True)
+        except Exception as e:
+            logger.exception(f"Error in duplicate_new: {e}")
+            return await self._end_duplicate_prompt_on_error(update, context)
+
     async def view_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """View specific address details"""
         try:
@@ -3906,7 +4279,7 @@ class ProfileHandlers(BaseHandler):
 
             # This screen IS the Cancel button of the title/instructions edit
             # prompts, so reaching it disarms them — and only them.
-            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
+            await self._leave_address_edit_prompts(update, context, user_id)
 
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
@@ -4131,7 +4504,7 @@ class ProfileHandlers(BaseHandler):
 
             # Back on the edit menu, so the prompt the customer left is one of
             # ours; anything else armed stays armed.
-            await self.user_repo.clear_awaiting_input(user_id, *_ADDRESS_EDIT_PROMPTS)
+            await self._leave_address_edit_prompts(update, context, user_id)
 
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
@@ -4150,7 +4523,7 @@ class ProfileHandlers(BaseHandler):
                     {'text': i18n.get('telegram.address.edit_instructions_button', language), 'callback_data': f'edit_instructions_{address_id}'}
                 ],
                 [
-                    {'text': i18n.get('telegram.address.delete_readd_button', language), 'callback_data': f'delete_address_{address_id}'},
+                    {'text': i18n.get('telegram.address.delete', language), 'callback_data': f'delete_address_{address_id}'},
                     {'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
@@ -4288,6 +4661,9 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
+            # The title prompt takes the single prompt slot: leave the one it replaces, Edit location's included.
+            await self._leave_address_edit_prompts(update, context, user_id)
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
 
@@ -4338,18 +4714,275 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             await self._handle_error(update, exc=e, operation="edit_title_handler")
 
+    async def _leave_address_edit_prompts(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, *also: str,
+    ) -> None:
+        """Disarm the address-edit prompts (`_ADDRESS_EDIT_PROMPTS`) and `also`, leaving any other flow armed.
+
+        The screens on the address-edit path (Profile, My addresses, an address, its edit menu, and the title and
+        instructions prompts) leave whatever address-edit prompt the customer walked away from. Edit location's prompt
+        (`relocate_address`) also put a location keyboard in place of the bottom one. So when that is the prompt left
+        here, the bottom keyboard goes back, silently, the way a flow exit puts it back (`flow_exit.put_the_menu_back`).
+        Left up, that keyboard's Share button would file the next pin to the Support Inbox in silence.
+        """
+        relocating = await self.user_repo.clear_awaiting_input(user_id, 'relocate_address')
+        await self.user_repo.clear_awaiting_input(user_id, *also, *_ADDRESS_EDIT_PROMPTS)
+        if relocating:
+            await put_the_menu_back(update, context, user_id)
+
+    @staticmethod
+    def _relocation_keyboard(language: str):
+        """The Edit-location prompt's keyboard: share the location, or Cancel (`cancel_address_text` ends it)."""
+        return ProfileKeyboards.location_request(language, extra_rows=(i18n.get('telegram.cancel', language),))
+
     async def edit_location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle editing address location"""
+        """Edit location (`edit_location_<id>`): ask for the pin that moves this saved address (spec 2026-11-18 §6.6).
+
+        The prompt is durable (`awaiting_input='relocate_address'` in bot_state, with the address id, its label and
+        when it was armed), so a pin sent after a restart still moves the right address. Any open flow and pin prompt
+        is left first, so the next pin can only mean this move; an add-address pin prompt (`arm_location_request`),
+        a flow exit and the keyboard's Cancel each disarm it again. Sent with no parse mode: the label is the
+        customer's own text.
+        """
         try:
             query = update.callback_query
-            language = await i18n.get_user_language(update.effective_user.id)
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
             address_id = query.data.split('_')[-1]
 
-            await self._ack(query, i18n.get('telegram.address.location_edit_not_supported', language))
-            logger.info(f"Location edit requested for address {address_id} - redirecting to delete/add flow")
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                response = await client.get_user_addresses(user_token)
+
+            addresses = response.data.get('data', {}).get('addresses', []) if response.success else []
+            address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
+            if not address:
+                await self._ack(query, i18n.get('telegram.address.not_found', language))
+                return
+
+            label = address['display_label']
+            reason = address.get('pin_move_refusal')
+            if reason in PIN_REFUSAL_COPY:
+                # The backend would refuse this move whatever pin came, so no pin is asked for. The refusal is a
+                # message, not the tap's answer: that toast is easy to miss, and Telegram refuses one past 200
+                # characters, which the Support explanation with a long label passes (the customer then sees nothing).
+                await self._ack(query)
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=i18n.get(PIN_REFUSAL_COPY[reason], language, label=label),
+                )
+                return
+            # Its own location keyboard follows, so leaving a share step here sends no bottom keyboard first.
+            await leave_all_flows(update, context, keyboard_follows=True)
+            await self.user_repo.arm_awaiting_input(
+                user_id,
+                'relocate_address',
+                relocate_address_id=int(address_id),
+                relocate_label=label,
+                armed_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            await self._ack(query)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=i18n.get('telegram.address.location_edit_prompt', language, label=label),
+                reply_markup=self._relocation_keyboard(language),
+            )
+            logger.info(f"Edit location armed for address {address_id}")
 
         except Exception as e:
-            await self._handle_error(update, exc=e, operation="edit_location_handler")
+            # The tap may be answered already (a refusal, or the prompt), so the error comes as a message.
+            await self._handle_error(
+                update, exc=e, operation="edit_location_handler", reply=self._reply_error_in_chat,
+            )
+
+    async def relocation_pin_received(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, state: Dict[str, Any],
+    ) -> None:
+        """The pin for a fresh Edit-location prompt (`state` is the customer's bot_state): move that address there.
+
+        Outside the delivery zone the customer is asked again and the prompt stays armed. Otherwise the prompt is
+        disarmed (one pin answers it) and the move goes out as a placed map pin. No draft and no reverse geocode:
+        the address keeps its text, which the answer shows. Sent with no parse mode, like the prompt.
+        """
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            address_id = state.get('relocate_address_id')
+            label = state.get('relocate_label')
+            location = update.message.location
+
+            if not is_within_tashkent(location.latitude, location.longitude):
+                logger.info(f"User {user_id} sent an out-of-zone pin for address {address_id}")
+                await update.message.reply_text(
+                    i18n.get('telegram.address.outside_delivery_area', language),
+                    reply_markup=self._relocation_keyboard(language),
+                )
+                return
+
+            await self.user_repo.disarm(user_id, 'relocate_address')
+            body = {'latitude': location.latitude, 'longitude': location.longitude, 'point_source': 'map_pin'}
+            response = None
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    response = await client.move_user_address(user_token, address_id, body)
+
+            if response is not None and response.success:
+                text = self._location_updated_text(response, language, label)
+            else:
+                duplicate = _duplicate_refusal(response) if response is not None else None
+                if duplicate:
+                    # The menu keyboard first (it replaces the location keyboard), then the prompt with its buttons.
+                    await send_menu_keyboard(
+                        context.bot, update.effective_chat.id, user_id,
+                        i18n.get('telegram.address.location_received', language), language,
+                    )
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="\n".join([
+                            i18n.get('telegram.address.duplicate_prompt_header', language),
+                            *_duplicate_candidate_lines(language, duplicate.candidates),
+                        ]),
+                        reply_markup=ProfileKeyboards.relocation_duplicate(
+                            language, int(address_id), location.latitude, location.longitude,
+                        ),
+                    )
+                    return
+                reason = _pin_refusal_reason(response) if response is not None else None
+                logger.warning(
+                    f"Move of address {address_id} to the new pin failed: "
+                    f"{reason or getattr(response, 'error', 'no auth token')}"
+                )
+                text = (
+                    i18n.get(PIN_REFUSAL_COPY[reason], language, label=label)
+                    if reason else i18n.get('telegram.error_occurred', language)
+                )
+            await send_menu_keyboard(context.bot, update.effective_chat.id, user_id, text, language)
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="relocation_pin_received")
+
+    @staticmethod
+    def _location_updated_text(response, language: str, label: str) -> str:
+        """The answer to a move that went through: the address keeps its text, which the answer shows."""
+        address = (response.data.get('data') or {}).get('address') or {}
+        return i18n.get(
+            'telegram.address.location_updated', language,
+            label=label, line=address.get('full_address') or address.get('display_label'),
+        )
+
+    async def relocation_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Save here anyway (`reloc_here_<id>_<lat>_<lng>`): move the address to the point the button carries.
+
+        The customer has seen the saved addresses next to it, so the move carries `confirm_duplicate`. The point
+        rides the button, so this works after a restart. A refusal edits the prompt to that rule's copy.
+
+        The tap is answered before the move is sent: a spinner left up for the backend invites a second tap. That
+        second tap repeats the move (a no-op within the tolerance) and its answer, an edit to the text already on
+        screen, which Telegram refuses as not modified: `_edit_or_replace_callback_message` takes that as done.
+        """
+        try:
+            query = update.callback_query
+            await self._ack(query)
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            _prefix, _here, raw_id, raw_lat, raw_lng = query.data.split('_')
+            address_id = int(raw_id)
+            body = {
+                'latitude': float(raw_lat), 'longitude': float(raw_lng),
+                'point_source': 'map_pin', 'confirm_duplicate': True,
+            }
+
+            response = None
+            label = None
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    response = await client.move_user_address(user_token, address_id, body)
+                    if response.success:
+                        label = ((response.data.get('data') or {}).get('address') or {}).get('display_label')
+                    elif _pin_refusal_reason(response):
+                        listed = await client.get_user_addresses(user_token)
+                        rows = listed.data.get('data', {}).get('addresses', []) if listed.success else []
+                        label = next((r.get('display_label') for r in rows if r.get('id') == address_id), None)
+
+            if response is not None and response.success:
+                text = self._location_updated_text(response, language, label)
+            else:
+                reason = _pin_refusal_reason(response) if response is not None else None
+                logger.warning(
+                    f"Confirmed move of address {address_id} failed: "
+                    f"{reason or getattr(response, 'error', 'no auth token')}"
+                )
+                text = (
+                    i18n.get(PIN_REFUSAL_COPY[reason], language, label=label or '')
+                    if reason else i18n.get('telegram.error_occurred', language)
+                )
+            await self._edit_or_replace_callback_message(query, text)
+
+        except Exception as e:
+            # The tap is answered already, so the error is said on the prompt.
+            await self._handle_error(
+                update, exc=e, operation="relocation_confirm", reply=self._reply_error_on_tapped_message,
+            )
+
+    async def relocation_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Cancel at the Edit-location duplicate prompt (`reloc_cancel`): nothing was moved. A second tap edits to the
+        same text, which `_edit_or_replace_callback_message` takes as done (see `relocation_confirm`)."""
+        try:
+            query = update.callback_query
+            await self._ack(query)
+            language = await i18n.get_user_language(update.effective_user.id)
+            await self._edit_or_replace_callback_message(query, i18n.get('telegram.action_cancelled', language))
+        except Exception as e:
+            # The tap is answered already, so the error is said on the prompt.
+            await self._handle_error(
+                update, exc=e, operation="relocation_cancel", reply=self._reply_error_on_tapped_message,
+            )
+
+    async def relocation_text_received(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, user_state: Dict[str, Any],
+    ) -> None:
+        """Typed text while Edit location waits for its pin (`user_state` is the customer's bot_state).
+
+        A fresh prompt asks for the pin again and stays armed; a stale one is disarmed and says it expired, so the
+        text never reaches the unknown-input branch (which would disarm it with "invalid input").
+        """
+        if is_stamp_stale(user_state.get('armed_at'), AWAITING_LOCATION_STALE_MINUTES):
+            await self.relocation_expired(update, context, user_state)
+            return
+        try:
+            language = await i18n.get_user_language(update.effective_user.id)
+            await update.message.reply_text(
+                i18n.get('telegram.address.location_edit_send_pin', language, label=user_state.get('relocate_label')),
+                reply_markup=self._relocation_keyboard(language),
+            )
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="relocation_text_received")
+
+    async def relocation_expired(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, state: Dict[str, Any],
+    ) -> None:
+        """A stale Edit-location prompt met its answer: disarm it and say so, so nothing is moved or added.
+
+        The menu keyboard comes back with the answer, in place of the location keyboard.
+        """
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            await self.user_repo.disarm(user_id, 'relocate_address')
+            logger.info(f"Edit location for address {state.get('relocate_address_id')} expired before its answer")
+            await send_menu_keyboard(
+                context.bot, update.effective_chat.id, user_id,
+                i18n.get('telegram.address.location_edit_expired', language), language,
+            )
+
+        except Exception as e:
+            await self._handle_error(update, exc=e, operation="relocation_expired")
 
     async def edit_details_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address details"""
@@ -4370,6 +5003,9 @@ class ProfileHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+
+            # Same as the title prompt: leave the prompt this one replaces, Edit location's included.
+            await self._leave_address_edit_prompts(update, context, user_id)
 
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]

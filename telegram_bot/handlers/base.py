@@ -3,7 +3,7 @@ Base handler class with shared error handling for Telegram bot handlers.
 """
 import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Awaitable, Callable
 from telegram import Message, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 from i18n import i18n
 from menu_keyboard import assert_editable_markup, send_menu_keyboard
 from database import db_manager, BotUserRepository
+from flow_exit import put_the_menu_back
 from handlers.errors import (
     BotAPIError,
     BotAuthError,
@@ -112,6 +113,21 @@ class BaseHandler:
             getattr(response, "error", None),
         )
         return await self._ack(query, i18n.get('telegram.error.generic', language))
+
+    async def _arm_awaiting_input(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, telegram_id: int, awaiting_input: str,
+        **companions: Any,
+    ) -> None:
+        """Arm a typed-answer prompt from a screen that is no flow exit (`BotUserRepository.arm_awaiting_input`).
+
+        bot_state holds one prompt, so this one replaces whatever was armed. When that was Edit location's
+        (`relocate_address`), its location keyboard is still up in place of the bottom one, and a pin from its Share
+        button would no longer move anything: it would be filed to the Support Inbox in silence. So the bottom
+        keyboard goes back, silently, the way `ProfileHandlers._leave_address_edit_prompts` puts it back.
+        """
+        replaced = await self.user_repo.arm_awaiting_input(telegram_id, awaiting_input, **companions)
+        if replaced == 'relocate_address' and awaiting_input != 'relocate_address':
+            await put_the_menu_back(update, context, telegram_id)
 
     async def _delete_callback_message(self, query: Any) -> bool:
         """Drop the bubble a tap came from — and never let that cost the work.
@@ -329,6 +345,31 @@ class BaseHandler:
         except Exception as e:
             logger.error(f"Failed to deliver error reply to user: {e}")
 
+    async def _reply_error_in_chat(self, update: Update, text: str) -> None:
+        """`_reply_error` for a tap the handler may already have answered: `text` comes as a message in the chat.
+
+        Telegram shows only the first answer to a tap, so after an early `_ack` the answer `_reply_error` sends
+        reaches no one. A message is seen either way. The quiet answer first stops a spinner nothing has stopped
+        yet; after an early ack, Telegram accepts it and shows nothing.
+        """
+        try:
+            await self._ack(update.callback_query)
+            await update.get_bot().send_message(chat_id=update.effective_chat.id, text=text)
+        except Exception as e:
+            logger.error(f"Failed to deliver error reply to user: {e}")
+
+    async def _reply_error_on_tapped_message(self, update: Update, text: str) -> None:
+        """`_reply_error` for a prompt whose tap was answered first: the tapped message is edited to `text`.
+
+        Its buttons answered nothing, so they go with the edit. When Telegram refuses the edit and the replacement
+        (`_edit_or_replace_callback_message`), `text` comes as a plain message (`_reply_error_in_chat`).
+        """
+        try:
+            await self._edit_or_replace_callback_message(update.callback_query, text)
+        except Exception as e:
+            logger.warning("Could not show the error on the tapped message; sending it to the chat: %s", e)
+            await self._reply_error_in_chat(update, text)
+
     @staticmethod
     def _response_error_code(response) -> str | None:
         """The structured `error_code` off a failed APIResponse, or None.
@@ -393,6 +434,7 @@ class BaseHandler:
         *,
         exc: Exception | None = None,
         operation: str | None = None,
+        reply: Callable[[Update, str], Awaitable[None]] | None = None,
     ):
         """Unified error handler.
 
@@ -400,6 +442,10 @@ class BaseHandler:
         receive the generic `telegram.error_occurred` reply. New callers pass the
         raised exception via `exc=` and a short `operation=` tag so we can dispatch
         by error category and emit a structured log line.
+
+        `reply` delivers the text, `_reply_error` by default. A handler that answers
+        its tap before the work passes `_reply_error_in_chat` or
+        `_reply_error_on_tapped_message`, because a second answer is never shown.
         """
         language = await self._resolve_language(update)
 
@@ -428,7 +474,7 @@ class BaseHandler:
         else:
             logger.error("Bot handler error in %s (no exception context)", operation or "unknown", extra=log_extra)
 
-        await self._reply_error(update, text)
+        await (reply or self._reply_error)(update, text)
 
     async def _handle_auth_error(self, update: Update, language: str):
         """Back-compat shim: prefer raising `BotAuthError` and letting `_handle_error` dispatch."""

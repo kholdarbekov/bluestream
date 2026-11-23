@@ -400,6 +400,18 @@ PLACE_COD_COLLECTION_ENABLED = _bool("PLACE_COD_COLLECTION_ENABLED", True)
 # at field onboarding (spec 2026-09-07-sales-agent-role-design.md, D14).
 SALES_DEDUPE_RADIUS_M = _int("SALES_DEDUPE_RADIUS_M", 150)
 
+# ─── Duplicate-address guard ────────────────────────────────────────────
+# Two radii, in metres, for the customer/admin address write paths. They are
+# distinct from the other proximity radii: PLACE_SUGGESTION_RADIUS_M (10 m, "are
+# these two addresses one office?", advisory to an admin), SHARED_PLACE_CANDIDATE_RADIUS_M
+# (50 m, which neighbour's empties a driver collected) and SALES_DEDUPE_RADIUS_M
+# (150 m, two outlets with similar names at field onboarding).
+# ADDRESS_DUPLICATE_RADIUS_M: how near another saved pin of the same customer
+# makes a new or moved address a possible duplicate (asked, never silently refused).
+# ADDRESS_MOVE_MAX_M: how far a saved address's pin may be moved in place.
+ADDRESS_DUPLICATE_RADIUS_M = _int("ADDRESS_DUPLICATE_RADIUS_M", 50)
+ADDRESS_MOVE_MAX_M = _int("ADDRESS_MOVE_MAX_M", 150)
+
 # ─── Sales agents (phase 2a — visit loop) ───────────────────────────────
 # Visit check-in geofence. The pin the agent shares is compared against the
 # outlet pin and `in_radius` is published as a FIELD (D15) — neither bot nor

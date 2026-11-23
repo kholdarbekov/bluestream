@@ -231,6 +231,8 @@ def _samples_matching(pattern_source: str) -> list[str]:
     # The subscription writes carry an `expected_state` (16 hex characters) and a date; each is one sample of
     # its own shape, so these patterns are read, not skipped.
     body = body.replace("[0-9a-f]{16}", "0123456789abcdef").replace(r"\d{4}-\d{2}-\d{2}", "2026-11-06")
+    # Edit location's "Save here anyway" carries a signed coordinate (`-?\d+\.\d+`), one sample of its own shape.
+    body = body.replace(r"-?\d+\.\d+", "41.3")
     body = (
         body.replace(r"\d+", "7").replace(r"\d*", "7").replace(r"\w+", "x")
         .replace("[a-z_]+", "x").replace("[a-z]+", "x")
@@ -916,6 +918,16 @@ def _keyboard_callbacks(lang: str = "uz") -> list[tuple[str, str]]:
     add(
         "ProfileKeyboards.delivery_instructions_keyboard",
         ProfileKeyboards.delivery_instructions_keyboard(lang),
+    )
+    # The duplicate-address prompt with Move offered, so every button it can carry is harvested.
+    add(
+        "ProfileKeyboards.address_duplicate_prompt(move)",
+        ProfileKeyboards.address_duplicate_prompt(lang, [_ADDRESSES[0] | {"distance_m": 14}], move_address_id=91),
+    )
+    # Edit location's duplicate prompt: the point rides the button, so a restart cannot lose it.
+    add(
+        "ProfileKeyboards.relocation_duplicate",
+        ProfileKeyboards.relocation_duplicate(lang, 91, 41.32354, 69.241036),
     )
 
     # -- payments ------------------------------------------------------------

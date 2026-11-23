@@ -474,6 +474,7 @@
        "landmark": null,
        "latitude": 41.3111,
        "longitude": 69.2797,
+       "pin_move_refusal": null,
        "postal_code": null,
        "street_address": "1 Test St",
        "title": null
@@ -493,6 +494,7 @@
        "landmark": null,
        "latitude": 41.31,
        "longitude": 69.28,
+       "pin_move_refusal": "SHARED_PLACE",
        "postal_code": null,
        "street_address": null,
        "title": "Office"

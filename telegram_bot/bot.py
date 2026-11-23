@@ -72,12 +72,12 @@ from handlers.profile import (
     SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP, REGISTER_OTP,
     ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
-    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+    ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM, ADDRESS_DUPLICATE,
     WEB_LINK_CONFIRM, WEB_LINK_PENDING_KEY, WEB_LINK_GREETING_KEY, PHONE_OTP_ARMED_AT,
 )
 from utils import (
     error_handler, rate_limiter, user_middleware, get_auth_token, is_awaiting_location_stale,
-    otp_code_in, OtpShapedFilter,
+    otp_code_in, OtpShapedFilter, is_stamp_stale, AWAITING_LOCATION_STALE_MINUTES,
 )
 from keyboards import BUY_PATTERN, MenuKeyboards, ORDERS_PAGE_PATTERN, PRODUCT_PAGE_PATTERN
 from menu_keyboard import MENU_INSTALLER_GROUP, ensure_menu_keyboard_middleware, send_menu_keyboard
@@ -147,6 +147,13 @@ class WaterBusinessBot:
         WITHOUT ever starting this conversation). Decide from an explicit
         marker instead:
 
+        * `awaiting_input == 'relocate_address'` in the durable `bot_state` —
+          the customer tapped Edit location on a saved address
+          (`ProfileHandlers.edit_location_handler`). Checked first: the pin
+          moves that address (`relocation_pin_received`), or, once the prompt
+          is older than `utils.AWAITING_LOCATION_STALE_MINUTES`, it is
+          disarmed with a "request expired" answer (`relocation_expired`).
+          Never Add address, never Support.
         * `awaiting_location` in `context.user_data` — the bot just asked for
           this pin (`utils.arm_location_request`, called at every site that
           sends `ProfileKeyboards.location_request(...)`, and cleared at every
@@ -200,6 +207,28 @@ class WaterBusinessBot:
                 # and dispatch still stops.
                 raise ApplicationHandlerStop()
 
+            try:
+                durable = await bot.user_repository.get_user_state(
+                    update.effective_user.id
+                )
+            except Exception as state_error:
+                logger.warning("Could not read the saved pin prompts: %s", state_error)
+                durable = {}
+
+            # Edit location (spec 2026-11-18 §6.6) is checked FIRST: its durable
+            # prompt names the saved address this pin moves, and every
+            # add-address pin prompt disarms it, so while it is armed the pin
+            # is that move's answer. A stale one says so. Either way neither
+            # Add address nor Support sees the pin. Bare stops, for the reason
+            # the null-message guard above gives.
+            # tests/telegram_bot/test_edit_location_journey.py
+            if durable.get('awaiting_input') == 'relocate_address':
+                if is_stamp_stale(durable.get('armed_at'), AWAITING_LOCATION_STALE_MINUTES):
+                    await profile_handlers.relocation_expired(update, context, durable)
+                else:
+                    await profile_handlers.relocation_pin_received(update, context, durable)
+                raise ApplicationHandlerStop()
+
             armed = context.user_data.pop('awaiting_location', False)
             armed_at = context.user_data.pop('awaiting_location_at', None)
 
@@ -213,20 +242,12 @@ class WaterBusinessBot:
             # Same staleness window either way, so a durable marker cannot
             # reopen address creation for an unrelated pin weeks later.
             # tests/telegram_bot/test_armed_prompts_survive_a_restart.py
-            if not armed:
-                try:
-                    durable = await bot.user_repository.get_user_state(
-                        update.effective_user.id
-                    )
-                except Exception as state_error:
-                    logger.warning("Could not read the pin arming: %s", state_error)
-                    durable = {}
-                if durable.get('awaiting_location_at'):
-                    armed = True
-                    armed_at = durable.get('awaiting_location_at')
-                    await bot.user_repository.forget_pin_prompt(
-                        update.effective_user.id
-                    )
+            if not armed and durable.get('awaiting_location_at'):
+                armed = True
+                armed_at = durable.get('awaiting_location_at')
+                await bot.user_repository.forget_pin_prompt(
+                    update.effective_user.id
+                )
 
             if armed and is_awaiting_location_stale(armed_at):
                 armed = False
@@ -740,6 +761,10 @@ class WaterBusinessBot:
             # Address editing callbacks
             CallbackQueryHandler(profile_handlers.edit_title_handler, pattern="^edit_title_"),
             CallbackQueryHandler(profile_handlers.edit_location_handler, pattern="^edit_location_"),
+            CallbackQueryHandler(
+                profile_handlers.relocation_confirm, pattern=r"^reloc_here_\d+_-?\d+\.\d+_-?\d+\.\d+$",
+            ),
+            CallbackQueryHandler(profile_handlers.relocation_cancel, pattern="^reloc_cancel$"),
             CallbackQueryHandler(profile_handlers.edit_details_handler, pattern="^edit_details_"),
             CallbackQueryHandler(profile_handlers.edit_instructions_handler, pattern="^edit_instructions_"),
 
@@ -1171,6 +1196,36 @@ class WaterBusinessBot:
                     CallbackQueryHandler(
                         self._consumes(profile_handlers.cancel_address),
                         pattern="^cancel_address_creation$",
+                    ),
+                ],
+                # The backend saw a saved address right where this one lands
+                # (409 ADDRESS_POSSIBLE_DUPLICATE): Use it, Move it to this pin,
+                # Save as new, or Cancel. `adup_\w+` is also in
+                # ADDRESS_FLOW_BUTTONS, so these stay wrapped in `_consumes`.
+                ADDRESS_DUPLICATE: [
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.duplicate_use),
+                        pattern=r"^adup_use_\d+$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.duplicate_move),
+                        pattern=r"^adup_move_\d+$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.duplicate_new),
+                        pattern="^adup_new$",
+                    ),
+                    CallbackQueryHandler(
+                        self._consumes(profile_handlers.cancel_address),
+                        pattern="^cancel_address_creation$",
+                    ),
+                    # Text typed at the prompt answers nothing it asks. Without a
+                    # handler here it falls to group 0, which sees the durable
+                    # `address_draft`, says "timed out" and clears the draft while
+                    # this conversation is alive.
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND,
+                        self._consumes(profile_handlers.duplicate_prompt_text_received),
                     ),
                 ],
                 # `conversation_timeout` below is not self-announcing: PTB looks
@@ -1843,6 +1898,9 @@ class WaterBusinessBot:
         elif input_type == 'edit_address_instructions':
             # Handle address instructions editing
             await profile_handlers.handle_address_instructions_edit(update, context, text, user_state)
+        elif input_type == 'relocate_address':
+            # Edit location is waiting for a pin: ask for it again, or say the request expired
+            await profile_handlers.relocation_text_received(update, context, text, user_state)
         elif input_type == 'edit_profile_name':
             # Handle profile name editing
             await profile_handlers.handle_profile_name_edit(update, context, text, user_state)
@@ -1897,7 +1955,7 @@ class WaterBusinessBot:
     ADDRESS_FLOW_BUTTONS = (
         r"^(cancel_address_creation|back_to_region|confirm_geocode|retry_geocode"
         r"|skip_street|skip_building|skip_apartment|skip_floor"
-        r"|skip_delivery_instructions|region_\w+|district_\w+|addr_title_\w+)$"
+        r"|skip_delivery_instructions|region_\w+|district_\w+|addr_title_\w+|adup_\w+)$"
     )
 
     async def _signup_step_expired(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1934,9 +1992,18 @@ class WaterBusinessBot:
         address form timed out and was closed. Nothing was saved — you can start
         again any time" — which is exactly what happened, and means this fix
         ships without a translation seed.
+
+        Except on the duplicate prompt the customer already answered with Use or
+        Move: a tap on it queued behind that answer only has its spinner
+        stopped. Its answer is on screen, the alert would be false after a Move,
+        and in checkout that message is now the payment picker, whose buttons
+        must stay.
         """
         query = update.callback_query
         try:
+            if profile_handlers.is_answered_duplicate_prompt_tap(update, context):
+                await query.answer()
+                return
             language = await i18n.get_user_language(update.effective_user.id)
             text = i18n.get('telegram.address.flow_timed_out', language)
             await query.answer(text, show_alert=True)

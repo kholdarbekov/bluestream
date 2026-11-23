@@ -238,6 +238,44 @@ const Users = () => {
     },
   });
 
+  // The guard's 409 (ADDRESS_POSSIBLE_DUPLICATE): list the close addresses and let the admin
+  // confirm. OK re-sends the same body with confirm_duplicate; Cancel leaves the form open.
+  // Each candidate is its display_label, plus its street line only when it has a title (without
+  // one, the label already is the street line), as the bots and the website list them.
+  // Returns true when the error was this refusal (so the caller shows no toast).
+  const confirmPossibleDuplicate = (error, variables, retry, isEdit) => {
+    if (apiErrorCode(error) !== 'ADDRESS_POSSIBLE_DUPLICATE') return false;
+    const candidates = error.response?.data?.details?.candidates || [];
+    Modal.confirm({
+      title: t('ui.users.address_duplicate_title', 'Possible duplicate address'),
+      content: (
+        <div>
+          <div>{t('ui.users.address_duplicate_body', 'This customer already has an address close to this pin:')}</div>
+          <ul>
+            {candidates.map((candidate) => (
+              <li key={candidate.id}>
+                {[
+                  candidate.display_label,
+                  candidate.title ? candidate.full_address : null,
+                  `~${candidate.distance_m} m`,
+                ].filter(Boolean).join(' · ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
+      okText: isEdit
+        ? t('ui.users.address_duplicate_save_anyway', 'Save anyway')
+        : t('ui.users.address_duplicate_create_anyway', 'Create anyway'),
+      cancelText: t('ui.common.cancel', 'Cancel'),
+      onOk: () => retry({
+        ...variables,
+        addressData: { ...variables.addressData, confirm_duplicate: true },
+      }),
+    });
+    return true;
+  };
+
   // Create address mutation
   const createAddressMutation = useMutation({
     mutationFn: ({ userId, addressData }) => adminService.createUserAddress(userId, addressData),
@@ -252,7 +290,8 @@ const Users = () => {
       }
     },
 
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (confirmPossibleDuplicate(error, variables, createAddressMutation.mutate, false)) return;
       const errorMessage = error.response?.data?.message || t('ui.users.address_create_failed', 'Failed to create address');
       message.error(errorMessage);
     },
@@ -273,7 +312,8 @@ const Users = () => {
       }
     },
 
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (confirmPossibleDuplicate(error, variables, updateAddressMutation.mutate, true)) return;
       const errorMessage = error.response?.data?.message || t('ui.users.address_update_failed', 'Failed to update address');
       message.error(errorMessage);
     },

@@ -359,6 +359,7 @@ describe('PlaceGroupPanel', () => {
                 phone: '+998900000001',
                 title: 'Home',
                 full_address: 'Home st 2',
+                display_label: 'Home',
               },
               {
                 address_id: 9,
@@ -368,6 +369,7 @@ describe('PlaceGroupPanel', () => {
                 phone: '+998900000003',
                 title: 'Home',
                 full_address: 'Home st 2',
+                display_label: 'Home',
               },
             ],
           },

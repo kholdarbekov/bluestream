@@ -18,6 +18,7 @@ from business_app.models.bottle import BottleBalance
 from business_app.models.order import Order
 from business_app.models.user import User, UserAddress
 from business_app.services.customer_link_service import CustomerLinkService
+from business_app.utils.address_helpers import apartments_differ
 from business_app.utils.helpers import calculate_distance
 from shared.enums import OrderStatus
 
@@ -75,15 +76,6 @@ def _place_balance_join():
     )
 
 
-def _norm_apartment(value) -> str:
-    return (value or "").strip().casefold()
-
-
-def _apartments_differ(a, b) -> bool:
-    left, right = _norm_apartment(a), _norm_apartment(b)
-    return bool(left) and bool(right) and left != right
-
-
 def find_candidates(address: UserAddress, *, limit: int = 3) -> CandidateResult:
     if address.latitude is None or address.longitude is None:
         # Before the prefilter: with empty coordinates it does not filter at all.
@@ -120,7 +112,7 @@ def find_candidates(address: UserAddress, *, limit: int = 3) -> CandidateResult:
     if not nearby:
         return CandidateResult((), "none_within_radius")
 
-    nearby = [row for row in nearby if not _apartments_differ(address.apartment_number, row[5])]
+    nearby = [row for row in nearby if not apartments_differ(address.apartment_number, row[5])]
 
     group_ids = sorted({row[2] for row in nearby if row[2] is not None})
     members_by_group: Dict[int, List[Tuple[int, int]]] = {gid: [] for gid in group_ids}

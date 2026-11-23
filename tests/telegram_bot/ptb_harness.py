@@ -50,7 +50,13 @@ from telegram.ext import Application, ConversationHandler
 import i18n as i18n_module
 
 
-from tests.integration.address_row_builders import address_row, edited_row, producer_rows, stored_row
+from tests.integration.address_row_builders import (
+    address_row,
+    customer_list_row,
+    edited_row,
+    producer_rows,
+    stored_row,
+)
 from tests.bot_dispatcher_harness import (  # noqa: F401  (re-exported)
     _is_catch_all,
     DEFAULT_CHAT_ID,
@@ -121,6 +127,9 @@ class FakeBackend:
         self.addresses: dict[int, dict] = _AddressBook()
         self.routes: dict[tuple[str, str], Callable[[BackendCall], Any]] = {}
         self._next_address_id = 900
+        # Per address id, the `pin_move_refusal` the customer's list serves ("WITH_DRIVER", ...); an instance
+        # attribute, so one test's refusal never leaks into the next.
+        self.pin_move_refusals: dict[int, Optional[str]] = {}
 
     # -- routing --------------------------------------------------------------
 
@@ -173,13 +182,26 @@ class FakeBackend:
         if endpoint == "/api/v1/auth/addresses":
             if method == "GET":
                 # Checked again on the way out: an in-place edit after seeding can still add a key.
-                return {"data": {"addresses": producer_rows(list(self.addresses.values()), "FakeBackend.addresses")}}
+                rows = producer_rows(list(self.addresses.values()), "FakeBackend.addresses")
+                return {
+                    "data": {
+                        "addresses": [customer_list_row(r, self.pin_move_refusals.get(r["id"])) for r in rows]
+                    }
+                }
             if method == "POST":
                 address_id = self._next_address_id
                 self._next_address_id += 1
                 row = stored_row(address_id, call.data, is_default=not self.addresses)
                 self.addresses[address_id] = row
                 return {"data": {"address": row}}
+        if endpoint.startswith("/api/v1/auth/addresses/") and endpoint.endswith("/move") and method == "POST":
+            # The bot's move body carries the pin and nothing else, so the answer is the row with that pin.
+            address_id = int(endpoint.split("/")[-2])
+            row = self.addresses[address_id]
+            moved = edited_row(row, {k: call.data[k] for k in ("latitude", "longitude") if k in call.data})
+            row.clear()
+            row.update(moved)
+            return {"data": {"address": row}}
         if endpoint.startswith("/api/v1/auth/addresses/"):
             address_id = int(endpoint.rsplit("/", 1)[-1])
             if method in {"PUT", "PATCH"}:

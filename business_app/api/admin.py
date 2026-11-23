@@ -12,7 +12,7 @@ from sqlalchemy import and_, or_, desc, func, text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
 from decimal import Decimal, InvalidOperation
-from shared.constants import DISPLAY_TIMEZONE, STAFF_INVITE_START_PREFIX, is_within_tashkent
+from shared.constants import DISPLAY_TIMEZONE, STAFF_INVITE_START_PREFIX
 from shared.redis_keyspace import RedisKeyspace
 
 from business_app.models.user import User, UserAddress
@@ -113,6 +113,9 @@ from business_app.utils.helpers import get_current_language, is_allowed_file, sa
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.user_search import build_user_search_filter
 from business_app.utils.translations import get_translation
+from business_app.utils.error_handlers import handle_api_exception
+from business_app.services.address_guard_service import take_confirm_flag
+from business_app.services.admin_user_address_service import AdminUserAddressService
 from business_app.utils.exceptions import (
     ValidationError,
     ConflictError,
@@ -1613,6 +1616,7 @@ def get_user_addresses(user_id):
 
 
 @admin_bp.route("/users/<int:user_id>/addresses", methods=["POST"])
+@handle_api_exception
 @jwt_required()
 @staff_or_higher_required
 @validate_json(["full_address"])
@@ -1634,142 +1638,43 @@ def create_user_address(user_id):
     - floor_number: Building floor
     - apartment_number: Apartment/unit number
     - is_default: Set as default address
+    - confirm_duplicate: JSON true to save although the point is within the duplicate radius of one of the
+      customer's saved addresses (otherwise 409 ADDRESS_POSSIBLE_DUPLICATE with the candidates in details)
     """
-    try:
-        current_user_id = get_jwt_identity()
+    data = request.get_json()
+    confirm_duplicate = take_confirm_flag(data)
+    current_user_id = get_jwt_identity()
 
-        user = User.query.get(user_id)
-        if not user:
-            return not_found_response(resource_type="User")
+    address = AdminUserAddressService.create(
+        user_id, data, actor_id=int(current_user_id), confirm_duplicate=confirm_duplicate
+    )
 
-        data = request.get_json()
+    current_app.logger.info(f"Admin {current_user_id} created address {address.id} for user {user_id}")
 
-        full_address = data.get("full_address", "").strip()
-        if not full_address:
-            return validation_error_response("Full address is required")
-
-        # Enforce the delivery-zone SSOT before persisting any coordinate.
-        latitude, longitude = data.get("latitude"), data.get("longitude")
-        if latitude is not None and longitude is not None and not is_within_tashkent(latitude, longitude):
-            return validation_error_response(get_translation("api.addresses.error.coordinates_outside_supported_area"))
-
-        # Check if this should be default
-        is_default = data.get("is_default", False)
-
-        # If setting as default, unset other defaults
-        if is_default:
-            UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
-
-        # If user has no addresses, make this the default
-        existing_count = UserAddress.query.filter_by(user_id=user_id).count()
-        if existing_count == 0:
-            is_default = True
-
-        # Create address
-        address = UserAddress(
-            user_id=user_id,
-            title=data.get("title"),
-            full_address=full_address,
-            street_address=data.get("street_address"),
-            city=data.get("city", "Tashkent"),
-            district=data.get("district"),
-            postal_code=data.get("postal_code"),
-            country=data.get("country", "Uzbekistan"),
-            latitude=data.get("latitude"),
-            longitude=data.get("longitude"),
-            is_default=is_default,
-            is_business=data.get("is_business", False),
-            delivery_instructions=data.get("delivery_instructions"),
-            landmark=data.get("landmark"),
-            floor_number=data.get("floor_number"),
-            apartment_number=data.get("apartment_number"),
-        )
-
-        db.session.add(address)
-        db.session.commit()
-
-        current_app.logger.info(f"Admin {current_user_id} created address {address.id} for user {user_id}")
-
-        return created_response(data={"address": address.to_dict()}, message="Address created successfully")
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Create user address error: {e}")
-        return internal_error_response("Failed to create address")
+    return created_response(data={"address": address.to_dict()}, message="Address created successfully")
 
 
 @admin_bp.route("/users/<int:user_id>/addresses/<int:address_id>", methods=["PUT"])
+@handle_api_exception
 @jwt_required()
 @staff_or_higher_required
 def update_user_address(user_id, address_id):
-    """Update an existing user address (admin operation)"""
-    try:
-        current_user_id = get_jwt_identity()
+    """Update an existing user address (admin operation).
 
-        user = User.query.get(user_id)
-        if not user:
-            return not_found_response(resource_type="User")
+    A change of the coordinates redirects the customer's open orders and tells their driver; it is answered 409
+    ADDRESS_POSSIBLE_DUPLICATE when the new point is within the duplicate radius of another saved address, unless the
+    body carries `confirm_duplicate: true`. Null coordinates never clear a pin."""
+    data = request.get_json()
+    confirm_duplicate = take_confirm_flag(data)
+    current_user_id = get_jwt_identity()
 
-        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
-        if not address:
-            return not_found_response(resource_type="Address")
+    address = AdminUserAddressService.update(
+        user_id, address_id, data, actor_id=int(current_user_id), confirm_duplicate=confirm_duplicate
+    )
 
-        data = request.get_json()
+    current_app.logger.info(f"Admin {current_user_id} updated address {address_id} for user {user_id}")
 
-        # Enforce the delivery-zone SSOT when coordinates are being changed.
-        if "latitude" in data or "longitude" in data:
-            new_lat = data["latitude"] if "latitude" in data else address.latitude
-            new_lng = data["longitude"] if "longitude" in data else address.longitude
-            if new_lat is not None and new_lng is not None and not is_within_tashkent(new_lat, new_lng):
-                return validation_error_response(
-                    get_translation("api.addresses.error.coordinates_outside_supported_area")
-                )
-
-        # Update fields if provided
-        if "title" in data:
-            address.title = data["title"]
-        if "full_address" in data:
-            address.full_address = data["full_address"]
-        if "street_address" in data:
-            address.street_address = data["street_address"]
-        if "city" in data:
-            address.city = data["city"]
-        if "district" in data:
-            address.district = data["district"]
-        if "postal_code" in data:
-            address.postal_code = data["postal_code"]
-        if "country" in data:
-            address.country = data["country"]
-        if "latitude" in data:
-            address.latitude = data["latitude"]
-        if "longitude" in data:
-            address.longitude = data["longitude"]
-        if "is_business" in data:
-            address.is_business = data["is_business"]
-        if "delivery_instructions" in data:
-            address.delivery_instructions = data["delivery_instructions"]
-        if "landmark" in data:
-            address.landmark = data["landmark"]
-        if "floor_number" in data:
-            address.floor_number = data["floor_number"]
-        if "apartment_number" in data:
-            address.apartment_number = data["apartment_number"]
-
-        # Handle default flag
-        if data.get("is_default"):
-            UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
-            address.is_default = True
-
-        db.session.commit()
-
-        current_app.logger.info(f"Admin {current_user_id} updated address {address_id} for user {user_id}")
-
-        return success_response(data={"address": address.to_dict()}, message="Address updated successfully")
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Update user address error: {e}")
-        return internal_error_response("Failed to update address")
+    return success_response(data={"address": address.to_dict()}, message="Address updated successfully")
 
 
 @admin_bp.route("/users/<int:user_id>/addresses/<int:address_id>", methods=["DELETE"])
@@ -14624,7 +14529,10 @@ def search_addresses_for_place_group():
 def list_place_group_suggestions():
     """Estate-wide co-located 'possible same place' candidates — no anchor.
 
-    `GET /admin/place-group-suggestions[?limit=]`
+    `GET /admin/place-group-suggestions[?limit=][&kind=shared_place|same_customer]`
+
+    `kind` keeps one arm of the suggestions before `limit` applies; any other
+    value is a 400.
 
     The per-user route below can only answer "who might share a place with THIS
     customer", so an admin had to suspect someone before they could look. The
@@ -14641,8 +14549,12 @@ def list_place_group_suggestions():
     """
     try:
         limit = request.args.get("limit", 20, type=int) or 20
-        suggestions = CustomerLinkService().get_place_group_suggestions(limit=max(1, min(limit, 100)))
+        suggestions = CustomerLinkService().get_place_group_suggestions(
+            limit=max(1, min(limit, 100)), kind=request.args.get("kind")
+        )
         return success_response(data=suggestions)
+    except ValidationError as e:
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
     except Exception as e:  # noqa: BLE001
         current_app.logger.error(f"Global place group suggestions error: {e}")
         return internal_error_response("Failed to load place group suggestions")
@@ -14652,13 +14564,18 @@ def list_place_group_suggestions():
 @jwt_required()
 @validate_admin_action(["view_users"])
 def get_user_place_group_suggestions(user_id):
-    """Co-located 'possible same place' suggestions anchored on this user."""
+    """Co-located 'possible same place' suggestions anchored on this user.
+
+    `GET /admin/users/<id>/place-group-suggestions[?kind=shared_place|same_customer]`
+    """
     try:
         service = CustomerLinkService()
         if not service.user_exists(user_id):
             return not_found_response(resource_type="User", message="User not found")
-        suggestions = service.get_place_group_suggestions(user_id=user_id)
+        suggestions = service.get_place_group_suggestions(user_id=user_id, kind=request.args.get("kind"))
         return success_response(data={"suggestions": suggestions})
+    except ValidationError as e:
+        return validation_error_response(getattr(e, "message", str(e)), error_code=getattr(e, "error_code", None))
     except Exception as e:  # noqa: BLE001
         current_app.logger.error(f"Place group suggestions error: {e}")
         return internal_error_response("Failed to load place group suggestions")

@@ -19,6 +19,7 @@ BESPOKE = {
     "STAFF_INVALID_INVITE_TOKEN": "start.py login refusal copy (also mapped)",
     "STATE_CHANGED": "price_lines.py price_changed_quote: operator/create_order.py and sales/visit.py redraw the "
     "quote on details.reason price_changed; the hand-in answers hand_in_changed only to a button that sends a basis",
+    "ADDRESS_POSSIBLE_DUPLICATE": "manage_address.py duplicate screen",
 }
 
 # The two shapes a reason may take (Task 12 ruling). A code no staff-bot route
@@ -35,6 +36,11 @@ _EXPENSE_CLAIM_BODY = (
 )
 _EXPENSE_DECISION = f"{_NOT_ON_ROUTE} (driver_expense/decision.py: admin /admin/driver-expenses/<id>/*)"
 _EXPENSE_RECEIPT = f"{_NOT_ON_ROUTE} (driver_expense/receipt.py: admin /admin/driver-expenses/<id>/receipt)"
+# The customer pin rules: the admin edit runs with customer_rules=False and the operator create has no pin rules.
+_ADDRESS_PIN_RULE = (
+    f"{_NOT_ON_ROUTE} (address_guard_service.py assert_pin_movable: customer /auth/addresses and legacy "
+    "/addresses/ routes)"
+)
 
 # Raised only on paths no staff-bot route reaches. One reason per line.
 NOT_STAFF_FACING: dict[str, str] = {
@@ -317,6 +323,13 @@ NOT_STAFF_FACING: dict[str, str] = {
     "ORDER_RESCHEDULE_WINDOW_PASSED": f"{_RACE_ONLY}: the bot sends no window and re-dispatch passes the order's "
     f"own, so a window is judged only if an admin changed it between the unlocked read and the lock, and that "
     f"re-date already took the row out of FAILED (order_schedule_service.py _refuse_disallowed_schedule){_FALLBACK}",
+    # Duplicate-address guard.
+    "ADDRESS_PIN_WITH_DRIVER": _ADDRESS_PIN_RULE,
+    "ADDRESS_PIN_SHARED_PLACE": _ADDRESS_PIN_RULE,
+    "ADDRESS_PIN_OUTLET": _ADDRESS_PIN_RULE,
+    "ADDRESS_MOVE_TOO_FAR": _ADDRESS_PIN_RULE,
+    "ADDRESS_MOVE_NEEDS_PIN": f"{_NOT_ON_ROUTE} (auth_service.py move_user_address: customer POST "
+    "/auth/addresses/<id>/move)",
 }
 
 

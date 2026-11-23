@@ -8,7 +8,9 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 
-from business_app.models.user import UserAddress
+from business_app.models.user import User, UserAddress
+from business_app.services.address_guard_service import assert_not_duplicate, take_confirm_flag
+from business_app.services.address_pin_service import AddressPinService
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.api_responses import (
@@ -80,9 +82,12 @@ def create_address():
     - landmark: Nearby landmark
     - floor_number: Building floor
     - apartment_number: Apartment/unit number
+    - confirm_duplicate: JSON true to save although the point is within the duplicate radius of one of the
+      user's saved addresses (otherwise 409 ADDRESS_POSSIBLE_DUPLICATE with the candidates in details)
     """
     user_id = get_jwt_identity()
     data = request.get_json()
+    confirm_duplicate = take_confirm_flag(data)
 
     # Validate required field - at minimum need full_address OR latitude/longitude
     if not data.get("full_address") and not (data.get("latitude") and data.get("longitude")):
@@ -96,6 +101,14 @@ def create_address():
         return validation_error_response(
             errors={"coordinates": get_translation("api.addresses.error.coordinates_outside_supported_area")}
         )
+
+    assert_not_duplicate(
+        user_id,
+        latitude,
+        longitude,
+        apartment_number=data.get("apartment_number"),
+        confirmed=confirm_duplicate,
+    )
 
     # Check if this should be default
     is_default = data.get("is_default", False)
@@ -143,9 +156,15 @@ def create_address():
 @jwt_required()
 @handle_api_exception
 def update_address(address_id):
-    """Update existing address"""
+    """Update existing address.
+
+    A change of the coordinates goes through the one pin-change path: 400 ADDRESS_PIN_WITH_DRIVER,
+    ADDRESS_PIN_SHARED_PLACE, ADDRESS_PIN_OUTLET or ADDRESS_MOVE_TOO_FAR when the pin may not move, and 409
+    ADDRESS_POSSIBLE_DUPLICATE when the new point is within the duplicate radius of another saved address, unless the
+    body carries `confirm_duplicate: true`. Null coordinates never clear a pin."""
     user_id = get_jwt_identity()
     data = request.get_json()
+    confirm_duplicate = take_confirm_flag(data)
 
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
 
@@ -161,35 +180,13 @@ def update_address(address_id):
                 errors={"coordinates": get_translation("api.addresses.error.coordinates_outside_supported_area")}
             )
 
-    # Update fields with correct mapping
-    if "title" in data:
-        address.title = data["title"]
-    if "full_address" in data:
-        address.full_address = data["full_address"]
-    if "street_address" in data:
-        address.street_address = data["street_address"]
-    if "city" in data:
-        address.city = data["city"]
-    if "district" in data:
-        address.district = data["district"]
-    if "postal_code" in data:
-        address.postal_code = data["postal_code"]
-    if "country" in data:
-        address.country = data["country"]
-    if "latitude" in data:
-        address.latitude = data["latitude"]
-    if "longitude" in data:
-        address.longitude = data["longitude"]
-    if "is_business" in data:
-        address.is_business = data["is_business"]
-    if "delivery_instructions" in data:
-        address.delivery_instructions = data["delivery_instructions"]
-    if "landmark" in data:
-        address.landmark = data["landmark"]
-    if "floor_number" in data:
-        address.floor_number = data["floor_number"]
-    if "apartment_number" in data:
-        address.apartment_number = data["apartment_number"]
+    AddressPinService.edit(
+        address,
+        data,
+        actor=db.session.get(User, int(user_id)),
+        customer_rules=True,
+        confirm_duplicate=confirm_duplicate,
+    )
 
     # Handle default flag
     if "is_default" in data and data["is_default"]:

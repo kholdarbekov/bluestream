@@ -15,6 +15,13 @@ from website_links import open_on_website_url
 
 
 MAX_DISPLAYED_ADDRESSES = 5
+# The longest saved-address label a duplicate-prompt button carries before it is cut with "…".
+DUPLICATE_BUTTON_LABEL_MAX = 24
+
+
+def duplicate_candidate_label(row: Dict[str, Any], language: str) -> str:
+    """How the duplicate prompt, its buttons and its answers name a saved address: the backend's `display_label`."""
+    return row.get('display_label') or i18n.get('telegram.common.address', language)
 
 
 # ---------------------------------------------------------------------------
@@ -1803,6 +1810,51 @@ class ProfileKeyboards:
             ProfileKeyboards._cancel_address_row(language),
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def address_duplicate_prompt(
+        language: str, candidates: Sequence[Dict[str, Any]], *, move_address_id: Optional[int]
+    ) -> InlineKeyboardMarkup:
+        """The duplicate-address prompt: Use each saved address nearby, Move the one the backend offers, Save as new,
+        Cancel.
+
+        `candidates` and `move_address_id` are the backend's 409 `details`, as they came. Move is drawn only when
+        the backend offered it. Each label is cut at DUPLICATE_BUTTON_LABEL_MAX characters so a long title cannot
+        push the button past what Telegram shows.
+        """
+        def label(row: Dict[str, Any]) -> str:
+            text = duplicate_candidate_label(row, language)
+            return text if len(text) <= DUPLICATE_BUTTON_LABEL_MAX else text[:DUPLICATE_BUTTON_LABEL_MAX] + '…'
+
+        buttons = [
+            [{'text': i18n.get('telegram.address.duplicate_use_button', language, label=label(row)),
+              'callback_data': f"adup_use_{row['id']}"}]
+            for row in candidates
+        ]
+        if move_address_id is not None:
+            # Named by the row it moves (the backend offers the nearest, which it sends first); a row missing from
+            # the candidates falls back to the first one, or to the generic word.
+            moved = next((row for row in candidates if row.get('id') == move_address_id), None)
+            moved = moved if moved is not None else (candidates[0] if candidates else {})
+            buttons.append([{'text': i18n.get('telegram.address.duplicate_move_button', language, label=label(moved)),
+                             'callback_data': f"adup_move_{move_address_id}"}])
+        buttons.append([{'text': i18n.get('telegram.address.duplicate_new_button', language),
+                         'callback_data': 'adup_new'}])
+        buttons.append(ProfileKeyboards._cancel_address_row(language))
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def relocation_duplicate(language: str, address_id: int, latitude: float, longitude: float) -> InlineKeyboardMarkup:
+        """The Edit-location duplicate prompt: save the pin here anyway, or Cancel.
+
+        The point rides the button (`reloc_here_<id>_<lat>_<lng>`, six decimals), so the tap needs no state and
+        survives a restart. At most 52 bytes for a 7-digit id and negative coordinates; Telegram's limit is 64.
+        """
+        return KeyboardBuilder.build_inline_keyboard([
+            [{'text': i18n.get('telegram.address.duplicate_save_here_button', language),
+              'callback_data': f"reloc_here_{address_id}_{latitude:.6f}_{longitude:.6f}"}],
+            [{'text': i18n.get('telegram.cancel', language), 'callback_data': 'reloc_cancel'}],
+        ])
 
     @staticmethod
     def address_view_actions(address_id: int, is_default: bool, language: str = 'en') -> InlineKeyboardMarkup:

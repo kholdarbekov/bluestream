@@ -18,6 +18,7 @@ from handlers.profile import (
 )
 from keyboards import MAIN_MENU_KEYS, MenuKeyboards
 from menu_keyboard import MENU_KEYBOARD_STATE_KEY, installed_menu_labels, send_menu_keyboard, wanted_menu_labels
+from tests.integration.address_row_builders import address_row
 from tests.telegram_bot.helpers import DummyCallbackQuery
 from tests.telegram_bot.menu_keyboard_helpers import (
     RU_LABELS, SEEDED, UZ_LABELS, UZ_ROWS, UZ_ROWS_WITHOUT_AQUA_CLUB,
@@ -794,10 +795,25 @@ async def at_the_checkout_pin_prompt(bot, user):
     assert share_button(reply_keyboards(bot)[-1]).get("request_location") is True
 
 
+async def at_the_edit_location_prompt(bot, user):
+    """Edit location on a saved address (spec 2026-11-18 §6.6): a location keyboard whose pin moves that address.
+    Its prompt lives in bot_state only: no form is open and no add-address pin prompt is armed."""
+    await menu_already_installed(bot)
+    bot.backend.addresses[91] = address_row(
+        91, title="Uy", full_address="Chilonzor 12-kv, 5-uy", latitude=41.3111, longitude=69.2797,
+    )
+    await bot.send(user.tap("edit_address_91"))
+    await bot.send(user.tap("edit_location_91"))
+    assert json.loads(bot.database.user["bot_state"])["awaiting_input"] == "relocate_address"
+    assert bot.conversation_state("address_conversation") is None
+    assert share_button(reply_keyboards(bot)[-1]).get("request_location") is True
+
+
 TEMPORARY_KEYBOARD_STEPS = {
     "address-location": at_the_location_step,
     "profile-phone": at_the_contact_step,
     "checkout-pin": at_the_checkout_pin_prompt,
+    "edit-location": at_the_edit_location_prompt,
 }
 
 

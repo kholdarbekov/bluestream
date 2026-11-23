@@ -7,6 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from staff_bot.handlers.base import BaseHandler
+from staff_bot.handlers.operator.manage_address import ManageAddressHandler
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.operator import OperatorKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
@@ -351,6 +352,10 @@ class CreateOrderHandler(BaseHandler):
             # Parse: staff_op_addr_{address_id}
             address_id = int(query.data.split('_')[-1])
             flow['delivery_address_id'] = address_id
+            # Choosing an address ends any add-address detour, including a "Use" tap on its possible-duplicate
+            # screen: that conversation stays parked until its timer, which then finds none of its keys and ends
+            # in silence.
+            ManageAddressHandler.drop_add_address_flow(context)
 
             # Fetch products
             async with api_client as client:

@@ -36,6 +36,18 @@
 .ae-wizard__zone { margin: 12px 0 0; }
 .ae-wizard__zone p { color: var(--ae-ink); }
 .ae-wizard__zone a { font-weight: 700; color: var(--ae-navy); text-decoration: underline; text-underline-offset: 2px; }
+.ae-wizard__locked { margin: 12px 0 0; }
+
+/* The duplicate pane: the saved addresses already at this spot, shown instead of the form. */
+.ae-dup[hidden] { display: none; }
+.ae-dup__title { margin: 0 0 6px; font-size: 18px; color: var(--ae-ink); }
+.ae-dup__body { margin: 0 0 14px; color: var(--ae-ink-soft); line-height: 1.5; }
+.ae-dup__list { display: grid; gap: 10px; }
+.ae-dup__card { padding: 14px; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 12px; }
+.ae-dup__label { margin: 0; font-size: 16px; color: var(--ae-ink); overflow-wrap: anywhere; }
+.ae-dup__line, .ae-dup__distance, .ae-dup__hint { margin: 4px 0 0; font-size: 14px; color: var(--ae-ink-soft); overflow-wrap: anywhere; }
+.ae-dup__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ae-dup__footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
 /* Step 2: name chips and the fields */
 .ae-wizard__chips { margin: 0 0 16px; }

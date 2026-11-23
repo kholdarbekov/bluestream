@@ -56,12 +56,13 @@ KEYS = {
     "ui.orders.change_address_error_invalid",
     "ui.orders.history_address_change",
     "ui.orders.history_branch_change",
+    "ui.orders.history_pin_moved",
 }
 ALL_KEYS = sorted(KEYS)
 
 _LITERAL = re.compile(
     r"""['"](ui\.orders\.(?:change_address[a-z_]*|address_default|delivery_address"""
-    r"""|history_(?:address_change|branch_change)))['"]"""
+    r"""|history_(?:address_change|branch_change|pin_moved)))['"]"""
 )
 
 # The codes ChangeAddressModal explains itself: the Vitest `HANDLED` list, in the Map's order.

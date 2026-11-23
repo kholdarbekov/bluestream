@@ -1362,10 +1362,16 @@ def test_placeholder_sets_are_identical_across_all_three_languages(place_seeds, 
 @pytest.mark.integration
 def test_the_admin_ui_place_copy_interpolates_nowhere_except_the_member_count(place_seeds):
     """Only ``linked_member_count_label`` uses ``{{count}}``; a ``{{x}}``
-    anywhere else in the admin place vocabulary is a typo that renders raw."""
+    anywhere else in the admin place vocabulary is a typo that renders raw.
+
+    The one named exception is the duplicate row's distance, which the panels
+    fill with ``distance``.
+    """
+    interpolating = {"ui.users.place_groups.distance_apart": {"distance"}}
     for key in sorted(_ui_place_keys() | {"ui.users.map.shared_place"}):
         for lang in LANGUAGES:
-            assert not _i18next_placeholders(_row(key, lang)), f"{key}:{lang}"
+            expected = interpolating.get(key, set())
+            assert _i18next_placeholders(_row(key, lang)) == expected, f"{key}:{lang}"
     for lang in LANGUAGES:
         assert _i18next_placeholders(_row("linked_member_count_label", lang)) == {"count"}, lang
 

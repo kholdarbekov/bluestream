@@ -16,6 +16,11 @@
  *   asks the geocoder, and its text replaces the address field only while the field is empty or still holds the
  *   geocoder's previous text. Otherwise the wizard offers it as a suggestion.
  * - The district comes from the reverse-geocode answer's canonical `district_key`, never from matching names here.
+ * - Duplicate-address guard: the body carries `point_source` (map_pin, gps, search; none for a saved point). A 409
+ *   ADDRESS_POSSIBLE_DUPLICATE opens a pane of the customer's nearby saved addresses instead of an error: Use one
+ *   (no request), Move its pin to the new point (POST /auth/addresses/<id>/move), or save anyway; each re-send
+ *   adds `confirm_duplicate: true` to that one request only. The server decides what may move (`move_address_id`)
+ *   and which pins are locked (`pin_move_refusal` on the row); the wizard only shows what it is told.
  */
 (function (window, document, $) {
     'use strict';
@@ -35,6 +40,9 @@
         autoAddress: '',        // the geocoder text the wizard last put into #fullAddress
         autoDistrict: '',       // the district key the wizard last selected on its own
         suggestion: '',
+        L: null,                // the Leaflet the loader returned
+        pointSource: null,      // map_pin | gps | search; null for a point loaded from a saved address
+        pinLocked: false,       // the edited address's pin may not move (row.pin_move_refusal)
         onSaved: null,
         geocodeSeq: 0,
         geo: FALLBACK_GEO
@@ -159,6 +167,7 @@
         if (!window.AEMap || !DATA.leaflet) return Promise.reject(new Error('map helper missing'));
         return window.AEMap.load(DATA.leaflet).then(function (L) {
             var container = el('addressWizardMap');
+            state.L = L;
             if (!state.map) {
                 var center = state.geo.center || FALLBACK_GEO.center;
                 state.map = L.map(container, { fadeAnimation: false, zoomSnap: 0.25 }).setView([center.latitude, center.longitude], 12);
@@ -168,7 +177,7 @@
                 }).addTo(state.map);
                 // A tap on the whole-city view is rough: zoom in on it so the pin can be put on the right door.
                 state.map.on('click', function (event) {
-                    pickPoint(event.latlng.lat, event.latlng.lng, state.map.getZoom() < 15);
+                    pickPoint(event.latlng.lat, event.latlng.lng, state.map.getZoom() < 15, 'map_pin');
                 });
             }
             drawZone(L);
@@ -190,25 +199,27 @@
     }
 
     function placeMarker(lat, lng) {
-        if (!state.map || !window.L) return;
+        if (!state.map || !state.L) return;
         if (state.marker) {
             state.marker.setLatLng([lat, lng]);
             return;
         }
-        state.marker = window.L.marker([lat, lng], { draggable: true, keyboard: true }).addTo(state.map);
+        state.marker = state.L.marker([lat, lng], { draggable: !state.pinLocked, keyboard: true }).addTo(state.map);
         state.marker.on('dragend', function (event) {
+            if (state.pinLocked) return;
             var pos = event.target.getLatLng();
             if (!insideZone(pos.lat, pos.lng)) {
                 if (state.location) state.marker.setLatLng([state.location.lat, state.location.lng]);
                 showZoneAlert(true);
                 return;
             }
-            setPoint(pos.lat, pos.lng, true);
+            setPoint(pos.lat, pos.lng, true, 'map_pin');
         });
     }
 
-    function setPoint(lat, lng, geocode) {
+    function setPoint(lat, lng, geocode, source) {
         state.location = { lat: lat, lng: lng };
+        state.pointSource = source || null;
         setVal('selectedLatitude', lat);
         setVal('selectedLongitude', lng);
         showZoneAlert(false);
@@ -218,12 +229,13 @@
     }
 
     /** A point the customer chose (tap, drag, search, my location): check the zone, pin it, ask the geocoder. */
-    function pickPoint(lat, lng, zoom) {
+    function pickPoint(lat, lng, zoom, source) {
+        if (state.pinLocked) return false;
         if (!insideZone(lat, lng)) {
             showZoneAlert(true);
             return false;
         }
-        setPoint(lat, lng, true);
+        setPoint(lat, lng, true, source);
         if (state.map && zoom) state.map.setView([lat, lng], 16);
         return true;
     }
@@ -275,6 +287,7 @@
     }
 
     async function searchAddress() {
+        if (state.pinLocked) return;
         var query = val('addressSearchInput');
         if (!query) {
             setStatus(T.search_empty, 'warn');
@@ -290,7 +303,7 @@
             });
             var result = await readJson(response);
             if (response.ok && result.success && result.data) {
-                pickPoint(result.data.latitude, result.data.longitude, true);
+                pickPoint(result.data.latitude, result.data.longitude, true, 'search');
             } else {
                 setStatus(response.status === 404 ? T.not_found : (result.message || T.not_found), 'warn');
             }
@@ -302,6 +315,7 @@
     }
 
     function useMyLocation() {
+        if (state.pinLocked) return;
         var button = el('useMyLocationBtn');
         if (!navigator.geolocation) {
             setStatus(T.geo_unsupported, 'warn');
@@ -310,7 +324,7 @@
         setBusy(button, true, T.locating);
         navigator.geolocation.getCurrentPosition(function (position) {
             setBusy(button, false, T.my_location);
-            pickPoint(position.coords.latitude, position.coords.longitude, true);
+            pickPoint(position.coords.latitude, position.coords.longitude, true, 'gps');
         }, function (error) {
             setBusy(button, false, T.my_location);
             setStatus(error && error.code === 1 ? T.geo_denied : T.geo_failed, 'warn');
@@ -327,6 +341,162 @@
             if (span) span.textContent = label;
             else button.textContent = label;
         }
+    }
+
+    // ---- a pin that may not move -------------------------------------------------------------------------------
+    /** `refusal` is the row's pin_move_refusal (WITH_DRIVER, SHARED_PLACE, OUTLET) or empty: read-only map and why. */
+    function setPinLock(refusal) {
+        state.pinLocked = !!refusal;
+        ['searchAddressBtn', 'useMyLocationBtn'].forEach(function (id) {
+            var button = el(id);
+            if (button) button.disabled = state.pinLocked;
+        });
+        var note = el('addressWizardPinLocked');
+        if (!note) return;
+        var reason = refusal ? (T.pin_locked || {})[refusal] : '';
+        note.textContent = reason || '';
+        note.hidden = !reason;
+    }
+
+    // ---- the duplicate pane ------------------------------------------------------------------------------------
+    function setDuplicateVisible(visible) {
+        var pane = el('addressWizardDuplicate');
+        if (!pane) return;
+        pane.hidden = !visible;
+        el('addressWizardForm').hidden = visible;
+        document.querySelector('#addressWizardModal .ae-wizard__stepper').hidden = visible;
+        document.querySelector('#addressWizardModal .modal-footer').hidden = visible;
+        if (!visible) {
+            el('addressWizardDuplicateList').innerHTML = '';
+            el('addressWizardDuplicateActions').innerHTML = '';
+            showDuplicateError('');
+        }
+    }
+
+    function showDuplicateError(message) {
+        var box = el('addressWizardDuplicateError');
+        box.textContent = message || '';
+        box.hidden = !message;
+    }
+
+    function setDuplicateBusy(busy) {
+        document.querySelectorAll('#addressWizardDuplicate button').forEach(function (button) { button.disabled = busy; });
+    }
+
+    function duplicateButton(action, label, className, handler) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ae-btn ' + className;
+        button.setAttribute('data-action', action);
+        button.textContent = label;
+        button.addEventListener('click', handler);
+        return button;
+    }
+
+    function textNode(tag, className, text) {
+        var node = document.createElement(tag);
+        node.className = className;
+        node.textContent = text;
+        return node;
+    }
+
+    function duplicateCard(candidate, moveId, editing) {
+        var card = document.createElement('article');
+        card.className = 'ae-dup__card';
+        card.setAttribute('data-candidate-id', String(candidate.id));
+        card.appendChild(textNode('h4', 'ae-dup__label', candidate.display_label || candidate.title || candidate.full_address || ''));
+        if (candidate.title && candidate.full_address) card.appendChild(textNode('p', 'ae-dup__line', candidate.full_address));
+        card.appendChild(textNode('p', 'ae-dup__distance', format(T.duplicate_distance, { distance: candidate.distance_m })));
+        if (editing) return card;
+        var canMove = candidate.id === moveId;
+        if (canMove) card.appendChild(textNode('p', 'ae-dup__hint', T.duplicate_move_hint));
+        var actions = document.createElement('div');
+        actions.className = 'ae-dup__actions';
+        actions.appendChild(duplicateButton('duplicate-use', T.duplicate_use, 'ae-btn--primary ae-btn--sm', function () { useCandidate(candidate); }));
+        if (canMove) {
+            actions.appendChild(duplicateButton('duplicate-move', T.duplicate_move, 'ae-btn--secondary ae-btn--sm', function () { moveCandidate(candidate); }));
+        }
+        card.appendChild(actions);
+        return card;
+    }
+
+    function showDuplicatePane(details) {
+        details = details || {};
+        var editing = !!state.editingId;
+        var list = el('addressWizardDuplicateList');
+        list.innerHTML = '';
+        (details.candidates || []).forEach(function (candidate) {
+            list.appendChild(duplicateCard(candidate, details.move_address_id, editing));
+        });
+        var actions = el('addressWizardDuplicateActions');
+        actions.innerHTML = '';
+        if (editing) {
+            actions.appendChild(duplicateButton('duplicate-anyway', T.duplicate_save_anyway, 'ae-btn--primary', function () { saveAnyway(); }));
+        } else {
+            actions.appendChild(duplicateButton('duplicate-new', T.duplicate_new, 'ae-btn--secondary', function () { saveAnyway(); }));
+        }
+        // Back to the map step with everything typed kept, so the pin can be fixed (both modes).
+        actions.appendChild(duplicateButton('duplicate-back', T.back, 'ae-btn--ghost', function () {
+            setDuplicateVisible(false);
+            goToStep(1);
+        }));
+        showDuplicateError('');
+        setDuplicateVisible(true);
+        var body = document.querySelector('#addressWizardModal .modal-body');
+        if (body) body.scrollTop = 0;
+        // The Save button that had the focus is hidden now: the pane's title takes it, so it is announced.
+        var title = el('addressWizardDuplicateTitle');
+        if (title) title.focus({ preventScroll: true });
+    }
+
+    /** The customer chose a saved address over the new point: nothing is sent, nothing was saved. */
+    function useCandidate(candidate) {
+        var onSaved = state.onSaved;
+        $('#addressWizardModal').modal('hide');
+        if (onSaved) onSaved(candidate, { created: false });
+    }
+
+    /** One re-send of the save, after the customer saw the duplicates: `send(body)` makes the request, and
+     *  `confirm_duplicate` rides this one body only (payload() never keeps it). */
+    async function sendConfirmed(send, created) {
+        showDuplicateError('');
+        setDuplicateBusy(true);
+        try {
+            var response = await send(JSON.stringify(payload({ confirm_duplicate: true })));
+            var result = await readJson(response);
+            if (!response.ok || result.success === false) {
+                setDuplicateBusy(false);
+                return { failed: result.message || T.save_failed };
+            }
+            finishSave((result.data && result.data.address) || null, created);
+            return { failed: null };
+        } catch (error) {
+            setDuplicateBusy(false);
+            return { failed: T.network_error };
+        }
+    }
+
+    async function saveAnyway() {
+        var created = !state.editingId;
+        var outcome = await sendConfirmed(function (body) {
+            return created
+                ? window.apiRequest('/auth/addresses', { method: 'POST', body: body })
+                : window.apiRequest('/auth/addresses/' + state.editingId, { method: 'PUT', body: body });
+        }, created);
+        if (outcome.failed) showDuplicateError(outcome.failed);
+    }
+
+    async function moveCandidate(candidate) {
+        var outcome = await sendConfirmed(function (body) {
+            return window.apiRequest('/auth/addresses/' + candidate.id + '/move', { method: 'POST', body: body });
+        }, false);
+        if (!outcome.failed) return;
+        // The server refused this move (a pin rule, too far): its words stay on screen and Move is gone.
+        var move = document.querySelector('#addressWizardDuplicate [data-candidate-id="' + candidate.id + '"] [data-action="duplicate-move"]');
+        if (move) move.remove();
+        var hint = document.querySelector('#addressWizardDuplicate [data-candidate-id="' + candidate.id + '"] .ae-dup__hint');
+        if (hint) hint.remove();
+        showDuplicateError(outcome.failed);
     }
 
     // ---- steps -------------------------------------------------------------------------------------------------
@@ -429,7 +599,10 @@
         setStatus('');
         showZoneAlert(false);
         showSuggestion('');
+        setPinLock('');
+        setDuplicateVisible(false);
         state.location = null;
+        state.pointSource = null;
         state.autoAddress = '';
         state.autoDistrict = '';
         state.geocodeSeq++;
@@ -479,6 +652,7 @@
         state.returnFocus = document.activeElement;
         if (address) {
             fillForm(address);
+            setPinLock(address.pin_move_refusal);
         } else if (options.makeDefault) {
             el('isDefault').checked = true;
         }
@@ -487,10 +661,10 @@
         $('#addressWizardModal').modal('show');
     }
 
-    function payload() {
+    function payload(extra) {
         // Optional fields left empty are sent as null, so an edit clears them instead of storing ''.
         function opt(id) { return val(id) || null; }
-        return {
+        return Object.assign({
             title: val('addressTitle'),
             full_address: val('fullAddress'),
             street_address: opt('streetAddress'),
@@ -504,8 +678,18 @@
             latitude: state.location.lat,
             longitude: state.location.lng,
             is_default: el('isDefault').checked,
-            is_business: el('isBusiness').checked
-        };
+            is_business: el('isBusiness').checked,
+            point_source: state.pointSource
+        }, extra || {});
+    }
+
+    /** The usual end of a save: close, tell the customer, tell the page (the 'ae:address-saved' event and onSaved). */
+    function finishSave(saved, created) {
+        var onSaved = state.onSaved;
+        $('#addressWizardModal').modal('hide');
+        notify(T.saved, 'success');
+        document.dispatchEvent(new CustomEvent('ae:address-saved', { detail: { address: saved, created: created } }));
+        if (onSaved) onSaved(saved, { created: created });
     }
 
     async function save() {
@@ -521,16 +705,15 @@
                 ? await window.apiRequest('/auth/addresses', { method: 'POST', body: body })
                 : await window.apiRequest('/auth/addresses/' + state.editingId, { method: 'PUT', body: body });
             var result = await readJson(response);
+            if (response.status === 409 && result.error_code === 'ADDRESS_POSSIBLE_DUPLICATE') {
+                showDuplicatePane(result.details);
+                return;
+            }
             if (!response.ok || result.success === false) {
                 notify(result.message || T.save_failed, 'error');
                 return;
             }
-            var saved = (result.data && result.data.address) || null;
-            var onSaved = state.onSaved;
-            $('#addressWizardModal').modal('hide');
-            notify(T.saved, 'success');
-            document.dispatchEvent(new CustomEvent('ae:address-saved', { detail: { address: saved, created: created } }));
-            if (onSaved) onSaved(saved, { created: created });
+            finishSave((result.data && result.data.address) || null, created);
         } catch (error) {
             notify(T.network_error, 'error');
         } finally {

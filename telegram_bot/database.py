@@ -171,8 +171,10 @@ class BotUserRepository:
         """
         return await self.disarm(telegram_id, *awaiting_inputs)
 
-    async def arm_awaiting_input(self, telegram_id: int, awaiting_input: str, **companions) -> None:
-        """Arm one flow, carrying preserved keys (`_PRESERVED_KEYS`) forward.
+    async def arm_awaiting_input(self, telegram_id: int, awaiting_input: str, **companions) -> Optional[str]:
+        """Arm one flow, carrying preserved keys (`_PRESERVED_KEYS`) forward. Returns the prompt it replaced (the
+        `awaiting_input` armed before), or None, for a caller that must undo what that prompt put on screen
+        (`BaseHandler._arm_awaiting_input`).
 
         `update_user_state` is a whole-document replace, and every flow arms by
         writing a fresh document — e.g. `handlers/support.py`'s "Report an
@@ -201,6 +203,7 @@ class BotUserRepository:
         await self.update_user_state(
             telegram_id, {**preserved, 'awaiting_input': awaiting_input, **companions}
         )
+        return state.get('awaiting_input')
 
     async def remember_pin_prompt(self, telegram_id: int, armed_at: str) -> None:
         """Record durably that the bot asked THIS customer for a pin.

@@ -84,6 +84,7 @@ PROMPTS_LEFT_BY_EXIT = (
     "edit_profile_birthday",
     "edit_address_title",
     "edit_address_instructions",
+    "relocate_address",
 )
 
 # --- Each flow's `context.user_data` keys: the one list per flow -------------
@@ -94,6 +95,8 @@ ADDRESS_FLOW_KEYS = (
     'address_flow_origin',
     'awaiting_location',
     'awaiting_location_at',
+    # The duplicate prompt on screen: the step it interrupted and the candidates it offers.
+    'address_duplicate_prompt',
 )
 # When the `PHONE_VERIFY_OTP` step's SMS went out. An exit carries it into the
 # durable `phone_otp` prompt (`leave_all_flows`), so leaving never extends a code.
@@ -143,8 +146,12 @@ END_FLOW_HANDLER = _EndFlowHandler(_end_flow)
 _SELF_INSTALLING = CommandHandler(SELF_INSTALLING_COMMANDS, _no_op, filters=filters.UpdateType.MESSAGE)
 
 
-async def leave_all_flows(update, context) -> None:
+async def leave_all_flows(update, context, *, keyboard_follows: bool = False) -> None:
     """End every unfinished flow for this chat except signup. Never raises.
+
+    `keyboard_follows` is for a caller that sends its own reply keyboard right
+    after (Edit location's location keyboard): step 5 then sends no bottom
+    keyboard that the caller's would replace a moment later.
 
     The order is load-bearing:
 
@@ -160,7 +167,8 @@ async def leave_all_flows(update, context) -> None:
        conversations but leaves `user_data` and `bot_state` behind.
     5. Put the bottom keyboard back when a share-location or share-contact
        keyboard was up (`_share_keyboard_up`, read before any teardown clears
-       the pin prompt it reads), unless the gesture installs it itself.
+       the pin prompt it reads), unless the gesture installs it itself or the
+       caller's own keyboard follows (`keyboard_follows`).
 
     It never raises `ApplicationHandlerStop` and never re-dispatches: the
     update walks on to group 0, which draws the destination.
@@ -180,7 +188,7 @@ async def leave_all_flows(update, context) -> None:
             state = conv._conversations.get(key)
             if state is not None:
                 open_flows.append((conv, key, state))
-    share_keyboard_up = await _share_keyboard_up(context, telegram_id, open_flows)
+    share_keyboard_up = not keyboard_follows and await _share_keyboard_up(context, telegram_id, open_flows)
 
     for conv, key, state in open_flows:
         try:
@@ -206,7 +214,7 @@ async def leave_all_flows(update, context) -> None:
         logger.warning("Flow exit could not clear the address flow for %s: %s", telegram_id, error)
 
     if share_keyboard_up and _SELF_INSTALLING.check_update(update) in (None, False):
-        await _put_the_menu_back(update, context, telegram_id)
+        await put_the_menu_back(update, context, telegram_id)
 
 
 async def _share_keyboard_up(context, telegram_id: int, open_flows) -> bool:
@@ -218,7 +226,10 @@ async def _share_keyboard_up(context, telegram_id: int, open_flows) -> bool:
       send it, though Enter manually leaves the pin prompt armed;
     * no address form open, with a pin prompt armed (`utils.arm_location_request`,
       in `user_data` or its durable twin in bot_state): the zero-address
-      checkout prompt, which starts no form, or a form a restart emptied.
+      checkout prompt, which starts no form, or a form a restart emptied;
+    * Edit location's prompt armed (`awaiting_input == 'relocate_address'` in
+      bot_state, `ProfileHandlers.edit_location_handler`). It is durable only,
+      and read here before `abandon_prompts` disarms it.
 
     Signup never gets here (`leave_all_flows` returns first while it is open).
     A failed read answers False: the destination is still drawn.
@@ -234,15 +245,18 @@ async def _share_keyboard_up(context, telegram_id: int, open_flows) -> bool:
         if context.user_data.get('awaiting_location'):
             return True
         state = await _user_repository.get_user_state(telegram_id)
-        return bool(state.get('awaiting_location_at'))
+        return bool(state.get('awaiting_location_at')) or state.get('awaiting_input') == 'relocate_address'
     except Exception as error:
         logger.warning("Flow exit could not read the share keyboard for %s: %s", telegram_id, error)
         return False
 
 
-async def _put_the_menu_back(update, context, telegram_id: int) -> None:
+async def put_the_menu_back(update, context, telegram_id: int) -> None:
     """Send the bottom keyboard, silently, through its one installer. `send_menu_keyboard`
-    keeps its own gate: a chat without a phone gets the share keyboard taken down instead."""
+    keeps its own gate: a chat without a phone gets the share keyboard taken down instead.
+
+    Public for the screens that end Edit location's prompt without a keyboard of their own
+    (`ProfileHandlers._leave_address_edit_prompts`). Never raises."""
     try:
         from menu_keyboard import send_menu_keyboard  # lazy: menu_keyboard imports this module
 

@@ -149,7 +149,6 @@ UZ = {
     "telegram.address.edit_location_button": "Joylashuvi",
     "telegram.address.edit_details_button": "Tafsilotlari",
     "telegram.address.edit_instructions_button": "Izohlari",
-    "telegram.address.delete_readd_button": "O'chirib qayta qo'shish",
     "telegram.address.edit_title_prompt": "Hozirgi nom: {current_title}. Yangi nom yozing",
     "telegram.address.title_updated_success": "Nom yangilandi: {title}",
     "telegram.address.title_too_short": "Nom juda qisqa",
@@ -160,9 +159,6 @@ UZ = {
     "telegram.address.instructions_too_long": "Izoh juda uzun",
     "telegram.address.none_value": "yo'q",
     "telegram.address.no_addresses_to_delete": "O'chirish uchun manzil yo'q",
-    "telegram.address.location_edit_not_supported": (
-        "Joylashuvni o'zgartirib bo'lmaydi, manzilni o'chirib qayta qo'shing"
-    ),
     "telegram.address.details_edit_coming_soon": "Tafsilotlarni tahrirlash tez orada",
 }
 
@@ -394,6 +390,7 @@ async def test_typing_an_address_by_hand_saves_it_with_exactly_the_columns_the_c
         "apartment_number": "45",
         "floor_number": "9",
         "delivery_instructions": "domofon 45",
+        "point_source": "typed",
     }
     assert bot.telegram.last_shown().text == UZ["telegram.address.saved_successfully"]
 
@@ -458,6 +455,7 @@ async def test_skipping_the_building_never_asks_for_an_apartment_or_a_floor(bot,
         "district": DISTRICT_KEY,
         "latitude": GEOCODED_LAT,
         "longitude": GEOCODED_LNG,
+        "point_source": "typed",
     }
     assert geocode_requests(bot) == [
         {
@@ -1523,23 +1521,22 @@ async def test_the_delete_picker_says_so_instead_of_opening_an_empty_list(bot, u
     )
 
 
-async def test_the_unimplemented_edit_buttons_explain_themselves_instead_of_hanging(
+async def test_the_unimplemented_details_button_explains_itself_instead_of_hanging(
     bot, user, address_book
 ):
-    """Two of the six buttons on the edit menu — Location and Details — have no
-    implementation behind them. A callback that runs no code leaves Telegram's
-    loading spinner up until it times out, which reads as a frozen bot and is
-    the exact symptom `callback_dedup` was written to chase.
+    """One of the six buttons on the edit menu — Details — has no
+    implementation behind it (Location moves the pin now:
+    tests/telegram_bot/test_edit_location_journey.py). A callback that runs no
+    code leaves Telegram's loading spinner up until it times out, which reads
+    as a frozen bot and is the exact symptom `callback_dedup` was written to
+    chase.
 
     So the contract for an unimplemented button is: answer the tap with an
     explanation, and leave the menu on screen so the customer can pick one of
-    the four buttons that DO work.
+    the buttons that DO work.
     """
     await bot.send(user.tap("edit_address_901"))
     bot.telegram.reset()
-
-    await bot.send(user.tap("edit_location_901"))
-    assert UZ["telegram.address.location_edit_not_supported"] in answered_toasts(bot)
 
     await bot.send(user.tap("edit_details_901"))
     assert UZ["telegram.address.details_edit_coming_soon"] in answered_toasts(bot)

@@ -9,6 +9,7 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from pydantic import ValidationError as PydanticValidationError
 
+from business_app.services.address_guard_service import take_confirm_flag
 from business_app.services.driver_expense.claims import DriverExpenseClaims
 from business_app.services.order_schedule_service import OrderScheduleService
 from business_app.services.staff_service import StaffService
@@ -1095,11 +1096,15 @@ def get_recent_operator_orders():
 @jwt_required()
 @require_staff_roles("operator")
 def add_client_address(user_id):
-    """Add address for a client"""
+    """Add address for a client.
+
+    A point within the duplicate radius of one of the client's saved addresses is answered 409
+    ADDRESS_POSSIBLE_DUPLICATE (candidates in `details`), unless the body carries `confirm_duplicate: true`."""
     data = request.get_json()
     if not data:
         raise ValidationError("Request body is required", error_code="STAFF_REQUEST_BODY_REQUIRED")
-    address = StaffService.add_client_address(user_id, data)
+    confirm_duplicate = take_confirm_flag(data)
+    address = StaffService.add_client_address(user_id, data, confirm_duplicate=confirm_duplicate)
 
     # The one address payload every address endpoint answers (title, display_label, ...): no staff-only rename.
     return success_response(address.to_dict(), status_code=201)

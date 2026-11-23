@@ -112,6 +112,12 @@ All API responses follow a consistent format:
 | `PAYMENT_FAILED` | Payment processing failed |
 | `INSUFFICIENT_STOCK` | Product out of stock |
 | `DELIVERY_UNAVAILABLE` | Delivery not available to address |
+| `ADDRESS_POSSIBLE_DUPLICATE` | 409. A saved address of the customer is within the duplicate radius of the new point. `details`: `move_address_id` (int or null) and `candidates` (up to 3 addresses, each with `distance_m`). Resend with `confirm_duplicate: true` (JSON `true` only) to save it as a new place |
+| `ADDRESS_PIN_WITH_DRIVER` | 400. The address has an order the driver already carries, so its pin cannot move. `details`: `reason` `WITH_DRIVER`, `order_number` |
+| `ADDRESS_PIN_SHARED_PLACE` | 400. The address is grouped with another customer's, so only staff move its pin. `details`: `reason` `SHARED_PLACE` |
+| `ADDRESS_PIN_OUTLET` | 400. The address belongs to a business outlet, so only staff move its pin. `details`: `reason` `OUTLET` |
+| `ADDRESS_MOVE_TOO_FAR` | 400. An address with order history moves at most `ADDRESS_MOVE_MAX_M` (150 m by default). `details`: `reason` `TOO_FAR` |
+| `ADDRESS_MOVE_NEEDS_PIN` | 400. A move request without a placed pin |
 
 ## API Endpoints
 

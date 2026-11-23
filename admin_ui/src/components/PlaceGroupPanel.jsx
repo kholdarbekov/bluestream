@@ -220,18 +220,34 @@ export default function PlaceGroupPanel({ user, onGroupChanged }) {
                 </Button>,
               ]}
             >
-              <Space direction="vertical" size={0}>
-                <Text>
-                  {suggestion.members
-                    .map((member) => [member.first_name, member.last_name].filter(Boolean).join(' '))
-                    .join(' · ')}
-                </Text>
-                <Text type="secondary">
-                  {suggestion.members[0]?.full_address} ·{' '}
-                  {t('ui.users.place_groups.distinct_customers', 'customers')}:{' '}
-                  {suggestion.distinct_customer_count}
-                </Text>
-              </Space>
+              {suggestion.kind === 'same_customer' ? (
+                <Space direction="vertical" size={0}>
+                  <Text strong>
+                    {t('ui.users.place_groups.kind_same_customer', 'Possible duplicate address')}
+                  </Text>
+                  <Text>
+                    {suggestion.members.map((member) => member.display_label).join(' · ')}
+                  </Text>
+                  <Text type="secondary">
+                    {t('ui.users.place_groups.distance_apart', '~{{distance}} m apart', {
+                      distance: suggestion.distance_m,
+                    })}
+                  </Text>
+                </Space>
+              ) : (
+                <Space direction="vertical" size={0}>
+                  <Text>
+                    {suggestion.members
+                      .map((member) => [member.first_name, member.last_name].filter(Boolean).join(' '))
+                      .join(' · ')}
+                  </Text>
+                  <Text type="secondary">
+                    {suggestion.members[0]?.full_address} ·{' '}
+                    {t('ui.users.place_groups.distinct_customers', 'customers')}:{' '}
+                    {suggestion.distinct_customer_count}
+                  </Text>
+                </Space>
+              )}
             </List.Item>
           )}
         />

@@ -1750,10 +1750,29 @@ class AuthService:
         """Get all addresses for a user."""
         return UserAddress.query.filter_by(user_id=user_id).all()
 
-    def add_user_address(self, user_id: int, data: Dict[str, Any]) -> UserAddress:
-        """Create address for a user."""
+    def add_user_address(
+        self,
+        user_id: int,
+        data: Dict[str, Any],
+        *,
+        confirm_duplicate: bool = False,
+        point_source: Optional[str] = None,
+    ) -> UserAddress:
+        """Create address for a user. A point within the duplicate radius of one of their saved addresses is
+        refused with a 409 naming it, unless `confirm_duplicate`; `point_source` decides whether a move of the
+        nearest one is offered (only a pin the customer placed)."""
+        from business_app.services.address_guard_service import assert_not_duplicate, is_placed_pin
+
         # Enforce the delivery-zone SSOT before persisting any coordinate.
         ensure_within_delivery_zone(data.get("latitude"), data.get("longitude"))
+        assert_not_duplicate(
+            user_id,
+            data.get("latitude"),
+            data.get("longitude"),
+            apartment_number=data.get("apartment_number"),
+            confirmed=confirm_duplicate,
+            offer_move=is_placed_pin(point_source, data.get("latitude"), data.get("longitude")),
+        )
 
         if data.get("is_default", False):
             UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
@@ -1780,36 +1799,26 @@ class AuthService:
         db.session.commit()
         return address
 
-    def update_user_address(self, user_id: int, address_id: int, data: Dict[str, Any]) -> UserAddress:
-        """Update address fields for a user-owned address."""
+    def update_user_address(
+        self, user_id: int, address_id: int, data: Dict[str, Any], *, confirm_duplicate: bool = False
+    ) -> UserAddress:
+        """Update address fields for a user-owned address. A change of the pin goes through the one pin-change path
+        (zone, the customer pin rules, the duplicate question, the open orders redirected); every other edit is the
+        plain write, which never carries a point."""
+        from business_app.services.address_pin_service import CUSTOMER_UPDATABLE_FIELDS, AddressPinService
+
         address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
         if not address:
             raise NotFoundError(get_translation("api.auth.address_not_found"))
 
-        # Enforce the delivery-zone SSOT when coordinates are being changed.
-        if "latitude" in data or "longitude" in data:
-            new_lat = data["latitude"] if "latitude" in data else address.latitude
-            new_lng = data["longitude"] if "longitude" in data else address.longitude
-            ensure_within_delivery_zone(new_lat, new_lng)
-
-        updatable_fields = (
-            "title",
-            "full_address",
-            "street_address",
-            "city",
-            "district",
-            "postal_code",
-            "latitude",
-            "longitude",
-            "delivery_instructions",
-            "landmark",
-            "floor_number",
-            "apartment_number",
-            "is_business",
+        AddressPinService.edit(
+            address,
+            data,
+            actor=db.session.get(User, user_id),
+            customer_rules=True,
+            confirm_duplicate=confirm_duplicate,
+            fields=CUSTOMER_UPDATABLE_FIELDS,
         )
-        for field in updatable_fields:
-            if field in data:
-                setattr(address, field, data[field])
 
         # The same "one default per user" rule as add_user_address / set_default_user_address: the website's
         # address wizard sends is_default on edit, which used to be dropped silently. False never un-defaults
@@ -1818,6 +1827,34 @@ class AuthService:
             UserAddress.query.filter_by(user_id=user_id, is_default=True).update({"is_default": False})
             address.is_default = True
 
+        db.session.commit()
+        return address
+
+    def move_user_address(
+        self,
+        user_id: int,
+        address_id: int,
+        data: Dict[str, Any],
+        *,
+        point_source: Optional[str],
+        confirm_duplicate: bool = False,
+    ) -> UserAddress:
+        """Move a saved address to a pin the customer placed (spec §6.3): the bot's and the website's Move and the
+        bot's Edit location. The address keeps its id; `AddressPinService.move` decides what else a move writes, and
+        sends a pin that really moves through the one pin-change path (zone, the customer pin rules, the duplicate
+        question, the open orders redirected). A point within the tolerance moves, records and sends nothing."""
+        from business_app.services.address_guard_service import is_placed_pin
+        from business_app.services.address_pin_service import AddressPinService
+
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            raise NotFoundError(get_translation("api.auth.address_not_found"))
+        if not is_placed_pin(point_source, data.get("latitude"), data.get("longitude")):
+            raise ValidationError(
+                get_translation("api.addresses.error.move_needs_pin"), error_code="ADDRESS_MOVE_NEEDS_PIN"
+            )
+
+        AddressPinService.move(address, data, actor=db.session.get(User, user_id), confirm_duplicate=confirm_duplicate)
         db.session.commit()
         return address
 

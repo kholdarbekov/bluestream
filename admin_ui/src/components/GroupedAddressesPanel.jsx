@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Card, Drawer, Input, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Drawer, Input, Segmented, Space, Table, Tag, Typography, message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
@@ -49,6 +49,8 @@ export default function GroupedAddressesPanel() {
   const [action, setAction] = useState(null);
   // The place group open in the edit drawer (null = closed).
   const [editingGroupId, setEditingGroupId] = useState(null);
+  // 'all' sends no `kind`; the backend then returns both kinds of suggestion.
+  const [kindFilter, setKindFilter] = useState('all');
 
   const groupsQuery = useQuery({
     queryKey: ['placeGroupsList', page, search],
@@ -60,8 +62,12 @@ export default function GroupedAddressesPanel() {
   // The un-anchored clusterer runs over the whole estate on this call, which is
   // why the tab is mounted lazily by Users.js rather than on every page load.
   const suggestionsQuery = useQuery({
-    queryKey: ['placeGroupSuggestionsGlobal', SUGGESTION_LIMIT],
-    queryFn: () => adminService.getGlobalPlaceGroupSuggestions({ limit: SUGGESTION_LIMIT }),
+    queryKey: ['placeGroupSuggestionsGlobal', SUGGESTION_LIMIT, kindFilter],
+    queryFn: () =>
+      adminService.getGlobalPlaceGroupSuggestions({
+        limit: SUGGESTION_LIMIT,
+        ...(kindFilter === 'all' ? {} : { kind: kindFilter }),
+      }),
   });
   const suggestions = suggestionsQuery.data?.data || [];
 
@@ -203,21 +209,41 @@ export default function GroupedAddressesPanel() {
     {
       title: t('ui.users.grouped_addresses.col_candidate', 'Possible same place'),
       key: 'members',
-      render: (_, suggestion) => (
-        <Space direction="vertical" size={0}>
-          {(suggestion.members || []).map((member) => (
-            <Text key={member.address_id}>
-              {[member.first_name, member.last_name].filter(Boolean).join(' ')}
-            </Text>
-          ))}
-          <Text type="secondary">{suggestion.members?.[0]?.full_address}</Text>
-        </Space>
-      ),
+      render: (_, suggestion) => {
+        const members = suggestion.members || [];
+        if (suggestion.kind === 'same_customer') {
+          return (
+            <Space direction="vertical" size={0}>
+              <Text strong>
+                {t('ui.users.place_groups.kind_same_customer', 'Possible duplicate address')}
+              </Text>
+              <Text>{members.map((member) => member.display_label).join(' · ')}</Text>
+              <Text type="secondary">
+                {t('ui.users.place_groups.distance_apart', '~{{distance}} m apart', {
+                  distance: suggestion.distance_m,
+                })}
+              </Text>
+            </Space>
+          );
+        }
+        return (
+          <Space direction="vertical" size={0}>
+            {members.map((member) => (
+              <Text key={member.address_id}>
+                {[member.first_name, member.last_name].filter(Boolean).join(' ')}
+              </Text>
+            ))}
+            <Text type="secondary">{members[0]?.full_address}</Text>
+          </Space>
+        );
+      },
     },
     {
       title: t('ui.users.grouped_addresses.col_distinct_customers', 'Distinct customers'),
       dataIndex: 'distinct_customer_count',
       key: 'distinct_customer_count',
+      // A duplicate pair is one customer by definition; its row says "N m apart" instead.
+      render: (count, suggestion) => (suggestion.kind === 'same_customer' ? null : count),
     },
     {
       title: t('ui.users.grouped_addresses.col_actions', 'Actions'),
@@ -282,6 +308,22 @@ export default function GroupedAddressesPanel() {
             'Suggestions are never grouped automatically. Each one needs an admin confirmation with a reason.'
           )}
         </Text>
+        <Segmented
+          style={{ display: 'block', width: 'fit-content', marginTop: 8 }}
+          value={kindFilter}
+          onChange={setKindFilter}
+          options={[
+            { value: 'all', label: t('ui.users.grouped_addresses.filter_all', 'All') },
+            {
+              value: 'shared_place',
+              label: t('ui.users.grouped_addresses.filter_shared_place', 'Shared places'),
+            },
+            {
+              value: 'same_customer',
+              label: t('ui.users.grouped_addresses.filter_duplicates', 'Possible duplicates'),
+            },
+          ]}
+        />
         <Table
           rowKey={(suggestion) => (suggestion.address_ids || []).join('-')}
           size="small"

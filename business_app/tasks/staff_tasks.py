@@ -421,14 +421,25 @@ def push_delivery_failed(self, delivery_id: int, attempts: int, telegram_id: int
     return {"success": True, "delivery_id": delivery_id}
 
 
+def _pin_moved_since(address, payload: dict) -> bool:
+    """Whether the address's pin is no longer the point the alert names (`lat`/`lng`): the guard's own
+    `pin_changed`, and a point missing on either side counts as moved."""
+    from business_app.services.address_guard_service import as_point, pin_changed
+
+    sent = {"latitude": payload["lat"], "longitude": payload.get("lng")}
+    return address is None or as_point(sent["latitude"], sent["longitude"]) is None or pin_changed(address, sent)
+
+
 @shared_task(name="staff.notify_order_address_changed", bind=True, max_retries=3, default_retry_delay=60)
 def notify_order_address_changed(self, delivery_id: int, driver_id: int, payload: dict) -> dict:
-    """Tell the driver on a stop that an admin changed its address (the only loud push of the change).
+    """Tell the driver on a stop that its address changed (the only loud push of the change): an admin
+    moved the order to another address, or the address's own pin moved.
 
     Re-read on every run, retries included. When the delivery is gone, another driver holds the stop
-    now, or the order's address is no longer the one this alert was built for, the alert is stale: the
-    newer change queued its own. A stale run sends nothing and is not retried. The event id is built
-    from the task id, which a retry keeps, so the staff bot's dedup collapses a send that did land.
+    now, or the order's address or that address's pin is no longer the one this alert was built for,
+    the alert is stale: the newer change queued its own. A stale run sends nothing and is not retried.
+    The event id is built from the task id, which a retry keeps, so the staff bot's dedup collapses a
+    send that did land.
     """
     from business_app.models.delivery import Delivery
     from business_app.services.order_schedule_service import OrderScheduleService
@@ -439,6 +450,7 @@ def notify_order_address_changed(self, delivery_id: int, driver_id: int, payload
         order is None
         or OrderScheduleService.driver_holding_stop(delivery) != driver_id
         or order.delivery_address_id != payload["delivery_address_id"]
+        or ("lat" in payload and _pin_moved_since(order.delivery_address, payload))
     ):
         logger.info("order-address-changed alert for delivery %s not sent: it is stale", delivery_id)
         return {"success": False, "reason": "stale", "delivery_id": delivery_id}

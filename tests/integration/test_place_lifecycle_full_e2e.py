@@ -2135,21 +2135,28 @@ class TestMovingBetweenPlaces:
 # =========================================================================== #
 
 
-class TestACustomerCanRePointAPlaceMemberAddress:
-    """PINS THE ACTUAL OUTCOME (reported, not fixed). A fix must change this.
+class TestACustomerIsRefusedButStaffCanStillRePointAPlaceMemberAddress:
+    """PINS THE CURRENT OUTCOME of re-pointing a place member's address.
 
-    Every OTHER route into and out of a place — create, join, leave, split,
-    dissolve, delete — is admin-only, reason-mandatory and audited, precisely
-    because it changes who can physically reach a shared pool.
-    `PUT /api/v1/addresses/<id>` (api/addresses.py:145) changes exactly the same
-    thing: it rewrites the coordinates and the street of a place-group MEMBER
-    while leaving `address_group_id` untouched. It touches no place fence, takes
-    no reason and writes no `CustomerLinkEvent`. It is customer-driven, it is two
-    taps, and it is the only way a stranger's building can end up inside a place
-    group without an admin ever acting.
+    Every route into and out of a place (create, join, leave, split, dissolve,
+    delete) is admin-only, reason-mandatory and audited, because it changes who
+    can physically reach a shared pool. Re-pointing a member's pin rewrites the
+    same thing while leaving `address_group_id` untouched.
 
-    Asserted as one consequence set rather than six tests, because the point is
-    that they all follow from the one unguarded write."""
+    Customer path (`PUT /api/v1/addresses/<id>`): REFUSED by the duplicate
+    guard with 400 ADDRESS_PIN_SHARED_PLACE, nothing written. This is the fix.
+
+    Staff path (`PUT /api/v1/admin/users/<uid>/addresses/<id>`): still allowed,
+    by design, and the address KEEPS POOLING with its place group after the
+    move (it stays a member across town).
+
+    Assertion 6 (no `CustomerLinkEvent` on a staff edit) is a GAP STILL BEING
+    REPORTED, not the intended outcome: a staff move of a place member leaves no
+    place-level audit row and the admin place panel shows no marker. It is
+    pinned so a later fix has to change it deliberately.
+
+    Asserted as one consequence set rather than several tests, because they all
+    follow from the one staff write."""
 
     ELSEWHERE = (41.3300, 69.2000)          # ~7 km from the office, still in-zone
 
@@ -2166,7 +2173,7 @@ class TestACustomerCanRePointAPlaceMemberAddress:
         assert _place(a1.id) == Decimal("12.00")
         return admin, ua, ub, a1, a2
 
-    def test_a_member_address_can_be_moved_ACROSS_TOWN_and_keeps_pooling_with_its_coworker(
+    def test_customer_is_refused_and_a_staff_move_across_town_keeps_pooling_with_the_coworker(
         self, db, client, app
     ):
         admin, ua, ub, a1, a2 = self._office(db)
@@ -2174,15 +2181,27 @@ class TestACustomerCanRePointAPlaceMemberAddress:
         events_before = CustomerLinkEvent.query.count()
         lat, lng = self.ELSEWHERE
 
+        body = {
+            "title": "Home",
+            "full_address": "Chilanzar 12-14, Tashkent",
+            "latitude": lat,
+            "longitude": lng,
+        }
+        # Duplicate guard: a customer can no longer re-point a place member's pin
+        # (400 ADDRESS_PIN_SHARED_PLACE, nothing written). Staff still can, so the
+        # move below goes through the admin route, which is the real way it happens.
+        refused = client.put(
+            f"/api/v1/addresses/{a1.id}", json=body, headers=_headers(app, ua)
+        )
+        assert refused.status_code == 400, refused.get_json()
+        assert refused.get_json()["error_code"] == "ADDRESS_PIN_SHARED_PLACE"
+        db.session.expire_all()
+        assert float(UserAddress.query.get(a1.id).latitude) == 41.31
+
         response = client.put(
-            f"/api/v1/addresses/{a1.id}",
-            json={
-                "title": "Home",
-                "full_address": "Chilanzar 12-14, Tashkent",
-                "latitude": lat,
-                "longitude": lng,
-            },
-            headers=_headers(app, ua),
+            f"/api/v1/admin/users/{ua.id}/addresses/{a1.id}",
+            json=body,
+            headers=_headers(app, admin, role="admin"),
         )
 
         # 1. It just works, and the address really moved.
@@ -2232,7 +2251,7 @@ class TestACustomerCanRePointAPlaceMemberAddress:
         ]
         assert detail["place_balance"] == Decimal("10.00")
 
-        # 6. Nothing anywhere recorded that a place member changed building.
+        # 6. GAP (still reported): nothing recorded that a place member changed building.
         assert CustomerLinkEvent.query.count() == events_before
         assert [
             e for e in _events(group_id) if "Chilanzar" in (e.get("reason") or "")

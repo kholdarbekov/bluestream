@@ -17,7 +17,11 @@
     document 'ae:address-saved' event                     detail {address, created}; fired on every save.
     AddressWizard.ready                                   Promise of the geo config (center, polygon, districts).
     AddressWizard.districtName(key)                       localized district name, '' when unknown.
-  Saving: POST /auth/addresses or PUT /auth/addresses/<id>; the backend re-checks the delivery zone.
+  Saving: POST /auth/addresses or PUT /auth/addresses/<id>; the backend re-checks the delivery zone. The body carries
+  `point_source`. A 409 ADDRESS_POSSIBLE_DUPLICATE opens #addressWizardDuplicate (its title takes the focus): Use a saved
+  address (onSaved gets that row with {created: false}, no request), Move its pin (POST /auth/addresses/<id>/move), save
+  anyway (`confirm_duplicate: true`) or Back to the map step with the form kept. A row with `pin_move_refusal` opens
+  with a read-only map and the reason.
 #}
 {% from "frontend/macros/page_data.html" import render_page_data %}
 
@@ -90,6 +94,8 @@
                             <i class="far fa-hand-pointer" aria-hidden="true"></i>
                             <span>{{ 'web.checkout.wizard.map_hint'|t }}</span>
                         </p>
+
+                        <p id="addressWizardPinLocked" class="ae-alert ae-alert--warn ae-wizard__locked" role="status" hidden></p>
 
                         <p id="locationStatus" class="ae-wizard__status d-none" role="status" aria-live="polite">
                             <i class="far fa-check-circle" aria-hidden="true"></i><span id="locationStatusText"></span>
@@ -181,6 +187,15 @@
                         </div>
                     </section>
                 </form>
+
+                {# Shown instead of the form when the save found a saved address at this spot (filled in by address-wizard.js) #}
+                <section id="addressWizardDuplicate" class="ae-dup" aria-labelledby="addressWizardDuplicateTitle" hidden>
+                    <h3 class="ae-dup__title" id="addressWizardDuplicateTitle" tabindex="-1">{{ 'web.checkout.wizard.duplicate_title'|t }}</h3>
+                    <p class="ae-dup__body">{{ 'web.checkout.wizard.duplicate_body'|t }}</p>
+                    <div class="ae-dup__list" id="addressWizardDuplicateList"></div>
+                    <p class="ae-field__error" id="addressWizardDuplicateError" role="alert" hidden></p>
+                    <div class="ae-dup__footer" id="addressWizardDuplicateActions"></div>
+                </section>
             </div>
             <div class="modal-footer ae-wizard__footer">
                 <button type="button" id="wizardPrevBtn" class="ae-btn ae-btn--ghost ae-wizard__back" hidden>
@@ -223,6 +238,20 @@
         'saved': 'web.checkout.wizard.saved'|t,
         'save_failed': 'web.checkout.wizard.save_failed'|t,
         'network_error': 'web.checkout.addr.network_error'|t,
+        'back': 'web.checkout.wizard.back'|t,
+        'duplicate_title': 'web.checkout.wizard.duplicate_title'|t,
+        'duplicate_body': 'web.checkout.wizard.duplicate_body'|t,
+        'duplicate_distance': 'web.checkout.wizard.duplicate_distance'|t,
+        'duplicate_use': 'web.checkout.wizard.duplicate_use'|t,
+        'duplicate_move': 'web.checkout.wizard.duplicate_move'|t,
+        'duplicate_move_hint': 'web.checkout.wizard.duplicate_move_hint'|t,
+        'duplicate_new': 'web.checkout.wizard.duplicate_new'|t,
+        'duplicate_save_anyway': 'web.checkout.wizard.duplicate_save_anyway'|t,
+        'pin_locked': {
+            'WITH_DRIVER': 'api.addresses.error.pin_with_driver'|t,
+            'SHARED_PLACE': 'api.addresses.error.pin_shared_place'|t,
+            'OUTLET': 'api.addresses.error.pin_outlet'|t,
+        },
         'summary': {
             'title': 'web.checkout.wizard.f_title'|t,
             'address': 'web.checkout.wizard.f_address'|t,

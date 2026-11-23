@@ -2,9 +2,9 @@
 
 `staff.notify_order_address_changed` posts one payload to the staff bot under an event id built from
 the Celery task id, so a retry collapses in the bot's dedup. It re-reads the delivery on every run,
-retries included: an alert whose address was changed again, whose stop moved to another driver, or
-whose delivery failed is stale (RF2) and sends nothing. Faked: `_send_staff_webhook` and the task's
-`retry`, both bound against their real signatures.
+retries included: an alert whose address was changed again (another address, or the same one's pin
+moved again), whose stop moved to another driver, or whose delivery failed is stale (RF2) and sends
+nothing. Faked: `_send_staff_webhook` and the task's `retry`, both bound against their real signatures.
 """
 
 import pytest
@@ -16,6 +16,7 @@ from business_app.models.order import Order
 from business_app.models.user import UserAddress
 from business_app.tasks import staff_tasks
 from shared.enums import DeliveryStatus as S
+from tests.integration.address_guard_geometry import at
 from tests.integration.test_admin_order_reschedule import _seed, rostered_driver  # noqa: F401  fixture
 from tests.integration.test_delivery_failed_alert import _retries, _webhook
 
@@ -87,6 +88,26 @@ def test_a_superseded_alert_is_not_sent(
 ):  # RF2
     seeded, payload = _alert(db, user_address, rostered_driver, local_noon)
     _supersede(db, change, seeded, user_address, rostered_driver, sample_user)
+    sent = _webhook(monkeypatch)
+    db.session.expire_all()
+
+    result = staff_tasks.notify_order_address_changed.run(seeded.delivery_id, rostered_driver.id, payload)
+
+    assert result == {"success": False, "reason": "stale", "delivery_id": seeded.delivery_id}
+    assert sent == []
+
+
+@pytest.mark.parametrize("change", ["moved_again", "pin_cleared", "first_pin_since"])
+def test_an_alert_for_a_pin_that_moved_again_is_stale(
+    db, monkeypatch, user_address, rostered_driver, local_noon, change
+):  # duplicate-address guard §6.3: two moves in a row
+    seeded, payload = _alert(db, user_address, rostered_driver, local_noon)  # built at the address's pin A
+    if change == "first_pin_since":
+        payload = {**payload, "lat": None, "lng": None}  # built while the address had no pin
+    else:
+        # Same address id, a different pin: the second move queued its own alert.
+        user_address.latitude, user_address.longitude = at(120) if change == "moved_again" else (None, None)
+        db.session.commit()
     sent = _webhook(monkeypatch)
     db.session.expire_all()
 

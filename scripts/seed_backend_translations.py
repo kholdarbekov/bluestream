@@ -7639,6 +7639,12 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         'Filial: {{before}} → {{after}}',
         'Филиал: {{before}} → {{after}}',
     ),
+    # The duplicate-address guard's pin move (OrderEditHistory.diff.pin_moved_m), one line under the address change.
+    'ui.orders.history_pin_moved': _ui_tr(
+        'Pin moved ~{{distance}} m',
+        'Nuqta ~{{distance}} m ko‘chirildi',
+        'Точка перенесена на ~{{distance}} м',
+    ),
     # F6: the cancel/return confirmation and the Update Status modal.
     'ui.orders.awaiting_new_date_notice': _ui_tr(
         "This order's delivery failed and is waiting for a new date.",
@@ -10061,6 +10067,199 @@ WEB_DISPLAY_LABEL_TRANSLATIONS = {
     },
 }
 BACKEND_TRANSLATIONS.update(WEB_DISPLAY_LABEL_TRANSLATIONS)
+
+
+# ============================================================================
+# Duplicate-address guard (spec 2026-11-18-duplicate-address-guard §6.11): the refusals raised by
+# business_app/services/address_guard_service.py (the possible-duplicate 409 and the customer pin rules' 400s) and
+# the move route's missing-pin 400. Perk tone; never "call us": Support or the bot chat. uz/ru are the spec's
+# draft, for the owner to skim. tests/unit/test_address_duplicate_copy_is_seeded.py holds every key of the feature.
+# ============================================================================
+ADDRESS_DUPLICATE_GUARD_TRANSLATIONS = {
+    # The admin panel's possible-duplicate dialog (admin_ui/src/pages/Users.js; the staff and bot copy is below).
+    'ui.users.address_duplicate_title': {
+        'en': 'Possible duplicate address',
+        'uz': 'Takroriy manzil bo‘lishi mumkin',
+        'ru': 'Возможный дубликат адреса',
+    },
+    'ui.users.address_duplicate_body': {
+        'en': 'This customer already has an address close to this pin:',
+        'uz': 'Mijozning shu nuqtaga yaqin manzili bor:',
+        'ru': 'У клиента уже есть адрес рядом с этой точкой:',
+    },
+    'ui.users.address_duplicate_create_anyway': {
+        'en': 'Create anyway',
+        'uz': 'Baribir yaratish',
+        'ru': 'Всё равно создать',
+    },
+    'ui.users.address_duplicate_save_anyway': {
+        'en': 'Save anyway',
+        'uz': 'Baribir saqlash',
+        'ru': 'Всё равно сохранить',
+    },
+    'api.addresses.error.possible_duplicate': {
+        'en': 'You already have an address saved at this spot.',
+        'uz': 'Bu joyda saqlangan manzilingiz allaqachon bor.',
+        'ru': 'У вас уже есть сохранённый адрес в этом месте.',
+    },
+    'api.addresses.error.pin_with_driver': {
+        'en': "Your order is already on its way to this address. You can move its pin as soon as it's delivered.",
+        'uz': 'Buyurtmangiz shu manzilga yo‘lda. Yetkazilgach, nuqtasini ko‘chirishingiz mumkin.',
+        'ru': 'Ваш заказ уже едет по этому адресу. Перенести точку можно сразу после доставки.',
+    },
+    'api.addresses.error.pin_shared_place': {
+        'en': (
+            'This address is shared with other customers, so our team looks after its pin. '
+            "Write to us in Support and we'll move it for you."
+        ),
+        'uz': (
+            'Bu manzil boshqa mijozlar bilan umumiy, shuning uchun uning nuqtasini jamoamiz boshqaradi. '
+            'Qo‘llab-quvvatlashga yozing — o‘zimiz ko‘chirib qo‘yamiz.'
+        ),
+        'ru': (
+            'Этот адрес общий с другими клиентами, поэтому его точкой занимается наша команда. '
+            'Напишите нам в поддержку — мы перенесём её сами.'
+        ),
+    },
+    'api.addresses.error.pin_outlet': {
+        'en': (
+            'This address belongs to a business branch, so our team looks after its pin. '
+            "Write to us in Support and we'll move it for you."
+        ),
+        'uz': (
+            'Bu manzil filialga tegishli, shuning uchun uning nuqtasini jamoamiz boshqaradi. '
+            'Qo‘llab-quvvatlashga yozing — o‘zimiz ko‘chirib qo‘yamiz.'
+        ),
+        'ru': (
+            'Этот адрес принадлежит филиалу, поэтому его точкой занимается наша команда. '
+            'Напишите нам в поддержку — мы перенесём её сами.'
+        ),
+    },
+    'api.addresses.error.move_too_far': {
+        'en': "That's a new place! Add it as a new address, so each place keeps its own bottle count.",
+        'uz': 'Bu yangi joy! Uni yangi manzil sifatida qo‘shing — har bir joyning idishlar hisobi alohida yuritiladi.',
+        'ru': 'Это новое место! Добавьте его как новый адрес — у каждого места будет свой учёт бутылей.',
+    },
+    'api.addresses.error.move_needs_pin': {
+        'en': 'Drop a pin on the map to move this address.',
+        'uz': 'Manzilni ko‘chirish uchun xaritada nuqta belgilang.',
+        'ru': 'Чтобы перенести адрес, поставьте точку на карте.',
+    },
+    # The customer bot's duplicate prompt (telegram_bot/handlers/profile.py::_show_duplicate_prompt) and what its
+    # Use / Move buttons answer. Sent with no parse mode, so the customer's own labels need no escaping.
+    'telegram.address.duplicate_prompt_header': {
+        'en': '📍 You already have an address saved right here:',
+        'uz': '📍 Aynan shu yerda saqlangan manzilingiz bor:',
+        'ru': '📍 Здесь у вас уже есть сохранённый адрес:',
+    },
+    'telegram.address.duplicate_prompt_line': {
+        'en': '{label} · ~{distance} m',
+        'uz': '{label} · ~{distance} m',
+        'ru': '{label} · ~{distance} м',
+    },
+    'telegram.address.duplicate_prompt_footer': {
+        'en': 'Choose it and your orders and bottle count stay in one place.',
+        'uz': 'Uni tanlang — buyurtmalar va idishlar hisobi bir joyda qoladi.',
+        'ru': 'Выберите его — заказы и учёт бутылей останутся в одном месте.',
+    },
+    'telegram.address.duplicate_use_button': {
+        'en': '✅ Use “{label}”',
+        'uz': '✅ «{label}» manzilini tanlash',
+        'ru': '✅ Выбрать «{label}»',
+    },
+    'telegram.address.duplicate_move_button': {
+        'en': '📌 Move “{label}” to this pin',
+        'uz': '📌 «{label}»ni shu nuqtaga ko‘chirish',
+        'ru': '📌 Перенести «{label}» на эту точку',
+    },
+    'telegram.address.duplicate_new_button': {
+        'en': '➕ Save as a new address',
+        'uz': '➕ Yangi manzil sifatida saqlash',
+        'ru': '➕ Сохранить как новый адрес',
+    },
+    'telegram.address.duplicate_save_here_button': {
+        'en': '📌 Save here anyway',
+        'uz': '📌 Baribir shu yerga saqlash',
+        'ru': '📌 Всё равно сохранить здесь',
+    },
+    'telegram.address.duplicate_kept': {
+        'en': '👍 Kept your saved address “{label}”.',
+        'uz': '👍 Saqlangan «{label}» manzilingiz qoldirildi.',
+        'ru': '👍 Оставили ваш сохранённый адрес «{label}».',
+    },
+    'telegram.address.duplicate_moved': {
+        'en': '📌 “{label}” is now at the new pin.',
+        'uz': '📌 «{label}» endi yangi nuqtada.',
+        'ru': '📌 «{label}» теперь на новой точке.',
+    },
+    # The bot's copy for each pin-move refusal (`details.reason`), keyed by telegram_bot/handlers/profile.py's
+    # PIN_REFUSAL_COPY.
+    'telegram.address.pin_with_driver': {
+        'en': "🚚 Your order is already on its way to “{label}”. You can move its pin as soon as it's delivered.",
+        'uz': '🚚 Buyurtmangiz «{label}» manziliga yo‘lda. Yetkazilgach, nuqtasini ko‘chirishingiz mumkin.',
+        'ru': '🚚 Ваш заказ уже едет на «{label}». Перенести точку можно сразу после доставки.',
+    },
+    'telegram.address.pin_shared_place': {
+        'en': (
+            '🤝 “{label}” is shared with other customers, so our team looks after its pin. '
+            "Write to us in Support and we'll move it for you."
+        ),
+        'uz': (
+            '🤝 «{label}» boshqa mijozlar bilan umumiy, shuning uchun uning nuqtasini jamoamiz boshqaradi. '
+            'Qo‘llab-quvvatlashga yozing — o‘zimiz ko‘chirib qo‘yamiz.'
+        ),
+        'ru': (
+            '🤝 «{label}» — общий адрес с другими клиентами, поэтому его точкой занимается наша команда. '
+            'Напишите нам в поддержку — мы перенесём её сами.'
+        ),
+    },
+    'telegram.address.pin_outlet': {
+        'en': (
+            '🏪 “{label}” belongs to a business branch, so our team looks after its pin. '
+            "Write to us in Support and we'll move it for you."
+        ),
+        'uz': (
+            '🏪 «{label}» filialga tegishli, shuning uchun uning nuqtasini jamoamiz boshqaradi. '
+            'Qo‘llab-quvvatlashga yozing — o‘zimiz ko‘chirib qo‘yamiz.'
+        ),
+        'ru': (
+            '🏪 «{label}» принадлежит филиалу, поэтому его точкой занимается наша команда. '
+            'Напишите нам в поддержку — мы перенесём её сами.'
+        ),
+    },
+    'telegram.address.move_too_far': {
+        'en': "✨ That's a new place! Add it as a new address, so each place keeps its own bottle count.",
+        'uz': (
+            '✨ Bu yangi joy! Uni yangi manzil sifatida qo‘shing — '
+            'har bir joyning idishlar hisobi alohida yuritiladi.'
+        ),
+        'ru': '✨ Это новое место! Добавьте его как новый адрес — у каждого места будет свой учёт бутылей.',
+    },
+    # Edit location (telegram_bot/handlers/profile.py::edit_location_handler / relocation_pin_received): the durable
+    # prompt, its expiry, and the moved address. The expiry quotes 'telegram.address.edit_location_button' as seeded
+    # in each language, without its 📍, so the customer finds the button it names.
+    'telegram.address.location_edit_prompt': {
+        'en': '📍 Send the new location for “{label}”: tap the button below or 📎 → Location.',
+        'uz': '📍 «{label}» uchun yangi joylashuvni yuboring: pastdagi tugma yoki 📎 → Joylashuv.',
+        'ru': '📍 Отправьте новую геопозицию для «{label}»: кнопка ниже или 📎 → Геопозиция.',
+    },
+    'telegram.address.location_edit_send_pin': {
+        'en': '📍 Just send the location with the button below, and we\'ll move “{label}” there.',
+        'uz': '📍 Pastdagi tugma orqali joylashuvni yuboring — «{label}»ni o‘sha yerga ko‘chiramiz.',
+        'ru': '📍 Просто отправьте геопозицию кнопкой ниже — и мы перенесём «{label}» туда.',
+    },
+    'telegram.address.location_edit_expired': {
+        'en': '⏱ That location request has expired. Open the address and tap “Edit Location” again.',
+        'uz': '⏱ Joylashuv so‘rovi muddati tugadi. Manzilni oching va «Joylashuvni tahrirlash»ni qayta bosing.',
+        'ru': '⏱ Запрос геопозиции истёк. Откройте адрес и снова нажмите «Изменить местоположение».',
+    },
+    'telegram.address.location_updated': {
+        'en': '📌 Location of “{label}” updated. The address text stays: {line}',
+        'uz': '📌 «{label}» joylashuvi yangilandi. Manzil matni o‘zgarmadi: {line}',
+        'ru': '📌 Геопозиция «{label}» обновлена. Текст адреса остался: {line}',
+    },
+}
+BACKEND_TRANSLATIONS.update(ADDRESS_DUPLICATE_GUARD_TRANSLATIONS)
 
 
 # ============================================================================

@@ -12,5 +12,6 @@
   "latitude": 41.2989,
   "longitude": 69.2401,
   "is_default": true,
-  "is_business": true
+  "is_business": true,
+  "point_source": null
 }

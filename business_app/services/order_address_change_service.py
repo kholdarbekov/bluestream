@@ -11,6 +11,7 @@ preview publishes and `change(for_customer=True)` re-asks under its locks.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from business_app import db
@@ -244,11 +245,11 @@ class OrderAddressChangeService:
         """Move the order to another saved address of its own customer (the admin PATCH).
 
         One transaction. It locks the delivery, then the order, in the reschedule's order, and
-        re-asks `block_code` and the option predicate for this one address. It captures the driver
-        holding the stop, then writes the address, the distance and pool ETA (D11), the copied-notes
-        cleanup (D12), the history row (D6) and the stale route metrics (D9). The delivery status,
-        the driver, the price and the commission subjects never move (R5, R9, R12), and nothing
-        customer-visible is written (R4). After the commit, `_run_post_commit` runs.
+        re-asks `block_code` and the option predicate for this one address. It writes the address and
+        the copied-notes cleanup (D12), then runs `destination_changed`: the driver holding the stop,
+        the distance and pool ETA (D11), the history row (D6) and the stale route metrics (D9). The
+        delivery status, the driver, the price and the commission subjects never move (R5, R9, R12),
+        and nothing customer-visible is written (R4). After the commit, `run_post_commit` runs.
 
         `for_customer`: the customer's subscription address change moves the order (spec 2026-10-27 §17 Q6). Its
         checks are `customer_move_refusal`'s, in that order, after the ownership check: an order the driver has
@@ -261,9 +262,7 @@ class OrderAddressChangeService:
         ADDRESS_OUTSIDE_ZONE, COD_DEBT_LIMIT_REACHED or (the customer's) ORDER_WITH_DRIVER. Nothing is written when
         it raises.
         """
-        from business_app.services.delivery_service import DeliveryService
         from business_app.services.order_service import OrderService
-        from business_app.services.route_optimization_service import RouteOptimizationService
         from business_app.utils.transactions import atomic_transaction
 
         with atomic_transaction():
@@ -286,19 +285,8 @@ class OrderAddressChangeService:
                 [pay_rules.check_self_decision(subject, actor) for subject in sorted(cls.pay_subjects(current, target))]
             )
 
-            # The driver on the stop, captured before the write (D2).
-            driver_id = OrderScheduleService.driver_holding_stop(delivery)
-            driver = db.session.get(User, driver_id) if driver_id is not None else None
-            driver_telegram_id = int(driver.telegram_id) if driver is not None and driver.telegram_id else None
-            driver_notified = driver_telegram_id is not None
-
             now = get_utc_now()
             order.delivery_address = new
-            if delivery is not None:
-                deliveries = DeliveryService()
-                delivery.distance_km = deliveries.distance_km(new)
-                # A pool row's ETA follows the new distance; a driver-held row keeps its own.
-                deliveries.refresh_pool_eta(delivery, now=now)
             # D12: subscription billing copied the old address's instructions into the notes. The
             # driver card shows the live address's instructions, so the copy goes; a typed note stays.
             if (
@@ -307,62 +295,129 @@ class OrderAddressChangeService:
                 and order.delivery_notes == old.delivery_instructions
             ):
                 order.delivery_notes = None
-            diff = {
-                "kind": "address_change",
-                "address_before": cls._snap(old),
-                "address_after": cls._snap(new),
-                "driver_notified": driver_notified,
-                "branch_before": cls._branch_view(current, old_id),
-                "branch_after": cls._branch_view(target, new.id),
-                "self_decided": self_decided,
-            }
-            history = OrderEditHistory(
-                order_id=order.id,
-                edited_by_user_id=actor.id,
-                edited_at=now,
+            outcome = cls.destination_changed(
+                order,
+                delivery,
+                before=cls.snapshot(old),
+                after=new,
+                old_line=get_address_line(old),
+                actor=actor,
                 reason=(note or "").strip(),
-                is_post_delivery=False,
-                diff=diff,
-            )
-            db.session.add(history)
-            db.session.flush()
-            if driver_id is not None:
-                routes = RouteOptimizationService()
-                route = routes.current_route(driver_id)
-                if route is not None:
-                    routes.mark_metrics_stale(route)
-            driver_payload = cls._driver_payload(delivery, old, new, driver_telegram_id) if driver_notified else None
-            outcome = AddressChangeOutcome(
-                order_id=order.id,
-                order_number=order.order_number,
-                delivery_id=delivery.id if delivery is not None else None,
-                driver_id=driver_id,
-                driver_telegram_id=driver_telegram_id,
+                now=now,
+                extra_diff={
+                    "branch_before": cls._branch_view(current, old_id),
+                    "branch_after": cls._branch_view(target, new.id),
+                    "self_decided": self_decided,
+                },
                 moved_outlet_ids=tuple(sorted(outlet.id for outlet in cls.moved_outlets(current, target))),
-                driver_payload=driver_payload,
-                audit={"order_number": order.order_number, "history_id": history.id, **diff},
             )
 
-        cls._run_post_commit(outcome)
-        return AddressChangeResult(db.session.get(Order, order_id), driver_notified, self_decided)
+        cls.run_post_commit(outcome)
+        return AddressChangeResult(
+            db.session.get(Order, order_id), outcome.driver_telegram_id is not None, self_decided
+        )
+
+    @classmethod
+    def destination_changed(
+        cls,
+        order: Order,
+        delivery: Optional[Delivery],
+        *,
+        before: Optional[Dict[str, Any]],
+        after: UserAddress,
+        old_line: str,
+        actor: User,
+        reason: str,
+        now: datetime,
+        extra_diff: Dict[str, Any],
+        moved_outlet_ids: Tuple[int, ...] = (),
+    ) -> AddressChangeOutcome:
+        """The steps every change of an order's destination takes, on a locked order whose address is already
+        written: the admin move to another address (`change`) and a saved address's pin move
+        (`AddressPinService.apply_pin_change`, spec 2026-11-18 §6.3).
+
+        It captures the driver holding the stop (D2), recomputes the distance and a pool row's ETA (D11), writes
+        the history row (D6: `before`, a snapshot of `after`, `driver_notified`, then `extra_diff`), marks the
+        driver's route metrics stale (D9) and builds the "Address changed" payload. `old_line` is the old written
+        line, read before the write: on a pin move the old and the new address are the same row. A `pin_moved_m`
+        in `extra_diff` goes into the payload too. The caller commits and then hands the outcome to
+        `run_post_commit`.
+        """
+        from business_app.services.delivery_service import DeliveryService
+        from business_app.services.route_optimization_service import RouteOptimizationService
+
+        # The driver on the stop (D2). An address write never moves who holds it.
+        driver_id = OrderScheduleService.driver_holding_stop(delivery)
+        driver = db.session.get(User, driver_id) if driver_id is not None else None
+        driver_telegram_id = int(driver.telegram_id) if driver is not None and driver.telegram_id else None
+        driver_notified = driver_telegram_id is not None
+
+        if delivery is not None:
+            deliveries = DeliveryService()
+            delivery.distance_km = deliveries.distance_km(after)
+            # A pool row's ETA follows the new distance; a driver-held row keeps its own.
+            deliveries.refresh_pool_eta(delivery, now=now)
+        diff = {
+            "kind": "address_change",
+            "address_before": before,
+            "address_after": cls.snapshot(after),
+            "driver_notified": driver_notified,
+            **extra_diff,
+        }
+        history = OrderEditHistory(
+            order_id=order.id,
+            edited_by_user_id=actor.id,
+            edited_at=now,
+            reason=reason,
+            is_post_delivery=False,
+            diff=diff,
+        )
+        db.session.add(history)
+        db.session.flush()
+        if driver_id is not None:
+            routes = RouteOptimizationService()
+            route = routes.current_route(driver_id)
+            if route is not None:
+                routes.mark_metrics_stale(route)
+        driver_payload = (
+            cls._driver_payload(
+                delivery, old_line, after, driver_telegram_id, pin_moved_m=extra_diff.get("pin_moved_m")
+            )
+            if driver_notified
+            else None
+        )
+        return AddressChangeOutcome(
+            order_id=order.id,
+            order_number=order.order_number,
+            delivery_id=delivery.id if delivery is not None else None,
+            driver_id=driver_id,
+            driver_telegram_id=driver_telegram_id,
+            moved_outlet_ids=moved_outlet_ids,
+            driver_payload=driver_payload,
+            audit={"order_number": order.order_number, "history_id": history.id, **diff},
+        )
 
     @staticmethod
     def _driver_payload(
-        delivery: Delivery, old: Optional[UserAddress], new: UserAddress, telegram_id: int
+        delivery: Delivery, old_line: str, new: UserAddress, telegram_id: int, *, pin_moved_m: Optional[int] = None
     ) -> Dict[str, Any]:
         """The "Address changed" message body. Built after the address write, so the order info
-        already names the new place; an empty old line is a legacy order that had none (RF4)."""
-        return {
+        already names the new place; an empty old line is a legacy order that had none (RF4).
+        `pin_moved_m` is there only for a pin move: the staff bot then says the pin moved."""
+        payload = {
             "telegram_id": telegram_id,
             "delivery_id": delivery.id,
             "delivery_address_id": new.id,
             "order_info": build_staff_order_info(delivery),
-            "old_address": get_address_line(old),
+            "old_address": old_line,
             "new_address": get_address_line(new),
             "lat": new.latitude,
             "lng": new.longitude,
             "door": door_fields(new),
         }
+        if pin_moved_m is not None:
+            payload["pin_moved_m"] = pin_moved_m
+        return payload
 
     @staticmethod
     def _refuse_unpickable(reason: Optional[str]) -> None:
@@ -416,8 +471,9 @@ class OrderAddressChangeService:
         raise RuntimeError(f"unrefused customer address-change reason {reason}")
 
     @staticmethod
-    def _snap(address: Optional[UserAddress]) -> Optional[Dict[str, Any]]:
-        """The history's picture of an address (D6). Read off the model, so (0.0, 0.0) stays a pin."""
+    def snapshot(address: Optional[UserAddress]) -> Optional[Dict[str, Any]]:
+        """The history's picture of an address (D6). Read off the model, so (0.0, 0.0) stays a pin.
+        A pin move's audit event records the address with it too."""
         if address is None:
             return None
         return {
@@ -429,8 +485,9 @@ class OrderAddressChangeService:
         }
 
     @classmethod
-    def _run_post_commit(cls, outcome: AddressChangeOutcome) -> None:
-        """The side effects of a committed address change. The only post-commit runner.
+    def run_post_commit(cls, outcome: AddressChangeOutcome) -> None:
+        """The side effects of a committed address change. The only post-commit runner: the admin move
+        and a saved address's pin move (`AddressPinService.apply_pin_change`) both hand it each outcome.
 
         Each step is isolated by `best_effort_step`, so one outage cannot swallow the steps after it.
         """

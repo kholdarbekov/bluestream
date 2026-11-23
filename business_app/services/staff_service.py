@@ -23,6 +23,7 @@ from business_app.services.cod_collect_ceiling import (
     place_widening_applies,
     resolve_collect_scope,
 )
+from business_app.services.address_guard_service import assert_not_duplicate
 from business_app.services.session_revocation_service import SessionRevocationService
 from business_app.utils.address_helpers import get_address_line
 from business_app.utils.delivery_window import window_slot_label
@@ -3276,13 +3277,17 @@ class StaffService:
         )
 
     @staticmethod
-    def add_client_address(user_id: int, address_data: Dict[str, Any]) -> UserAddress:
+    def add_client_address(
+        user_id: int, address_data: Dict[str, Any], *, confirm_duplicate: bool = False
+    ) -> UserAddress:
         """
-        Add an address for a customer user.
+        Add an address for a customer user. A point within the duplicate radius of one of the customer's saved
+        addresses is refused with a 409 naming it, unless `confirm_duplicate` (there is no Move offer for staff).
 
         Args:
             user_id: Target customer user id
             address_data: Address payload from staff bot/API
+            confirm_duplicate: The operator confirmed the duplicate question
 
         Returns:
             Created UserAddress model
@@ -3293,6 +3298,13 @@ class StaffService:
 
         # Enforce the delivery-zone SSOT before persisting any coordinate.
         ensure_within_delivery_zone(address_data.get("latitude"), address_data.get("longitude"))
+        assert_not_duplicate(
+            user_id,
+            address_data.get("latitude"),
+            address_data.get("longitude"),
+            apartment_number=address_data.get("apartment_number"),
+            confirmed=confirm_duplicate,
+        )
 
         address = UserAddress(
             user_id=user_id,

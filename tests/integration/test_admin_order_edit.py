@@ -312,6 +312,8 @@ def test_apply_edit_no_changes_blocks(
         headers=admin_auth_headers,
     )
     assert resp.status_code == 400
+    # The refusal's code reaches the client (the envelope's `data.error_code`), as the 409's does.
+    assert resp.get_json()["data"]["error_code"] == "ORDER_EDIT_BLOCKED"
 
 
 # -------------------------------------------------------------------------
@@ -561,6 +563,60 @@ def test_apply_edit_rollback_on_mid_cascade_failure(
     # Item quantity unchanged.
     refreshed = Order.query.get(order.id)
     assert refreshed.order_items[0].quantity == original_qty
+
+
+def test_apply_edit_of_a_first_timers_delivered_paid_order_creates_his_account_inside_the_edit(
+    client, db, admin_claim_headers, sample_user, sample_product, monkeypatch
+):
+    """A staff-created customer has no loyalty account yet, and his delivered, card-paid order of 4 bottles earned no
+    AquaCoins. The office lowers it to 2. The edit re-quotes the order's AquaCoins, which creates his account; that
+    must happen inside the edit's one transaction. It committed there, which released every lock the edit held (the
+    order, its products, the bottle and trip rows) before the totals, the payment and the history row were written.
+    The transaction the edit's stock step runs in is the one its totals step runs in, and he ends with one account
+    holding the 2 bottles' 30 000 so'm / 250 = 120 AquaCoins."""
+    from business_app.models.loyalty import LoyaltyPoints, LoyaltyProgram
+    from business_app.services.order_edit_service import OrderEditService
+
+    db.session.add(LoyaltyProgram(name="Default", is_active=True, is_default=True, uzs_per_point=250))
+    db.session.commit()
+    order = _seed_paid_card_delivered_order(sample_user, sample_product, quantity=4)
+    assert LoyaltyPoints.query.filter_by(user_id=sample_user.id).count() == 0
+    assert int(order.loyalty_points_earned or 0) == 0
+    transactions = {}
+    cascade_inventory, recompute_totals = OrderEditService._cascade_inventory, OrderEditService._recompute_totals
+
+    def stock_step(self, *args, **kwargs):
+        transactions["stock"] = _db.session().get_transaction()
+        return cascade_inventory(self, *args, **kwargs)
+
+    def totals_step(self, *args, **kwargs):
+        transactions["totals"] = _db.session().get_transaction()
+        return recompute_totals(self, *args, **kwargs)
+
+    monkeypatch.setattr(OrderEditService, "_cascade_inventory", stock_step)
+    monkeypatch.setattr(OrderEditService, "_recompute_totals", totals_step)
+
+    # What Orders.js sends for Apply on the Edit items dialog.
+    resp = client.post(
+        f"/api/v1/admin/orders/{order.id}/edit",
+        json={
+            "items": [{"orderItemId": order.order_items[0].id, "productId": sample_product.id, "quantity": 2}],
+            "reason": "customer kept only 2 of 4 bottles",
+        },
+        headers=admin_claim_headers,
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    earnings = resp.get_json()["data"]["cascade_summary"]["loyalty"]["earnings"]
+    assert (earnings["old_points_earned"], earnings["new_points_earned"], earnings["award"]) == (0, 120, 120)
+    assert transactions["stock"] is not None
+    assert transactions["totals"] is transactions["stock"], "the edit committed between its stock and totals steps"
+    accounts = LoyaltyPoints.query.filter_by(user_id=sample_user.id).all()
+    assert [(a.current_balance, a.total_earned) for a in accounts] == [(120, 120)]
+    refreshed = Order.query.get(order.id)
+    assert (refreshed.order_items[0].quantity, refreshed.loyalty_points_earned) == (2, 120)
+    assert Decimal(str(refreshed.total_amount)) == Decimal("33000.00")
+    assert OrderEditHistory.query.filter_by(order_id=order.id).count() == 1
 
 
 # -------------------------------------------------------------------------
@@ -1423,6 +1479,56 @@ def test_apply_edit_removed_line_on_a_delivered_cash_order_is_credited_once(
         order_id=order.id, source=CashCollectionSource.ADMIN_ADJUSTMENT
     ).all()
     assert [event.amount for event in credits] == [Decimal("24000.00")]
+
+
+def test_two_edits_down_by_the_same_amount_each_credit_the_customer(
+    client, db, admin_claim_headers, sample_user, sample_product
+):
+    """Delivered and paid 63,000 in cash (4 × 15,000 + a 3,000 fee). The admin takes one bottle
+    off (4 → 3), and later another (3 → 2): each edit lowers the order by 15,000 and must give
+    the customer 15,000 of credit. The credit was keyed by the order and the amount, so the
+    second edit found the first one's credit under its key and booked nothing, while the order
+    still dropped to 33,000: the customer held 15,000 of credit, not 30,000. Sending the second
+    edit again (what Orders.js sends on a second Apply) changes nothing and books nothing."""
+    from business_app.models.payment import CashCollectionEvent
+    from business_app.services.cash_collection_service import CashCollectionService
+    from shared.enums import CashCollectionSource
+
+    _returning_customer(sample_user)
+    order = _seed_paid_cash_delivered_order(sample_user, sample_product, quantity=4)
+    order_id, line_id = order.id, order.order_items[0].id
+
+    def edit_to(quantity):
+        body = {
+            "items": [{"orderItemId": line_id, "productId": sample_product.id, "quantity": quantity}],
+            "reason": f"customer kept {quantity} bottles",
+        }
+        return client.post(f"/api/v1/admin/orders/{order_id}/edit", json=body, headers=admin_claim_headers)
+
+    first = edit_to(3)
+    assert first.status_code == 200, first.get_data(as_text=True)
+    second = edit_to(2)
+    assert second.status_code == 200, second.get_data(as_text=True)
+    replay = edit_to(2)
+    assert replay.status_code == 400, replay.get_data(as_text=True)
+    assert replay.get_json()["data"]["error_code"] == "ORDER_EDIT_BLOCKED"
+
+    _db.session.expire_all()
+    stored = Order.query.get(order_id)
+    assert (stored.total_amount, stored.payment.amount_collected) == (Decimal("33000.00"), Decimal("63000.00"))
+    credits = (
+        CashCollectionEvent.query.filter_by(order_id=order_id, source=CashCollectionSource.ADMIN_ADJUSTMENT)
+        .order_by(CashCollectionEvent.id.asc())
+        .all()
+    )
+    assert [event.amount for event in credits] == [Decimal("15000.00"), Decimal("15000.00")]
+    assert [event.id for event in credits] == [
+        first.get_json()["data"]["cascade_summary"]["cash"]["event_id"],
+        second.get_json()["data"]["cascade_summary"]["cash"]["event_id"],
+    ]
+    # The report and the cancel netting still recognise each one by its key's prefix.
+    assert all(event.idempotency_key.startswith("order_edit_refund:") for event in credits)
+    assert CashCollectionService().get_customer_prepaid_balance(sample_user.id) == Decimal("30000.00")
 
 
 # -------------------------------------------------------------------------

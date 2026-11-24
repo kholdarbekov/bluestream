@@ -160,8 +160,9 @@ describe('Bottle Transfers tab', () => {
     expect(adminService.resolveBottleTransferDispute).toHaveBeenCalledWith(7, {
       resolvedFull: 5,
       resolvedEmpty: 2,
+      resolvedUnits: [],
       resolutionNotes: 'counted twice',
-    });
+    }, { handledErrorCodes: ['BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE'] });
   });
 });
 
@@ -265,5 +266,311 @@ describe('Driver session bottle numbers', () => {
     expect(value('Empties Transferred In')).toBe('4');
     expect(within(drawer).queryByText('Transferred Out')).toBeNull();
     expect(within(drawer).queryByText('Transferred In')).toBeNull();
+  });
+});
+
+// Keys mirror serialize_bottle_session `units` (_unit_lines in bottle_serializers.py).
+const tenLitreLine = (overrides = {}) => ({
+  product_id: 3,
+  product_name: '10 Litr suv',
+  loaded: 12,
+  delivered: 4,
+  transferred_in: 0,
+  transferred_out: 0,
+  on_board: 8,
+  transferable: 8,
+  free: 8,
+  returned: null,
+  discrepancy: null,
+  ...overrides,
+});
+
+const sessionHeaders = () => [...document.querySelectorAll('.ant-tabs-tabpane-active th')].map((th) => th.textContent);
+const cellOf = (row, title) => row.querySelectorAll('td')[sessionHeaders().indexOf(title)].textContent;
+
+const openSessionsTab = async (user) => {
+  render(<BottleTracking />, { wrapper: createWrapper() });
+  await user.click(tabLabel('Driver Sessions'));
+};
+
+const activeModal = () => [...document.querySelectorAll('.ant-modal-wrap')].filter((m) => m.style.display !== 'none').pop();
+const fieldOf = (modal, label) => [...modal.querySelectorAll('.ant-form-item')]
+  .find((el) => el.querySelector('label')?.textContent?.includes(label));
+
+describe('Driver Sessions: one-way unit columns', () => {
+  beforeEach(() => {
+    mockTransfers();
+  });
+
+  it('shows the 10 L columns and a dash for a trip without the line', async () => {
+    adminService.getBottleSessions.mockResolvedValue({
+      data: {
+        items: [
+          session({ id: 3, driver_name: 'Has Line', units: [tenLitreLine({ returned: 7, discrepancy: 1 })] }),
+          session({ id: 4, driver_name: 'No Line', units: [] }),
+        ],
+        total: 2,
+      },
+    });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+
+    const withLine = (await screen.findByText('Has Line')).closest('tr');
+    expect(cellOf(withLine, '10 Litr suv loaded')).toBe('12');
+    expect(cellOf(withLine, '10 Litr suv delivered')).toBe('4');
+    expect(cellOf(withLine, '10 Litr suv on board')).toBe('8');
+    expect(cellOf(withLine, '10 Litr suv returned')).toBe('7');
+    expect(cellOf(withLine, '10 Litr suv discrepancy')).toBe('1');
+    const withoutLine = screen.getByText('No Line').closest('tr');
+    expect(cellOf(withoutLine, '10 Litr suv loaded')).toBe('—');
+    expect(cellOf(withoutLine, '10 Litr suv delivered')).toBe('—');
+    expect(cellOf(withoutLine, '10 Litr suv on board')).toBe('—');
+    expect(cellOf(withoutLine, '10 Litr suv returned')).toBe('—');
+    expect(cellOf(withoutLine, '10 Litr suv discrepancy')).toBe('—');
+  });
+
+  it('marks a trip red for a 10 L-only discrepancy', async () => {
+    adminService.getBottleSessions.mockResolvedValue({
+      data: {
+        items: [session({ discrepancy: 0, has_discrepancy: true, units: [tenLitreLine({ returned: 6, discrepancy: 2 })] })],
+        total: 1,
+      },
+    });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+    const row = (await screen.findByText('Sender Sam')).closest('tr');
+    expect(row).toHaveClass('ant-table-row-danger');
+  });
+
+  it('colours the row from has_discrepancy alone', async () => {
+    adminService.getBottleSessions.mockResolvedValue({
+      data: { items: [session({ discrepancy: 3, has_discrepancy: false, units: [] })], total: 1 },
+    });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+    const row = (await screen.findByText('Sender Sam')).closest('tr');
+    expect(row).not.toHaveClass('ant-table-row-danger');
+  });
+
+  it('sends the 10 L returned box with Force Close', async () => {
+    adminService.getBottleSessions.mockResolvedValue({
+      data: { items: [session({ units: [tenLitreLine()] })], total: 1 },
+    });
+    adminService.forceCloseBottleSession.mockResolvedValue({ success: true });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+    await screen.findByText('Sender Sam');
+    await user.click(within(document.querySelector('.ant-tabs-tabpane-active .ant-table-tbody')).getByText('Force Close'));
+
+    const modal = activeModal();
+    await user.clear(within(fieldOf(modal, 'Bottles returned to warehouse')).getByRole('spinbutton'));
+    await user.type(within(fieldOf(modal, 'Bottles returned to warehouse')).getByRole('spinbutton'), '2');
+    await user.type(within(fieldOf(modal, '10 Litr suv returned (if known)')).getByRole('spinbutton'), '5');
+    await user.type(within(fieldOf(modal, 'Reason')).getByRole('textbox'), 'driver left');
+    await user.click(within(modal).getByText('Force Close', { selector: '.ant-modal-footer span' }).closest('button'));
+
+    await waitFor(() => expect(adminService.forceCloseBottleSession).toHaveBeenCalledTimes(1));
+    expect(adminService.forceCloseBottleSession).toHaveBeenCalledWith(3, {
+      reason: 'driver left',
+      bottles_returned_to_warehouse: 2,
+      units_returned: [{ product_id: 3, quantity: 5 }],
+    });
+  });
+
+  it('shows each line with sent and received, and marks a rejected transfer, in the drawer', async () => {
+    adminService.getBottleSessions.mockResolvedValue({ data: { items: [session({ units: [tenLitreLine()] })], total: 1 } });
+    const lines = (confirmed) => [
+      { kind: 'full', product_id: null, product_name: null, declared: 9, confirmed, resolved: null },
+      {
+        kind: 'empty', product_id: null, product_name: null, declared: 4, confirmed: confirmed === null ? null : 3, resolved: null,
+      },
+      { kind: 'product', product_id: 3, product_name: '10 Litr suv', declared: 6, confirmed, resolved: null },
+    ];
+    // What the backend publishes for this trip: its only transfer was rejected, so what it carried went back to it
+    // (spec §6.11) and counts in no transfer total. 18.9 L: 20 loaded, nothing delivered or collected. 10 L:
+    // on board = loaded 12 - delivered 4.
+    adminService.getBottleSession.mockResolvedValue({
+      data: session({
+        bottles_transferred_out: 0,
+        bottles_transferred_in: 0,
+        empties_transferred_out: 0,
+        empties_transferred_in: 0,
+        current_inventory: 20,
+        full_bottles_on_board: 20,
+        empties_on_board: 0,
+        free_full_bottles: 20,
+        units: [tenLitreLine({ transferred_out: 0, transferred_in: 0, on_board: 8, transferable: 8, free: 8 })],
+        members: [],
+        transfers_out: [transfer({ id: 8, status: 'rejected', rejected_at: '2026-11-09T09:30:00', lines: lines(null) })],
+        transfers_in: [],
+      }),
+    });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+    await screen.findByText('Sender Sam');
+    await user.click(within(document.querySelector('.ant-tabs-tabpane-active .ant-table-tbody')).getByText('Detail'));
+    const drawer = await waitFor(() => {
+      const d = document.querySelector('.ant-drawer-content');
+      expect(within(d).getByText('Receiver Rita')).toBeInTheDocument();
+      return d;
+    });
+    expect(within(drawer).getByText('Rejected')).toBeInTheDocument();
+    // The trip's own 10 L block: a rejected transfer counts in neither total, so Sent and Received stay 0.
+    const unitBlock = within(drawer).getByText('10 Litr suv', { selector: '.ant-descriptions-title' })
+      .closest('.ant-descriptions');
+    const figure = (label) => within(unitBlock).getByText(label).closest('th').nextElementSibling.textContent;
+    expect(figure('10 Litr suv loaded')).toBe('12');
+    expect(figure('10 Litr suv delivered')).toBe('4');
+    expect(figure('10 Litr suv on board')).toBe('8');
+    expect(figure('Sent')).toBe('0');
+    expect(figure('Received')).toBe('0');
+    expect(figure('10 Litr suv returned')).toBe('—');
+    expect(figure('10 Litr suv discrepancy')).toBe('—');
+    const tripFigure = (label) => within(drawer).getByText(label).closest('th').nextElementSibling.textContent;
+    expect(tripFigure('Full on Board')).toBe('20');
+    expect(tripFigure('Full Transferred Out')).toBe('0');
+    expect(tripFigure('Empties Transferred Out')).toBe('0');
+    // The transfer row still shows what the sender declared, and nothing counted.
+    expect(within(drawer).getByText(/10 Litr suv: Sent 6 · Received —/)).toBeInTheDocument();
+  });
+
+  it('shows what the office resolved as received on each line of a resolved transfer, as the trip does', async () => {
+    adminService.getBottleSessions.mockResolvedValue({ data: { items: [session({ units: [tenLitreLine()] })], total: 1 } });
+    // What the backend publishes after Bobur counted 10 full + 4 x 10 L of 10 + 6 and the office resolved 10 / 6: the
+    // full line's count was overwritten by the resolve, the 10 L line keeps his 4 beside the resolved 6, and his trip's
+    // 10 L line was credited 6.
+    adminService.getBottleSession.mockResolvedValue({
+      data: session({
+        units: [tenLitreLine({ transferred_out: 0, transferred_in: 6, on_board: 14, transferable: 14, free: 14 })],
+        members: [],
+        transfers_out: [],
+        transfers_in: [transfer({
+          id: 10,
+          status: 'resolved',
+          lines: [
+            { kind: 'full', product_id: null, product_name: null, declared: 10, confirmed: 10, resolved: 10 },
+            { kind: 'empty', product_id: null, product_name: null, declared: 0, confirmed: 0, resolved: 0 },
+            { kind: 'product', product_id: 3, product_name: '10 Litr suv', declared: 6, confirmed: 4, resolved: 6 },
+          ],
+        })],
+      }),
+    });
+    const user = userEvent.setup();
+    await openSessionsTab(user);
+    await screen.findByText('Sender Sam');
+    await user.click(within(document.querySelector('.ant-tabs-tabpane-active .ant-table-tbody')).getByText('Detail'));
+    const drawer = await waitFor(() => {
+      const d = document.querySelector('.ant-drawer-content');
+      expect(within(d).getByText('Receiver Rita')).toBeInTheDocument();
+      return d;
+    });
+    const unitBlock = within(drawer).getByText('10 Litr suv', { selector: '.ant-descriptions-title' })
+      .closest('.ant-descriptions');
+    const figure = (label) => within(unitBlock).getByText(label).closest('th').nextElementSibling.textContent;
+    expect(figure('Received')).toBe('6');
+    expect(within(drawer).getByText(/10 Litr suv: Sent 6 · Received 6/)).toBeInTheDocument();
+    expect(within(drawer).queryByText(/10 Litr suv: Sent 6 · Received 4/)).toBeNull();
+  });
+});
+
+describe('Bottle Transfers tab: unit lines, Rejected, Resolve', () => {
+  it('filters and tags Rejected and offers no Resolve on it', async () => {
+    const rejected = transfer({
+      id: 9,
+      status: 'rejected',
+      rejected_at: '2026-11-09T09:30:00',
+      confirmed_quantity: null,
+      confirmed_full: null,
+      confirmed_empty: null,
+      confirmed_total: null,
+    });
+    mockTransfers({ items: [rejected] });
+    const user = userEvent.setup();
+    render(<BottleTracking />, { wrapper: createWrapper() });
+    await user.click(tabLabel('Bottle Transfers'));
+    const row = (await screen.findByText('Sender Sam')).closest('tr');
+    const tag = within(row).getByText('Rejected');
+    expect(tag.closest('.ant-tag')).toHaveClass('ant-tag-orange');
+    expect(within(row).getByText(/Rejected at/)).toBeInTheDocument();
+    expect(within(row).queryByText('Resolve')).toBeNull();
+
+    // the filter offers Rejected and sends it as the status
+    await user.click(document.querySelector('.ant-tabs-tabpane-active .ant-select-selector'));
+    await user.click(await screen.findByTitle('Rejected'));
+    await waitFor(() => {
+      expect(adminService.getBottleTransfers).toHaveBeenCalledWith(expect.objectContaining({ status: 'rejected' }));
+    });
+  });
+
+  it('shows declared, counted and resolved for each unit line', async () => {
+    mockTransfers({
+      items: [transfer({
+        status: 'resolved',
+        units: [{ product_id: 3, product_name: '10 Litr suv', declared: 6, confirmed: 5, resolved: 4 }],
+      })],
+    });
+    const user = userEvent.setup();
+    render(<BottleTracking />, { wrapper: createWrapper() });
+    await user.click(tabLabel('Bottle Transfers'));
+    const row = (await screen.findByText('Sender Sam')).closest('tr');
+    expect(within(row).getByText('10 Litr suv: declared 6, counted 5, resolved 4')).toBeInTheDocument();
+  });
+
+  it('sends the 10 L line with Resolve', async () => {
+    mockTransfers({
+      disputedTotal: 1,
+      items: [transfer({
+        status: 'disputed',
+        units: [{ product_id: 3, product_name: '10 Litr suv', declared: 6, confirmed: 5, resolved: null }],
+      })],
+    });
+    adminService.resolveBottleTransferDispute.mockResolvedValue({ success: true });
+    const user = userEvent.setup();
+    render(<BottleTracking />, { wrapper: createWrapper() });
+    await user.click(tabLabel('Bottle Transfers'));
+    await screen.findByText('Sender Sam');
+    await user.click(within(document.querySelector('.ant-tabs-tabpane-active .ant-table-tbody')).getByText('Resolve'));
+
+    const modal = activeModal();
+    await user.type(within(fieldOf(modal, 'Resolved Full')).getByRole('spinbutton'), '5');
+    await user.type(within(fieldOf(modal, 'Resolved Empty')).getByRole('spinbutton'), '2');
+    await user.type(within(fieldOf(modal, 'Resolved 10 Litr suv')).getByRole('spinbutton'), '5');
+    await user.type(within(fieldOf(modal, 'Resolution Notes')).getByRole('textbox'), 'counted twice');
+    await user.click(within(modal).getByText('Resolve', { selector: '.ant-modal-footer span' }).closest('button'));
+
+    await waitFor(() => expect(adminService.resolveBottleTransferDispute).toHaveBeenCalledTimes(1));
+    expect(adminService.resolveBottleTransferDispute).toHaveBeenCalledWith(7, {
+      resolvedFull: 5,
+      resolvedEmpty: 2,
+      resolvedUnits: [{ productId: 3, quantity: 5 }],
+      resolutionNotes: 'counted twice',
+    }, { handledErrorCodes: ['BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE'] });
+  });
+
+  it('says the receiver is co-driving, with the owner name, on the 409, and keeps the modal open', async () => {
+    mockTransfers({ disputedTotal: 1, items: [transfer({ status: 'disputed' })] });
+    adminService.resolveBottleTransferDispute.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          error_code: 'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE',
+          message: 'Driver already has an active membership',
+          details: { session_id: 31, owner_user_id: 5, owner_name: 'Olim Owner' },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<BottleTracking />, { wrapper: createWrapper() });
+    await user.click(tabLabel('Bottle Transfers'));
+    await screen.findByText('Sender Sam');
+    await user.click(within(document.querySelector('.ant-tabs-tabpane-active .ant-table-tbody')).getByText('Resolve'));
+    const modal = activeModal();
+    await user.type(within(fieldOf(modal, 'Resolved Full')).getByRole('spinbutton'), '5');
+    await user.type(within(fieldOf(modal, 'Resolved Empty')).getByRole('spinbutton'), '2');
+    await user.type(within(fieldOf(modal, 'Resolution Notes')).getByRole('textbox'), 'x');
+    await user.click(within(modal).getByText('Resolve', { selector: '.ant-modal-footer span' }).closest('button'));
+
+    expect(await screen.findByText("This driver is on Olim Owner's trip right now. Resolve this transfer after that trip ends.")).toBeInTheDocument();
+    expect(activeModal()).toBe(modal);
   });
 });

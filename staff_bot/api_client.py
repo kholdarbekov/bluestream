@@ -1385,17 +1385,33 @@ class StaffAPIClient:
 
     # --- Bottle Session endpoints ---
 
-    async def open_bottle_session(self, token: str, bottles_loaded: int, notes: str = None) -> APIResponse:
+    async def open_bottle_session(
+        self, token: str, bottles_loaded: int, units: list = None, notes: str = None
+    ) -> APIResponse:
+        """Open the trip. `units` is `[{'product_id', 'quantity'}]`, one per product the load screen named; the key
+        is left out when the bot has none to send."""
         data = {'bottles_loaded': bottles_loaded}
+        if units is not None:
+            data['units'] = units
         if notes:
             data['notes'] = notes
         return await self._make_request('POST', '/api/v1/staff/bottles/session/open', token=token, data=data)
 
+    async def get_bottle_load_screen(self, token: str) -> APIResponse:
+        """The Load screen in one read: the products to ask a number for, and the refusal when he may not open a trip."""
+        return await self._make_request('GET', '/api/v1/staff/bottles/session/load-screen', token=token)
+
     async def get_current_bottle_session(self, token: str) -> APIResponse:
         return await self._make_request('GET', '/api/v1/staff/bottles/session/current', token=token)
 
-    async def close_bottle_session(self, token: str, bottles_returned: int, notes: str = None) -> APIResponse:
+    async def close_bottle_session(
+        self, token: str, bottles_returned: int, units_returned: list = None, notes: str = None
+    ) -> APIResponse:
+        """Close the trip. `units_returned` is `[{'product_id', 'quantity'}]`, one per line on the trip (the backend
+        refuses a close that leaves one out); the key is left out when the bot has none to send."""
         data = {'bottles_returned_to_warehouse': bottles_returned}
+        if units_returned is not None:
+            data['units_returned'] = units_returned
         if notes:
             data['notes'] = notes
         return await self._make_request('POST', '/api/v1/staff/bottles/session/close', token=token, data=data)
@@ -1444,35 +1460,51 @@ class StaffAPIClient:
 
     async def initiate_bottle_transfer(
         self, token: str, receiver_driver_id: int, *,
-        full_quantity: int = 0, empty_quantity: int = 0, send_all: bool = False,
+        full_quantity: int = 0, empty_quantity: int = 0, send_all: bool = False, units: Optional[list] = None,
     ) -> APIResponse:
-        """Hand full bottles and empties to a colleague: both numbers, or `send_all` (spec 2026-11-09 T1).
+        """Hand full bottles, empties and one-way units to a colleague: the numbers, or `send_all` (spec 2026-11-09 T1).
 
         With `send_all` the backend sends whatever is on the truck when it books the transfer, so no numbers go
-        with it. The backend caps each number and refuses a total of 0.
+        with it. `units` is `[{"product_id", "quantity"}]`, left out when None. The backend caps each number and
+        refuses a total of 0.
         """
         data = {'receiver_driver_id': receiver_driver_id}
         if send_all:
             data['send_all'] = True
         else:
             data.update(full_quantity=full_quantity, empty_quantity=empty_quantity)
+            if units is not None:
+                data['units'] = units
         return await self._make_request('POST', '/api/v1/staff/bottles/transfers', token=token, data=data)
 
     async def confirm_bottle_transfer(
         self, token: str, transfer_id: int, *,
         confirmed_full: int = None, confirmed_empty: int = None, confirm_as_declared: bool = False,
+        units: Optional[list] = None,
     ) -> APIResponse:
-        """The receiver's count: `confirm_as_declared`, or both numbers he counted.
+        """The receiver's count: `confirm_as_declared`, or the numbers he counted, one per line of the transfer.
 
-        The answer carries `admins_alerted`: True only when a disputed count's alert was accepted by the admins'
-        Slack alerts channel.
+        `units` is `[{"product_id", "quantity"}]`, one per one-way unit line, sent only with counted numbers and
+        left out when None. The answer carries `admins_alerted`: True only when a disputed count's alert was
+        accepted by the admins' Slack alerts channel.
         """
         if confirm_as_declared:
             data = {'confirm_as_declared': True}
         else:
             data = {'confirmed_full': confirmed_full, 'confirmed_empty': confirmed_empty}
+            if units is not None:
+                data['units'] = units
         return await self._make_request(
             'POST', f'/api/v1/staff/bottles/transfers/{transfer_id}/confirm', token=token, data=data
+        )
+
+    async def reject_bottle_transfer(self, token: str, transfer_id: int) -> APIResponse:
+        """The receiver rejects a pending transfer: every line goes back to the sender's trip. Empty body.
+
+        The answer is the rejected transfer (with `sender_name`) plus `sender_trip_was_closed`.
+        """
+        return await self._make_request(
+            'POST', f'/api/v1/staff/bottles/transfers/{transfer_id}/reject', token=token
         )
 
     async def get_drivers_available_to_invite(self, token: str) -> APIResponse:

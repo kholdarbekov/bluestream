@@ -8,7 +8,7 @@ from typing import List, Dict, NamedTuple, Optional, Tuple
 from staff_bot.i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, DRIVER_EXPENSE_CATEGORIES, FAILED_DELIVERY_REASONS
 from staff_bot.keyboards.common import CommonKeyboards
-from staff_bot.utils.formatters import format_currency, format_quantity
+from staff_bot.utils.formatters import format_currency, format_quantity, format_transfer_lines
 
 
 class HandoffTap(NamedTuple):
@@ -691,16 +691,18 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def transfer_send_choice(language: str, full: int, empties: int) -> InlineKeyboardMarkup:
-        """The sender's two ways to send (spec 2026-11-09 T1): everything on the truck, or two numbers.
+    def transfer_send_choice(language: str, lines: List[Dict]) -> InlineKeyboardMarkup:
+        """The sender's two ways to send (spec 2026-11-09 T1): everything on the truck, or the numbers.
 
-        `full` / `empties` are the backend's `transferable_full` / `transferable_empties`, shown as they are.
+        `lines` are the send screen's lines (`kind`, `product_name`, and the backend's `transferable`), shown as
+        they are in the Send all label.
         """
+        label = i18n.get(
+            'staff.delivery.transfer_send_all_button', language,
+            lines=format_transfer_lines(language, lines, field='transferable', html=False),
+        )
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                f"📦 {i18n.get('staff.delivery.transfer_send_all_button', language, full=full, empty=empties)}",
-                callback_data="staff_transfer_send_all",
-            )],
+            [InlineKeyboardButton(f"📦 {label}", callback_data="staff_transfer_send_all")],
             [InlineKeyboardButton(
                 i18n.get('staff.delivery.transfer_choose_amounts_button', language),
                 callback_data="staff_transfer_choose",
@@ -709,39 +711,67 @@ class DeliveryKeyboards:
         ])
 
     @staticmethod
-    def transfer_declared_counts(transfer: Dict) -> Tuple[int, int]:
-        """(full, empties) a transfer declared, read the same way from an inbox row, a push and a send's answer.
+    def transfer_declared_counts(transfer: Dict) -> List[Dict]:
+        """Every line a transfer declared, read the same way from an inbox row, a push and a count's answer.
 
-        All three carry `declared_quantity` (the full bottles) and `declared_empty_quantity`. A push queued before
-        the split has no empties field, and it declared none.
+        Each carries the backend's `lines` (`transfer_lines`: full, empty, then each one-way unit). A push queued
+        before the backend published them has only `declared_quantity` (the full bottles) and
+        `declared_empty_quantity` (absent before the split: none), so it reads as those two lines, which carry
+        `declared` only: render them with `field="declared"`.
         """
-        return transfer.get('declared_quantity') or 0, transfer.get('declared_empty_quantity') or 0
+        if transfer.get('lines') is not None:
+            return transfer['lines']
+        return [
+            {'kind': 'full', 'declared': transfer.get('declared_quantity') or 0},
+            {'kind': 'empty', 'declared': transfer.get('declared_empty_quantity') or 0},
+        ]
 
     @staticmethod
     def pending_transfer_list(language: str, transfers: List[Dict]) -> InlineKeyboardMarkup:
-        """Confirm as declared / enter a different count, for each pending transfer.
+        """Confirm as declared / enter a different count / reject, for each pending transfer.
 
         Confirm carries only the transfer id: the backend takes the declared numbers off the row, so a button
         drawn before a change can never confirm a count of its own. Older messages carry
-        `staff_transfer_confirm_<id>_<qty>`; that pattern stays registered and does the same.
+        `staff_transfer_confirm_<id>_<qty>`; that pattern stays registered and does the same. Reject asks once
+        before it posts anything (`transfer_reject_confirm`).
         """
         keyboard = []
         for t in transfers[:5]:
             transfer_id = t.get('id')
-            full, empties = DeliveryKeyboards.transfer_declared_counts(t)
+            lines = format_transfer_lines(
+                language, DeliveryKeyboards.transfer_declared_counts(t), field='declared', html=False,
+            )
             keyboard.append([InlineKeyboardButton(
-                f"✅ {i18n.get('staff.delivery.transfer_confirm_split_button', language, full=full, empty=empties)}",
+                f"✅ {i18n.get('staff.delivery.transfer_confirm_lines_button', language, lines=lines)}",
                 callback_data=f"staff_transfer_confirm_{transfer_id}",
             )])
             keyboard.append([InlineKeyboardButton(
                 f"✏️ {i18n.get('staff.delivery.transfer_custom_count_button', language)}",
                 callback_data=f"staff_transfer_custom_{transfer_id}",
             )])
+            keyboard.append([InlineKeyboardButton(
+                i18n.get('staff.delivery.transfer_reject_button', language),
+                callback_data=f"staff_transfer_reject_{transfer_id}",
+            )])
         keyboard.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_cash_hub"
         )])
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def transfer_reject_confirm(language: str, transfer_id: int) -> InlineKeyboardMarkup:
+        """Reject's one question: yes rejects, Back redraws the inbox with the transfer still pending."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                i18n.get('staff.delivery.transfer_reject_yes', language),
+                callback_data=f"staff_transfer_reject_yes_{transfer_id}",
+            ),
+            InlineKeyboardButton(
+                f"⬅️ {i18n.get('staff.delivery.transfer_reject_back', language)}",
+                callback_data="staff_bottle_transfers_pending",
+            ),
+        ]])
 
     # The category buttons' callback prefix (`staff_expense_cat_<category>`); the handler reads the category back
     # off it. A constant rather than an inline f-string: the category is a code, not a number, and the static

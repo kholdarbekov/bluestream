@@ -29,6 +29,7 @@ from tests.staff_bot.test_staff_delivery_journey_dispatcher import (
     capture_errors,
     copy_for,
     sign_in,
+    status_writes,
     texts,
     visible_answer_texts,
     walk_to_the_door,
@@ -60,7 +61,7 @@ BOTTLE_COPY = (
     "staff.delivery.bottles_zero_returned",
     "staff.delivery.view_bottle_balance",
     "staff.delivery.enter_bottle_count",
-    "staff.delivery.invalid_bottle_count",
+    "staff.delivery.invalid_count_zero_ok",
 )
 
 QUESTION = {
@@ -139,6 +140,21 @@ async def test_zero_returned_makes_no_question_call(monkeypatch):
     assert backend_calls(harness, "GET", QUESTION_URL) == []
     assert harness.telegram.last_shown().text.endswith(_plain_tail())
     assert harness.telegram.last_shown().callback_data() == ["staff_active_deliveries"]
+
+
+async def test_a_slip_at_the_door_count_asks_for_zero_or_more_and_zero_delivers(monkeypatch):
+    """0 empties back is a real answer at the door, so a slip ("o" for "0") is refused in words a 0 satisfies,
+    the prompt stays, and nothing is recorded until the driver types the number."""
+    harness = await _bot(monkeypatch)
+    driver = await _deliver_with_returns(harness, typed="o")
+
+    assert harness.telegram.last_shown().text == "Send a whole number, 0 or more."
+    assert [body["status"] for _endpoint, body in status_writes(harness)] == ["picked_up", "in_transit", "arrived"]
+
+    await harness.send(driver.text("0"))
+    delivered = status_writes(harness)[-1][1]
+    assert (delivered["status"], delivered["metadata"]["bottles_returned"]) == ("delivered", 0)
+    assert harness.telegram.last_shown().text.endswith(_plain_tail())
 
 
 async def test_failed_question_get_leaves_plain_delivered_message(monkeypatch):

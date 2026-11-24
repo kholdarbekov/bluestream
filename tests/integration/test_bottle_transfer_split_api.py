@@ -1,9 +1,10 @@
 """Transfers carry full bottles and empties as two numbers (spec 2026-11-09 T1, T2, T3, T5 and §4.3).
 
 Driven through the HTTP routes the staff bot and the admin Bottle Tracking page call, with real JWTs and the camelCase
-bodies the new clients send. The running staff_bot's own bodies (`quantity`, `confirmed_quantity`, snake_case) stay
-accepted for the restart window (spec "Old data in flight"). Only the Celery publish is faked, with the
-signature-enforcing `_spy`; the running bot's renderer and error resolver are the real ones, fed the real seeded copy.
+bodies the new clients send. The old send body's `quantity` (full bottles, snake_case too) stays accepted for the
+restart window (spec "Old data in flight"); the old single full count on Confirm does not, since every line is now
+counted. Only the Celery publish is faked, with the signature-enforcing `_spy`; the running bot's renderer and error
+resolver are the real ones, fed the real seeded copy.
 """
 
 import importlib.util
@@ -142,7 +143,30 @@ def test_choose_amounts_moves_each_component(app, client, db, pushes):
             (
                 int(receiver.telegram_id),
                 "transfer_received",
-                {"id": sent["id"], "declared_quantity": 5, "declared_empty_quantity": 2, "sender_name": "Ali Driver"},
+                {
+                    "id": sent["id"],
+                    "declared_quantity": 5,
+                    "declared_empty_quantity": 2,
+                    "sender_name": "Ali Driver",
+                    "lines": [
+                        {
+                            "kind": "full",
+                            "product_id": None,
+                            "product_name": None,
+                            "declared": 5,
+                            "confirmed": None,
+                            "resolved": None,
+                        },
+                        {
+                            "kind": "empty",
+                            "product_id": None,
+                            "product_name": None,
+                            "declared": 2,
+                            "confirmed": None,
+                            "resolved": None,
+                        },
+                    ],
+                },
             ),
             {},
         )
@@ -401,8 +425,7 @@ def test_an_empties_only_hand_off_to_a_driver_with_nothing_open_opens_his_sessio
         {"confirmedFull": 5},
         {"confirmedEmpty": 2},
         {"confirmAsDeclared": True, "confirmedFull": 5, "confirmedEmpty": 2},
-        {"confirmedQuantity": 5, "confirmedFull": 5, "confirmedEmpty": 2},
-        {"confirmAsDeclared": True, "confirmedQuantity": 5},
+        {"confirmedQuantity": 5},
         {"confirmedFull": -1, "confirmedEmpty": 2},
     ],
     ids=[
@@ -410,8 +433,7 @@ def test_an_empties_only_hand_off_to_a_driver_with_nothing_open_opens_his_sessio
         "full-only",
         "empties-only",
         "declared-and-numbers",
-        "legacy-and-numbers",
-        "declared-and-legacy",
+        "legacy",
         "negative",
     ],
 )
@@ -434,9 +456,8 @@ def test_a_confirm_that_does_not_give_exactly_one_count_is_refused_and_credits_n
     [
         ({"confirmedFull": OVER_THE_CEILING, "confirmedEmpty": 2}, "confirmedFull"),
         ({"confirmedFull": 5, "confirmedEmpty": OVER_THE_CEILING}, "confirmedEmpty"),
-        ({"confirmedQuantity": OVER_THE_CEILING}, "confirmedQuantity"),
     ],
-    ids=["full", "empty", "legacy"],
+    ids=["full", "empty"],
 )
 def test_a_count_the_columns_cannot_hold_is_refused_by_its_field_and_credits_nothing(app, client, db, body, field):
     sender, receiver = _pair(db, "16")
@@ -611,8 +632,8 @@ def test_legacy_quantity_field_still_accepted(app, client, db, body):
     assert (sent["declared_full"], sent["declared_empty"]) == (3, 0)
     db.session.refresh(trip)
     assert _moved_out(trip) == (3, 0)
-    # The running bot's confirm button sends the full count it showed: nothing else was declared, so it confirms.
-    confirmed = _confirm(client, app, sent["id"], receiver, {"confirmed_quantity": 3})
+    # Counted the way the bot sends other numbers (snake_case): the 3 full it showed and no empties, so it confirms.
+    confirmed = _confirm(client, app, sent["id"], receiver, {"confirmed_full": 3, "confirmed_empty": 0})
     assert confirmed.status_code == 200, confirmed.get_json()
     assert (confirmed.get_json()["data"]["status"], confirmed.get_json()["data"]["confirmed_empty"]) == (
         "confirmed",
@@ -622,29 +643,17 @@ def test_legacy_quantity_field_still_accepted(app, client, db, body):
     assert _moved_in(receiver_trip) == (3, 0)
 
 
-def test_a_legacy_confirmed_quantity_on_a_transfer_with_empties_is_disputed(app, client, db):
-    """The running bot can only say a full count: on a transfer that also declared empties, an admin decides."""
-    sender, receiver = _pair(db, "42")
-    _trip(db, sender, loaded=7, collected=3)
-    receiver_trip = _trip(db, receiver, loaded=4)
-    sent = _send(client, app, sender, {"receiverDriverId": receiver.id, "fullQuantity": 5, "emptyQuantity": 2})
-
-    answered = _confirm(client, app, sent["id"], receiver, {"confirmed_quantity": 5})
-
-    assert answered.status_code == 200, answered.get_json()
-    data = answered.get_json()["data"]
-    assert (data["status"], data["confirmed_full"], data["confirmed_empty"]) == ("disputed", 5, 0)
-    db.session.refresh(receiver_trip)
-    assert _moved_in(receiver_trip) == (5, 0)
-
-
 def test_the_push_carries_both_numbers_and_the_bot_renders_both(app, client, db, pushes, seeded_copy):
     from staff_bot.webhook_server import _render_bottle_event
 
     seeded_copy(
-        "staff.bottles.notify.transfer_received_split",
-        "staff.delivery.transfer_confirm_split_button",
+        "staff.bottles.notify.transfer_received_lines",
+        "staff.delivery.transfer_line_full",
+        "staff.delivery.transfer_line_empty",
+        "staff.delivery.transfer_line_product",
+        "staff.delivery.transfer_confirm_lines_button",
         "staff.delivery.transfer_custom_count_button",
+        "staff.delivery.transfer_reject_button",
         "staff.back",
     )
     sender, receiver = _pair(db, "43")
@@ -656,15 +665,34 @@ def test_the_push_carries_both_numbers_and_the_bot_renders_both(app, client, db,
         "declared_quantity": 5,
         "declared_empty_quantity": 2,
         "sender_name": "Ali Driver",
+        "lines": [
+            {
+                "kind": "full",
+                "product_id": None,
+                "product_name": None,
+                "declared": 5,
+                "confirmed": None,
+                "resolved": None,
+            },
+            {
+                "kind": "empty",
+                "product_id": None,
+                "product_name": None,
+                "declared": 2,
+                "confirmed": None,
+                "resolved": None,
+            },
+        ],
     }
 
     text, keyboard = _render_bottle_event(event, payload, "en")
 
-    assert text == "📥 <b>Ali Driver</b> sent you <b>5</b> full + <b>2</b> empty. Confirm the count you received."
+    assert text == "📥 Ali Driver sent you: 18.9 L full 5 · empty 2"
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
-    assert buttons[:2] == [
-        ("✅ Confirm 5 full + 2 empty", f"staff_transfer_confirm_{sent['id']}"),
-        ("✏️ Different count", f"staff_transfer_custom_{sent['id']}"),
+    assert buttons[:3] == [
+        ("✅ Confirm 18.9 L full 5 · empty 2", f"staff_transfer_confirm_{sent['id']}"),
+        ("✏️ Enter other numbers", f"staff_transfer_custom_{sent['id']}"),
+        ("❌ Reject", f"staff_transfer_reject_{sent['id']}"),
     ]
 
 

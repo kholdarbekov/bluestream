@@ -375,6 +375,29 @@ def _add(db, row):
     db.session.remove()
 
 
+def _insert_product(db, *, name, price, category_name="Water"):
+    """A `products` row (and its category) as raw SQL, and the product's id. For fixtures staged BEFORE the
+    revision that added `products.counted_on_bottle_trip`: the ORM sends every mapped column, so an ORM
+    `Product` fails at any older schema (the same reason `_insert_user` goes through Core). The category table
+    has not changed, so the ORM is safe for it."""
+    from business_app.models.product import ProductCategory
+
+    category = ProductCategory(name=category_name, description="d", is_active=True)
+    db.session.add(category)
+    db.session.flush()
+    product_id = db.session.execute(
+        text(
+            "INSERT INTO products (name, description, category_id, size, volume, volume_unit, base_price, "
+            "stock_quantity, min_stock_level, max_stock_level, is_active, created_at, updated_at) "
+            "VALUES (:name, 'd', :category_id, '19L', 19.0, 'L', :price, 100000, 0, 1000000, true, now(), now()) "
+            "RETURNING id"
+        ),
+        {"name": name, "category_id": category.id, "price": price},
+    ).scalar_one()
+    db.session.commit()
+    return product_id
+
+
 def _insert_user(db, **columns):
     """A `users` row written with Core, and its id. For fixtures staged BEFORE b4f1c7e9a2d3.
 
@@ -459,7 +482,6 @@ def _v4_plan_world(db):
     from business_app.models.sales import Outlet
     from business_app.models.sales_pay import SalesAgentPayTerms, SalesPayPeriod, SalesPayPlan
     from business_app.utils.constants import ORDER_SOURCE_SALES_AGENT
-    from tests.integration.sales_pay_builders import make_product
 
     # Users and the order go in with Core: this schema predates users.telegram_blocked_at and
     # orders.online_payable_since (see `_insert_user`).
@@ -469,7 +491,7 @@ def _v4_plan_world(db):
     customer_id = _insert_user(db, phone="+998900000502", password_hash="not-a-real-hash", first_name="Store")
     db.session.add(Outlet(name="Tier Shop", outlet_type="grocery_store", stage="active"))
     db.session.commit()
-    water = make_product(db, name="Water 19L", price="20000")
+    water = _insert_product(db, name="Water 19L", price=Decimal("20000"), category_name="Sales pay test")
     plan = SalesPayPlan(name="Standard", created_by_user_id=agent_id)
     period = SalesPayPeriod(month_start=OCT, status="open", is_shadow=False, holidays=[])
     order_id = _insert_order(
@@ -488,7 +510,7 @@ def _v4_plan_world(db):
     db.session.add(terms)
     db.session.commit()
     w = SimpleNamespace(
-        agent=agent_id, water=water.id, plan=plan.id, period=period.id, order=order_id, terms=terms.id
+        agent=agent_id, water=water, plan=plan.id, period=period.id, order=order_id, terms=terms.id
     )
     db.session.remove()
     versions = []
@@ -668,7 +690,6 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
 
     from business_app import db
     from business_app.models.corporate import CorporateContract, CorporateContractStatus
-    from business_app.models.product import Product, ProductCategory
     from shared.enums import UserRole, UserType
 
     app = _migration_app(ephemeral_pg_database)
@@ -676,28 +697,21 @@ def test_contract_price_split_copies_the_price_into_both_methods_and_rolls_back(
         config = app.extensions["migrate"].migrate.get_config()
         command.upgrade(config, CONTRACT_PRICE_PARENT_REVISION)
 
-        # Only corporate_contract_product_prices and users.telegram_blocked_at differ between the
+        # Only corporate_contract_product_prices, users.telegram_blocked_at and products.counted_on_bottle_trip differ between the
         # parent and head, so the ORM is safe for every other table; the price row goes in as raw SQL
         # and the user as Core (see `_insert_user`).
         user_id = _insert_user(
             db, email="split@example.com", phone="+998901110001", password_hash="x" * 60, first_name="S",
             last_name="P", user_type=UserType.ENTITY, role=UserRole.CUSTOMER, is_verified=True,
         )
-        category = ProductCategory(name="Water", description="d", is_active=True)
-        db.session.add(category)
-        db.session.flush()
-        product = Product(
-            name="Water 19L", description="d", category_id=category.id, size="19L", volume=19.0,
-            volume_unit="L", base_price=Decimal("15000.00"), stock_quantity=10, min_stock_level=1,
-            max_stock_level=100, is_active=True,
-        )
+        product_id = _insert_product(db, name="Water 19L", price=Decimal("15000.00"))
         contract = CorporateContract(
             user_id=user_id, contract_number="SPLIT-1", name="Split",
             status=CorporateContractStatus.ACTIVE, currency="UZS", is_active=True,
         )
-        db.session.add_all([product, contract])
+        db.session.add(contract)
         db.session.commit()
-        contract_id, product_id = contract.id, product.id
+        contract_id = contract.id
         db.session.remove()
 
         _run(
@@ -1136,6 +1150,80 @@ def test_customer_credit_payouts_downgrade_refuses_while_a_payout_row_exists(eph
         command.upgrade(config, "head")
         assert _revision(db.engine) == head
         assert _rows(db.engine, "SELECT to_regclass('customer_credit_payouts') IS NOT NULL") == [(True,)]
+
+
+TEN_LITRE_PARENT_REVISION = "3d8f5a1c7e92"
+
+
+@pytest.mark.integration
+def test_ten_litre_trip_units_downgrade_refuses_while_a_rejected_transfer_or_a_unit_line_exists(ephemeral_pg_database):
+    """Rolling the 10 L trip back with its rows in place would drop every trip's and every transfer's 10 L lines (the
+    10 L tallies) without a word, and leave transfers in status 'rejected', which the previous code cannot load (the
+    admin Bottle Transfers tab answers 500). The downgrade names the rows and refuses, writing nothing; with none left
+    it drops what the upgrade added, and head comes back."""
+    from alembic import command
+
+    from business_app import db
+    from business_app.models.bottle import (
+        DriverBottleSession,
+        DriverBottleSessionUnit,
+        DriverBottleTransfer,
+        DriverBottleTransferUnit,
+    )
+    from shared.enums import DriverBottleSessionStatus, DriverBottleTransferStatus
+
+    app = _migration_app(ephemeral_pg_database)
+    with app.app_context():
+        config = app.extensions["migrate"].migrate.get_config()
+        command.upgrade(config, "head")
+        head = _revision(db.engine)
+        sender_id = _insert_user(db, phone="+998900000901", password_hash="not-a-real-hash", first_name="Aziz")
+        receiver_id = _insert_user(db, phone="+998900000902", password_hash="not-a-real-hash", first_name="Bobur")
+        product_id = _insert_product(db, name="10 Litr suv", price=9000)
+        trip = DriverBottleSession(
+            session_ref="TRIP-MIG-1", driver_user_id=sender_id, status=DriverBottleSessionStatus.OPEN, bottles_loaded=4
+        )
+        _add(db, trip)
+        (trip_id,) = _rows(db.engine, "SELECT id FROM driver_bottle_sessions")[0]
+        _add(db, DriverBottleSessionUnit(session_id=trip_id, product_id=product_id, loaded=6))
+        transfer = DriverBottleTransfer(
+            transfer_ref="TRF-MIG-1",
+            sender_session_id=trip_id,
+            sender_driver_id=sender_id,
+            receiver_driver_id=receiver_id,
+            declared_quantity=2,
+            status=DriverBottleTransferStatus.REJECTED,
+            rejected_at=datetime.now(UTC),
+        )
+        _add(db, transfer)
+        (transfer_id,) = _rows(db.engine, "SELECT id FROM driver_bottle_transfers")[0]
+        _add(db, DriverBottleTransferUnit(transfer_id=transfer_id, product_id=product_id, declared=3))
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"ten litre trip units downgrade: 1 rejected transfers, 1 trip unit lines and 1 transfer unit lines "
+            r"exist; export and delete driver_bottle_transfer_units and driver_bottle_session_units, and move every "
+            r"rejected transfer off that status by hand, first",
+        ):
+            command.downgrade(config, TEN_LITRE_PARENT_REVISION)
+        assert _revision(db.engine) == head
+        assert _rows(db.engine, "SELECT count(*) FROM driver_bottle_session_units") == [(1,)]
+        assert _rows(db.engine, "SELECT count(*) FROM driver_bottle_transfer_units") == [(1,)]
+        with db.engine.connect() as conn:
+            assert "rejected_at" in _schema_columns(conn, "driver_bottle_transfers")
+
+        _run(db.engine, "DELETE FROM driver_bottle_transfer_units")
+        _run(db.engine, "DELETE FROM driver_bottle_session_units")
+        _run(db.engine, "DELETE FROM driver_bottle_transfers")
+        command.downgrade(config, TEN_LITRE_PARENT_REVISION)
+        assert _revision(db.engine) == TEN_LITRE_PARENT_REVISION
+        assert _rows(db.engine, "SELECT to_regclass('driver_bottle_session_units')") == [(None,)]
+        with db.engine.connect() as conn:
+            assert "rejected_at" not in _schema_columns(conn, "driver_bottle_transfers")
+
+        command.upgrade(config, "head")
+        assert _revision(db.engine) == head
+        assert _rows(db.engine, "SELECT to_regclass('driver_bottle_session_units') IS NOT NULL") == [(True,)]
 
 
 SHARED_PLACE_REVISION = "e3b7c1d9a5f4"

@@ -19,8 +19,10 @@ vi.mock('react-i18next', () => ({
           ? maybeOptions
           : fallbackOrOptions;
 
-      if (options?.count !== undefined && typeof fallback === 'string') {
-        return fallback.replace('{{count}}', String(options.count));
+      if (options && typeof fallback === 'string') {
+        return fallback.replace(/{{(\w+)}}/g, (match, name) =>
+          options[name] !== undefined ? String(options[name]) : match
+        );
       }
       return fallback || key;
     },
@@ -252,6 +254,221 @@ describe('Products edit modal', () => {
             returnable_bottles_per_unit: 0,
           }),
         );
+      });
+    });
+  });
+
+  describe('count on the driver bottle trip', () => {
+    const SETTING = "Count on the driver's bottle trip";
+
+    // The PUT body the edit modal sends for productRow(NON_RETURNABLE): every field the form holds, from the row.
+    const NON_RETURNABLE = { tracks_returnable_bottles: false, returnable_bottles_per_unit: 0 };
+    const editBody = (overrides) => ({
+      name: 'Aqua Element 18.9L',
+      sku: 'AQUA-19',
+      volume: 18.9,
+      category_id: 8,
+      status: 'active',
+      price: 18000,
+      stock_quantity: 24,
+      min_order_quantity: 1,
+      is_tryout_eligible: true,
+      tracks_returnable_bottles: false,
+      returnable_bottles_per_unit: 0,
+      counted_on_bottle_trip: false,
+      in_sales_stock_check: false,
+      is_featured: false,
+      barcode: '4780011111111',
+      spic: 'SPIC-19L',
+      package_code: 'PACK-19L',
+      units: 'pcs',
+      vat_percent: 12,
+      fiscalization_enabled: true,
+      requires_marking_codes: false,
+      images: [],
+      ...overrides,
+    });
+    // Shown = in the page, with no ancestor styled out of view.
+    const settingShown = (dialog) => {
+      const control = within(dialog).queryByLabelText(SETTING);
+      if (control === null) return false;
+      for (let el = control; el; el = el.parentElement) {
+        if (window.getComputedStyle(el).display === 'none') return false;
+      }
+      return true;
+    };
+
+    it('shows the setting for a non-returnable product and sends it ticked', async () => {
+      const user = userEvent.setup();
+      mockProducts(NON_RETURNABLE);
+
+      const dialog = await openEditModal(user);
+      expect(within(dialog).getByLabelText(SETTING)).not.toBeChecked();
+      await user.click(within(dialog).getByLabelText(SETTING));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => expect(adminService.updateProduct).toHaveBeenCalledTimes(1));
+      expect(adminService.updateProduct).toHaveBeenCalledWith(44, editBody({ counted_on_bottle_trip: true }));
+    });
+
+    it('sends the setting unticked when the admin unticks a counted product', async () => {
+      const user = userEvent.setup();
+      mockProducts({ ...NON_RETURNABLE, counted_on_bottle_trip: true });
+
+      const dialog = await openEditModal(user);
+      expect(within(dialog).getByLabelText(SETTING)).toBeChecked();
+      await user.click(within(dialog).getByLabelText(SETTING));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => expect(adminService.updateProduct).toHaveBeenCalledTimes(1));
+      expect(adminService.updateProduct).toHaveBeenCalledWith(44, editBody({ counted_on_bottle_trip: false }));
+    });
+
+    // The page holds no copy of the returnability rule (M2): the setting is on screen for every product, and the
+    // backend's TRIP_UNIT_ON_RETURNABLE answers a tick on a returnable bottle (see 'explains a refused returnable change').
+    it('shows the setting on a returnable product too', async () => {
+      const user = userEvent.setup();
+
+      const dialog = await openEditModal(user);
+
+      expect(settingShown(dialog)).toBe(true);
+      expect(within(dialog).getByLabelText(SETTING)).not.toBeChecked();
+    });
+
+    it('keeps the setting shown while the admin switches Tracks Returnable Bottles on and off', async () => {
+      const user = userEvent.setup();
+      mockProducts(NON_RETURNABLE);
+
+      const dialog = await openEditModal(user);
+      expect(settingShown(dialog)).toBe(true);
+
+      await user.click(within(dialog).getByLabelText('Tracks Returnable Bottles'));
+      await waitFor(() => expect(within(dialog).getByLabelText('Tracks Returnable Bottles')).toBeChecked());
+      expect(settingShown(dialog)).toBe(true);
+
+      await user.click(within(dialog).getByLabelText('Tracks Returnable Bottles'));
+      await waitFor(() => expect(within(dialog).getByLabelText('Tracks Returnable Bottles')).not.toBeChecked());
+      expect(settingShown(dialog)).toBe(true);
+      expect(within(dialog).getByLabelText(SETTING)).not.toBeChecked();
+    });
+
+    // A counted product the admin makes returnable: the setting stays on screen after the untick, and the PUT carries
+    // the untick, or the backend keeps the stored tick and refuses TRIP_UNIT_ON_RETURNABLE.
+    it('sends the untick of a counted product the admin makes returnable', async () => {
+      const user = userEvent.setup();
+      mockProducts({ ...NON_RETURNABLE, counted_on_bottle_trip: true });
+
+      const dialog = await openEditModal(user);
+      await user.click(within(dialog).getByLabelText('Tracks Returnable Bottles'));
+      expect(settingShown(dialog)).toBe(true);
+      await user.click(within(dialog).getByLabelText(SETTING));
+      await waitFor(() => expect(within(dialog).getByLabelText(SETTING)).not.toBeChecked());
+      expect(settingShown(dialog)).toBe(true);
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => expect(adminService.updateProduct).toHaveBeenCalledTimes(1));
+      expect(adminService.updateProduct).toHaveBeenCalledWith(44, editBody({
+        tracks_returnable_bottles: true,
+        returnable_bottles_per_unit: 1,
+        counted_on_bottle_trip: false,
+      }));
+    });
+
+    it('lists the open trips when the save is refused', async () => {
+      const user = userEvent.setup();
+      mockProducts({ tracks_returnable_bottles: false, returnable_bottles_per_unit: 0 });
+      adminService.updateProduct.mockRejectedValue({
+        response: {
+          status: 409,
+          data: {
+            success: false,
+            message: 'Close every open bottle trip before changing whether this product is counted on the trip.',
+            error_code: 'TRIP_UNIT_SETTING_BLOCKED',
+            details: { open_trips: [{ session_id: 9, session_ref: 'a1b2c3d4e5', driver_user_id: 3, driver_name: 'Aziz' }] },
+          },
+        },
+      });
+
+      const dialog = await openEditModal(user);
+      await user.click(within(dialog).getByLabelText(SETTING));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      expect(await screen.findByText('Close these open trips first: Aziz (#a1b2c3d4)')).toBeInTheDocument();
+    });
+
+    it('explains a refused returnable change', async () => {
+      const user = userEvent.setup();
+      // An 18.9 L returnable bottle the admin ticks: the page sends the tick and the backend refuses it.
+      mockProducts();
+      adminService.updateProduct.mockRejectedValue({
+        response: {
+          status: 400,
+          data: {
+            success: false,
+            message: 'A product counted on the bottle trip cannot be a returnable bottle.',
+            error_code: 'TRIP_UNIT_ON_RETURNABLE',
+          },
+        },
+      });
+
+      const dialog = await openEditModal(user);
+      expect(settingShown(dialog)).toBe(true);
+      await user.click(within(dialog).getByLabelText(SETTING));
+      await user.click(within(dialog).getByRole('button', { name: 'Update Product' }));
+
+      await waitFor(() => expect(adminService.updateProduct).toHaveBeenCalledTimes(1));
+      expect(adminService.updateProduct).toHaveBeenCalledWith(44, editBody({
+        tracks_returnable_bottles: true,
+        returnable_bottles_per_unit: 1,
+        counted_on_bottle_trip: true,
+      }));
+      expect(
+        await screen.findByText('A product counted on the bottle trip cannot be returnable. Untick the setting first.'),
+      ).toBeInTheDocument();
+    });
+
+    // The create modal: a new non-returnable product, the setting ticked or left as it opens (off).
+    it.each([
+      ['ticked', true, true],
+      ['left as it opens', false, false],
+    ])('the create modal sends the setting %s', async (_label, tick, expected) => {
+      const user = userEvent.setup();
+      adminService.createProduct.mockResolvedValue({ success: true, data: { product: productRow() } });
+      render(<Products />, { wrapper: createWrapper() });
+      await waitFor(() => expect(adminService.getProducts).toHaveBeenCalled());
+      await user.click(await screen.findByRole('button', { name: /Add Product/ }));
+      const dialog = await screen.findByRole('dialog');
+
+      await user.type(within(dialog).getByLabelText('Product name'), '10 Litr suv');
+      await user.type(within(dialog).getByLabelText('SKU'), 'AQUA-10');
+      await user.type(within(dialog).getByLabelText('Volume'), '10');
+      await user.click(within(dialog).getByLabelText('Category'));
+      await user.click(await screen.findByTitle('Water'));
+      await user.click(within(dialog).getByLabelText('Status'));
+      await user.click(await screen.findByTitle('active'));
+      await user.type(within(dialog).getByLabelText('Price'), '9000');
+      await user.type(within(dialog).getByLabelText('Stock Quantity'), '30');
+      expect(within(dialog).getByLabelText(SETTING)).not.toBeChecked();
+      if (tick) await user.click(within(dialog).getByLabelText(SETTING));
+      await user.click(within(dialog).getByRole('button', { name: 'Create Product' }));
+
+      await waitFor(() => expect(adminService.createProduct).toHaveBeenCalledTimes(1));
+      // Fields the admin never touched are undefined, so axios leaves them out of the JSON.
+      expect(adminService.createProduct).toHaveBeenCalledWith({
+        name: '10 Litr suv',
+        sku: 'AQUA-10',
+        volume: 10,
+        category_id: 8,
+        status: 'active',
+        price: 9000,
+        stock_quantity: 30,
+        min_order_quantity: 1,
+        is_tryout_eligible: true,
+        tracks_returnable_bottles: false,
+        returnable_bottles_per_unit: 0,
+        counted_on_bottle_trip: expected,
+        in_sales_stock_check: false,
+        images: [],
       });
     });
   });

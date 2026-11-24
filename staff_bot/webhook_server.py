@@ -33,6 +33,7 @@ from staff_bot.utils.formatters import (
     format_pay_carry_in,
     format_pay_month,
     format_pay_tiers,
+    format_transfer_lines,
     signed_currency,
     signed_deduction,
 )
@@ -46,6 +47,7 @@ from shared.staff_constants import (
     BOTTLE_EVENT_TRANSFER_CONFIRMED,
     BOTTLE_EVENT_TRANSFER_DISPUTED,
     BOTTLE_EVENT_TRANSFER_RECEIVED,
+    BOTTLE_EVENT_TRANSFER_REJECTED,
     BOTTLE_EVENTS,
     SALES_EVENT_PAY_PENALTY_CONFIRMED,
     SALES_EVENT_PAY_STATEMENT_APPROVED,
@@ -481,36 +483,69 @@ def _render_bottle_event(event: str, payload: dict, language: str) -> Tuple[str,
     """One bottle event as `(text, keyboard)`. Every one sounds: each asks the
     driver to act, or answers a question they asked a moment ago."""
     unknown = i18n.get('staff.common.unknown_driver', language)
+    lines = payload.get('lines')
     if event == BOTTLE_EVENT_TRANSFER_RECEIVED:
-        # Full bottles and empties, read like an inbox row: a push queued before the split names no empties.
-        full, empties = DeliveryKeyboards.transfer_declared_counts(payload)
+        # Every line, read like an inbox row; a push queued before the backend published `lines` reads as its
+        # full bottles and empties.
         text = i18n.get(
-            'staff.bottles.notify.transfer_received_split', language,
+            'staff.bottles.notify.transfer_received_lines', language,
             sender=escape_html(payload.get('sender_name') or unknown),
-            full=full, empty=empties,
+            lines=format_transfer_lines(
+                language, DeliveryKeyboards.transfer_declared_counts(payload), field='declared',
+            ),
         )
-        # The inbox's own keyboard: its confirm button is a global handler and
-        # its "different count" button a conversation entry point, so both work
-        # from this message exactly as from "📥 Incoming transfers".
+        # The inbox's own keyboard: its confirm and reject buttons are global
+        # handlers and its "different count" button a conversation entry point,
+        # so all three work from this message exactly as from "📥 Incoming transfers".
         return text, DeliveryKeyboards.pending_transfer_list(language, [payload])
-    if event == BOTTLE_EVENT_TRANSFER_CONFIRMED:
+    receiver = escape_html(payload.get('receiver_name') or unknown)
+    if event == BOTTLE_EVENT_TRANSFER_REJECTED:
         text = i18n.get(
-            'staff.bottles.notify.transfer_confirmed', language,
-            receiver=escape_html(payload.get('receiver_name') or unknown),
-            full=payload.get('confirmed_full', 0), empty=payload.get('confirmed_empty', 0),
+            'staff.bottles.notify.transfer_rejected', language,
+            receiver=receiver,
+            ref=escape_html((payload.get('transfer_ref') or '')[:8]),
+            lines=format_transfer_lines(language, lines, field='declared'),
         )
+        # The backend says whether the trip had closed, so its discrepancies were recomputed.
+        if payload.get('sender_trip_was_closed'):
+            text = f"{text}\n{i18n.get('staff.bottles.notify.transfer_rejected_trip_closed', language)}"
+        return text, None
+    if event == BOTTLE_EVENT_TRANSFER_CONFIRMED:
+        # Every line as counted; a push queued before the backend published `lines` names the two numbers.
+        if lines is not None:
+            text = i18n.get(
+                'staff.bottles.notify.transfer_confirmed_lines', language,
+                receiver=receiver, lines=format_transfer_lines(language, lines, field='confirmed'),
+            )
+        else:
+            text = i18n.get(
+                'staff.bottles.notify.transfer_confirmed', language,
+                receiver=receiver,
+                full=payload.get('confirmed_full', 0), empty=payload.get('confirmed_empty', 0),
+            )
         # The backend says whether the trip really closed; the bot never guesses it from the numbers.
         if payload.get('auto_closed'):
             text = f"{text}\n{i18n.get('staff.bottles.notify.trip_auto_closed', language)}"
         return text, None
     if event == BOTTLE_EVENT_TRANSFER_DISPUTED:
+        # Says an admin will check only when the backend reports one was alerted. Every line as counted and as
+        # sent; a push queued before the backend published `lines` names the four numbers.
+        alerted = payload.get('admins_alerted')
+        if lines is not None:
+            counts = {
+                'receiver': receiver,
+                'counted': format_transfer_lines(language, lines, field='confirmed'),
+                'declared': format_transfer_lines(language, lines, field='declared'),
+            }
+            if alerted:
+                return i18n.get('staff.bottles.notify.transfer_disputed_lines', language, **counts), None
+            return i18n.get('staff.bottles.notify.transfer_disputed_lines_no_admin', language, **counts), None
         counts = {
-            'receiver': escape_html(payload.get('receiver_name') or unknown),
+            'receiver': receiver,
             'cfull': payload.get('confirmed_full', 0), 'cempty': payload.get('confirmed_empty', 0),
             'dfull': payload.get('declared_full', 0), 'dempty': payload.get('declared_empty', 0),
         }
-        # Says an admin will check only when the backend reports one was alerted.
-        if payload.get('admins_alerted'):
+        if alerted:
             return i18n.get('staff.bottles.notify.transfer_disputed', language, **counts), None
         return i18n.get('staff.bottles.notify.transfer_disputed_no_admin', language, **counts), None
     if event == BOTTLE_EVENT_JOIN_REQUESTED:

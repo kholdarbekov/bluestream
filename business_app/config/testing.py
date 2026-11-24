@@ -27,13 +27,22 @@ class TestingConfig(BaseConfig):
         "json_serializer": decimal_safe_json_serializer,
     }
 
-    # Redis Configuration - Use separate test database
-    REDIS_URL = os.environ.get("REDIS_TEST_URL", "redis://localhost:6379/15")
+    # Redis Configuration - the test process's own database. Read when an app is built, not when this module is
+    # imported: tests/conftest.py maps REDIS_URL to the xdist worker's database (and never DB 0) before it builds the
+    # session app, so every app a test builds without a REDIS_URL of its own (each Postgres app) talks to the same
+    # database. The old localhost default reached nothing in the test container, and a process-wide client first
+    # built under such an app (`inventory_service.get_inventory_service()`) failed every later reservation.
+    @property
+    def REDIS_URL(self):
+        return os.environ.get("REDIS_TEST_URL") or os.environ.get("REDIS_URL") or "redis://localhost:6379/15"
 
     # Disable rate limiting for tests
     RATELIMIT_ENABLED = False
-    RATELIMIT_STORAGE_URL = REDIS_URL
     RATELIMIT_DEFAULT = "10000/hour"
+
+    @property
+    def RATELIMIT_STORAGE_URL(self):
+        return self.REDIS_URL
 
     # Celery Configuration - Synchronous execution for testing
     CELERY = {
@@ -197,7 +206,7 @@ class TestingConfig(BaseConfig):
         try:
             import redis
 
-            r = redis.from_url(cls.REDIS_URL)
+            r = redis.from_url(app.config["REDIS_URL"])
             r.ping()
         except (redis.ConnectionError, ConnectionRefusedError):
             # Use fake Redis for testing

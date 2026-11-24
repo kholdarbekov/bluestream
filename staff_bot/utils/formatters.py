@@ -71,12 +71,13 @@ def format_quantity(value: Any) -> str:
     return text or '0'
 
 
-def format_truck_bottle_lines(language: str, *, full, empties, free_full=None) -> List[str]:
+def format_truck_bottle_lines(language: str, *, full, empties, free_full=None, units=None) -> List[str]:
     """The truck's bottles as the bottle screens show them (spec 2026-11-09 U1), one HTML line each.
 
     Every number is a field the backend published (full / empties on board, free full bottles, or the two
     transferable numbers on the send screen), shown as it came: the bot adds nothing up. `free_full` is left
-    out where a screen has no use for it.
+    out where a screen has no use for it. `units` are the trip's one-way unit lines (the session payload's
+    `units`): one more line each, what is on board and what is free.
     """
     lines = [
         f"💧 {i18n.get('staff.bottles.full_on_truck', language, n=f'<b>{escape_html(full)}</b>')}",
@@ -86,7 +87,41 @@ def format_truck_bottle_lines(language: str, *, full, empties, free_full=None) -
         lines.append(
             f"✅ {i18n.get('staff.bottles.free_full_bottles', language, n=f'<b>{escape_html(free_full)}</b>')}"
         )
-    return lines
+    return lines + format_session_unit_lines(language, units, field='on_board', with_free=True)
+
+
+def format_session_unit_lines(language: str, units, *, field: str, with_free: bool = False) -> List[str]:
+    """One HTML line per one-way unit line of a trip, the number being the line's `field` as the backend published it
+    (`loaded` on a trip just opened, `on_board` on the trip a co-driver is on). With `with_free` the line also names
+    the line's `free`. Nothing for an empty list."""
+    key = 'staff.bottles.unit_on_truck' if with_free else 'staff.delivery.session_unit_line'
+    return [
+        i18n.get(
+            key, language,
+            product=escape_html(unit.get('product_name')), n=escape_html(unit.get(field)),
+            **({'free': escape_html(unit.get('free'))} if with_free else {}),
+        )
+        for unit in units or []
+    ]
+
+
+def format_transfer_lines(language: str, lines, *, field: str, html: bool = True) -> str:
+    """A transfer's lines on one line, the number of each being its `field` as the backend published it
+    (`declared` or `confirmed` on a transfer, `transferable` on the send screen's lines): the full bottles, the
+    empties, then one fragment per one-way unit line, joined with " · ". `html=False` for a button label."""
+    safe = escape_html if html else str
+    fragments = []
+    for line in lines or []:
+        n = safe(line.get(field) or 0)
+        if line.get('kind') == 'full':
+            fragments.append(i18n.get('staff.delivery.transfer_line_full', language, n=n))
+        elif line.get('kind') == 'empty':
+            fragments.append(i18n.get('staff.delivery.transfer_line_empty', language, n=n))
+        else:
+            fragments.append(i18n.get(
+                'staff.delivery.transfer_line_product', language, product=safe(line.get('product_name')), n=n,
+            ))
+    return " · ".join(fragments)
 
 
 def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:

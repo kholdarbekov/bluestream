@@ -156,7 +156,7 @@ def test_the_receiver_can_confirm_a_transfer_through_the_api(app, client, db):
 
     confirmed = client.post(
         f"/api/v1/staff/bottles/transfers/{transfer_id}/confirm",
-        headers=_headers(app, receiver.id), json={"confirmed_quantity": 3},
+        headers=_headers(app, receiver.id), json={"confirmed_full": 3, "confirmed_empty": 0},
     )
 
     assert confirmed.status_code == 200, confirmed.get_json()
@@ -353,7 +353,7 @@ def test_transfer_confirm_refusals_each_carry_their_own_code(app, client, db):
     def _confirm(transfer, user):
         return client.post(
             f"/api/v1/staff/bottles/transfers/{transfer}/confirm",
-            headers=_headers(app, user.id), json={"confirmed_quantity": 3},
+            headers=_headers(app, user.id), json={"confirmed_full": 3, "confirmed_empty": 0},
         )
 
     missing = _confirm(987654, receiver)

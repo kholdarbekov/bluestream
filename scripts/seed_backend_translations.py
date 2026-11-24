@@ -7357,6 +7357,24 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
         'Haydovchining idish sessiyasi qayta ochiladi',
         'Сессия по таре курьера будет переоткрыта',
     ),
+    # The edit preview's "Driver trip" row: what the edit changes on the driver's trip (`cascade_summary.trip_effect`).
+    'ui.orders.trip_impact': _ui_tr(
+        'Driver trip',
+        'Haydovchi reysi',  # NATIVE-READ
+        'Рейс водителя',  # NATIVE-READ
+    ),
+    'ui.orders.no_trip_change': _ui_tr(
+        "No change on the driver's trip",
+        "Haydovchi reysida o'zgarish yo'q",  # NATIVE-READ
+        'Рейс водителя не меняется',  # NATIVE-READ
+    ),
+    'ui.orders.trip_reopen_refused': _ui_tr(
+        'The driver has another open trip or rides on one: this edit will be refused until they close or leave it.',
+        "Haydovchida boshqa ochiq reys bor yoki u boshqa reysda yuribdi: u uni yopmaguncha yoki undan "  # NATIVE-READ
+        "chiqmaguncha bu tahrir rad etiladi.",  # NATIVE-READ
+        'У водителя есть другой открытый рейс или он едет в чужом рейсе: правка будет отклонена, '  # NATIVE-READ
+        'пока он его не закроет или не выйдет из него.',  # NATIVE-READ
+    ),
     # ---- Collected-cash admin edit ----
     'ui.orders.edit_collected_cash': _ui_tr(
         'Edit collected cash',
@@ -7743,6 +7761,18 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.category_placeholder': _ui_tr('Select category'),
     'ui.products.category_required': _ui_tr('Category is required'),
     'ui.products.close': _ui_tr('Close', 'Yopish', 'Закрыть'),
+    'ui.products.counted_on_bottle_trip': _ui_tr(
+        "Count on the driver's bottle trip",
+        "Haydovchining idish reysida hisoblash",  # NATIVE-READ
+        'Учитывать в рейсе водителя с тарой',  # NATIVE-READ
+    ),
+    'ui.products.counted_on_bottle_trip_help': _ui_tr(
+        "Drivers type this product's load and return on their bottle trip. Change it only when every trip is closed.",
+        "Haydovchilar bu mahsulotning yuklangan va qaytgan sonini idish reysida kiritadi. "  # NATIVE-READ
+        "Faqat barcha reyslar yopilganda o'zgartiring.",
+        'Водители вводят загрузку и возврат этого товара в рейсе с тарой. '  # NATIVE-READ
+        'Меняйте только когда все рейсы закрыты.',
+    ),
     'ui.products.create_failed': _ui_tr('Failed to create product'),
     'ui.products.create_marking_codes': _ui_tr('Create Codes'),
     'ui.products.create_product': _ui_tr('Create Product', 'Mahsulot yaratish', 'Создать товар'),
@@ -7877,6 +7907,16 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     ),
     'ui.products.total_inventory_value': _ui_tr('Total Inventory Value', 'Jami ombor qiymati', 'Общая стоимость запасов'),
     'ui.products.total_products': _ui_tr('Total Products', 'Jami mahsulotlar', 'Всего товаров'),
+    'ui.products.trip_unit_on_returnable': _ui_tr(
+        'A product counted on the bottle trip cannot be returnable. Untick the setting first.',
+        "Idish reysida hisoblanadigan mahsulot qaytariladigan bo'lishi mumkin emas. Avval sozlamani o'chiring.",  # NATIVE-READ
+        'Товар, учитываемый в рейсе с тарой, не может быть возвратным. Сначала снимите галочку.',  # NATIVE-READ
+    ),
+    'ui.products.trip_unit_setting_blocked': _ui_tr(
+        'Close these open trips first: {{trips}}',
+        'Avval bu ochiq reyslarni yoping: {{trips}}',  # NATIVE-READ
+        'Сначала закройте эти открытые рейсы: {{trips}}',  # NATIVE-READ
+    ),
     'ui.products.tracks_returnable_bottles': _ui_tr('Tracks Returnable Bottles'),
     'ui.products.tracks_returnable_bottles_help': _ui_tr(
         'On = every unit sold leaves an empty bottle the customer owes back, and delivering it '

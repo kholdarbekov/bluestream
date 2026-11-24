@@ -7,11 +7,11 @@ from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError, Retry, SoftTimeLimitExceeded
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.user import User
-from business_app.services.bottle_tracking_service import BottleTrackingService
+from business_app.services.bottle_tracking_service import BottleTrackingService, TripUnits
 from business_app.services.delivery_service import DeliveryService
 from business_app.services.notification_service import NotificationService
 from shared.enums import DeliveryStatus, UserRole, OrderStatus
@@ -27,18 +27,19 @@ _BOTTLE_REFUSAL_CODES = frozenset({"BOTTLE_SESSION_REQUIRED", "BOTTLE_SESSION_CA
 NO_DRIVER_WITH_ENOUGH_BOTTLES = "no_driver_with_enough_bottles"
 
 
-def _bottles_needed(order) -> int:
-    """Whole bottles the order puts on the truck (0 for an order with no returnable bottle in it)."""
+def _trip_units(order) -> Optional[TripUnits]:
+    """What the order puts on the truck (18.9 L bottles and counted units), or None for an order that puts nothing."""
     if order is None:
-        return 0
-    return int(BottleTrackingService.calculate_bottles_for_order(order))
+        return None
+    units = BottleTrackingService.trip_units_for_order(order)
+    return units if units.any else None
 
 
-def _can_carry(driver_user_id: int, needed: int, bottle_service: BottleTrackingService) -> bool:
-    """Whether the driver's crew has `needed` free full bottles. No effective session means no: both auto-assign and
-    the bot's accept require one. Never called for an order with no bottles in it."""
-    free = bottle_service.free_full_bottles(driver_user_id)
-    return free is not None and free >= needed
+def _can_carry(driver_user_id: int, trip_units: TripUnits, bottle_service: BottleTrackingService) -> bool:
+    """Whether the driver's crew has every line of `trip_units` free. No effective trip means no: both auto-assign and
+    the bot's accept require one. Never called for an order that puts nothing on the truck."""
+    session = bottle_service.get_effective_session(driver_user_id)
+    return session is not None and not bottle_service.trip_shortfall(session, trip_units)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=300, time_limit=600, soft_time_limit=540)
@@ -81,16 +82,16 @@ def auto_assign_delivery_task(self, delivery_id: int):
         is_cash = order_pm == PaymentMethod.CASH or getattr(order_pm, "value", None) == "cash"
         recon = DriverReconciliationService() if is_cash else None
 
-        # An order with returnable bottles needs a driver whose crew can carry them (spec A8);
-        # one without goes to anyone.
-        needed = _bottles_needed(order)
+        # An order that puts anything on the trip (18.9 L bottles or counted units) needs a driver whose crew can
+        # carry every line (spec A8); one without goes to anyone.
+        trip_units = _trip_units(order)
         bottle_service = BottleTrackingService()
         skipped_for_bottles = False
 
         for driver in available_drivers:
             if is_cash and recon.is_driver_blocked_from_cod(driver.user_id):
                 continue
-            if needed >= 1 and not _can_carry(driver.user_id, needed, bottle_service):
+            if trip_units is not None and not _can_carry(driver.user_id, trip_units, bottle_service):
                 skipped_for_bottles = True
                 continue
             if delivery_service._is_driver_available(driver.user_id):
@@ -105,7 +106,9 @@ def auto_assign_delivery_task(self, delivery_id: int):
             # Assign delivery (assign_delivery_driver expects the User id). A bottle order is re-judged under the
             # locks: a stop taken or a session closed since the read above refuses here, and that is a shortfall.
             try:
-                delivery_service.assign_delivery_driver(delivery_id, best_driver.user_id, require_session=needed >= 1)
+                delivery_service.assign_delivery_driver(
+                    delivery_id, best_driver.user_id, require_session=trip_units is not None
+                )
             except ValidationError as exc:
                 if exc.error_code not in _BOTTLE_REFUSAL_CODES:
                     raise
@@ -125,9 +128,10 @@ def auto_assign_delivery_task(self, delivery_id: int):
                 "driver_name": best_driver.full_name,
             }
         elif skipped_for_bottles:
-            # Drivers are on shift but none can carry the order. Retrying changes nothing: the pool is re-offered
-            # (`reoffer_pool_deliveries_task`) the moment a session opens, a co-driver joins or full bottles arrive.
-            logger.warning(f"No driver with enough full bottles for delivery {delivery_id}: {needed} needed")
+            # Drivers are on shift but none can carry every line of the order. Retrying changes nothing: the pool is
+            # re-offered (`reoffer_pool_deliveries_task`) the moment a session opens, a co-driver joins or full bottles
+            # arrive.
+            logger.warning(f"No driver can carry every line of delivery {delivery_id}: {trip_units} needed")
             return {"success": False, "delivery_id": delivery_id, "error": NO_DRIVER_WITH_ENOUGH_BOTTLES}
         else:
             logger.warning(f"No available drivers found for delivery {delivery_id}")
@@ -436,11 +440,11 @@ def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
                 .all()
             )
             candidates = [c for c in candidates if c.is_working_now]
-            # A driver who cannot carry the order could not accept it either (the bot's accept requires the bottles).
-            needed = _bottles_needed(delivery.order)
-            if needed >= 1:
+            # A driver who cannot carry the order could not accept it either (the bot's accept requires every line).
+            trip_units = _trip_units(delivery.order)
+            if trip_units is not None:
                 bottle_service = BottleTrackingService()
-                candidates = [c for c in candidates if _can_carry(c.user_id, needed, bottle_service)]
+                candidates = [c for c in candidates if _can_carry(c.user_id, trip_units, bottle_service)]
             service = RouteOptimizationService()
             for cand in candidates:
                 gain_info = service.compute_diversion_gain(cand.user_id, delivery_id)

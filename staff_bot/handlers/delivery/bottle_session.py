@@ -42,6 +42,7 @@ def _owner_truck_lines(language: str, row: dict) -> list:
             full=row.get('full_bottles_on_board', 0),
             empties=row.get('empties_on_board', 0),
             free_full=row.get('free_full_bottles', 0),
+            units=row.get('units'),
         ),
     ]
 

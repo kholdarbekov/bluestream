@@ -177,3 +177,46 @@ class TestRedisIsolationReachesTheClientTheAppActuallyUses:
             monkeypatch.setenv("PYTEST_XDIST_WORKER", worker)
             seen.add(_per_worker_redis_url("redis://redis:6379/15"))
         assert len(seen) == 4
+
+
+class TestEveryTestAppReachesTheWorkersRedis:
+    """An app a test builds without a Redis URL of its own (`pg_app` and every other Postgres app,
+    `tests/app_configs.py::postgres_app_config`) talks to the same Redis database as the session app.
+
+    Such an app took `TestingConfig`'s own default, `redis://localhost:6379/15`, and nothing listens on localhost in the
+    test container. That stayed hidden while the app was alive (the reservation failure is logged and swallowed) and
+    broke LATER tests: `inventory_service.get_inventory_service()` is one InventoryService per process, and it keeps
+    the first Redis client it gets, built from whichever app is current then. When that was a Postgres app, every
+    later reservation on that xdist worker answered "Inventory reservation failed: … Error 111 connecting to
+    localhost:6379" (the Task 25 flake in test_click_to_cash_conversion_reprices.py). `TestingConfig` now takes the
+    process's REDIS_URL, which this conftest maps to the worker's database before business_app is imported.
+    """
+
+    @staticmethod
+    def _postgres_style_app():
+        from business_app import create_app
+        from tests.app_configs import postgres_app_config
+
+        return create_app(postgres_app_config("sqlite:///:memory:"))
+
+    @staticmethod
+    def _where(url):
+        """Host, port and database of a Redis URL: never the URL itself, whose password a failure would print."""
+        parsed = urlparse(url)
+        return parsed.hostname, parsed.port, _redis_db(url)
+
+    def test_an_app_built_without_a_redis_url_uses_the_workers_database(self, app):
+        other = self._postgres_style_app()
+
+        assert self._where(other.config["REDIS_URL"]) == self._where(os.environ["REDIS_URL"])
+        assert self._where(other.config["REDIS_URL"]) == self._where(app.config["REDIS_URL"])
+
+    def test_the_inventory_client_first_built_under_such_an_app_reaches_redis(self, monkeypatch):
+        import business_app.services.inventory_service as inventory_module
+
+        monkeypatch.setattr(inventory_module, "_inventory_service", None)
+        other = self._postgres_style_app()
+        with other.app_context():
+            client = inventory_module.get_inventory_service()._get_redis_client()
+
+        assert client.ping() is True

@@ -15,7 +15,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
+    exists,
+    or_,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.sql import text as sa_text
 from sqlalchemy.orm import relationship
 
@@ -351,6 +355,13 @@ class DriverBottleSession(db.Model, TimestampMixin):
         back_populates="receiver_session",
     )
 
+    unit_lines = relationship(
+        "DriverBottleSessionUnit",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="DriverBottleSessionUnit.product_id",
+    )
+
     def __init__(self, **kwargs):
         import uuid
 
@@ -400,9 +411,38 @@ class DriverBottleSession(db.Model, TimestampMixin):
         """Empties the driver can hand over: never negative."""
         return max(self.empties_on_board, 0)
 
+    @property
+    def transferable_any(self) -> bool:
+        """Anything to hand over: full bottles, empties or any one-way unit line."""
+        return bool(
+            self.transferable_full or self.transferable_empties or any(line.transferable for line in self.unit_lines)
+        )
+
     def compute_discrepancy(self) -> None:
         """Compute and store discrepancy on session close."""
         self.discrepancy = self.current_inventory - (self.bottles_returned_to_warehouse or 0)
+
+    @hybrid_property
+    def has_discrepancy(self) -> bool:
+        """THE answer to "does this trip have a discrepancy": its 18.9 L one, or any line's, is set and not 0.
+
+        Published by the session payload (the admin page's red row reads it); the admin list's "only discrepancies"
+        filter is the SQL twin below. Nothing else decides it.
+        """
+        values = (self.discrepancy, *(line.discrepancy for line in self.unit_lines))
+        return any(value not in (None, 0) for value in values)
+
+    @has_discrepancy.inplace.expression
+    @classmethod
+    def _has_discrepancy_expression(cls):
+        return or_(
+            and_(cls.discrepancy.isnot(None), cls.discrepancy != 0),
+            exists().where(
+                DriverBottleSessionUnit.session_id == cls.id,
+                DriverBottleSessionUnit.discrepancy.isnot(None),
+                DriverBottleSessionUnit.discrepancy != 0,
+            ),
+        )
 
     def to_dict(self):
         return {
@@ -437,6 +477,58 @@ class DriverBottleSession(db.Model, TimestampMixin):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class DriverBottleSessionUnit(db.Model):
+    """One one-way unit product (no bottle comes back, e.g. 10 L water) on one trip.
+
+    Same tallies as the 18.9 L session columns, one row per (trip, product). Its discrepancy is its own and is
+    never added to the session's.
+    """
+
+    __tablename__ = "driver_bottle_session_units"
+    __table_args__ = (
+        UniqueConstraint("session_id", "product_id", name="uq_dbsu_session_product"),
+        CheckConstraint(
+            "loaded >= 0 AND delivered >= 0 AND transferred_in >= 0 AND transferred_out >= 0 "
+            "AND (returned IS NULL OR returned >= 0)",
+            name="ck_dbsu_counts_non_negative",
+        ),
+    )
+
+    # The columns `on_board` reads (the guard expires them under its lock, as for the session tallies).
+    ON_BOARD_TALLIES = ("loaded", "transferred_in", "delivered", "transferred_out")
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    loaded = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    delivered = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    transferred_in = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    transferred_out = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+    returned = Column(Integer, nullable=True)
+    discrepancy = Column(Integer, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=sa_text("now()"),
+    )
+
+    session = relationship("DriverBottleSession", back_populates="unit_lines")
+    product = relationship("Product")
+
+    @property
+    def on_board(self) -> int:
+        """loaded + transferred in - delivered - transferred out; unclamped, so a bad tally keeps its sign."""
+        return (self.loaded or 0) + (self.transferred_in or 0) - (self.delivered or 0) - (self.transferred_out or 0)
+
+    @property
+    def transferable(self) -> int:
+        return max(self.on_board, 0)
+
+    def compute_discrepancy(self) -> None:
+        self.discrepancy = self.on_board - (self.returned or 0)
 
 
 class DriverBottleSessionOrder(db.Model, TimestampMixin):
@@ -608,6 +700,7 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
 
     dispute_notes = Column(Text, nullable=True)
     resolution_notes = Column(Text, nullable=True)
@@ -626,6 +719,12 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
     sender_driver = relationship("User", foreign_keys=[sender_driver_id])
     receiver_driver = relationship("User", foreign_keys=[receiver_driver_id])
     resolved_by = relationship("User", foreign_keys=[resolved_by_user_id])
+    unit_lines = relationship(
+        "DriverBottleTransferUnit",
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+        order_by="DriverBottleTransferUnit.product_id",
+    )
 
     def __init__(self, **kwargs):
         import uuid
@@ -650,6 +749,7 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "confirmed_at": self.confirmed_at.isoformat() if self.confirmed_at else None,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "rejected_at": self.rejected_at.isoformat() if self.rejected_at else None,
             "resolved_by_user_id": self.resolved_by_user_id,
             "dispute_notes": self.dispute_notes,
             "resolution_notes": self.resolution_notes,
@@ -657,3 +757,27 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class DriverBottleTransferUnit(db.Model):
+    """One one-way unit product on a driver-to-driver transfer: what the sender declared, the receiver counted
+    and the admin resolved (NULL until each step happens)."""
+
+    __tablename__ = "driver_bottle_transfer_units"
+    __table_args__ = (
+        UniqueConstraint("transfer_id", "product_id", name="uq_dbtu_transfer_product"),
+        CheckConstraint(
+            "declared >= 0 AND (confirmed IS NULL OR confirmed >= 0) AND (resolved IS NULL OR resolved >= 0)",
+            name="ck_dbtu_counts_non_negative",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    transfer_id = Column(Integer, ForeignKey("driver_bottle_transfers.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    declared = Column(Integer, nullable=False)
+    confirmed = Column(Integer, nullable=True)
+    resolved = Column(Integer, nullable=True)
+
+    transfer = relationship("DriverBottleTransfer", back_populates="unit_lines")
+    product = relationship("Product")

@@ -25,7 +25,12 @@ from flask_jwt_extended import create_access_token
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 
-from business_app.models.bottle import DriverBottleSession, DriverBottleTransfer, DriverSessionMembership
+from business_app.models.bottle import (
+    DriverBottleSession,
+    DriverBottleSessionUnit,
+    DriverBottleTransfer,
+    DriverSessionMembership,
+)
 from business_app.models.translation import Translation
 from business_app.services import bottle_notifications
 from business_app.services.bottle_tracking_service import BottleTrackingService
@@ -36,6 +41,7 @@ from shared.enums import DeliveryStatus, DriverBottleSessionStatus
 from staff_bot.i18n import i18n
 from staff_bot.webhook_server import _render_bottle_event
 from tests.integration.test_bottle_transfer_split_api import _confirm, _pair, _send, _trip
+from tests.integration.trip_unit_builders import small  # noqa: F401 -- a fixture
 from tests.unit.test_bottle_transfer_and_join_requests import _driver
 from tests.unit.test_sales_agent_tasks import _spy
 from tests.unit.test_staff_error_endpoints import _assigned_delivery, _order_with_bottles
@@ -66,6 +72,12 @@ SENDER_COPY = (
     "staff.bottles.notify.trip_auto_closed",
     "staff.bottles.notify.transfer_disputed",
     "staff.bottles.notify.transfer_disputed_no_admin",
+    "staff.bottles.notify.transfer_confirmed_lines",
+    "staff.bottles.notify.transfer_disputed_lines",
+    "staff.bottles.notify.transfer_disputed_lines_no_admin",
+    "staff.delivery.transfer_line_full",
+    "staff.delivery.transfer_line_empty",
+    "staff.delivery.transfer_line_product",
 )
 
 _seed_spec = importlib.util.spec_from_file_location(
@@ -183,10 +195,30 @@ def test_send_all_exact_confirm_auto_closes_sender(app, client, db, anchor_spy, 
             "confirmed_full": 5,
             "confirmed_empty": 2,
             "auto_closed": True,
+            "lines": [
+                {
+                    "kind": "full",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 5,
+                    "confirmed": 5,
+                    "resolved": None,
+                },
+                {
+                    "kind": "empty",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 2,
+                    "confirmed": 2,
+                    "resolved": None,
+                },
+            ],
         },
     )
     text, keyboard = _render_bottle_event(event, payload, "en")
-    assert text == "Vali Driver confirmed 5 full + 2 empty.\nYour trip was closed: nothing is left on your truck."
+    assert text == (
+        "Vali Driver confirmed 18.9 L full 5 · empty 2.\nYour trip was closed: nothing is left on your truck."
+    )
     assert keyboard is None
     assert reoffers == [((), {})]
 
@@ -270,6 +302,24 @@ def test_no_auto_close_when(app, client, db, anchor_spy, pushes, sample_user, sa
                 "confirmed_full": 5,
                 "confirmed_empty": 1,
                 "admins_alerted": False,
+                "lines": [
+                    {
+                        "kind": "full",
+                        "product_id": None,
+                        "product_name": None,
+                        "declared": 5,
+                        "confirmed": 5,
+                        "resolved": None,
+                    },
+                    {
+                        "kind": "empty",
+                        "product_id": None,
+                        "product_name": None,
+                        "declared": 2,
+                        "confirmed": 1,
+                        "resolved": None,
+                    },
+                ],
             },
         )
     else:
@@ -281,6 +331,24 @@ def test_no_auto_close_when(app, client, db, anchor_spy, pushes, sample_user, sa
                 "confirmed_full": confirmed_pair[0],
                 "confirmed_empty": confirmed_pair[1],
                 "auto_closed": False,
+                "lines": [
+                    {
+                        "kind": "full",
+                        "product_id": None,
+                        "product_name": None,
+                        "declared": confirmed_pair[0],
+                        "confirmed": confirmed_pair[0],
+                        "resolved": None,
+                    },
+                    {
+                        "kind": "empty",
+                        "product_id": None,
+                        "product_name": None,
+                        "declared": confirmed_pair[1],
+                        "confirmed": confirmed_pair[1],
+                        "resolved": None,
+                    },
+                ],
             },
         )
 
@@ -341,6 +409,24 @@ def test_a_failed_auto_close_never_fails_the_receivers_count(app, client, db, pu
             "confirmed_full": 5,
             "confirmed_empty": 2,
             "auto_closed": False,
+            "lines": [
+                {
+                    "kind": "full",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 5,
+                    "confirmed": 5,
+                    "resolved": None,
+                },
+                {
+                    "kind": "empty",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 2,
+                    "confirmed": 2,
+                    "resolved": None,
+                },
+            ],
         },
     )
 
@@ -427,6 +513,42 @@ def test_a_last_read_the_database_refuses_still_answers_the_count_as_committed(
     assert (receiver_trip.bottles_transferred_in, receiver_trip.empties_transferred_in) == (5, 2)
 
 
+def test_a_last_read_the_database_refuses_still_answers_a_ten_litre_line_as_committed(
+    app, client, db, pushes, reoffers, small  # noqa: F811
+):
+    """The same failure on a transfer that carries a 10 L line: the answer kept from right after the commit holds the
+    line and its product, so publishing it reads nothing more (products included) from the database that went away."""
+    sender, receiver = _pair(db, "63")
+    sender_trip = _trip(db, sender, loaded=7, collected=3)
+    db.session.add(DriverBottleSessionUnit(session_id=sender_trip.id, product_id=small.id, loaded=4))
+    db.session.commit()
+    _trip(db, receiver, loaded=4)
+    units = [{"productId": small.id, "quantity": 3}]
+    sent = _send(
+        client, app, sender, {"receiverDriverId": receiver.id, "fullQuantity": 5, "emptyQuantity": 2, "units": units}
+    )
+    pushes.clear()
+
+    def database_down_once_the_pool_is_offered(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if reoffers and any(table in statement for table in ("driver_bottle_transfers", "FROM users", "FROM products")):
+            raise OperationalError(statement, None, Exception("server closed the connection unexpectedly"))
+
+    event.listen(db.engine, "before_cursor_execute", database_down_once_the_pool_is_offered)
+    try:
+        confirmed = _confirm(client, app, sent["id"], receiver, {"confirmAsDeclared": True})
+    finally:
+        event.remove(db.engine, "before_cursor_execute", database_down_once_the_pool_is_offered)
+
+    assert confirmed.status_code == 200, confirmed.get_json()
+    data = confirmed.get_json()["data"]
+    assert (data["id"], data["status"], data["sender_name"]) == (sent["id"], "confirmed", "Ali Driver")
+    assert [(line["kind"], line["product_name"], line["declared"]) for line in data["lines"]] == [
+        ("full", None, 5),
+        ("empty", None, 2),
+        ("product", "10 Litr suv", 3),
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # Disputes (T5)
 # --------------------------------------------------------------------------- #
@@ -495,10 +617,30 @@ def test_dispute_alerts_admins_and_tells_sender(app, client, db, pushes, slack, 
             "confirmed_full": 4,
             "confirmed_empty": 1,
             "admins_alerted": True,
+            "lines": [
+                {
+                    "kind": "full",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 5,
+                    "confirmed": 4,
+                    "resolved": None,
+                },
+                {
+                    "kind": "empty",
+                    "product_id": None,
+                    "product_name": None,
+                    "declared": 2,
+                    "confirmed": 1,
+                    "resolved": None,
+                },
+            ],
         },
     )
     text, keyboard = _render_bottle_event(event, payload, "en")
-    assert text == "Vali Driver counted 4 full + 1 empty; you sent 5 full + 2 empty. An admin will check it."
+    assert text == (
+        "Vali Driver counted 18.9 L full 4 · empty 1; you sent 18.9 L full 5 · empty 2. An admin will check it."
+    )
     assert keyboard is None
 
     # The admin the alert reached settles it from the page it names.
@@ -600,7 +742,8 @@ def test_a_dispute_slack_did_not_take_never_says_an_admin_will_check(
     assert (event, payload["admins_alerted"]) == ("transfer_disputed", False)
     text, _keyboard = _render_bottle_event(event, payload, "en")
     assert text == (
-        "Vali Driver counted 4 full + 1 empty; you sent 5 full + 2 empty. Please tell an admin so they can settle it."
+        "Vali Driver counted 18.9 L full 4 · empty 1; you sent 18.9 L full 5 · empty 2. "
+        "Please tell an admin so they can settle it."
     )
     assert "admin will check" not in text
     assert reoffers == [((), {})]

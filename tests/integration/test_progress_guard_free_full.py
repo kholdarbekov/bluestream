@@ -11,11 +11,13 @@ Driven through the HTTP routes the staff bot, the driver app and the admin pages
 those clients send. Only Celery publishing is faked (`enqueued` binds each publish against the task's signature).
 """
 
+from decimal import Decimal
+
 import pytest
 
 from business_app.models.bottle import DriverBottleSessionOrder
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
-from business_app.services.bottle_tracking_service import BottleTrackingService
+from business_app.services.bottle_tracking_service import BottleTrackingService, TripUnits
 from business_app.tasks.notification_tasks import send_delivery_update_task
 from shared.enums import DeliveryStatus
 from staff_bot.api_client import StaffAPIClient
@@ -199,19 +201,19 @@ def test_assigned_straight_to_in_transit_checks_once(
     delivery = _assigned_delivery(db, order, driver)
     _bound(db, session, order, driver)
     checks = []
-    real_check = BottleTrackingService.assert_delivery_within_session_capacity
+    real_check = BottleTrackingService.assert_order_within_session_capacity
 
-    def recorded(self, checked_session, bottles_to_deliver, *, exclude_delivery_id=None):
-        checks.append((checked_session.id, bottles_to_deliver, exclude_delivery_id))
-        return real_check(self, checked_session, bottles_to_deliver, exclude_delivery_id=exclude_delivery_id)
+    def recorded(self, checked_session, trip_units, *, exclude_delivery_id=None):
+        checks.append((checked_session.id, trip_units, exclude_delivery_id))
+        return real_check(self, checked_session, trip_units, exclude_delivery_id=exclude_delivery_id)
 
-    monkeypatch.setattr(BottleTrackingService, "assert_delivery_within_session_capacity", recorded)
+    monkeypatch.setattr(BottleTrackingService, "assert_order_within_session_capacity", recorded)
 
     response = client.post(START_DELIVERY.format(delivery.id), headers=_headers(app, driver.id))
 
     body = response.get_json()
     assert response.status_code == expected_status, body
-    assert checks == [(session.id, 8, delivery.id)]
+    assert checks == [(session.id, TripUnits(Decimal("8.00"), {}), delivery.id)]
     db.session.expire_all()
     if expected_status == 200:
         assert _status_of(delivery.id) is DeliveryStatus.IN_TRANSIT

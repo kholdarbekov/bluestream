@@ -1,11 +1,12 @@
 """Serializers for returnable bottle tracking models."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_core import PydanticCustomError
 
+from shared.enums import DriverBottleTransferStatus
 from shared.staff_constants import BOTTLE_RETURN_COLUMN_CEILING, MAX_BOTTLES_PER_SESSION
 
 
@@ -90,16 +91,65 @@ class BottleCollectionRequest(BaseModel):
     model_config = _FINITE_QUANTITY_CONFIG
 
 
+class TripUnitLoad(BaseModel):
+    """One counted one-way product (e.g. 10 L water) and how many of it: a line of a trip body's `units`."""
+
+    product_id: int
+    quantity: int = Field(..., ge=0, le=MAX_BOTTLES_PER_SESSION)
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class TripUnitCount(BaseModel):
+    """`TripUnitLoad` with the storage bound (`BOTTLE_RETURN_COLUMN_CEILING`) of the 18.9 L count it goes beside: a line
+    of a body that counts what came back, such as the close's `units_returned`."""
+
+    product_id: int
+    quantity: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+def _distinct_products(
+    lines: List[Union[TripUnitLoad, TripUnitCount]],
+) -> List[Union[TripUnitLoad, TripUnitCount]]:
+    """A body's `units` name each product once (`field_validator` on every body that carries them)."""
+    seen = set()
+    for line in lines:
+        if line.product_id in seen:
+            # A custom error carries no exception object, so the 400 body stays JSON.
+            raise PydanticCustomError(
+                "trip_units_duplicate",
+                "Product {product_id} is listed twice; give each product once.",
+                {"product_id": line.product_id},
+            )
+        seen.add(line.product_id)
+    return lines
+
+
+def unit_counts(lines: List[Union[TripUnitLoad, TripUnitCount]]) -> Dict[int, int]:
+    """A body's `units` as the service takes them: `{product_id: quantity}`."""
+    return {line.product_id: line.quantity for line in lines}
+
+
 class DriverBottleSessionOpenRequest(BaseModel):
     # `le=` is the SAME rule the staff bot enforces at the keypad, read from the
     # same name — the bot's refusal is only advice until the boundary carries
     # it too. Without it a direct API call, a replayed request or any future
     # client puts an unbounded count on `DriverBottleSession.bottles_loaded`, a
     # 4-byte PostgreSQL integer, and the write dies as a DataError 500.
-    bottles_loaded: int = Field(..., gt=0, le=MAX_BOTTLES_PER_SESSION)
+    # Each number may be 0: a load of nothing at all is refused by the service's one empty-load rule
+    # (`BottleTrackingService._assert_load_not_empty`), never here.
+    bottles_loaded: int = Field(..., ge=0, le=MAX_BOTTLES_PER_SESSION)
+    units: List[TripUnitLoad] = []
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @field_validator("units")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitLoad]) -> List[TripUnitLoad]:
+        return _distinct_products(lines)
 
 
 class DriverBottleSessionCloseRequest(BaseModel):
@@ -111,9 +161,17 @@ class DriverBottleSessionCloseRequest(BaseModel):
     # integer — cannot hold, which the bot answers at the keypad and which
     # otherwise reaches a direct API caller as a DataError 500.
     bottles_returned_to_warehouse: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    # One return per line on the trip (the session payload's `units`); the service refuses a close that leaves one
+    # out (BOTTLE_SESSION_RETURN_INCOMPLETE).
+    units_returned: List[TripUnitCount] = []
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @field_validator("units_returned")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitCount]) -> List[TripUnitCount]:
+        return _distinct_products(lines)
 
 
 class AdminForceCloseSessionRequest(BaseModel):
@@ -122,9 +180,16 @@ class AdminForceCloseSessionRequest(BaseModel):
     # unbounded would keep the 500 alive for the admin UI after the driver's
     # path was fixed.
     bottles_returned_to_warehouse: int = Field(default=0, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    # A line left out is taken as 0 returned.
+    units_returned: List[TripUnitCount] = []
     reason: str
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @field_validator("units_returned")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitCount]) -> List[TripUnitCount]:
+        return _distinct_products(lines)
 
 
 # Every transfer count below lands in a 4-byte PostgreSQL integer (the transfer row and the sessions' transfer
@@ -134,20 +199,28 @@ class AdminForceCloseSessionRequest(BaseModel):
 
 
 class DriverBottleTransferCreateRequest(BaseModel):
-    """A hand-off of full bottles and empties (spec 2026-11-09 T1): both numbers, or `send_all`.
+    """A hand-off of full bottles, empties and one-way units (spec 2026-11-09 T1, 2026-11-18 §6.7): the numbers, or
+    `send_all`.
 
-    `quantity` is the running staff_bot's body (full bottles only), kept for the restart window (spec "Old data in
-    flight"): it is read as `full_quantity`. The backend decides "nothing to send" and each component's cap.
+    `units` gives one `{product_id, quantity}` per line on the sender's trip he sends some of; a line left out sends
+    none. `quantity` is the running staff_bot's body (full bottles only), kept for the restart window (spec "Old data in
+    flight"): it is read as `full_quantity`. The backend decides "nothing to send" and each line's cap.
     """
 
     receiver_driver_id: int
     full_quantity: int = Field(default=0, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     empty_quantity: int = Field(default=0, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    units: List[TripUnitCount] = []
     send_all: bool = False
     quantity: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @field_validator("units")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitCount]) -> List[TripUnitCount]:
+        return _distinct_products(lines)
 
     @model_validator(mode="after")
     def _one_way_to_send(self):
@@ -156,37 +229,42 @@ class DriverBottleTransferCreateRequest(BaseModel):
                 # A custom error carries no exception object, so the 400 body stays JSON.
                 raise PydanticCustomError("transfer_legacy_mixed", "quantity is the old name for fullQuantity")
             self.full_quantity = self.quantity
-        if self.send_all and (self.full_quantity or self.empty_quantity):
+        if self.send_all and (self.full_quantity or self.empty_quantity or self.units):
             raise PydanticCustomError("transfer_send_all_mixed", "sendAll sends everything; give no amounts with it")
         return self
 
 
 class DriverBottleTransferConfirmRequest(BaseModel):
-    """The receiver's count: `confirm_as_declared`, or both numbers.
+    """The receiver's count (spec 2026-11-18 §6.7 "Counting"): `confirm_as_declared`, or other numbers.
 
-    `confirmed_quantity` is the running staff_bot's body (spec "Old data in flight"): a full count with no empties, so
-    a transfer that also declared empties comes out DISPUTED for an admin to settle.
+    Other numbers are both 18.9 L counts plus `units`, one `{product_id, quantity}` for every one-way unit line the
+    transfer carries (its `lines` of kind `product`, declared 0 included). The service refuses a count that leaves a
+    line out or names one the transfer does not carry (BOTTLE_TRANSFER_COUNT_INCOMPLETE). A body with no count, such as
+    the old single full count `confirmed_quantity`, is refused here.
     """
 
     confirmed_full: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     confirmed_empty: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    units: List[TripUnitCount] = []
     confirm_as_declared: bool = False
-    confirmed_quantity: Optional[int] = Field(default=None, ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     notes: Optional[str] = None
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
 
+    @field_validator("units")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitCount]) -> List[TripUnitCount]:
+        return _distinct_products(lines)
+
     @model_validator(mode="after")
     def _exactly_one_count(self):
         numbers = (self.confirmed_full, self.confirmed_empty)
-        ways = (self.confirm_as_declared, numbers != (None, None), self.confirmed_quantity is not None)
-        if sum(ways) != 1:
+        other_numbers = numbers != (None, None) or bool(self.units)
+        if self.confirm_as_declared == other_numbers:
             raise PydanticCustomError(
                 "transfer_count_ambiguous", "send confirmAsDeclared, or confirmedFull and confirmedEmpty"
             )
-        if self.confirmed_quantity is not None:
-            self.confirmed_full, self.confirmed_empty = self.confirmed_quantity, 0
-        elif not self.confirm_as_declared and None in numbers:
+        if other_numbers and None in numbers:
             raise PydanticCustomError("transfer_count_incomplete", "confirmedFull and confirmedEmpty go together")
         return self
 
@@ -194,9 +272,17 @@ class DriverBottleTransferConfirmRequest(BaseModel):
 class AdminResolveTransferRequest(BaseModel):
     resolved_full: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
     resolved_empty: int = Field(..., ge=0, le=BOTTLE_RETURN_COLUMN_CEILING)
+    # One count per line the transfer carries (its `lines` of kind `product`); the service refuses a resolve that
+    # leaves one out or names one the transfer does not carry (BOTTLE_TRANSFER_COUNT_INCOMPLETE).
+    resolved_units: List[TripUnitCount] = []
     resolution_notes: str
 
     model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+    @field_validator("resolved_units")
+    @classmethod
+    def _one_line_per_product(cls, lines: List[TripUnitCount]) -> List[TripUnitCount]:
+        return _distinct_products(lines)
 
 
 # ------------------------------------------------------------------
@@ -316,21 +402,40 @@ def serialize_customer_place_ledger_entry(entry, viewer_user_id: int) -> Dict[st
     }
 
 
-def _free_full_bottles(session) -> int:
-    """The session's one capacity number; needs a query, so it is read here and not in `to_dict`."""
+def _unit_lines(session, free_units: Dict[int, int]) -> List[Dict[str, Any]]:
+    """One entry per one-way unit line of the trip; `free` comes from the trip's one `free_on_trip` read."""
+    return [
+        {
+            "product_id": line.product_id,
+            "product_name": line.product.name if line.product else None,
+            "loaded": line.loaded,
+            "delivered": line.delivered,
+            "transferred_in": line.transferred_in,
+            "transferred_out": line.transferred_out,
+            "on_board": line.on_board,
+            "transferable": line.transferable,
+            "free": free_units.get(line.product_id, 0),
+            "returned": line.returned,
+            "discrepancy": line.discrepancy,
+        }
+        for line in session.unit_lines or []
+    ]
+
+
+def _capacity_fields(session) -> Dict[str, Any]:
+    """The capacity keys every session payload shares. The free numbers need a query, so they are read here
+    (once, through `free_on_trip`) and not in `to_dict`."""
     from business_app.services.bottle_tracking_service import BottleTrackingService
 
-    return BottleTrackingService().free_full_bottles_for_session(session)
-
-
-def _capacity_fields(session) -> Dict[str, int]:
-    """The five capacity keys every session payload shares."""
+    free = BottleTrackingService().free_on_trip(session)
     return {
-        "free_full_bottles": _free_full_bottles(session),
+        "free_full_bottles": free.bottles,
         "full_bottles_on_board": session.full_bottles_on_board,
         "empties_on_board": session.empties_on_board,
         "transferable_full": session.transferable_full,
         "transferable_empties": session.transferable_empties,
+        "transferable_any": session.transferable_any,
+        "units": _unit_lines(session, free.units),
     }
 
 
@@ -346,7 +451,8 @@ def serialize_bottle_session(
         return None
 
     data = session.to_dict()
-    data["free_full_bottles"] = _free_full_bottles(session)
+    data.update(_capacity_fields(session))
+    data["has_discrepancy"] = session.has_discrepancy
 
     if session.driver:
         data["driver_name"] = f"{session.driver.first_name or ''} {session.driver.last_name or ''}".strip()
@@ -415,19 +521,103 @@ def serialize_bottle_session(
     return data
 
 
+def serialize_load_screen(screen) -> Dict[str, Any]:
+    """THE payload of `GET /staff/bottles/session/load-screen` (a `BottleTrackingService.LoadScreen`).
+
+    `products` are what the bot asks a load number for. `refusal` is null when the driver may open a trip; otherwise
+    the open's refusal, with the trip it names: its owner, its 18.9 L full bottles on board and its unit lines (the
+    session payload's `units`). `open_session` is the driver's own trip, only when that is the refusal. A later build
+    adds keys here from fields it adds to `LoadScreen`; the route returns this unchanged.
+    """
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    refusal = None
+    if screen.refusal_code is not None:
+        session = screen.refusal_session
+        refusal = {
+            "error_code": screen.refusal_code,
+            "owner_name": screen.refusal_details["owner_name"],
+            "session_id": screen.refusal_details["session_id"],
+            "bottles_on_board": session.full_bottles_on_board,
+            "units": _unit_lines(session, BottleTrackingService().free_on_trip(session).units),
+        }
+    return {
+        "products": [{"product_id": product.id, "product_name": product.name} for product in screen.products],
+        "refusal": refusal,
+        "open_session": serialize_bottle_session(screen.open_session),
+    }
+
+
+def _confirmed_empty(transfer) -> Optional[int]:
+    """THE legacy-empties rule: a transfer confirmed before the empties split has no empties count (NULL) and moved
+    full bottles only, so it reads 0 empties. Not yet counted reads None."""
+    if transfer.confirmed_empty_quantity is None and transfer.confirmed_quantity is not None:
+        return 0
+    return transfer.confirmed_empty_quantity
+
+
+def transfer_lines(transfer) -> List[Dict[str, Any]]:
+    """THE line-by-line shape of a transfer, read by the bot's inbox, its push and the admin page: the full bottles and
+    the empties (both always present, even at 0), then one line per one-way unit, by product id. `confirmed` is None
+    until the receiver counts. `resolved` is the office's figure once it resolved the dispute, else None: what the
+    receiver's trip was finally credited with. A unit line keeps the receiver's count in `confirmed` beside it; the
+    full and empties lines have no count of their own after a resolve (the resolve overwrote it), so both read the
+    resolved figure."""
+    resolved = transfer.status == DriverBottleTransferStatus.RESOLVED
+    return [
+        {
+            "kind": "full",
+            "product_id": None,
+            "product_name": None,
+            "declared": transfer.declared_quantity,
+            "confirmed": transfer.confirmed_quantity,
+            "resolved": transfer.confirmed_quantity if resolved else None,
+        },
+        {
+            "kind": "empty",
+            "product_id": None,
+            "product_name": None,
+            "declared": transfer.declared_empty_quantity or 0,
+            "confirmed": _confirmed_empty(transfer),
+            "resolved": _confirmed_empty(transfer) if resolved else None,
+        },
+        *(
+            {
+                "kind": "product",
+                "product_id": line.product_id,
+                "product_name": line.product.name if line.product else None,
+                "declared": line.declared,
+                "confirmed": line.confirmed,
+                "resolved": line.resolved,
+            }
+            for line in transfer.unit_lines
+        ),
+    ]
+
+
 def serialize_bottle_transfer(transfer) -> Dict[str, Any]:
     """Serialize a DriverBottleTransfer with driver names and its full / empty split (spec 2026-11-09 §4.3).
 
     The `*_full` / `*_empty` / `*_total` keys are what the bot and the admin page read. A row confirmed before the
     split has no empties count (NULL), and it moved full bottles only, so it reads 0 empties. Not yet counted reads
-    None for the three confirmed keys.
+    None for the three confirmed keys. `units` are its one-way unit lines (declared, confirmed, resolved), `lines`
+    every line in one shape (`transfer_lines`).
     """
     data = transfer.to_dict()
+    data["units"] = [
+        {
+            "product_id": line.product_id,
+            "product_name": line.product.name if line.product else None,
+            "declared": line.declared,
+            "confirmed": line.confirmed,
+            "resolved": line.resolved,
+        }
+        for line in transfer.unit_lines
+    ]
+    data["lines"] = transfer_lines(transfer)
     declared_empty = transfer.declared_empty_quantity or 0
     confirmed_full = transfer.confirmed_quantity
-    confirmed_empty = transfer.confirmed_empty_quantity
-    if confirmed_empty is None and confirmed_full is not None:
-        confirmed_empty = 0
+    confirmed_empty = _confirmed_empty(transfer)
     data["declared_full"] = transfer.declared_quantity
     data["declared_empty"] = declared_empty
     data["declared_total"] = transfer.declared_quantity + declared_empty

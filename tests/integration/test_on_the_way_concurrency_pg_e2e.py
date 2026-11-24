@@ -16,6 +16,10 @@ first commits. Without the lock it reads the uncommitted state, sees 10 free and
 own thread, app context, session and connection, as two gunicorn workers would. Who taps first is parametrized, so
 both lock orders a crew can produce are exercised. Every wait is bounded, so a broken lock fails instead of hanging.
 Celery publishing is the only thing faked (`enqueued`).
+
+The same file pins what a Delivered adds to the crew's trip (spec 2026-11-18 §6.5, call 19): the owner's close and a
+co-driver's Delivered serialize on the trip row, so the Delivered lands before the seal or finds the trip closed and
+adds nothing to it; and two Delivered taps add both their 10 L to the trip's one 10 L line.
 """
 
 import threading
@@ -30,12 +34,14 @@ from sqlalchemy import event, text
 from business_app.models.bottle import (
     DriverBottleSession,
     DriverBottleSessionOrder,
+    DriverBottleSessionUnit,
     DriverSessionMembership,
 )
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory
 from business_app.models.user import UserAddress
+from business_app.serializers.bottle_serializers import serialize_bottle_session
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.order_service import OrderService
 from business_app.tasks.notification_tasks import send_delivery_update_task
@@ -54,6 +60,7 @@ from tests.integration.test_redispatch_reschedules_to_today import enqueued  # n
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
 STATUS = "/api/v1/staff/delivery/{}/status"
+CLOSE_SESSION = "/api/v1/staff/bottles/session/close"
 ADMIN_ORDER_STATUS = "/api/v1/admin/orders/{}/status"
 LOADED = 10
 NEEDED = 8
@@ -158,19 +165,71 @@ def _crew_world(pg_db, *, co_driver_stop=DeliveryStatus.PICKED_UP):
     return SimpleNamespace(session_id=session.id, stops=stops)
 
 
-def _taps(driver, delivery_id, status):
-    """The staff bot's status tap, with the body `StaffAPIClient` sends."""
-    headers = {
+def _staff_headers(driver):
+    """A staff token (staff routes read the DB roles, not a claim)."""
+    return {
         "Authorization": f"Bearer {create_access_token(identity=str(driver.id))}",
         "Content-Type": "application/json",
     }
+
+
+def _taps(driver, delivery_id, status):
+    """The staff bot's status tap, with the body `StaffAPIClient` sends."""
+    headers = _staff_headers(driver)
     return lambda client: client.put(
         STATUS.format(delivery_id), json=StaffAPIClient.delivery_status_body(status), headers=headers
     )
 
 
+def _close_trip(owner, bottles, units_returned):
+    """The staff bot's Close trip: the 18.9 L count the owner typed and one count per line on the trip
+    (`units_returned`, {product_id: quantity})."""
+    headers = _staff_headers(owner)
+    body = {
+        "bottles_returned_to_warehouse": bottles,
+        "units_returned": [{"product_id": pid, "quantity": q} for pid, q in units_returned.items()],
+    }
+    return lambda client: client.post(CLOSE_SESSION, json=body, headers=headers)
+
+
 def _taps_on_the_way(driver, delivery_id):
     return _taps(driver, delivery_id, "in_transit")
+
+
+def _race_two_on_the_way_taps(pg_app, pg_db, monkeypatch, first, second):
+    """Run two On the way taps against the real app so the second one meets the first one's open transaction.
+
+    The first tap is held right after the bottle guard passed it: it holds whatever the guard locked, and its
+    IN_TRANSIT is not committed yet, so only a lock can make the second tap count it. `first` and `second` are
+    `_taps(...)` callables. Returns `{"first": (status, body), "second": (status, body)}`."""
+    first_passed_its_check = threading.Event()
+    release_the_first = threading.Event()
+    guard = BottleTrackingService.assert_driver_can_progress_delivery
+
+    def held_after_the_check(self, delivery, *args, **kwargs):
+        result = guard(self, delivery, *args, **kwargs)
+        if threading.current_thread().name == "first" and not first_passed_its_check.is_set():
+            first_passed_its_check.set()
+            assert release_the_first.wait(timeout=30), "the test never released the first tap"
+        return result
+
+    monkeypatch.setattr(BottleTrackingService, "assert_driver_can_progress_delivery", held_after_the_check)
+    answers, errors = {}, []
+    first_thread = _thread("first", pg_app, first, answers, errors, finally_set=first_passed_its_check)
+    second_thread = _thread("second", pg_app, second, answers, errors)
+
+    first_thread.start()
+    try:
+        assert first_passed_its_check.wait(timeout=30), "the first tap never reached its bottle check"
+        assert errors == [], errors
+        second_thread.start()
+        assert _await_a_lock_waiter(pg_db), "the second tap did not wait: nothing holds the crew's rows"
+        assert second_thread.is_alive(), "the second tap finished while the first one held the crew's rows"
+    finally:
+        release_the_first.set()
+        _finish(first_thread, *([second_thread] if second_thread.ident else []))
+    assert errors == []
+    return answers
 
 
 @pytest.mark.parametrize("first_to_tap", ["owner", "co_driver"])
@@ -184,43 +243,13 @@ def test_two_crew_members_tapping_on_the_way_at_once_cannot_promise_the_same_bot
     second_driver, second_stop = world.stops[second_to_tap]
     first_stop_id, second_stop_id = first_stop.id, second_stop.id
 
-    first_passed_its_check = threading.Event()
-    release_the_first = threading.Event()
-    guard = BottleTrackingService.assert_driver_can_progress_delivery
-
-    # The first tap stops right after the guard passed it: it holds whatever the guard locked, and its
-    # IN_TRANSIT is not committed yet, so only a lock can make the second tap count it.
-    def held_after_the_check(self, delivery, *args, **kwargs):
-        result = guard(self, delivery, *args, **kwargs)
-        if threading.current_thread().name == "first" and not first_passed_its_check.is_set():
-            first_passed_its_check.set()
-            assert release_the_first.wait(timeout=30), "the test never released the first tap"
-        return result
-
-    monkeypatch.setattr(BottleTrackingService, "assert_driver_can_progress_delivery", held_after_the_check)
-    answers, errors = {}, []
-    first = _thread(
-        "first",
+    answers = _race_two_on_the_way_taps(
         pg_app,
+        pg_db,
+        monkeypatch,
         _taps_on_the_way(first_driver, first_stop_id),
-        answers,
-        errors,
-        finally_set=first_passed_its_check,
+        _taps_on_the_way(second_driver, second_stop_id),
     )
-    second = _thread("second", pg_app, _taps_on_the_way(second_driver, second_stop_id), answers, errors)
-
-    first.start()
-    try:
-        assert first_passed_its_check.wait(timeout=30), "the first tap never reached its bottle check"
-        assert errors == [], errors
-        second.start()
-        assert _await_a_lock_waiter(pg_db), "the second tap did not wait: nothing holds the crew's rows"
-        assert second.is_alive(), "the second tap finished while the first one held the crew's rows"
-    finally:
-        release_the_first.set()
-        _finish(first, *([second] if second.ident else []))
-
-    assert errors == []
     (first_status, first_body), (second_status, second_body) = answers["first"], answers["second"]
     assert first_status == 200, first_body
     assert first_body["data"]["status"] == "in_transit"
@@ -239,6 +268,66 @@ def test_two_crew_members_tapping_on_the_way_at_once_cannot_promise_the_same_bot
     assert [row.delivery_id for row in on_the_way] == [first_stop_id]
     # Only the stop that really is on its way tells its customer so.
     assert [args for name, args, _kwargs in enqueued if name == send_delivery_update_task.name] == [(on_the_way[0].id,)]
+
+
+@pytest.mark.parametrize("first_to_tap", ["owner", "co_driver"])
+def test_two_crew_taps_on_the_way_on_the_last_ten_litre(
+    pg_app, pg_db, monkeypatch, enqueued, first_to_tap  # noqa: F811 -- `enqueued` is the fixture
+):
+    """10 L 4 on board; the owner and his co-driver each hold a picked-up stop of 4. One tap passes; the other
+    counts the first one's stop and is refused with 0 available."""
+    from tests.integration.trip_unit_builders import (
+        bind,
+        delivery_for,
+        member,
+        order_with_lines,
+        ten_litre,
+        trip,
+        trip_category,
+        trip_customer,
+        trip_driver,
+    )
+
+    monkeypatch.setitem(pg_app.config, "BOTTLE_SESSION_ENFORCEMENT_STRICT", True)
+    customer = trip_customer(pg_db)
+    owner = trip_driver(pg_db, "Olim", telegram_id="900000012")
+    co_driver = trip_driver(pg_db, "Kamol", telegram_id="900000013")
+    unit = ten_litre(pg_db, trip_category(pg_db))
+    unit_id, unit_name = unit.id, unit.name
+    session = trip(pg_db, owner, units={unit_id: 4})
+    member(pg_db, session, co_driver)
+    stops = {}
+    for who, driver in (("owner", owner), ("co_driver", co_driver)):
+        order = order_with_lines(pg_db, customer, [(unit, 4)], status=OrderStatus.OUT_FOR_DELIVERY)
+        delivery = delivery_for(pg_db, order, driver, DeliveryStatus.PICKED_UP)
+        bind(pg_db, session, order, driver)
+        stops[who] = (driver, delivery.id)
+    second_to_tap = "co_driver" if first_to_tap == "owner" else "owner"
+    first_driver, first_stop_id = stops[first_to_tap]
+    second_driver, second_stop_id = stops[second_to_tap]
+
+    answers = _race_two_on_the_way_taps(
+        pg_app,
+        pg_db,
+        monkeypatch,
+        _taps_on_the_way(first_driver, first_stop_id),
+        _taps_on_the_way(second_driver, second_stop_id),
+    )
+    (first_status, first_body), (second_status, second_body) = answers["first"], answers["second"]
+    assert first_status == 200, first_body
+    assert second_status == 400, second_body
+    assert second_body["error_code"] == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
+    assert second_body["details"] == {
+        "product_id": unit_id,
+        "product_name": unit_name,
+        "available": 0,
+        "required": 4,
+        "shortfall": 4,
+        "validation_errors": [],
+    }
+    pg_db.session.expire_all()
+    assert pg_db.session.get(Delivery, first_stop_id).status is DeliveryStatus.IN_TRANSIT
+    assert pg_db.session.get(Delivery, second_stop_id).status is DeliveryStatus.PICKED_UP
 
 
 # --------------------------------------------------------------------------- #
@@ -416,3 +505,170 @@ def test_a_stop_closed_from_the_orders_page_just_before_the_tap_reads_the_stops_
     assert closed_status == 200, closed_body
     assert closed_body["data"]["order"]["status"] == OrderStatus.DELIVERED.value
     _assert_the_tap_counted_the_truck_after_the_delivery(world, answers, owner_stop_id, delivered_stop_id, pg_db)
+
+
+# --------------------------------------------------------------------------- #
+# A Delivered on the crew's trip: against the owner's close, and twice on one 10 L line
+# --------------------------------------------------------------------------- #
+
+SEALED_TRIP_KEYS = (
+    "status",
+    "bottles_delivered",
+    "bottles_collected_from_customers",
+    "bottles_returned_to_warehouse",
+    "discrepancy",
+)
+SEALED_LINE_KEYS = ("product_id", "loaded", "delivered", "returned", "discrepancy")
+
+
+def _sealed_figures(trip_payload):
+    """What a close seals, from a trip payload (`serialize_bottle_session`): the 18.9 L figures and each line's."""
+    return (
+        {key: trip_payload[key] for key in SEALED_TRIP_KEYS},
+        [{key: line[key] for key in SEALED_LINE_KEYS} for line in trip_payload["units"]],
+    )
+
+
+@pytest.mark.parametrize("path", ["staff_route", "orders_page"])
+@pytest.mark.parametrize("first,strict_on", [("close", True), ("close", False), ("delivered", True)])
+def test_the_owners_close_and_a_co_drivers_delivered_never_change_the_sealed_figures(
+    pg_app, pg_db, monkeypatch, enqueued, first, strict_on, path  # noqa: F811 -- `enqueued` is the fixture
+):
+    """The owner is back at the depot (10 full and 6 x 10 L loaded) and closes the trip while his co-driver hands over
+    a stop of 3 x 18.9 L and 2 x 10 L at a door.
+
+    Close first, held right after it locked the trip and released the undelivered stops: the Delivered waits on the
+    trip, then finds the stop's binding released. Strict refuses it (BOTTLE_SESSION_REQUIRED); legacy delivers it and
+    adds nothing to the closed trip. Delivered first, held right after its tally with the trip still locked: the close
+    waits, then seals figures that include the delivery. Either way the trip read back afterwards carries exactly the
+    figures the close answered.
+
+    `path` is how the Delivered arrives: the co-driver's bot tap (`staff_route`) or the office marking the stop on the
+    Orders page (`orders_page`, an admin token, the body `adminService.updateOrderStatus` sends). Same stop, same close,
+    same sealed figures."""
+    from tests.integration.test_bottle_transfer_races_pg_e2e import _double_tap
+    from tests.integration.trip_unit_builders import (
+        bind,
+        delivery_for,
+        member,
+        nineteen,
+        order_with_lines,
+        ten_litre,
+        trip,
+        trip_category,
+        trip_customer,
+        trip_driver,
+    )
+
+    monkeypatch.setitem(pg_app.config, "BOTTLE_SESSION_ENFORCEMENT_STRICT", strict_on)
+    customer = trip_customer(pg_db)
+    owner = trip_driver(pg_db, "Olim", telegram_id="900000022")
+    co_driver = trip_driver(pg_db, "Kamol", telegram_id="900000023")
+    category = trip_category(pg_db)
+    water, unit = nineteen(pg_db, category), ten_litre(pg_db, category)
+    unit_id = unit.id
+    session = trip(pg_db, owner, bottles=LOADED, units={unit_id: 6})
+    trip_id = session.id
+    member(pg_db, session, co_driver)
+    order = order_with_lines(pg_db, customer, [(water, 3), (unit, 2)], status=OrderStatus.OUT_FOR_DELIVERY)
+    stop_id = delivery_for(pg_db, order, co_driver, DeliveryStatus.ARRIVED).id
+    bind(pg_db, session, order, co_driver)
+    order_id = order.id
+    admin = _user(pg_db, "+998901242005", role=UserRole.ADMIN, user_type=UserType.STAFF)
+
+    def delivers(client):
+        """The Delivered of the co-driver's stop, by the path under test."""
+        if path == "orders_page":
+            return _admin_marks_delivered(admin, order_id)(client)
+        return _taps(co_driver, stop_id, "delivered")(client)
+
+    if first == "close":
+        (close_status, close_body), (delivered_status, delivered_body) = _double_tap(
+            pg_app,
+            pg_db,
+            monkeypatch,
+            held_method="_release_open_bindings_for_session",
+            first_tap=_close_trip(owner, LOADED, {unit_id: 6}),
+            second_tap=delivers,
+        )
+    else:
+        (delivered_status, delivered_body), (close_status, close_body) = _double_tap(
+            pg_app,
+            pg_db,
+            monkeypatch,
+            owner=OrderService,
+            held_method="_record_delivery_bottles",
+            first_tap=delivers,
+            second_tap=_close_trip(owner, LOADED - 3, {unit_id: 6 - 2}),
+        )
+
+    assert close_status == 200, close_body
+    sealed = close_body["data"]
+    if first == "close":
+        assert (sealed["bottles_delivered"], sealed["discrepancy"]) == (0, 0)
+        assert [(line["product_id"], line["delivered"]) for line in sealed["units"]] == [(unit_id, 0)]
+        if strict_on:
+            assert delivered_status == 400, delivered_body
+            # The staff routes answer the code at the top level; the admin route nests it under `data`.
+            code = delivered_body["data"]["error_code"] if path == "orders_page" else delivered_body["error_code"]
+            assert code == "BOTTLE_SESSION_REQUIRED"
+        else:
+            assert delivered_status == 200, delivered_body
+            pg_db.session.expire_all()
+            assert pg_db.session.get(Order, order_id).status is OrderStatus.DELIVERED
+    else:
+        assert delivered_status == 200, delivered_body
+        assert (sealed["bottles_delivered"], sealed["discrepancy"]) == (3, 0)
+        assert [(line["product_id"], line["delivered"]) for line in sealed["units"]] == [(unit_id, 2)]
+    pg_db.session.expire_all()
+    after = serialize_bottle_session(pg_db.session.get(DriverBottleSession, trip_id))
+    assert _sealed_figures(after) == _sealed_figures(sealed)
+
+
+def test_two_delivered_taps_add_to_one_line(
+    pg_app, pg_db, monkeypatch, enqueued  # noqa: F811 -- `enqueued` is the fixture
+):
+    """The owner and his co-driver each hand over a 10 L stop, 4 and 3, at once. The second Delivered waits for the
+    first, then adds to what it wrote: the trip's one 10 L line counts both."""
+    from tests.integration.test_bottle_transfer_races_pg_e2e import _double_tap
+    from tests.integration.trip_unit_builders import (
+        bind,
+        delivery_for,
+        member,
+        order_with_lines,
+        ten_litre,
+        trip,
+        trip_category,
+        trip_customer,
+        trip_driver,
+    )
+
+    customer = trip_customer(pg_db)
+    owner = trip_driver(pg_db, "Olim", telegram_id="900000032")
+    co_driver = trip_driver(pg_db, "Kamol", telegram_id="900000033")
+    unit = ten_litre(pg_db, trip_category(pg_db))
+    unit_id = unit.id
+    session = trip(pg_db, owner, units={unit_id: 12})
+    trip_id = session.id
+    member(pg_db, session, co_driver)
+    stops = {}
+    for who, driver, quantity in (("owner", owner, 4), ("co_driver", co_driver, 3)):
+        order = order_with_lines(pg_db, customer, [(unit, quantity)], status=OrderStatus.OUT_FOR_DELIVERY)
+        stops[who] = delivery_for(pg_db, order, driver, DeliveryStatus.ARRIVED).id
+        bind(pg_db, session, order, driver)
+
+    (first_status, first_body), (second_status, second_body) = _double_tap(
+        pg_app,
+        pg_db,
+        monkeypatch,
+        owner=OrderService,
+        held_method="_record_delivery_bottles",
+        first_tap=_taps(owner, stops["owner"], "delivered"),
+        second_tap=_taps(co_driver, stops["co_driver"], "delivered"),
+    )
+
+    assert first_status == 200, first_body
+    assert second_status == 200, second_body
+    pg_db.session.expire_all()
+    line = DriverBottleSessionUnit.query.filter_by(session_id=trip_id, product_id=unit_id).one()
+    assert (line.delivered, line.on_board) == (4 + 3, 12 - 4 - 3)

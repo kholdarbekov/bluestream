@@ -40,7 +40,13 @@ def test_the_receiver_is_pushed_the_transfer_with_the_senders_name(db, monkeypat
 
     assert pushes == [((int(receiver.telegram_id), "transfer_received",
                         {"id": transfer.id, "declared_quantity": 4, "declared_empty_quantity": 2,
-                         "sender_name": "Ali Driver"}), {})]
+                         "sender_name": "Ali Driver",
+                         "lines": [
+                             {"kind": "full", "product_id": None, "product_name": None, "declared": 4,
+                              "confirmed": None, "resolved": None},
+                             {"kind": "empty", "product_id": None, "product_name": None, "declared": 2,
+                              "confirmed": None, "resolved": None},
+                         ]}), {})]
 
 
 def test_the_owner_is_pushed_the_request_and_the_requester_the_answer(db, monkeypatch):

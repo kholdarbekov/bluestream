@@ -121,17 +121,21 @@ def test_every_delivery_status_has_an_admin_ui_label():
     }
 
 
-def _assert_seeded_as_the_delivery_page_writes_it(expected):
-    """Each key is seeded trilingually, rendered by `Delivery.js`, and falls back there to
-    the seeded English. Two different English sentences would be two copies of one
-    message, and an unseeded key shows that English to a uz/ru admin."""
+def _assert_seeded_as_the_page_writes_it(page_file, expected):
+    """Each key is seeded trilingually, rendered by `admin_ui/src/pages/<page_file>`, and
+    falls back there to the seeded English. Two different English sentences would be two
+    copies of one message, and an unseeded key shows that English to a uz/ru admin."""
     from scripts.seed_backend_translations import BACKEND_TRANSLATIONS
 
-    page = (ROOT / "admin_ui" / "src" / "pages" / "Delivery.js").read_text(encoding="utf-8")
+    page = (ROOT / "admin_ui" / "src" / "pages" / page_file).read_text(encoding="utf-8")
     for key, row in expected.items():
         assert BACKEND_TRANSLATIONS[key] == row, key
-        assert f"'{key}'" in page, f"{key} is not rendered by admin_ui/src/pages/Delivery.js"
-        assert row["en"] in page, f"{key}: Delivery.js falls back to different English"
+        assert f"'{key}'" in page, f"{key} is not rendered by admin_ui/src/pages/{page_file}"
+        assert row["en"] in page, f"{key}: {page_file} falls back to different English"
+
+
+def _assert_seeded_as_the_delivery_page_writes_it(expected):
+    _assert_seeded_as_the_page_writes_it("Delivery.js", expected)
 
 
 def test_the_delivery_page_reschedule_and_return_copy_is_seeded_as_the_page_writes_it():
@@ -250,3 +254,29 @@ def test_the_dispatch_map_says_the_orders_tag_sentence_from_the_same_row():
     english = BACKEND_TRANSLATIONS["ui.orders.delivery_failed_needs_new_date"]["en"]
     source = (ROOT / "admin_ui" / "src" / "components" / "OperationsMap.jsx").read_text(encoding="utf-8")
     assert f"t('delivery:ui.orders.delivery_failed_needs_new_date', '{english}')" in source
+
+
+def test_the_order_edit_preview_trip_copy_is_seeded_as_the_page_writes_it():
+    """The Edit items preview's "Driver trip" row (spec 2026-11-18, calls 7 and 8): what the
+    edit changes on the driver's trip, and why the apply will refuse it while they are on
+    another trip (drivers are they/them in house copy). Orders.js renders each and falls
+    back to the seeded English."""
+    _assert_seeded_as_the_page_writes_it(
+        "Orders.js",
+        {
+            "ui.orders.trip_impact": {"en": "Driver trip", "uz": "Haydovchi reysi", "ru": "Рейс водителя"},
+            "ui.orders.no_trip_change": {
+                "en": "No change on the driver's trip",
+                "uz": "Haydovchi reysida o'zgarish yo'q",
+                "ru": "Рейс водителя не меняется",
+            },
+            "ui.orders.trip_reopen_refused": {
+                "en": "The driver has another open trip or rides on one: this edit will be refused until they "
+                "close or leave it.",
+                "uz": "Haydovchida boshqa ochiq reys bor yoki u boshqa reysda yuribdi: u uni yopmaguncha yoki "
+                "undan chiqmaguncha bu tahrir rad etiladi.",
+                "ru": "У водителя есть другой открытый рейс или он едет в чужом рейсе: правка будет "
+                "отклонена, пока он его не закроет или не выйдет из него.",
+            },
+        },
+    )

@@ -3326,6 +3326,12 @@ def test_the_api_contract_snapshot_still_lists_the_merge_preview_route(db):
     # count moved.
     # 681 -> 682: POST /api/v1/auth/addresses/<int:address_id>/move (auth.move_user_address), duplicate-address
     # guard Task 5. Unrelated to place-merge; only the estate-wide count moved.
+    # 682 -> 681: the 10 L bottle-trip plan (2026-11-19, Task 6) removed the two deprecated driver shims POST
+    # /api/v1/staff/bottles/load (staff.record_bottles_loaded) and POST /api/v1/staff/bottles/return-to-warehouse
+    # (staff.record_bottles_returned_to_warehouse) and added GET /api/v1/staff/bottles/session/load-screen
+    # (staff.get_bottle_load_screen). Unrelated to place-merge; only the estate-wide count moved.
+    # 681 -> 682: the same plan's Task 18 added POST /api/v1/staff/bottles/transfers/<int:transfer_id>/reject
+    # (staff.reject_bottle_transfer), the receiver's Reject. Unrelated to place-merge; only the estate-wide count moved.
     assert len(routes) == 682
     entry = next(r for r in routes if r["rule"] == "/api/v1/admin/place-groups/merge-preview")
     assert entry["methods"] == ["GET"]

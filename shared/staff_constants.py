@@ -162,6 +162,9 @@ BOTTLE_EVENT_TRANSFER_RECEIVED = 'transfer_received'
 # bottle_notifications.notify_transfer_outcome_to_sender.
 BOTTLE_EVENT_TRANSFER_CONFIRMED = 'transfer_confirmed'
 BOTTLE_EVENT_TRANSFER_DISPUTED = 'transfer_disputed'
+# The sender's answer when the receiver rejected the transfer (spec 2026-11-18 §6.7); payload documented on
+# bottle_notifications.notify_transfer_rejected_to_sender.
+BOTTLE_EVENT_TRANSFER_REJECTED = 'transfer_rejected'
 BOTTLE_EVENT_JOIN_REQUESTED = 'join_requested'
 BOTTLE_EVENT_JOIN_APPROVED = 'join_approved'
 BOTTLE_EVENT_JOIN_DECLINED = 'join_declined'
@@ -169,6 +172,7 @@ BOTTLE_EVENTS = (
     BOTTLE_EVENT_TRANSFER_RECEIVED,
     BOTTLE_EVENT_TRANSFER_CONFIRMED,
     BOTTLE_EVENT_TRANSFER_DISPUTED,
+    BOTTLE_EVENT_TRANSFER_REJECTED,
     BOTTLE_EVENT_JOIN_REQUESTED,
     BOTTLE_EVENT_JOIN_APPROVED,
     BOTTLE_EVENT_JOIN_DECLINED,

@@ -28,7 +28,6 @@ from shared.staff_constants import MAX_BOTTLES_PER_SESSION
 pytestmark = pytest.mark.integration
 
 OPEN_URL = "/api/v1/staff/bottles/session/open"
-LEGACY_LOAD_URL = "/api/v1/staff/bottles/load"
 
 # The storage column's own ceiling: PostgreSQL `integer` is 4 bytes, signed.
 COLUMN_CEILING = 2**31 - 1
@@ -81,16 +80,11 @@ def test_the_ceiling_sits_far_below_what_the_column_can_hold():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("url", [OPEN_URL, LEGACY_LOAD_URL])
 def test_the_backend_refuses_a_load_out_the_column_cannot_hold(
-    client, db, driver_auth_headers, delivery_driver, url
+    client, db, driver_auth_headers, delivery_driver
 ):
-    """A typed phone number posted straight at the API — no bot in the path.
-
-    Both the current endpoint and the deprecated shim share the serializer, so
-    both inherit the bound.
-    """
-    resp = client.post(url, json={"bottles_loaded": 40_000_000_000}, headers=driver_auth_headers)
+    """A typed phone number posted straight at the API — no bot in the path."""
+    resp = client.post(OPEN_URL, json={"bottles_loaded": 40_000_000_000}, headers=driver_auth_headers)
 
     assert resp.status_code == 400, resp.get_data(as_text=True)
     assert DriverBottleSession.query.filter_by(driver_user_id=delivery_driver.id).count() == 0, (
@@ -127,11 +121,16 @@ def test_a_load_out_at_the_ceiling_is_still_accepted(
     assert session.bottles_loaded == MAX_BOTTLES_PER_SESSION
 
 
-def test_the_lower_bound_the_ceiling_was_added_beside_still_holds(
+def test_an_all_zero_load_is_refused_by_the_empty_load_rule(
     client, db, driver_auth_headers, delivery_driver
 ):
-    """Regression fence: adding `le=` must not have loosened `gt=0`."""
+    """The floor is no longer the request model's: each number may be 0 (a truck of 10 L only opens with 0 x 18.9 L).
+
+    What is refused is a load of nothing at all, by the service's one empty-load rule
+    (`BottleTrackingService._assert_load_not_empty`).
+    """
     resp = client.post(OPEN_URL, json={"bottles_loaded": 0}, headers=driver_auth_headers)
 
     assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert resp.get_json()["error_code"] == "BOTTLE_SESSION_EMPTY_LOAD"
     assert DriverBottleSession.query.filter_by(driver_user_id=delivery_driver.id).count() == 0

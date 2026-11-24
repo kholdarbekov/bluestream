@@ -22,6 +22,7 @@ from business_app.models.tryout import (
 )
 from business_app.models.user import User, UserAddress
 from business_app.services.auth_service import AuthService
+from business_app.services.inventory_service import InventoryService
 from business_app.services.maps_service import MapsService
 from business_app.services.sales.replenishment_service import effective_line_qty_max
 from shared.enums import (
@@ -123,15 +124,20 @@ class TryoutService:
         return tryout
 
     @staticmethod
-    def _load_task(task_id: int) -> TryoutTask:
-        task = TryoutTask.query.options(
+    def _load_task(task_id: int, *, fresh: bool = False) -> TryoutTask:
+        """The task with its try-out loaded. `fresh` re-reads rows this request already loaded (`populate_existing`):
+        after a lock, the state the lock waited for."""
+        query = TryoutTask.query.options(
             joinedload(TryoutTask.tryout).joinedload(ProductTryout.trial_contact),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
             joinedload(TryoutTask.tryout)
             .selectinload(ProductTryout.bottle_ledger_entries)
             .joinedload(TryoutBottleLedger.product),
-        ).get(task_id)
+        )
+        if fresh:
+            query = query.populate_existing()
+        task = query.get(task_id)
         if not task:
             raise NotFoundError("Try-out task not found", error_code="TRYOUT_TASK_NOT_FOUND")
         return task
@@ -764,6 +770,9 @@ class TryoutService:
             tryout.return_due_at = handoff_at + timedelta(days=TryoutService.DEFAULT_RETURN_DUE_DAYS)
 
         if not already_applied:
+            # Product rows before the trip tally below, in id order (spec 2026-11-18 §6.2), and re-read under the
+            # lock, so the decrement starts from the stock a cash Delivered may just have committed.
+            InventoryService.lock_product_rows(item.product_id for item in tryout.items)
             for item in tryout.items:
                 product = item.product
                 if product.track_inventory:
@@ -794,21 +803,25 @@ class TryoutService:
 
             db.session.flush()
 
-            # Tally tryout-handoff bottles against the driver's open session (if any).
+            # Tally tryout-handoff bottles and one-way units (10 L) against the driver's open session (if any).
             # Mirrors the tally done for regular order deliveries so the driver's
             # session discrepancy formula stays balanced.
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+
             total_bottles_handed_off = sum(
                 TryoutService._as_decimal(item.returnable_bottles_due)
                 for item in tryout.items
                 if TryoutService._as_decimal(item.returnable_bottles_due) > 0
             )
-            if actor_user_id and total_bottles_handed_off > 0:
+            units = BottleTrackingService.trip_units_for_lines(
+                (item.product, item.quantity) for item in tryout.items
+            ).units
+            if actor_user_id and (total_bottles_handed_off > 0 or units):
                 try:
-                    from business_app.services.bottle_tracking_service import BottleTrackingService
-
                     BottleTrackingService().update_session_delivery_tally(
                         actor_user_id,
                         bottles_delivered=int(total_bottles_handed_off),
+                        units=units,
                     )
                 except Exception:
                     import logging
@@ -825,8 +838,25 @@ class TryoutService:
         TryoutService._sync_tryout_status(tryout)
 
     @staticmethod
+    def _lock_tryout(tryout_id: int) -> None:
+        """The try-out's row, FOR NO KEY UPDATE until this transaction ends (rows that only point at it never wait).
+
+        Completing a hand-off reads whether it is done (its task's status, `handoff_completed_at`) and then books it:
+        the stock, and for the driver's trip the units, which a one-way try-out (no returnable item, so no ledger row
+        whose key would refuse a second one) books with nothing else to stop a second pass. Two completions (the
+        driver's Handed over and the office's Complete, or the office saving it twice) queue here, and the later one
+        reads, after the lock, that the earlier one did it. Taken before the hand-off's product and trip locks, and by
+        no path after one. A no-op on SQLite.
+        """
+        db.session.query(ProductTryout.id).filter(ProductTryout.id == tryout_id).with_for_update(key_share=True).all()
+
+    @staticmethod
     def complete_handoff_task(task_id: int, actor_user_id: int, notes: Optional[str] = None) -> ProductTryout:
-        task = TryoutService._load_task(task_id)
+        tryout_id = db.session.query(TryoutTask.tryout_id).filter(TryoutTask.id == task_id).scalar()
+        if tryout_id is None:
+            raise NotFoundError("Try-out task not found", error_code="TRYOUT_TASK_NOT_FOUND")
+        TryoutService._lock_tryout(tryout_id)
+        task = TryoutService._load_task(task_id, fresh=True)
         if TryoutService._status_value(task.task_type) != TryoutTaskType.HANDOFF.value:
             raise ValidationError("Task is not a handoff task")
         if TryoutService._status_value(task.status) == TryoutTaskStatus.COMPLETED.value:
@@ -1033,6 +1063,8 @@ class TryoutService:
 
     @staticmethod
     def update_tryout(tryout_id: int, payload: Dict[str, Any], actor_user_id: Optional[int] = None) -> ProductTryout:
+        # Before the read: a hand-off this edit completes and one the driver completes queue here (`_lock_tryout`).
+        TryoutService._lock_tryout(tryout_id)
         tryout = TryoutService._load_tryout(tryout_id)
         contact_updated = False
         address_updated = False

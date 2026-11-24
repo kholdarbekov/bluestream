@@ -86,6 +86,9 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     # Read by ReplenishmentService.stock_check_products(); toggled on the admin
     # Products page. server_default so the backfill on the existing rows is false.
     in_sales_stock_check = Column(Boolean, nullable=False, default=False, server_default=sa.false(), index=True)
+    # Counted on the driver's bottle trip as a one-way unit (loaded, delivered, returned) with no return leg.
+    # Admin Products page toggle; refused for a returnable bottle (TRIP_UNIT_ON_RETURNABLE).
+    counted_on_bottle_trip = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     expire_days = Column(Integer, nullable=True, default=180)
     # Per-product purchase minimum (cart/order rule). Distinct from PriceRule.min_quantity,
     # which is for bulk-discount tiers, and from min_stock_level, which is a restock threshold.
@@ -150,6 +153,23 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
         they are still not the same question.
         """
         return bool(self.tracks_returnable_bottles) and (self.returnable_bottles_per_unit or 0) > 0
+
+    @property
+    def is_trip_one_way_unit(self) -> bool:
+        """SSOT: is this product counted on the bottle trip as a one-way unit (no bottle comes back)?
+
+        A returnable bottle is never one: it travels on the 18.9 L bottle tallies. SQL twin:
+        `trip_one_way_unit_clause()`.
+        """
+        return bool(self.counted_on_bottle_trip) and not self.is_returnable_bottle
+
+    @classmethod
+    def trip_one_way_unit_clause(cls):
+        """SQL twin of `is_trip_one_way_unit` (NULL-safe on the setting, like `is_returnable_bottle`)."""
+        return sa.and_(
+            cls.counted_on_bottle_trip.is_(True),
+            sa.not_(sa.and_(cls.tracks_returnable_bottles, cls.returnable_bottles_per_unit > 0)),
+        )
 
     def returnable_bottles_for(self, quantity) -> Decimal:
         """How many returnable bottles `quantity` units of this product represent.

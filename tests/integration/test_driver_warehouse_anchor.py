@@ -2,10 +2,8 @@
 
 Both actions physically happen at the single depot, so they are as good a
 position fix as a shared pin — and a better one than the stale reading the
-driver left behind yesterday. Driven through HTTP because four separate
-endpoints (two current, two deprecated shims) funnel into the same two service
-methods, and the whole point of anchoring in the service layer is that all four
-inherit it.
+driver left behind yesterday. Driven through HTTP, the open and close routes the
+staff bot calls; the anchor lives in the two service methods behind them.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -26,8 +24,6 @@ WAREHOUSE_LNG = 69.5222
 
 OPEN_URL = "/api/v1/staff/bottles/session/open"
 CLOSE_URL = "/api/v1/staff/bottles/session/close"
-LEGACY_LOAD_URL = "/api/v1/staff/bottles/load"
-LEGACY_RETURN_URL = "/api/v1/staff/bottles/return-to-warehouse"
 LOCATION_URL = "/api/v1/staff/delivery/me/location"
 
 
@@ -100,19 +96,6 @@ def test_loading_bottles_clears_the_measured_accuracy_radius(
     assert _person(delivery_driver).location_accuracy_m is None
 
 
-def test_deprecated_load_shim_also_anchors_at_the_warehouse(
-    client, db, driver_auth_headers, delivery_driver, driver_with_location, warehouse_coords
-):
-    """Proof the anchor lives in the service, not in one route handler."""
-    resp = client.post(LEGACY_LOAD_URL, json={"bottles_loaded": 12}, headers=driver_auth_headers)
-
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    db.session.expire_all()
-    person = _person(delivery_driver)
-    assert person.current_location_lat == pytest.approx(WAREHOUSE_LAT)
-    assert person.current_location_lng == pytest.approx(WAREHOUSE_LNG)
-
-
 # --------------------------------------------------------------------------- #
 # Return to warehouse
 # --------------------------------------------------------------------------- #
@@ -136,25 +119,6 @@ def test_returning_to_warehouse_moves_the_driver_back_to_the_warehouse(
     assert person.current_location_lat == pytest.approx(WAREHOUSE_LAT)
     assert person.current_location_lng == pytest.approx(WAREHOUSE_LNG)
     assert person.location_accuracy_m is None
-
-
-def test_deprecated_return_shim_also_anchors_at_the_warehouse(
-    client, db, driver_auth_headers, delivery_driver, driver_with_location, warehouse_coords
-):
-    client.post(OPEN_URL, json={"bottles_loaded": 20}, headers=driver_auth_headers)
-    _share_pin(client, driver_auth_headers, 41.35, 69.31)
-
-    resp = client.post(
-        LEGACY_RETURN_URL,
-        json={"bottles_returned_to_warehouse": 5},
-        headers=driver_auth_headers,
-    )
-
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    db.session.expire_all()
-    person = _person(delivery_driver)
-    assert person.current_location_lat == pytest.approx(WAREHOUSE_LAT)
-    assert person.current_location_lng == pytest.approx(WAREHOUSE_LNG)
 
 
 # --------------------------------------------------------------------------- #

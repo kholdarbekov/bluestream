@@ -2993,23 +2993,59 @@ const Orders = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.bottle_impact', 'Bottle balance')}>
                 {(() => {
-                  const bottle = editPreviewData?.cascade_summary?.bottle_balance;
-                  if (!bottle || !(bottle.changes || []).length) {
+                  const changes = editPreviewData?.cascade_summary?.bottle_balance?.changes || [];
+                  if (!changes.length) {
                     return t('ui.orders.no_bottle_change', 'No bottle balance change');
                   }
                   return (
                     <div>
-                      {(bottle.changes || []).map((change, idx) => (
-                        <div key={idx}>
+                      {/* A reward line and a paid line of one product are two entries with one product_id. */}
+                      {changes.map((change, idx) => (
+                        <div key={`${change.product_id}-${idx}`}>
                           Product {change.product_id}: {change.delta_bottles > 0 ? '+' : ''}
                           {change.delta_bottles} {t('ui.orders.bottles', 'bottles')}
                         </div>
                       ))}
-                      {bottle.affected_session_id ? (
+                    </div>
+                  );
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.trip_impact', 'Driver trip')}>
+                {(() => {
+                  // What the apply books on the driver's trip, and whether it reopens it: the backend decides
+                  // both (`trip_effect`), so this only shows them.
+                  const trip = editPreviewData?.cascade_summary?.trip_effect;
+                  const bottles = Number(trip?.bottles || 0);
+                  const units = trip?.units || [];
+                  const signed = (value) => `${value > 0 ? '+' : ''}${value}`;
+                  return (
+                    <div>
+                      {bottles === 0 && !units.length ? (
+                        <div>{t('ui.orders.no_trip_change', "No change on the driver's trip")}</div>
+                      ) : null}
+                      {bottles !== 0 ? (
+                        <div>
+                          {signed(bottles)} {t('ui.orders.bottles', 'bottles')}
+                        </div>
+                      ) : null}
+                      {units.map((unit) => (
+                        <div key={unit.product_id}>
+                          {unit.product_name}: {signed(unit.delta)}
+                        </div>
+                      ))}
+                      {trip?.reopens ? (
                         <div style={{ color: '#fa8c16' }}>
                           {t(
                             'ui.orders.session_will_reopen',
-                            `Driver bottle session #${bottle.affected_session_id} will be reopened`,
+                            `Driver bottle session #${trip.session_id} will be reopened`,
+                          )}
+                        </div>
+                      ) : null}
+                      {trip?.reopen_refusal ? (
+                        <div style={{ color: '#cf1322' }}>
+                          {t(
+                            'ui.orders.trip_reopen_refused',
+                            'The driver has another open trip or rides on one: this edit will be refused until they close or leave it.',
                           )}
                         </div>
                       ) : null}
@@ -3034,7 +3070,10 @@ const Orders = () => {
                 <AsyncButton
                   type="primary"
                   loading={submitOrderEditMutation.isPending}
-                  disabled={(editPreviewData?.blocking_reasons || []).length > 0}
+                  disabled={
+                    (editPreviewData?.blocking_reasons || []).length > 0 ||
+                    Boolean(editPreviewData?.cascade_summary?.trip_effect?.reopen_refusal)
+                  }
                   onClick={handleEditConfirm}
                 >
                   {t('ui.orders.confirm_apply', 'Confirm and apply')}

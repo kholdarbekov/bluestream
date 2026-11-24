@@ -136,6 +136,7 @@ DELIVERY_KEYS = (
     "staff.error.api.scope_busy",
     "staff.error.api.bottle_session_capacity_exceeded",
     "staff.error.api.bottle_session_capacity_exceeded_detail",
+    "staff.error.api.bottle_session_capacity_exceeded_unit_detail",
     "staff.error.api.bottle_session_required",
     "staff.error.api.status_transition_refused_detail",
     "staff.menu.my_bottle_accountability",
@@ -1542,6 +1543,38 @@ async def test_a_capacity_refusal_names_the_numbers_and_offers_the_session_scree
         "the refusal must lead somewhere the driver can fix it"
     )
     assert "Session 178" not in refusal.text, "the internal session id leaked to the driver"
+
+
+async def test_the_capacity_refusal_names_the_product(monkeypatch):
+    """Accept, refused on a 10 L line: the backend's unit details fill the uz sentence, not the bottle one."""
+    bot = await build_driver(
+        monkeypatch,
+        language="uz",
+        translations={
+            "staff.error.api.bottle_session_capacity_exceeded_unit_detail": copy_for(
+                "staff.error.api.bottle_session_capacity_exceeded_unit_detail", "uz"
+            )
+        },
+    )
+    driver, _labels = await sign_in(bot)
+    bot.desk.serve(501)
+    bot.desk.accept_outcomes[501] = staff_backend_failure(
+        "Session 178 only has 2 10 Litr suv unit(s) available; cannot deliver 4.",
+        status_code=400,
+        error_code="BOTTLE_SESSION_CAPACITY_EXCEEDED",
+        details={
+            "product_id": 31,
+            "product_name": "10 Litr suv",
+            "available": 2,
+            "required": 4,
+            "shortfall": 2,
+        },
+    )
+
+    await bot.send(driver.tap("staff_confirm_accept_501"))
+
+    refusal = bot.telegram.last_shown()
+    assert refusal.text == "❌ Reysingizda 10 Litr suv yetarli emas: bo'sh 2 ta, kerak 4 ta."
 
 
 SESSION_CURRENT = "/api/v1/staff/bottles/session/current"

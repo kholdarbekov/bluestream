@@ -64,6 +64,7 @@ KEYS = (
     "staff.bottles.full_on_truck",
     "staff.bottles.empties_on_truck",
     "staff.bottles.free_full_bottles",
+    "staff.bottles.unit_on_truck",
     "staff.bottles.current_membership_title",
     "staff.bottles.leave_session",
     "staff.bottles.codriver_invited",
@@ -175,6 +176,24 @@ async def test_membership_status_names_the_owner_and_counts_the_bottles(
     assert "37" not in text, "current_inventory counts empties; it is not bottles available"
     assert HUMANISED_MEMBERSHIP not in text
     assert "{" not in text and "}" not in text
+
+
+async def test_the_co_driver_membership_screen_lists_the_owner_lines(real_copy, handler, monkeypatch):
+    monkeypatch.setattr(
+        mod, "api_client",
+        _FakeClient(
+            get_current_session_membership=_ok({
+                "owner_name": "Aziz Karimov", "current_inventory": 37,
+                "full_bottles_on_board": 13, "empties_on_board": 24, "free_full_bottles": 8,
+                "units": [{"product_id": 3, "product_name": "10 Litr suv", "on_board": 9, "free": 4}],
+            })
+        ),
+    )
+    update, query = _callback("bottles_membership_status")
+
+    await handler.show_membership_status(update, _context("uz"))
+
+    assert "🧴 10 Litr suv: 9 · bo'sh 4" in _rendered(query).splitlines()
 
 
 @pytest.mark.parametrize("language", LANGUAGES)

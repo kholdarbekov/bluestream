@@ -2,13 +2,18 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from business_app import db as _db
-from business_app.models.loyalty import LoyaltyPoints, LoyaltyProgram, LoyaltyReward, LoyaltyTransaction
+from business_app.models.loyalty import (
+    LoyaltyPoints,
+    LoyaltyProgram,
+    LoyaltyReward,
+    LoyaltyTierConfig,
+    LoyaltyTransaction,
+)
 from business_app.models.product import Product, ProductSizeEnum
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
@@ -85,20 +90,62 @@ class TestLoyaltyServiceBusinessRules:
         # eligibility before touching the account, so an id with no user row
         # resolves to ineligible and earns 0. effective_tier() also queries
         # LoyaltyTierConfig/LoyaltyTransaction directly. No tier is seeded for
-        # program 42, so effective_tier() returns None and the badge "Gold" falls
-        # through unchanged to _get_tier_multiplier, which this test still mocks.
-        fake_account = SimpleNamespace(
-            user_id=sample_user.id,
-            program=SimpleNamespace(uzs_per_point=200),
-            current_tier="Gold",
-            program_id=42,
+        # the program, so effective_tier() returns None and the badge "Gold" falls
+        # through unchanged to _get_tier_multiplier, which this test still stubs.
+        program = LoyaltyProgram(name="Ratio program", is_active=True, is_default=True, uzs_per_point=200)
+        db.session.add(program)
+        db.session.flush()
+        db.session.add(
+            LoyaltyPoints(user_id=sample_user.id, program_id=program.id, current_balance=0, current_tier="Gold")
         )
-        monkeypatch.setattr(loyalty_service, "get_or_create_loyalty_account", lambda _uid: fake_account)
-        monkeypatch.setattr(loyalty_service, "_get_tier_multiplier", lambda _tier, _pid: 1.5)
+        db.session.commit()
+        asked = []
+
+        def multiplier_for(tier_name, program_id=None):  # _get_tier_multiplier's own signature
+            asked.append((tier_name, program_id))
+            return 1.5
+
+        monkeypatch.setattr(loyalty_service, "_get_tier_multiplier", multiplier_for)
 
         points = loyalty_service.calculate_points_for_purchase(user_id=sample_user.id, amount=1000)
 
         assert points == 7  # floor(1000/200)=5, multiplier=1.5 => 7.5 -> int(7)
+        assert asked == [("Gold", program.id)]
+
+    def test_a_first_timers_points_are_worked_out_without_creating_his_account(self, loyalty_service, db, sample_user):
+        """A customer with no loyalty account earns what his first account would give him, and the calculation writes
+        nothing: no account row (even unflushed or flushed), and the caller's transaction is not ended. A flushed first
+        account held his unique user id until the caller's commit, so any other first-account write for him waited on
+        it and then failed. The figures are those of the account `get_or_create_loyalty_account` then creates."""
+        program = LoyaltyProgram(name="First-timer program", is_active=True, is_default=True, uzs_per_point=200)
+        db.session.add(program)
+        db.session.flush()
+        db.session.add(
+            LoyaltyTierConfig(
+                program_id=program.id,
+                name="Starter",
+                display_order=0,
+                min_points=0,
+                points_multiplier=1.5,
+                is_active=True,
+            )
+        )
+        db.session.commit()
+        user_id = sample_user.id
+        assert LoyaltyPoints.query.filter_by(user_id=user_id).count() == 0
+        transaction = db.session().get_transaction()  # the scoped session's own Session
+        assert transaction is not None
+
+        points = loyalty_service.calculate_points_for_purchase(user_id=user_id, amount=1000)
+
+        assert points == 7  # floor(1000/200)=5, the 0-point tier's x1.5 => 7.5 -> int(7)
+        assert db.session().get_transaction() is transaction
+        assert [obj for obj in db.session.new if isinstance(obj, LoyaltyPoints)] == []
+        assert LoyaltyPoints.query.filter_by(user_id=user_id).count() == 0
+
+        account = loyalty_service.get_or_create_loyalty_account(user_id)
+        assert (account.program_id, account.current_tier) == (program.id, "Starter")
+        assert loyalty_service.calculate_points_for_purchase(user_id=user_id, amount=1000) == 7
 
     def test_get_or_create_loyalty_account_raises_not_found_for_missing_user(self, loyalty_service, db):
         with pytest.raises(NotFoundError, match="User not found"):

@@ -572,7 +572,10 @@ describe('AdminService', () => {
 
       const result = await adminService.createProduct(productData);
 
-      expect(api.post).toHaveBeenCalledWith('/admin/products', productData);
+      // The Products page explains the bottle-trip setting's two refusals itself, so api.js must not toast them.
+      expect(api.post).toHaveBeenCalledWith('/admin/products', productData, {
+        handledErrorCodes: ['TRIP_UNIT_ON_RETURNABLE', 'TRIP_UNIT_SETTING_BLOCKED'],
+      });
       expect(result).toEqual(mockResponse);
     });
   });
@@ -586,7 +589,9 @@ describe('AdminService', () => {
 
       const result = await adminService.updateProduct(1, productData);
 
-      expect(api.put).toHaveBeenCalledWith('/admin/products/1', productData);
+      expect(api.put).toHaveBeenCalledWith('/admin/products/1', productData, {
+        handledErrorCodes: ['TRIP_UNIT_ON_RETURNABLE', 'TRIP_UNIT_SETTING_BLOCKED'],
+      });
       expect(result).toEqual(mockResponse);
     });
   });

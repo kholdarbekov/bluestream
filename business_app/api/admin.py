@@ -54,6 +54,7 @@ from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.admin_loyalty_service import AdminLoyaltyService
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.product_fiscal_service import ProductFiscalService
+from business_app.services.product_service import ProductService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.customer_map_service import CustomerMapService
 from business_app.services.customer_link_service import _KEEP, CustomerLinkService
@@ -2383,6 +2384,8 @@ def preview_order_edit(order_id):
     Body: { items: [{order_item_id?, product_id, quantity}], reason: str }
     Response: { blocking_reasons, warnings, items_before, items_after,
                 totals_before, totals_after, cascade_summary, is_post_delivery }
+    `cascade_summary.trip_effect`: { session_id, bottles, units: [{product_id, product_name, delta}], reopens,
+    reopen_refusal } — what the apply books on the driver's trip, and the code it would refuse with.
     """
     try:
         from business_app.serializers.order_serializers import OrderEditRequest
@@ -2425,7 +2428,7 @@ def preview_order_edit(order_id):
     except NotFoundError as e:
         return not_found_response(resource_type="Order", message=str(e))
     except ValidationError as e:
-        return validation_error_response(str(e))
+        return validation_error_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Order edit preview error: {e}", exc_info=True)
         return internal_error_response("Failed to preview order edit")
@@ -2437,7 +2440,10 @@ def preview_order_edit(order_id):
 def apply_order_edit(order_id):
     """Apply an admin order edit and cascade side-effects atomically.
 
-    On success, dispatches the ORDER_EDITED notification post-commit.
+    Body: as /edit-preview. On success, dispatches the ORDER_EDITED notification post-commit.
+    409 `data.error_code` BOTTLE_SESSION_ACTIVE_CONFLICT: the edit changes the driver's closed trip, which must be
+    reopened, while they are on another trip (the preview's `cascade_summary.trip_effect.reopen_refusal`).
+    400 `data.error_code`: the refusal's code when it has one (ORDER_EDIT_BLOCKED: `blocking_reasons` not empty).
     """
     try:
         from business_app.serializers.order_serializers import OrderEditRequest
@@ -2540,7 +2546,11 @@ def apply_order_edit(order_id):
     except NotFoundError as e:
         return not_found_response(resource_type="Order", message=str(e))
     except ValidationError as e:
-        return validation_error_response(str(e))
+        # Its code reaches the client too (`data.error_code`), e.g. ORDER_EDIT_BLOCKED.
+        return validation_error_response(e.message, error_code=e.error_code)
+    except ConflictError as e:
+        # The edit would reopen the driver's closed trip while he is on another (BOTTLE_SESSION_ACTIVE_CONFLICT).
+        return conflict_response(e.message, error_code=e.error_code)
     except Exception as e:
         current_app.logger.error(f"Order edit apply error: {e}", exc_info=True)
         return internal_error_response("Failed to apply order edit")
@@ -3128,10 +3138,16 @@ def _resolve_returnable_bottle_config(data, *, current_tracks=False, current_per
 
 
 @admin_bp.route("/products", methods=["POST"])
+@handle_api_exception
 @jwt_required()
 @validate_admin_action(["manage_products"])
 def create_product():
-    """Create a new product"""
+    """Create a new product.
+
+    `counted_on_bottle_trip` (bool, default false) counts it on the driver's bottle trip. Refused 400
+    TRIP_UNIT_ON_RETURNABLE for a returnable bottle, and 409 TRIP_UNIT_SETTING_BLOCKED (`details.open_trips`) when
+    ticked while any trip is open (ProductService.check_product_save).
+    """
     try:
         data = request.get_json()
         current_app.logger.info(f"/admin/products POST data: {data}")
@@ -3212,6 +3228,7 @@ def create_product():
             in_sales_stock_check=bool(data.get("in_sales_stock_check", False)),
             tracks_returnable_bottles=returnable_tracks,
             returnable_bottles_per_unit=returnable_per_unit,
+            counted_on_bottle_trip=bool(data.get("counted_on_bottle_trip", False)),
             stock_quantity=data.get("stock_quantity", 0),
             min_stock_level=data.get("min_stock_level", 0),
             max_stock_level=data.get("max_stock_level", 1000),
@@ -3225,6 +3242,7 @@ def create_product():
             meta_description=data.get("meta_description"),
             expire_days=data.get("expire_days"),
         )
+        ProductService.check_product_save(product)
 
         db.session.add(product)
         db.session.flush()
@@ -3257,6 +3275,9 @@ def create_product():
             data={"product": serialize_product_admin(product)}, message="Product created successfully"
         )
 
+    except (ValidationError, ConflictError):
+        db.session.rollback()
+        raise
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create product error: {e}")
@@ -3264,10 +3285,16 @@ def create_product():
 
 
 @admin_bp.route("/products/<int:product_id>", methods=["PUT"])
+@handle_api_exception
 @jwt_required()
 @validate_admin_action(["manage_products"])
 def update_product(product_id):
-    """Update an existing product"""
+    """Update an existing product.
+
+    `counted_on_bottle_trip` (bool) counts it on the driver's bottle trip. Refused 400 TRIP_UNIT_ON_RETURNABLE when the
+    saved product would be a returnable bottle counted on the trip, and 409 TRIP_UNIT_SETTING_BLOCKED
+    (`details.open_trips`) when the setting changes while any trip is open (ProductService.check_product_save).
+    """
     try:
         data = request.get_json()
 
@@ -3345,8 +3372,6 @@ def update_product(product_id):
 
         # Handle category field mapping (frontend may send category name)
         if "category" in data and not "category_id" in data:  # noqa: E713
-            from business_app.models.product import ProductCategory
-
             category = ProductCategory.query.filter(
                 (ProductCategory.name.ilike(data["category"])) | (ProductCategory.id == data["category"])
                 if isinstance(data["category"], int)
@@ -3359,8 +3384,6 @@ def update_product(product_id):
 
         # Handle size field
         if "size" in data:
-            from business_app.models.product import ProductSizeEnum
-
             if isinstance(data["size"], str):
                 try:
                     product.size = ProductSizeEnum(data["size"])
@@ -3447,6 +3470,11 @@ def update_product(product_id):
         if "translations" in data:
             product.set_translations(data["translations"])
 
+        # After the route's last query: an autoflush resets the attribute history check_product_save reads.
+        if "counted_on_bottle_trip" in data:
+            product.counted_on_bottle_trip = bool(data["counted_on_bottle_trip"])
+        ProductService.check_product_save(product)
+
         fiscal_payload_keys = {
             "barcode",
             "spic",
@@ -3471,6 +3499,9 @@ def update_product(product_id):
             data={"product": serialize_product_admin(product)}, message="Product updated successfully"
         )
 
+    except (ValidationError, ConflictError):
+        db.session.rollback()
+        raise
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update product error: {e}")

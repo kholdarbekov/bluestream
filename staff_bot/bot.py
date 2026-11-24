@@ -74,8 +74,9 @@ from staff_bot.handlers.delivery.bottle_collection import (
     BOTTLES_LOADED_INPUT, BOTTLES_RETURNED_WH_INPUT,
     BOTTLE_SESSION_LOADED_QTY_INPUT, BOTTLE_SESSION_RETURNED_QTY_INPUT,
     BOTTLE_TRANSFER_DRIVER_SELECT, BOTTLE_TRANSFER_SEND_CHOICE,
-    BOTTLE_TRANSFER_FULL_QTY_INPUT, BOTTLE_TRANSFER_EMPTY_QTY_INPUT,
+    BOTTLE_TRANSFER_FULL_QTY_INPUT, BOTTLE_TRANSFER_EMPTY_QTY_INPUT, BOTTLE_TRANSFER_UNIT_QTY_INPUT,
     BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT, BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT,
+    BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT,
 )
 from staff_bot.handlers.delivery.bottle_session import BottleSessionMembershipHandler
 from staff_bot.handlers.delivery.shared_place import SharedPlaceHandler
@@ -712,7 +713,7 @@ class StaffBot:
             an inactive conversation's entry points on every update, so a sales
             agent can arm Nearby or a try-out and then walk into a visit, leaving
             the loser armed with a timer nobody cancels. The same holds for a
-            driver's bottle send and his "Different count" on a colleague's
+            driver's bottle send and his "Enter other numbers" on a colleague's
             transfer. Such a timeout clears only the keys its own conversation
             owns -- never the whole flow set, which would take the live flow's
             draft with it -- and says nothing at all when every one of them is
@@ -997,6 +998,9 @@ class StaffBot:
             # One-tap "Confirm as declared". `staff_transfer_confirm_<id>` since the full/empties split;
             # the `_<qty>` suffix is on messages sent before it, still in drivers' chats, and confirms the same way.
             CallbackQueryHandler(bottle_collection_handler.receive_transfer_confirm_callback, pattern=r"^staff_transfer_confirm_\d+(_\d+)?$"),
+            # Reject asks once (yes / Back to the inbox) before it posts; Back leaves the transfer pending.
+            CallbackQueryHandler(bottle_collection_handler.start_transfer_reject, pattern=r"^staff_transfer_reject_\d+$"),
+            CallbackQueryHandler(bottle_collection_handler.confirm_transfer_reject, pattern=r"^staff_transfer_reject_yes_\d+$"),
 
             # History & Stats
             CallbackQueryHandler(history_handler.show_history, pattern="^staff_delivery_history$"),
@@ -1415,7 +1419,11 @@ class StaffBot:
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_empty_quantity)
                 ],
-                # Displaceable by the receiver's "Different count" below (it drops this flow's keys):
+                BOTTLE_TRANSFER_UNIT_QTY_INPUT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_unit_quantity)
+                ],
+                # Displaceable by the receiver's "Enter other numbers" below (it drops this flow's keys):
                 # the timeout drops only this flow's keys, and is silent once they are gone.
                 ConversationHandler.TIMEOUT: _flow_timeout(own_keys=bottle_collection_handler.TRANSFER_FLOW_KEYS),
             },
@@ -1433,7 +1441,7 @@ class StaffBot:
         )
         self.application.add_handler(bottle_transfer_conv)
 
-        # Receiver enters the counts he received for a pending transfer: full bottles, then empties
+        # Receiver enters the counts he received for a pending transfer: full bottles, empties, then each unit line
         bottle_transfer_confirm_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(bottle_collection_handler.start_transfer_custom_confirm, pattern=r"^staff_transfer_custom_\d+$"),
@@ -1446,6 +1454,10 @@ class StaffBot:
                 BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT: [
                     menu_escape,
                     MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm_empties)
+                ],
+                BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT: [
+                    menu_escape,
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm_unit)
                 ],
                 # Displaceable by a send started above (it drops this flow's keys), as the send is by this.
                 ConversationHandler.TIMEOUT: _flow_timeout(own_keys=bottle_collection_handler.CONFIRM_FLOW_KEYS),

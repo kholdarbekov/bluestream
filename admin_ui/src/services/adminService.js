@@ -5,6 +5,9 @@ import api, { getCookie } from './api';
 const SUPPORT_ATTACHMENT_TIMEOUT_MS = 60000;
 // The duplicate-address guard's 409 is explained by a dialog on the Users page, so api.js stays silent for it.
 const ADDRESS_DUPLICATE_CONFIG = { handledErrorCodes: ['ADDRESS_POSSIBLE_DUPLICATE'] };
+// The bottle-trip setting's two refusals of a product save: the Products page says them in the admin's language
+// (with the open trips that block the change), so api.js does not toast the backend's English sentence too.
+const PRODUCT_SAVE_CONFIG = { handledErrorCodes: ['TRIP_UNIT_ON_RETURNABLE', 'TRIP_UNIT_SETTING_BLOCKED'] };
 
 // The `error_code`s the basket quote refuses with, read off `_admin_order_request` and `OrderService.price_order`: the
 // order's lines and minimums. The quote panel prints their sentence itself, so api.js does not toast them too.
@@ -781,12 +784,12 @@ class AdminService {
   }
 
   async createProduct(productData) {
-    const response = await api.post('/admin/products', productData);
+    const response = await api.post('/admin/products', productData, PRODUCT_SAVE_CONFIG);
     return response.data;
   }
 
   async updateProduct(productId, productData) {
-    const response = await api.put(`/admin/products/${productId}`, productData);
+    const response = await api.put(`/admin/products/${productId}`, productData, PRODUCT_SAVE_CONFIG);
     return response.data;
   }
 
@@ -1630,8 +1633,9 @@ class AdminService {
     return response.data;
   }
 
-  async resolveBottleTransferDispute(transferId, data) {
-    const response = await api.post(`/admin/bottles/transfers/${transferId}/resolve`, data);
+  // `config.handledErrorCodes`: refusals the Resolve modal explains itself (see rescheduleOrder).
+  async resolveBottleTransferDispute(transferId, data, config) {
+    const response = await api.post(`/admin/bottles/transfers/${transferId}/resolve`, data, config);
     return response.data;
   }
 

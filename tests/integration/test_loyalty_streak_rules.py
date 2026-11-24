@@ -1085,17 +1085,17 @@ class TestTriggerWiring:
             "business_app.services.loyalty_service.LoyaltyService.update_streak",
             side_effect=lambda user_id, commit=True: called_with.append(user_id),
         ):
-            with app.app_context():
-                svc = OrderService()
-                # Call _handle_status_change_actions directly to test the wiring without
-                # going through the full update_order_status (which needs driver assignment,
-                # payment, address, delivery row, etc.).
-                svc._handle_status_change_actions(
-                    order=order,
-                    new_status=OrderStatus.DELIVERED,
-                    updated_by=sample_user.id,
-                    commit=False,
-                )
+            svc = OrderService()
+            # Call _handle_status_change_actions directly to test the wiring without
+            # going through the full update_order_status (which needs driver assignment,
+            # payment, address, delivery row, etc.). In the session that holds the order,
+            # as update_order_status does: the DELIVERED branch re-reads the order's lines there.
+            svc._handle_status_change_actions(
+                order=order,
+                new_status=OrderStatus.DELIVERED,
+                updated_by=sample_user.id,
+                commit=False,
+            )
 
         assert sample_user.id in called_with, (
             "update_streak was not called with the user's id when order transitioned to DELIVERED"
@@ -1122,13 +1122,12 @@ class TestTriggerWiring:
         db.session.add(order)
         db.session.commit()
 
-        with app.app_context():
-            svc = OrderService()
-            svc._handle_status_change_actions(
-                order=order,
-                new_status=OrderStatus.DELIVERED,
-                updated_by=sample_user.id,
-                commit=True,
-            )
+        svc = OrderService()
+        svc._handle_status_change_actions(
+            order=order,
+            new_status=OrderStatus.DELIVERED,
+            updated_by=sample_user.id,
+            commit=True,
+        )
 
         assert _streak_points(db, sample_user.id) == 300

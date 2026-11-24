@@ -32,6 +32,7 @@ from celery import _state as celery_state
 from sqlalchemy import event
 
 from business_app import db as _db
+from business_app.models.delivery import Delivery
 from business_app.models.order import OrderItem
 from business_app.models.user import UserAddress
 from business_app.services.eta_plan.engine import EtaEngine
@@ -40,7 +41,7 @@ from business_app.tasks.order_tasks import release_due_scheduled_orders
 from business_app.utils import eta_recompute_dispatch
 from business_app.utils.local_windows import local_date
 from business_app.utils.transactions import atomic_transaction
-from shared.enums import PaymentMethod, UserStatus
+from shared.enums import OrderStatus, PaymentMethod, UserStatus
 from shared.redis_keyspace import RedisKeyspace
 from staff_bot.api_client import StaffAPIClient
 from tests.integration.contract_pricing_factory import customer_headers as bearer
@@ -50,6 +51,7 @@ from tests.integration.eta_plan_builders import (  # noqa: F401 -- the fixtures
     dated_order,
     eleven_yesterday,
     eta_redis_fixture,
+    hold_for_release,
     make_driver,
     open_session,
     order_at_km,
@@ -59,6 +61,7 @@ from tests.integration.eta_plan_builders import (  # noqa: F401 -- the fixtures
     published_fixture,
     recompute_requests_fixture,
     returning_customer,
+    schedule,
     store_route,
 )
 from tests.integration.reorder_reminder_builders import captured_logs
@@ -81,6 +84,7 @@ EDIT_ORDER = "/api/v1/admin/orders/{}/edit"
 BULK_ACTIONS = "/api/v1/admin/bulk-actions"
 EDIT_DRIVER = "/api/v1/admin/staff/delivery-persons/{}"
 USER_STATUS = "/api/v1/admin/users/{}/status"
+ORDER_STATUS = "/api/v1/admin/orders/{}/status"
 
 
 def _ok(response, status=200):
@@ -327,6 +331,30 @@ def test_a_release_sweep_requests_a_recompute(app, db, monkeypatch, recompute_re
     assert recompute_requests == _one_run(app)
 
 
+def test_confirming_a_dated_order_held_for_its_day_requests_a_recompute(
+    app, db, client, monkeypatch, recompute_requests, admin_claim_headers
+):
+    """A customer's pending order, dated tomorrow, is confirmed on the Orders page (a Click payment confirms one the
+    same way). It stays held for its day, so no delivery row is written: the order's status is the only plan input the
+    confirm changes, and the plan counts a confirmed order held for its day as demand. One recompute. The Delivered and
+    every other claimed transition re-read the order after the claim; that read must leave the status the claim wrote
+    a change to the order, or this confirm requested nothing until the beat."""
+    created = eleven_yesterday()
+    order = order_at_km(db, 2.0, created_at=created, status=OrderStatus.PENDING)
+    schedule(db, order, day=local_date() + timedelta(days=1))
+    hold_for_release(db, order)
+    _trigger_on(app, monkeypatch)
+
+    confirmed = client.put(
+        ORDER_STATUS.format(order.id), json={"status": "confirmed", "notes": ""}, headers=admin_claim_headers
+    )
+
+    assert _ok(confirmed)["order"]["status"] == "confirmed"
+    db.session.expire_all()
+    assert Delivery.query.filter_by(order_id=order.id).count() == 0  # held for its day
+    assert recompute_requests == _one_run(app)
+
+
 def test_opening_closing_and_transferring_a_session_request_a_recompute(
     app, db, monkeypatch, eta_redis, recompute_requests
 ):
@@ -356,7 +384,9 @@ def test_opening_closing_and_transferring_a_session_request_a_recompute(
     the_queued_run_starts()
     _ok(
         app.test_client().post(
-            CONFIRM_BOTTLES.format(sent["id"]), json={"confirmed_quantity": 5}, headers=bearer(app, colleague)
+            CONFIRM_BOTTLES.format(sent["id"]),
+            json={"confirmed_full": 5, "confirmed_empty": 0},
+            headers=bearer(app, colleague),
         )
     )
     assert recompute_requests == _one_run(app)

@@ -2793,7 +2793,12 @@ def test_custom_at_door_count_rejects_bad_input_without_losing_the_flow(
     app, db, http, monkeypatch, text
 ):
     """The router dispatches on ``awaiting_bottle_count``; clearing it on a
-    validation failure would drop the driver's next number into the menu router."""
+    validation failure would drop the driver's next number into the menu router.
+
+    The refusal is the slip for a count where 0 is a real answer
+    (``staff.delivery.invalid_count_zero_ok``, humanised here: the seed has not
+    run), because this step accepts 0 (no empties back:
+    ``test_custom_at_door_count_accepts_zero``)."""
     from staff_bot.handlers.delivery.status_update import BOTTLE_RETURN_INPUT
 
     driver = _staff(db, UserRole.DELIVERY_DRIVER, driver_profile=True)
@@ -2813,7 +2818,7 @@ def test_custom_at_door_count_rejects_bad_input_without_losing_the_flow(
     bad, _ = _make_update_context(message_text=text)
     state = asyncio.run(handler.receive_bottle_count(bad, context))
     assert state == BOTTLE_RETURN_INPUT
-    assert bad.message.reply_text.call_args.args[0] == "Invalid bottle count"
+    assert bad.message.reply_text.call_args.args[0] == "Invalid count zero ok"
     assert context.user_data["pending_delivery_cash_flow"]["awaiting_bottle_count"] is True
 
     good, _ = _make_update_context(message_text="2")

@@ -330,6 +330,12 @@ NOT_STAFF_FACING: dict[str, str] = {
     "ADDRESS_MOVE_TOO_FAR": _ADDRESS_PIN_RULE,
     "ADDRESS_MOVE_NEEDS_PIN": f"{_NOT_ON_ROUTE} (auth_service.py move_user_address: customer POST "
     "/auth/addresses/<id>/move)",
+    # The product's bottle-trip setting.
+    "TRIP_UNIT_ON_RETURNABLE": f"{_NOT_ON_ROUTE} (product_service.py check_product_save: admin /admin/products)",
+    "TRIP_UNIT_SETTING_BLOCKED": f"{_NOT_ON_ROUTE} (product_service.py check_product_save: admin /admin/products)",
+    # The receiver's count of a transfer.
+    "BOTTLE_TRANSFER_COUNT_INCOMPLETE": f"{_BOT_NEVER_SENDS}: the bot answers every line the backend publishes in "
+    f"lines{_FALLBACK}",
 }
 
 

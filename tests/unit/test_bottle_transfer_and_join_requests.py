@@ -166,7 +166,7 @@ def _send(client, app, sender, receiver, qty):
 
 def _confirm(client, app, transfer_id, receiver, qty):
     return client.post(f"{TRANSFERS}/{transfer_id}/confirm", headers=_headers(app, receiver.id),
-                       json={"confirmed_quantity": qty})
+                       json={"confirmed_full": qty, "confirmed_empty": 0})
 
 
 def _open_sessions_of(driver):
@@ -319,6 +319,8 @@ def test_resolving_a_zero_count_dispute_opens_the_receivers_session_with_the_bot
 def test_resolving_never_lands_the_bottles_on_a_truck_the_receiver_merely_co_drives(
     app, client, db, admin_claim_headers, admin_user
 ):
+    """Nor does it open him a trip of his own while he co-drives one (two places to be): it is refused, naming the
+    trip he is on, and nothing is written."""
     sender_session, idle, transfer = _disputed_at_zero(client, app, db, "24")
     third = _driver(db, "+998901202493", "Third")
     third_session = _open_session(db, third, 6)
@@ -326,13 +328,18 @@ def test_resolving_never_lands_the_bottles_on_a_truck_the_receiver_merely_co_dri
 
     resolved = _resolve(client, admin_claim_headers, transfer["id"], 4)
 
-    assert resolved.status_code == 200, resolved.get_json()
-    db.session.refresh(third_session)
-    assert third_session.bottles_transferred_in == 0
-    [opened] = _open_sessions_of(idle)
-    assert (opened.bottles_loaded, opened.bottles_transferred_in) == (0, 4)
-    assert opened.loaded_by_user_id == admin_user.id
-    assert DriverBottleTransfer.query.get(transfer["id"]).receiver_session_id == opened.id
+    assert resolved.status_code == 409, resolved.get_json()
+    answer = resolved.get_json()
+    assert (answer["error_code"], answer["details"]) == (
+        "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE",
+        {"session_id": third_session.id, "owner_user_id": third.id, "owner_name": "Third Driver"},
+    )
+    db.session.expire_all()
+    assert db.session.get(DriverBottleSession, third_session.id).bottles_transferred_in == 0
+    assert _open_sessions_of(idle) == []
+    refused = db.session.get(DriverBottleTransfer, transfer["id"])
+    assert (refused.status.value, refused.receiver_session_id) == ("disputed", None)
+    assert db.session.get(DriverBottleSession, sender_session.id).bottles_transferred_out == 4
 
 
 def test_resolving_a_zero_count_dispute_credits_a_session_the_receiver_has_since_opened(
@@ -380,9 +387,39 @@ def test_a_saved_transfer_is_pushed_to_the_receiver(app, client, db, pushes):
 
     transfer = _send(client, app, sender, receiver, 4)
 
-    assert pushes == [((int(receiver.telegram_id), "transfer_received",
-                        {"id": transfer["id"], "declared_quantity": 4, "declared_empty_quantity": 0,
-                         "sender_name": "Ali Driver"}), {})]
+    assert pushes == [
+        (
+            (
+                int(receiver.telegram_id),
+                "transfer_received",
+                {
+                    "id": transfer["id"],
+                    "declared_quantity": 4,
+                    "declared_empty_quantity": 0,
+                    "sender_name": "Ali Driver",
+                    "lines": [
+                        {
+                            "kind": "full",
+                            "product_id": None,
+                            "product_name": None,
+                            "declared": 4,
+                            "confirmed": None,
+                            "resolved": None,
+                        },
+                        {
+                            "kind": "empty",
+                            "product_id": None,
+                            "product_name": None,
+                            "declared": 0,
+                            "confirmed": None,
+                            "resolved": None,
+                        },
+                    ],
+                },
+            ),
+            {},
+        )
+    ]
 
 
 def test_a_refused_transfer_pushes_nothing(app, client, db, pushes):
@@ -590,3 +627,46 @@ def test_answering_a_request_from_a_requester_who_is_gone_is_stale(app, client, 
     assert (refused.status_code, refused.get_json()["error_code"]) == (409, "BOTTLE_JOIN_REQUEST_STALE")
     assert DriverSessionMembership.query.filter_by(member_driver_id=requester_id).all() == []
     assert pushes == []
+
+
+# ---------------------------------------------------------------------------
+# Task 24: one legacy-empties rule for `lines` and `confirmed_empty`
+# ---------------------------------------------------------------------------
+
+
+def test_a_transfer_confirmed_before_the_empties_split_reads_zero_empties_in_lines_and_in_confirmed_empty(
+    app, client, db, admin_claim_headers
+):
+    sender = _driver(db, "+998901202601", "Sender")
+    receiver = _driver(db, "+998901202602", "Receiver")
+    _open_session(db, sender, 10)
+    transfer = _send(client, app, sender, receiver, 3)
+    assert _confirm(client, app, transfer["id"], receiver, 3).status_code == 200
+    row = db.session.get(DriverBottleTransfer, transfer["id"])
+    row.confirmed_empty_quantity = None  # what a row confirmed before the split holds
+    db.session.commit()
+
+    listed = client.get("/api/v1/admin/bottles/transfers", headers=admin_claim_headers)
+
+    assert listed.status_code == 200, listed.get_json()
+    [item] = [i for i in listed.get_json()["data"]["items"] if i["id"] == transfer["id"]]
+    empties = [line for line in item["lines"] if line["kind"] == "empty"]
+    assert empties == [
+        {"kind": "empty", "product_id": None, "product_name": None, "declared": 0, "confirmed": 0, "resolved": None}
+    ]
+    assert item["confirmed_empty"] == 0
+
+
+def test_a_pending_transfer_reads_empties_not_counted_in_lines_and_in_confirmed_empty(
+    app, client, db, admin_claim_headers
+):
+    sender = _driver(db, "+998901202611", "Sender")
+    receiver = _driver(db, "+998901202612", "Receiver")
+    _open_session(db, sender, 10)
+    transfer = _send(client, app, sender, receiver, 3)
+
+    listed = client.get("/api/v1/admin/bottles/transfers", headers=admin_claim_headers)
+
+    [item] = [i for i in listed.get_json()["data"]["items"] if i["id"] == transfer["id"]]
+    assert [line["confirmed"] for line in item["lines"] if line["kind"] == "empty"] == [None]
+    assert item["confirmed_empty"] is None

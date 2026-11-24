@@ -400,14 +400,18 @@ class LoyaltyService:
         if not self.is_user_loyalty_eligible(User.query.get(user_id)):
             return 0
 
-        # Get user's loyalty account and program
-        account = self.get_or_create_loyalty_account(user_id)
+        # The user's loyalty account, or for a first-timer the one he would get (`_new_loyalty_account`), never created
+        # here: a calculation writes nothing. Its callers run it inside their own transaction (an office order edit
+        # holds the order's and the driver's rows), so a commit released their locks, and even a flushed first account
+        # held its unique user id until their commit, making any other first-account write for him wait and then fail.
+        account = _get_cached_loyalty_account(user_id) or self._new_loyalty_account(user_id)
+        program = db.session.get(LoyaltyProgram, account.program_id) if account.program_id else None
 
         # Get uzs_per_point from LoyaltyProgram (primary source)
         # Default: 250 UZS = 1 AquaCoin
         uzs_per_point = 250
-        if account.program:
-            uzs_per_point = account.program.uzs_per_point or 250
+        if program:
+            uzs_per_point = program.uzs_per_point or 250
 
         # Calculate base points (Floor division)
         base_points = amount // uzs_per_point
@@ -493,44 +497,7 @@ class LoyaltyService:
                     points_to_next_tier=0,
                 )
 
-            # Get default loyalty program
-            program = LoyaltyProgram.query.filter_by(is_default=True).first()
-            if not program:
-                program = LoyaltyProgram.query.filter_by(is_active=True).first()
-
-            program_id = program.id if program else 1
-
-            # Determine starting tier for 0 points using database config
-            # This mirrors the logic in LoyaltyPoints.calculate_tier()
-            starting_tier = LoyaltyTierConfig.get_tier_for_points(0, program_id)
-            current_tier_name = starting_tier.name if starting_tier else "Bronze"
-            starting_order = starting_tier.display_order if starting_tier else -1
-
-            # Find next tier above starting tier
-            next_tier = (
-                LoyaltyTierConfig.query.filter(
-                    LoyaltyTierConfig.program_id == program_id,
-                    LoyaltyTierConfig.is_active == True,
-                    LoyaltyTierConfig.display_order > starting_order,
-                )
-                .order_by(LoyaltyTierConfig.display_order.asc())
-                .first()
-            )
-
-            # Points needed is the next tier's min_points (since user has 0 points)
-            points_to_next_tier = next_tier.min_points if next_tier else 0
-
-            account = LoyaltyPoints(
-                user_id=user_id,
-                program_id=program_id,
-                total_earned=0,
-                total_redeemed=0,
-                total_expired=0,
-                current_balance=0,
-                current_tier=current_tier_name,
-                points_to_next_tier=points_to_next_tier,
-            )
-
+            account = self._new_loyalty_account(user_id)
             db.session.add(account)
             if commit:
                 db.session.commit()
@@ -538,6 +505,49 @@ class LoyaltyService:
                 db.session.flush()
 
         return account
+
+    @staticmethod
+    def _new_loyalty_account(user_id: int) -> LoyaltyPoints:
+        """The account a loyalty-eligible user gets on first use: the default program (else the first active one), no
+        points, the tier for 0 points. Transient, never added to the session: `get_or_create_loyalty_account` adds it,
+        and `calculate_points_for_purchase` only reads it."""
+        # Get default loyalty program
+        program = LoyaltyProgram.query.filter_by(is_default=True).first()
+        if not program:
+            program = LoyaltyProgram.query.filter_by(is_active=True).first()
+
+        program_id = program.id if program else 1
+
+        # Determine starting tier for 0 points using database config
+        # This mirrors the logic in LoyaltyPoints.calculate_tier()
+        starting_tier = LoyaltyTierConfig.get_tier_for_points(0, program_id)
+        current_tier_name = starting_tier.name if starting_tier else "Bronze"
+        starting_order = starting_tier.display_order if starting_tier else -1
+
+        # Find next tier above starting tier
+        next_tier = (
+            LoyaltyTierConfig.query.filter(
+                LoyaltyTierConfig.program_id == program_id,
+                LoyaltyTierConfig.is_active == True,  # noqa: E712 -- a SQL comparison
+                LoyaltyTierConfig.display_order > starting_order,
+            )
+            .order_by(LoyaltyTierConfig.display_order.asc())
+            .first()
+        )
+
+        # Points needed is the next tier's min_points (since user has 0 points)
+        points_to_next_tier = next_tier.min_points if next_tier else 0
+
+        return LoyaltyPoints(
+            user_id=user_id,
+            program_id=program_id,
+            total_earned=0,
+            total_redeemed=0,
+            total_expired=0,
+            current_balance=0,
+            current_tier=current_tier_name,
+            points_to_next_tier=points_to_next_tier,
+        )
 
     def grant_welcome_bonus(self, user_id: int) -> int:
         """Grant the one-time welcome (signup) bonus from the DB SSOT.
@@ -1270,7 +1280,9 @@ class LoyaltyService:
         if not self.is_user_loyalty_eligible(User.query.get(user_id)):
             return {"diff": 0, "clawback": 0, "uncollectible": 0, "award": 0, "transaction_id": None}
 
-        account = self.get_or_create_loyalty_account(user_id)
+        # A first account is created under the caller's `commit`: an order edit passes False and holds the order, its
+        # products and the bottle and trip rows until its own commit, which a commit here would release half way.
+        account = self.get_or_create_loyalty_account(user_id, commit=commit)
         result: Dict[str, Any] = {
             "diff": old_points_earned - new_points_earned,
             "clawback": 0,

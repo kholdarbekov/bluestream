@@ -384,10 +384,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "vaqti nomalum",
         "ru": "время неизвестно",
     },
-    "staff.delivery.pending_transfer_split_line": {
-        "en": "• From <b>{sender}</b>: <b>{full}</b> full + <b>{empty}</b> empty  [ref: {ref}]",
-        "uz": "• <b>{sender}</b>dan: <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh  [ref: {ref}]",
-        "ru": "• От <b>{sender}</b>: <b>{full}</b> полных + <b>{empty}</b> пустых  [ref: {ref}]",
+    # One inbox row per pending transfer: who sent it, then every line as declared (`format_transfer_lines`).
+    "staff.delivery.pending_transfer_lines_line": {
+        "en": "📥 {sender} sent you: {lines}  [ref: {ref}]",
+        "uz": "📥 {sender} sizga yubordi: {lines}  [ref: {ref}]",  # NATIVE-READ
+        "ru": "📥 {sender} передал вам: {lines}  [ref: {ref}]",  # NATIVE-READ
     },
     "staff.tryout.default_label": {
         "en": "Try-out",
@@ -1132,6 +1133,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Sizda {available} ta band qilinmagan to'la idish bor; bu buyurtmaga {required} ta kerak.",
         "ru": "У вас {available} свободных полных бутылок; для этого заказа нужно {required}.",
     },
+    "staff.error.api.bottle_session_capacity_exceeded_unit_detail": {
+        "en": "You don't have enough {product} on your trip: {available} free, {required} needed.",
+        "uz": "Reysingizda {product} yetarli emas: bo'sh {available} ta, kerak {required} ta.",  # NATIVE-READ
+        "ru": "В вашем рейсе не хватает товара «{product}»: свободно {available}, нужно {required}.",  # NATIVE-READ
+    },
     # Bottle sessions, co-drivers and transfers (2026-09-24 audit): one sentence
     # per refusal code, mapped in staff_bot/handlers/base.py.
     "staff.error.api.no_open_bottle_session": {
@@ -1194,6 +1200,29 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Hozir siz hech kimning idish sessiyasida emassiz.",
         "ru": "Сейчас вы не состоите ни в чьей сессии по таре.",
     },
+    # The trip open (spec 2026-11-18 §6.3, §6.14). A co-driver at Load is told whose trip he is on (`{owner}`, the
+    # open's `details.owner_name`); a load of all zeros and a product the trip no longer counts are the service's.
+    "staff.error.api.membership_already_active_owner_detail": {
+        "en": "You are on {owner}'s trip. Leave it first to open your own.",
+        "uz": "Siz {owner}ning reysidasiz. O'z reysingizni ochish uchun avval undan chiqing.",  # NATIVE-READ
+        "ru": "Вы в рейсе {owner}. Чтобы открыть свой рейс, сначала выйдите из него.",  # NATIVE-READ
+    },
+    "staff.error.api.bottle_session_empty_load": {
+        "en": "Type how many you loaded: at least one number must be above 0.",
+        "uz": "Qancha yuklaganingizni kiriting: kamida bitta son 0 dan katta bo'lishi kerak.",  # NATIVE-READ
+        "ru": "Введите, сколько вы загрузили: хотя бы одно число должно быть больше 0.",  # NATIVE-READ
+    },
+    "staff.error.api.trip_unit_not_counted": {
+        "en": "This product is not counted on the bottle trip. Open the load screen again.",
+        "uz": "Bu mahsulot reysda hisobga olinmaydi. Yuklash ekranini qayta oching.",  # NATIVE-READ
+        "ru": "Этот товар не учитывается в рейсе. Откройте экран загрузки заново.",  # NATIVE-READ
+    },
+    # The close (spec 2026-11-18 §6.8): every line on the trip needs its return typed.
+    "staff.error.api.bottle_session_return_incomplete": {
+        "en": "Type the return for every line, then close again.",
+        "uz": "Har bir qator uchun qaytarilgan sonni kiriting, so'ng qayta yoping.",  # NATIVE-READ
+        "ru": "Введите возврат по каждой строке, затем закройте снова.",  # NATIVE-READ
+    },
     # A co-driver may not leave while his stops on the way (In Transit or Arrived) hold
     # bottles promised from the owner's truck (spec 2026-11-09 A8). The second sentence
     # names how many, from the refusal's `count`.
@@ -1239,11 +1268,18 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Sizda faqat {available} ta bo'sh idish bor.",
         "ru": "У вас только {available} пустых бутылок.",
     },
-    # A transfer of 0 full and 0 empties (spec 2026-11-09 §4.3): chosen, or "Send all" on an empty truck.
+    # A one-way unit line (e.g. 10 L water) that was too high (spec 2026-11-18 §6.7): `kind` is `product`.
+    "staff.error.api.transfer_exceeds_unit_detail": {
+        "en": "{product}: you have only {available} on your trip.",
+        "uz": "{product}: reysingizda faqat {available} ta bor.",  # NATIVE-READ
+        "ru": "{product}: в вашем рейсе только {available} шт.",  # NATIVE-READ
+    },
+    # A transfer of 0 on every line, full, empties and each one-way unit line (spec 2026-11-09 §4.3, 2026-11-18
+    # §6.7): chosen, or "Send all" on an empty truck.
     "staff.error.api.transfer_nothing_to_send": {
-        "en": "Nothing to transfer. Choose at least one full or empty bottle from your truck.",
-        "uz": "O'tkazadigan hech narsa yo'q. Mashinangizdan kamida bitta to'la yoki bo'sh idishni tanlang.",
-        "ru": "Нечего передавать. Выберите хотя бы одну полную или пустую бутылку из машины.",
+        "en": "Nothing to transfer. Choose at least one bottle to send.",
+        "uz": "O'tkazadigan hech narsa yo'q. Yuborish uchun kamida bitta idishni tanlang.",  # NATIVE-READ
+        "ru": "Нечего передавать. Выберите хотя бы одну бутылку для отправки.",  # NATIVE-READ
     },
     "staff.error.api.transfer_not_found": {
         "en": "This transfer no longer exists.",
@@ -2137,10 +2173,18 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "{count} ta mijoz topildi. Joylaridagi idishlarni korish uchun bosing:",
         "ru": "Найдено клиентов: {count}. Нажмите, чтобы увидеть тару по их местам:",
     },
+    # The fine quantity's slip: a fine is for one bottle or more, so 0 is refused here too.
     "staff.delivery.invalid_bottle_count": {
         "en": "Please enter a valid positive number.",
         "uz": "Iltimos, musbat son kiriting.",
         "ru": "Пожалуйста, введите положительное число.",
+    },
+    # A slip at a count step where 0 is a real answer: Load and Return (18.9 L and each trip line), the Send
+    # numbers, the receiver's count, the empties back at a door.
+    "staff.delivery.invalid_count_zero_ok": {
+        "en": "Send a whole number, 0 or more.",
+        "uz": "Butun son yuboring: 0 yoki undan ko'p.",  # NATIVE-READ
+        "ru": "Отправьте целое число: 0 или больше.",  # NATIVE-READ
     },
     # `{remaining}` is the PLACE's remainder, not this account's — at a shared
     # workplace it still counts a coworker's empties. Phrased to mirror its
@@ -2258,20 +2302,45 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Входящие передачи",
     },
     # Bottle session state messages
+    # Load refused on the driver's own open trip: this header with the 18.9 L loaded figure, the trip's one-way unit
+    # lines right under it, then the instruction below as the last paragraph. Without unit lines the screen reads
+    # exactly as the single message it was before.
     "staff.delivery.bottle_session_already_open": {
-        "en": "🚫 <b>Cannot start a new load.</b>\n\nYou already have an active session started at <b>{started}</b> with <b>{loaded}</b> (18.9 L) bottles loaded.\n\nReturn to the warehouse and close your current session first.",
-        "uz": "🚫 <b>Yangi yuklash boshlash mumkin emas.</b>\n\nSizda allaqachon <b>{started}</b> da boshlangan va <b>{loaded}</b> ta (18,9 l) idish yuklangan faol sessiya mavjud.\n\nAvval omborga qayting va joriy sessiyangizni yoping.",
-        "ru": "🚫 <b>Нельзя начать новую загрузку.</b>\n\nУ вас уже есть активная сессия, начатая в <b>{started}</b> с <b>{loaded}</b> (18,9 л) бутылками.\n\nВернитесь на склад и закройте текущую сессию.",
+        "en": "🚫 <b>Cannot start a new load.</b>\n\nYou already have an active session started at <b>{started}</b> with <b>{loaded}</b> (18.9 L) bottles loaded.",
+        "uz": "🚫 <b>Yangi yuklash boshlash mumkin emas.</b>\n\nSizda allaqachon <b>{started}</b> da boshlangan va <b>{loaded}</b> ta (18,9 l) idish yuklangan faol sessiya mavjud.",  # NATIVE-READ
+        "ru": "🚫 <b>Нельзя начать новую загрузку.</b>\n\nУ вас уже есть активная сессия, начатая в <b>{started}</b> с <b>{loaded}</b> (18,9 л) бутылками.",  # NATIVE-READ
+    },
+    "staff.delivery.bottle_session_already_open_close_first": {
+        "en": "Return to the warehouse and close your current session first.",
+        "uz": "Avval omborga qayting va joriy sessiyangizni yoping.",  # NATIVE-READ
+        "ru": "Вернитесь на склад и закройте текущую сессию.",  # NATIVE-READ
     },
     "staff.delivery.bottle_session_already_open_short": {
         "en": "🚫 You already have an open session. Close it before loading new (18.9 L) bottles.",
         "uz": "🚫 Sizda allaqachon ochiq sessiya bor. Yangi (18,9 l) idish yuklashdan oldin uni yoping.",
         "ru": "🚫 У вас уже есть открытая сессия. Закройте её перед загрузкой новых (18,9 л) бутылок.",
     },
-    "staff.delivery.bottle_session_opened": {
-        "en": "✅ <b>Session opened!</b>\n\n📦 Loaded: <b>{count}</b> (18.9 L) bottles\nSession ref: <code>{ref}</code>\n\nDeliver your orders and return to WH when done.",
-        "uz": "✅ <b>Sessiya ochildi!</b>\n\n📦 Yuklandi: <b>{count}</b> ta (18,9 l) idish\nSessiya raqami: <code>{ref}</code>\n\nBuyurtmalaringizni yetkazing va tugagach omborga qayting.",
-        "ru": "✅ <b>Сессия открыта!</b>\n\n📦 Загружено: <b>{count}</b> (18,9 л) бутылок\nНомер сессии: <code>{ref}</code>\n\nВыполняйте заказы и возвращайтесь на склад по завершении.",
+    # The trip just opened (spec 2026-11-18 §6.3): a header with the trip's ref, the 18.9 L number, then one line per
+    # product the trip counts, every number as the open's answer carries it.
+    "staff.delivery.bottle_session_opened_header": {
+        "en": "✅ Trip opened (#{ref})",
+        "uz": "✅ Reys ochildi (#{ref})",  # NATIVE-READ
+        "ru": "✅ Рейс открыт (#{ref})",  # NATIVE-READ
+    },
+    "staff.delivery.session_bottles_line": {
+        "en": "💧 18.9 L full bottles: {n}",
+        "uz": "💧 18,9 L to'la idish: {n}",  # NATIVE-READ
+        "ru": "💧 Полных бутылей 18,9 л: {n}",  # NATIVE-READ
+    },
+    "staff.delivery.session_unit_line": {
+        "en": "🧴 {product}: {n}",
+        "uz": "🧴 {product}: {n}",  # NATIVE-READ
+        "ru": "🧴 {product}: {n}",  # NATIVE-READ
+    },
+    "staff.delivery.enter_unit_loaded_qty": {
+        "en": "Enter how many {product} you loaded from the warehouse:",
+        "uz": "Ombordan nechta {product} yuklab olganingizni kiriting:",  # NATIVE-READ
+        "ru": "Введите, сколько «{product}» вы загрузили со склада:",  # NATIVE-READ
     },
     "staff.delivery.no_active_bottle_session": {
         "en": "ℹ️ You have no active bottle session. Nothing to close.",
@@ -2293,6 +2362,23 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "⚠️ Farq: <b>{discrepancy}</b> ta (18,9 l) idish hisoblanmagan",
         "ru": "⚠️ Расхождение: <b>{discrepancy}</b> (18,9 л) бутылок не учтено",
     },
+    # The close (spec 2026-11-18 §6.8): one return number per line on the trip, then one line per product on the
+    # reply, the number being what the backend published as that line's discrepancy.
+    "staff.delivery.enter_unit_returned_qty": {
+        "en": "Enter how many {product} you returned to the warehouse:",
+        "uz": "Omborga nechta {product} qaytarganingizni kiriting:",  # NATIVE-READ
+        "ru": "Введите, сколько «{product}» вы вернули на склад:",  # NATIVE-READ
+    },
+    "staff.delivery.discrepancy_unit_zero": {
+        "en": "✅ {product}: discrepancy 0",
+        "uz": "✅ {product}: farq 0",  # NATIVE-READ
+        "ru": "✅ {product}: расхождение 0",  # NATIVE-READ
+    },
+    "staff.delivery.discrepancy_unit_line": {
+        "en": "⚠️ {product}: {discrepancy} unaccounted",
+        "uz": "⚠️ {product}: {discrepancy} ta hisoblanmagan",  # NATIVE-READ
+        "ru": "⚠️ {product}: не учтено {discrepancy}",  # NATIVE-READ
+    },
     # Bottle transfer messages
     "staff.delivery.no_bottles_to_transfer": {
         "en": "🚫 You have no bottles available to transfer.",
@@ -2304,8 +2390,9 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Boshqa faol haydovchilar topilmadi.",
         "ru": "Других активных водителей не найдено.",
     },
-    # The sender's screens (spec 2026-11-09 §4.4): pick a colleague, then send everything or choose two numbers.
-    # The numbers are the backend's transferable full / empties; the backend caps each one.
+    # The sender's screens (spec 2026-11-09 §4.4, 2026-11-18 §6.7): pick a colleague, then send everything or choose
+    # the numbers, one per line (full, empties, each one-way unit line). They are the backend's transferable numbers;
+    # the backend caps each one.
     "staff.delivery.select_transfer_receiver": {
         "en": "Select the driver to transfer bottles to.\n\n🚚 has a session · 🤝 co-driver · 👤 no session yet",
         "uz": "Idish o'tkazish uchun haydovchini tanlang.\n\n🚚 sessiyasi bor · 🤝 hamkor haydovchi · 👤 hali sessiyasi yo'q",
@@ -2317,9 +2404,26 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "📦 Что вы передаёте?",
     },
     "staff.delivery.transfer_send_all_button": {
-        "en": "Send all ({full} full + {empty} empty)",
-        "uz": "Hammasini yuborish ({full} ta to'la + {empty} ta bo'sh)",
-        "ru": "Отправить всё ({full} полных + {empty} пустых)",
+        "en": "Send all ({lines})",
+        "uz": "Hammasini yuborish ({lines})",  # NATIVE-READ
+        "ru": "Отправить всё ({lines})",  # NATIVE-READ
+    },
+    # The one renderer of a transfer's lines (`format_transfer_lines`), joined with " · ": the full bottles, the
+    # empties, then one fragment per one-way unit line.
+    "staff.delivery.transfer_line_full": {
+        "en": "18.9 L full {n}",
+        "uz": "18,9 L to'la {n}",  # NATIVE-READ
+        "ru": "18,9 л полных {n}",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_line_empty": {
+        "en": "empty {n}",
+        "uz": "bo'sh {n}",  # NATIVE-READ
+        "ru": "пустых {n}",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_line_product": {
+        "en": "{product} {n}",
+        "uz": "{product} {n}",  # NATIVE-READ
+        "ru": "{product} {n}",  # NATIVE-READ
     },
     "staff.delivery.transfer_choose_amounts_button": {
         "en": "Choose amounts",
@@ -2336,10 +2440,17 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Nechta bo'sh idish? (ko'pi bilan {max})",
         "ru": "Сколько пустых бутылок? (макс. {max})",
     },
-    "staff.delivery.bottle_transfer_sent": {
-        "en": "✅ <b>Transfer initiated!</b>\n\n📦 <b>{full}</b> full + <b>{empty}</b> empty\nThe receiving driver will get a notification to confirm.\nRef: <code>{ref}</code>",
-        "uz": "✅ <b>O'tkazish boshlandi!</b>\n\n📦 <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh\nQabul qiluvchi haydovchi tasdiqlash uchun bildirishnoma oladi.\nRaqam: <code>{ref}</code>",
-        "ru": "✅ <b>Передача инициирована!</b>\n\n📦 <b>{full}</b> полных + <b>{empty}</b> пустых\nПринимающий водитель получит уведомление для подтверждения.\nНомер: <code>{ref}</code>",
+    # One prompt per one-way unit line (e.g. 10 L water), after the empties; `{max}` is the line's `transferable`.
+    "staff.delivery.enter_transfer_unit_qty": {
+        "en": "How many {product}? (max {max})",
+        "uz": "Nechta {product}? (ko'pi bilan {max})",  # NATIVE-READ
+        "ru": "Сколько «{product}»? (макс. {max})",  # NATIVE-READ
+    },
+    # The receipt: `{lines}` is every line the backend recorded, from `format_transfer_lines`.
+    "staff.delivery.bottle_transfer_sent_lines": {
+        "en": "✅ <b>Transfer initiated!</b>\n\n📦 <b>{lines}</b>\nThe receiving driver will get a notification to confirm.\nRef: <code>{ref}</code>",
+        "uz": "✅ <b>O'tkazish boshlandi!</b>\n\n📦 <b>{lines}</b>\nQabul qiluvchi haydovchi tasdiqlash uchun bildirishnoma oladi.\nRaqam: <code>{ref}</code>",  # NATIVE-READ
+        "ru": "✅ <b>Передача инициирована!</b>\n\n📦 <b>{lines}</b>\nПринимающий водитель получит уведомление для подтверждения.\nНомер: <code>{ref}</code>",  # NATIVE-READ
     },
     "staff.delivery.no_pending_transfers": {
         "en": "No pending transfers waiting for your confirmation.",
@@ -2351,38 +2462,46 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "📥 <b>Kutilayotgan kiruvchi o'tkazmalar:</b>",
         "ru": "📥 <b>Ожидающие входящие передачи:</b>",
     },
-    # The receiver's "Different count": full first, then empties.
+    # The receiver's "Enter other numbers": one number per line of the transfer, full first, then empties, then each
+    # one-way unit line; `{n}` is what the sender declared on that line.
     "staff.delivery.enter_received_full_qty": {
-        "en": "✏️ How many full bottles did you receive?",
-        "uz": "✏️ Nechta to'la idish oldingiz?",
-        "ru": "✏️ Сколько полных бутылок вы получили?",
+        "en": "✏️ How many full bottles did you receive? (sent: {n})",
+        "uz": "✏️ Nechta to'la idish oldingiz? (yuborilgan: {n})",  # NATIVE-READ
+        "ru": "✏️ Сколько полных бутылок вы получили? (отправлено: {n})",  # NATIVE-READ
     },
     "staff.delivery.enter_received_empty_qty": {
-        "en": "✏️ How many empty bottles did you receive?",
-        "uz": "✏️ Nechta bo'sh idish oldingiz?",
-        "ru": "✏️ Сколько пустых бутылок вы получили?",
+        "en": "✏️ How many empty bottles did you receive? (sent: {n})",
+        "uz": "✏️ Nechta bo'sh idish oldingiz? (yuborilgan: {n})",  # NATIVE-READ
+        "ru": "✏️ Сколько пустых бутылок вы получили? (отправлено: {n})",  # NATIVE-READ
+    },
+    "staff.delivery.enter_received_unit_qty": {
+        "en": "✏️ How many {product} did you receive? (sent: {n})",
+        "uz": "✏️ Nechta {product} oldingiz? (yuborilgan: {n})",  # NATIVE-READ
+        "ru": "✏️ Сколько «{product}» вы получили? (отправлено: {n})",  # NATIVE-READ
     },
     "staff.delivery.transfer_confirm_failed": {
         "en": "Failed to confirm transfer. Please try again.",
         "uz": "O'tkazmani tasdiqlash muvaffaqiyatsiz. Qayta urinib ko'ring.",
         "ru": "Не удалось подтвердить передачу. Попробуйте ещё раз.",
     },
-    "staff.delivery.transfer_confirmed_split": {
-        "en": "✅ <b>Transfer confirmed!</b>\n\n📥 <b>{full}</b> full + <b>{empty}</b> empty added to your session.",
-        "uz": "✅ <b>O'tkazma tasdiqlandi!</b>\n\n📥 <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh idish sessiyangizga qo'shildi.",
-        "ru": "✅ <b>Передача подтверждена!</b>\n\n📥 <b>{full}</b> полных + <b>{empty}</b> пустых добавлено в вашу сессию.",
+    # The receiver's count, answered: `{lines}`, `{declared}` and `{counted}` are every line of the transfer from
+    # `format_transfer_lines` (as counted, as declared).
+    "staff.delivery.transfer_confirmed_lines": {
+        "en": "✅ <b>Transfer confirmed!</b>\n\n📥 <b>{lines}</b> added to your trip.",
+        "uz": "✅ <b>O'tkazma tasdiqlandi!</b>\n\n📥 <b>{lines}</b> reysingizga qo'shildi.",  # NATIVE-READ
+        "ru": "✅ <b>Передача подтверждена!</b>\n\n📥 <b>{lines}</b> добавлено в ваш рейс.",  # NATIVE-READ
     },
     # The receiver's disputed count (spec 2026-11-09 §4.4): it says an admin was notified only when the backend's
     # `admins_alerted` says one was; the twin below asks the driver to tell one instead.
-    "staff.delivery.transfer_disputed_split": {
-        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{dfull}</b> full + <b>{dempty}</b> empty; you received <b>{cfull}</b> full + <b>{cempty}</b> empty.\nAdmin has been notified. Your session has been credited with your count pending resolution.",
-        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi <b>{dfull}</b> ta to'la + <b>{dempty}</b> ta bo'sh deb ko'rsatdi, siz <b>{cfull}</b> ta to'la + <b>{cempty}</b> ta bo'sh oldingiz.\nAdmin xabardor qilindi. Sessiyangizga hal bo'lgunga qadar siz sanagan son yozildi.",
-        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал <b>{dfull}</b> полных + <b>{dempty}</b> пустых, вы получили <b>{cfull}</b> полных + <b>{cempty}</b> пустых.\nАдмин уведомлён. В вашу сессию записан ваш подсчёт до разрешения.",
+    "staff.delivery.transfer_disputed_lines": {
+        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{declared}</b>; you received <b>{counted}</b>.\nAdmin has been notified. Your trip has been credited with your count pending resolution.",
+        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi ko'rsatdi: <b>{declared}</b>; siz oldingiz: <b>{counted}</b>.\nAdmin xabardor qilindi. Reysingizga hal bo'lgunga qadar siz sanagan son yozildi.",  # NATIVE-READ
+        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал: <b>{declared}</b>; вы получили: <b>{counted}</b>.\nАдмин уведомлён. В ваш рейс записан ваш подсчёт до разрешения.",  # NATIVE-READ
     },
-    "staff.delivery.transfer_disputed_split_no_admin": {
-        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{dfull}</b> full + <b>{dempty}</b> empty; you received <b>{cfull}</b> full + <b>{cempty}</b> empty.\nPlease tell an admin so they can settle it. Your session has been credited with your count pending resolution.",
-        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi <b>{dfull}</b> ta to'la + <b>{dempty}</b> ta bo'sh deb ko'rsatdi, siz <b>{cfull}</b> ta to'la + <b>{cempty}</b> ta bo'sh oldingiz.\nIltimos, hal qilishlari uchun adminga xabar bering. Sessiyangizga hal bo'lgunga qadar siz sanagan son yozildi.",
-        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал <b>{dfull}</b> полных + <b>{dempty}</b> пустых, вы получили <b>{cfull}</b> полных + <b>{cempty}</b> пустых.\nПожалуйста, сообщите администратору, чтобы он решил вопрос. В вашу сессию записан ваш подсчёт до разрешения.",
+    "staff.delivery.transfer_disputed_lines_no_admin": {
+        "en": "⚠️ <b>Your count differs from the sender's.</b>\n\nSender declared <b>{declared}</b>; you received <b>{counted}</b>.\nPlease tell an admin so they can settle it. Your trip has been credited with your count pending resolution.",
+        "uz": "⚠️ <b>Sizning soningiz jo'natuvchinikidan farq qiladi.</b>\n\nJo'natuvchi ko'rsatdi: <b>{declared}</b>; siz oldingiz: <b>{counted}</b>.\nIltimos, hal qilishlari uchun adminga xabar bering. Reysingizga hal bo'lgunga qadar siz sanagan son yozildi.",  # NATIVE-READ
+        "ru": "⚠️ <b>Ваш подсчёт расходится с отправителем.</b>\n\nОтправитель указал: <b>{declared}</b>; вы получили: <b>{counted}</b>.\nПожалуйста, сообщите администратору, чтобы он решил вопрос. В ваш рейс записан ваш подсчёт до разрешения.",  # NATIVE-READ
     },
     # Session display labels (used in _format_session)
     "staff.delivery.session_ref_label": {
@@ -2488,6 +2607,12 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Band qilinmagan to'la idishlar: {n}",
         "ru": "Свободных полных бутылок: {n}",
     },
+    # One line per one-way unit on the trip beside the truck's bottles: what is on board and what is still free.
+    "staff.bottles.unit_on_truck": {
+        "en": "🧴 {product}: {n} · free {free}",
+        "uz": "🧴 {product}: {n} · bo'sh {free}",  # NATIVE-READ
+        "ru": "🧴 {product}: {n} · свободно {free}",  # NATIVE-READ
+    },
     "staff.bottles.join_session_confirm_title": {
         "en": "Ask to join this session?",
         "uz": "Ushbu sessiyaga qo'shilishni so'raysizmi?",
@@ -2518,10 +2643,12 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Siz <b>{name}</b>ning so'rovini rad etdingiz.",
         "ru": "Вы отклонили запрос: <b>{name}</b>.",
     },
-    "staff.bottles.notify.transfer_received_split": {
-        "en": "📥 <b>{sender}</b> sent you <b>{full}</b> full + <b>{empty}</b> empty. Confirm the count you received.",
-        "uz": "📥 <b>{sender}</b> sizga <b>{full}</b> ta to'la + <b>{empty}</b> ta bo'sh idish yubordi. Qabul qilgan soningizni tasdiqlang.",
-        "ru": "📥 <b>{sender}</b> передал вам <b>{full}</b> полных + <b>{empty}</b> пустых. Подтвердите полученное количество.",
+    # The receiver's push: who sent what, every line as declared (`format_transfer_lines`), under the inbox's
+    # three buttons (spec 2026-11-18 §6.7).
+    "staff.bottles.notify.transfer_received_lines": {
+        "en": "📥 {sender} sent you: {lines}",
+        "uz": "📥 {sender} sizga yubordi: {lines}",  # NATIVE-READ
+        "ru": "📥 {sender} передал вам: {lines}",  # NATIVE-READ
     },
     "staff.bottles.notify.join_requested": {
         "en": "🤝 <b>{name}</b> wants to join your bottle session. Orders they accept will count against your truck.",
@@ -2556,6 +2683,37 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "{receiver} counted {cfull} full + {cempty} empty; you sent {dfull} full + {dempty} empty. Please tell an admin so they can settle it.",
         "uz": "{receiver} {cfull} ta to'la + {cempty} ta bo'sh idish sanadi; siz {dfull} ta to'la + {dempty} ta bo'sh yubordingiz. Iltimos, hal qilishlari uchun adminga xabar bering.",
         "ru": "{receiver} насчитал(а) {cfull} полных + {cempty} пустых; вы отправили {dfull} полных + {dempty} пустых. Пожалуйста, сообщите администратору, чтобы он решил вопрос.",
+    },
+    # The same three answers from a backend that publishes the transfer's `lines` (every push since the 10 L
+    # trip): `{lines}`, `{counted}` and `{declared}` come from `format_transfer_lines`. The four above stay for a
+    # push queued before that deploy.
+    "staff.bottles.notify.transfer_confirmed_lines": {
+        "en": "{receiver} confirmed {lines}.",
+        "uz": "{receiver} tasdiqladi: {lines}.",  # NATIVE-READ
+        "ru": "{receiver} подтвердил(а): {lines}.",  # NATIVE-READ
+    },
+    "staff.bottles.notify.transfer_disputed_lines": {
+        "en": "{receiver} counted {counted}; you sent {declared}. An admin will check it.",
+        "uz": "{receiver} sanadi: {counted}; siz yubordingiz: {declared}. Admin buni tekshiradi.",  # NATIVE-READ
+        "ru": "{receiver} насчитал(а): {counted}; вы отправили: {declared}. Администратор это проверит.",  # NATIVE-READ
+    },
+    "staff.bottles.notify.transfer_disputed_lines_no_admin": {
+        "en": "{receiver} counted {counted}; you sent {declared}. Please tell an admin so they can settle it.",
+        "uz": "{receiver} sanadi: {counted}; siz yubordingiz: {declared}. Iltimos, hal qilishlari uchun adminga xabar bering.",  # NATIVE-READ
+        "ru": "{receiver} насчитал(а): {counted}; вы отправили: {declared}. Пожалуйста, сообщите администратору, чтобы он решил вопрос.",  # NATIVE-READ
+    },
+    # The sender's push when the receiver rejects (spec 2026-11-18 §6.14, word for word): `{ref}` is the
+    # transfer's first eight characters, `{lines}` every line as declared. The second line follows only when the
+    # backend reports the sender's trip had closed before the reject.
+    "staff.bottles.notify.transfer_rejected": {
+        "en": "❌ {receiver} rejected transfer #{ref}. {lines} are back on your trip.",
+        "uz": "❌ {receiver} #{ref} o'tkazmangizni rad etdi. {lines} reysingizga qaytdi.",  # NATIVE-READ
+        "ru": "❌ {receiver} отклонил передачу #{ref}. {lines} вернулись в ваш рейс.",  # NATIVE-READ
+    },
+    "staff.bottles.notify.transfer_rejected_trip_closed": {
+        "en": "Your trip was already closed; its difference was recalculated.",
+        "uz": "Reys yopilgan edi, farq qayta hisoblandi.",  # NATIVE-READ
+        "ru": "Рейс был закрыт, расхождение пересчитано.",  # NATIVE-READ
     },
     "staff.bottles.join_request_approve": {
         "en": "Approve",
@@ -2687,15 +2845,45 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Oldindan to'lov ushlangandan keyin naqd pul talab qilinmaydi",
         "ru": "Наличные не требуются после вычета предоплаты",
     },
-    "staff.delivery.transfer_confirm_split_button": {
-        "en": "Confirm {full} full + {empty} empty",
-        "uz": "{full} ta to'la + {empty} ta bo'shni tasdiqlash",
-        "ru": "Подтвердить {full} полных + {empty} пустых",
+    # The receiver's three answers to a pending transfer (spec 2026-11-18 §6.7): Confirm names every line as
+    # declared (`format_transfer_lines`), then a count of his own, then Reject.
+    "staff.delivery.transfer_confirm_lines_button": {
+        "en": "Confirm {lines}",
+        "uz": "Tasdiqlash: {lines}",  # NATIVE-READ
+        "ru": "Подтвердить: {lines}",  # NATIVE-READ
     },
+    # The spec's words (§6.7 mock); the keyboard puts the ✏️ in front, so the value carries none.
     "staff.delivery.transfer_custom_count_button": {
-        "en": "Different count",
-        "uz": "Boshqa miqdor",
-        "ru": "Другое количество",
+        "en": "Enter other numbers",
+        "uz": "Boshqa son kiritish",  # NATIVE-READ
+        "ru": "Ввести другие числа",  # NATIVE-READ
+    },
+    # Reject and its one confirmation (spec 2026-11-18 §6.14, word for word). It cannot be undone, so it asks
+    # once; Back leaves the transfer pending. `{sender}` is the sender's name.
+    "staff.delivery.transfer_reject_button": {
+        "en": "❌ Reject",
+        "uz": "❌ Rad etish",  # NATIVE-READ
+        "ru": "❌ Отклонить",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_reject_confirm": {
+        "en": "Reject? The bottles go back to {sender}'s trip.",
+        "uz": "Rad etasizmi? Idishlar {sender}ning reysiga qaytadi.",  # NATIVE-READ
+        "ru": "Отклонить? Бутылки вернутся в рейс {sender}.",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_reject_yes": {
+        "en": "Yes, reject",
+        "uz": "Ha, rad etaman",  # NATIVE-READ
+        "ru": "Да, отклонить",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_reject_back": {
+        "en": "Back",
+        "uz": "Orqaga",  # NATIVE-READ
+        "ru": "Назад",  # NATIVE-READ
+    },
+    "staff.delivery.transfer_rejected_reply": {
+        "en": "❌ Rejected. {sender} has been told.",
+        "uz": "❌ Rad etildi. {sender} xabardor qilindi.",  # NATIVE-READ
+        "ru": "❌ Отклонено. {sender} получил уведомление.",  # NATIVE-READ
     },
     "staff.tryout.pickup_all_label": {
         "en": "All ({label})",

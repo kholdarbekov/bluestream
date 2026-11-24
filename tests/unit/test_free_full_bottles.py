@@ -15,7 +15,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductSizeEnum
 from business_app.models.user import User, UserAddress
-from business_app.services.bottle_tracking_service import BottleTrackingService
+from business_app.services.bottle_tracking_service import BottleTrackingService, TripUnits
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.state_validators import DELIVERY_BOTTLES_PROMISED_STATES
 from shared.enums import (
@@ -221,7 +221,7 @@ def test_no_session_returns_none(db, svc, driver):
 def test_capacity_error_details_use_free_full(db, svc, driver):
     session = _session(db, driver, loaded=3, collected=15)
     with pytest.raises(ValidationError) as excinfo:
-        svc.assert_delivery_within_session_capacity(session, 8)
+        svc.assert_order_within_session_capacity(session, TripUnits(Decimal(8), {}))
     assert excinfo.value.error_code == "BOTTLE_SESSION_CAPACITY_EXCEEDED"
     assert excinfo.value.details == {"available": 3, "required": 8, "shortfall": 5}
 
@@ -230,6 +230,6 @@ def test_capacity_error_details_use_free_full(db, svc, driver):
 def test_capacity_passes_when_free_full_covers_it(db, svc, driver, customer, returnable_19l):
     session = _session(db, driver, loaded=10)
     d = _delivery(db, customer, returnable_19l, driver.id, DeliveryStatus.IN_TRANSIT, 8)
-    svc.assert_delivery_within_session_capacity(session, 8, exclude_delivery_id=d.id)
+    svc.assert_order_within_session_capacity(session, TripUnits(Decimal(8), {}), exclude_delivery_id=d.id)
     with pytest.raises(ValidationError):
-        svc.assert_delivery_within_session_capacity(session, 8)
+        svc.assert_order_within_session_capacity(session, TripUnits(Decimal(8), {}))

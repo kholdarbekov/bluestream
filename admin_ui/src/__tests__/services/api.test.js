@@ -148,6 +148,48 @@ describe('api response interceptor', () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('Pay period not found');
   });
+
+  // The Products page explains the bottle-trip setting's refusals in the admin's language
+  // (productSaveErrorMessage); the backend's English sentence must not be toasted beside it.
+  // Envelope (a): `handle_api_exception` puts `error_code` and `details` at the top of the body.
+  const TRIP_SETTING_REFUSALS = [
+    [409, {
+      success: false,
+      error: 'CONFLICT',
+      message: 'Close every open bottle trip before changing whether this product is counted on the trip.',
+      error_code: 'TRIP_UNIT_SETTING_BLOCKED',
+      details: { open_trips: [{ session_id: 9, session_ref: 'a1b2c3d4e5', driver_user_id: 3, driver_name: 'Aziz' }] },
+    }],
+    [400, {
+      success: false,
+      error: 'VALIDATION_ERROR',
+      message: 'A product counted on the bottle trip cannot be a returnable bottle.',
+      error_code: 'TRIP_UNIT_ON_RETURNABLE',
+    }],
+  ];
+  const PRODUCT_SAVES = [
+    ['createProduct', () => adminService.createProduct({ name: '10 Litr suv', counted_on_bottle_trip: true })],
+    ['updateProduct', () => adminService.updateProduct(44, { counted_on_bottle_trip: true })],
+  ];
+
+  it.each(PRODUCT_SAVES.flatMap(([name, save]) => TRIP_SETTING_REFUSALS.map(([status, body]) => [
+    name, body.error_code, status, body, save,
+  ])))('%s refused with %s rejects to the Products page without a toast', async (_name, _code, status, body, save) => {
+    api.defaults.adapter = failWith(status, body);
+
+    await expect(save()).rejects.toMatchObject({ response: { status, data: { error_code: body.error_code } } });
+
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it.each(PRODUCT_SAVES)('%s refused with any other code is still toasted, once', async (_name, save) => {
+    api.defaults.adapter = failWith(409, { success: false, message: 'SKU already exists', error_code: 'PRODUCT_SKU_EXISTS' });
+
+    await expect(save()).rejects.toMatchObject({ response: { status: 409 } });
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('SKU already exists');
+  });
 });
 
 // The Support Inbox downloads a customer's video (up to 20 MB) through the Pi; the instance-wide

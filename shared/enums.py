@@ -277,6 +277,7 @@ class DriverBottleTransferStatus(Enum):
     CONFIRMED = 'confirmed'  # Receiver accepted the declared quantity
     DISPUTED  = 'disputed'   # Receiver claims a different quantity
     RESOLVED  = 'resolved'   # Admin arbitrated the dispute
+    REJECTED  = 'rejected'   # Receiver refused the hand-over; units go back to the sender's trip
 
 
 class DriverSessionMembershipStatus(Enum):

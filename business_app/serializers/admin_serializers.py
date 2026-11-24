@@ -879,6 +879,8 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
             # The SSOT answer, so no client re-derives it from the pair above.
             "is_returnable_bottle": bool(getattr(product, "is_returnable_bottle", False)),
+            # The bottle-trip setting the edit modal shows and sends back (ProductService.check_product_save rules it).
+            "counted_on_bottle_trip": bool(product.counted_on_bottle_trip),
             # D22: whether an agent counts this SKU at a sales visit.
             "in_sales_stock_check": bool(getattr(product, "in_sales_stock_check", False)),
             # ...and whether it is actually ON that list, which is the flag AND `is_active`

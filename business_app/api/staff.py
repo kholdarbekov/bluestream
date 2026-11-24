@@ -1346,70 +1346,6 @@ def create_bottle_fine_staff():
     return success_response(fine.to_dict())
 
 
-@staff_bp.route("/bottles/load", methods=["POST"])
-@handle_api_exception
-@jwt_required()
-@require_staff_roles("delivery_driver")
-def record_bottles_loaded():
-    """[DEPRECATED] Shim — delegates to session open endpoint for backward compatibility."""
-    from business_app.serializers.bottle_serializers import (
-        DriverBottleSessionOpenRequest,
-        serialize_bottle_session,
-    )
-    from business_app.services.bottle_tracking_service import BottleTrackingService
-    from pydantic import ValidationError as PydanticValidationError
-    from business_app.utils.api_responses import validation_error_response
-
-    current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-
-    try:
-        payload = DriverBottleSessionOpenRequest(**data)
-    except PydanticValidationError as exc:
-        return validation_error_response(exc.errors())
-
-    service = BottleTrackingService()
-    session = service.open_bottle_session(
-        current_user_id,
-        payload.bottles_loaded,
-        actor_user_id=current_user_id,
-        notes=payload.notes,
-    )
-    return success_response(serialize_bottle_session(session))
-
-
-@staff_bp.route("/bottles/return-to-warehouse", methods=["POST"])
-@handle_api_exception
-@jwt_required()
-@require_staff_roles("delivery_driver")
-def record_bottles_returned_to_warehouse():
-    """[DEPRECATED] Shim — delegates to session close endpoint for backward compatibility."""
-    from business_app.serializers.bottle_serializers import (
-        DriverBottleSessionCloseRequest,
-        serialize_bottle_session,
-    )
-    from business_app.services.bottle_tracking_service import BottleTrackingService
-    from pydantic import ValidationError as PydanticValidationError
-    from business_app.utils.api_responses import validation_error_response
-
-    current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
-
-    try:
-        payload = DriverBottleSessionCloseRequest(**data)
-    except PydanticValidationError as exc:
-        return validation_error_response(exc.errors())
-
-    service = BottleTrackingService()
-    session = service.close_bottle_session(
-        current_user_id,
-        payload.bottles_returned_to_warehouse,
-        actor_user_id=current_user_id,
-        notes=payload.notes,
-    )
-    return success_response(serialize_bottle_session(session))
-
-
 @staff_bp.route("/bottles/my-accountability", methods=["GET"])
 @handle_api_exception
 @jwt_required()
@@ -1440,10 +1376,19 @@ def get_my_bottle_accountability():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def open_bottle_session():
-    """Driver opens a new trip session by loading bottles from the warehouse."""
+    """Driver opens a new trip session by loading bottles from the warehouse.
+
+    Body: `{bottles_loaded, units: [{product_id, quantity}], notes}`. Each number is 0 to MAX_BOTTLES_PER_SESSION;
+    `units` names each product the trip counts (`GET /bottles/session/load-screen`) at most once, an omitted one is 0.
+    201: the session payload, with one `units` line per counted product.
+    400: BOTTLE_SESSION_EMPTY_LOAD (every number 0), TRIP_UNIT_NOT_COUNTED (`details.product_id`), or a number out of
+    bounds. 409: BOTTLE_SESSION_ALREADY_OPEN or BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE, `details` =
+    `{session_id, owner_user_id, owner_name}` of the trip he is already on.
+    """
     from business_app.serializers.bottle_serializers import (
         DriverBottleSessionOpenRequest,
         serialize_bottle_session,
+        unit_counts,
     )
     from business_app.services.bottle_tracking_service import BottleTrackingService
     from pydantic import ValidationError as PydanticValidationError
@@ -1461,6 +1406,7 @@ def open_bottle_session():
     session = service.open_bottle_session(
         current_user_id,
         payload.bottles_loaded,
+        units=unit_counts(payload.units),
         actor_user_id=current_user_id,
         notes=payload.notes,
     )
@@ -1482,15 +1428,42 @@ def get_current_bottle_session():
     return success_response(serialize_bottle_session(session) if session else None)
 
 
+@staff_bp.route("/bottles/session/load-screen", methods=["GET"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def get_bottle_load_screen():
+    """The driver's Load screen, in one read: what he types a load for, and whether he may open a trip.
+
+    200: `{products: [{product_id, product_name}], refusal: null | {error_code, owner_name, session_id,
+    bottles_on_board, units}, open_session: <session payload> | null}`. `refusal.error_code` is
+    BOTTLE_SESSION_ALREADY_OPEN (his own trip, also given as `open_session`) or BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE
+    (the trip he co-drives); `units` are that trip's lines in the session payload's shape.
+    """
+    from business_app.serializers.bottle_serializers import serialize_load_screen
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    return success_response(serialize_load_screen(BottleTrackingService().load_screen(get_jwt_identity())))
+
+
 @staff_bp.route("/bottles/session/close", methods=["POST"])
 @handle_api_exception
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def close_bottle_session():
-    """Driver closes the active session by returning bottles to the warehouse."""
+    """Driver closes the active session by returning bottles to the warehouse.
+
+    Body: `{bottles_returned_to_warehouse, units_returned: [{product_id, quantity}], notes}`. Each number is 0 to
+    BOTTLE_RETURN_COLUMN_CEILING; `units_returned` answers every line on the trip (the session payload's `units`), each
+    product once.
+    200: the closed session payload, with both discrepancies (`discrepancy`, each `units` line's) and `has_discrepancy`.
+    400: BOTTLE_SESSION_RETURN_INCOMPLETE (`details.missing_product_ids`: the lines left out), TRIP_UNIT_NOT_COUNTED
+    (`details.product_id`: no line on the trip), or a number out of bounds. 404: BOTTLE_SESSION_NOT_FOUND.
+    """
     from business_app.serializers.bottle_serializers import (
         DriverBottleSessionCloseRequest,
         serialize_bottle_session,
+        unit_counts,
     )
     from business_app.services.bottle_tracking_service import BottleTrackingService
     from pydantic import ValidationError as PydanticValidationError
@@ -1508,6 +1481,7 @@ def close_bottle_session():
     session = service.close_bottle_session(
         current_user_id,
         payload.bottles_returned_to_warehouse,
+        units_returned=unit_counts(payload.units_returned),
         actor_user_id=current_user_id,
         notes=payload.notes,
     )
@@ -1754,10 +1728,21 @@ def get_pending_bottle_transfers():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def initiate_bottle_transfer():
-    """Driver initiates a mid-route transfer of full bottles and empties to another driver (or sends all)."""
+    """Driver hands full bottles, empties and one-way units to another driver mid-route (or sends all).
+
+    Body: `{receiver_driver_id, full_quantity, empty_quantity, units: [{product_id, quantity}], notes}`, or
+    `{receiver_driver_id, send_all: true}` with no amounts. `units` names each line of the sender's trip at most once;
+    a line left out sends none.
+    201: the transfer (`serialize_bottle_transfer`), with `units` (one per line on the sender's trip, declared 0 when
+    not sent) and `lines` (full, empty, then each unit). 400: BOTTLE_TRANSFER_NOTHING_TO_SEND (every line 0),
+    BOTTLE_TRANSFER_EXCEEDS_INVENTORY (`details.kind` = `full`, `empty` or `product` with `product_id` and
+    `product_name`; `requested`, `available`), TRIP_UNIT_NOT_COUNTED (`details.product_id`),
+    BOTTLE_TRANSFER_RECEIVER_INVALID, or a body out of bounds. 404: BOTTLE_SESSION_NOT_FOUND (no open trip).
+    """
     from business_app.serializers.bottle_serializers import (
         DriverBottleTransferCreateRequest,
         serialize_bottle_transfer,
+        unit_counts,
     )
     from business_app.services.bottle_tracking_service import BottleTrackingService
     from pydantic import ValidationError as PydanticValidationError
@@ -1777,6 +1762,7 @@ def initiate_bottle_transfer():
         receiver_driver_id=payload.receiver_driver_id,
         full_quantity=payload.full_quantity,
         empty_quantity=payload.empty_quantity,
+        units=unit_counts(payload.units),
         send_all=payload.send_all,
         notes=payload.notes,
     )
@@ -1790,15 +1776,22 @@ def initiate_bottle_transfer():
 def confirm_bottle_transfer(transfer_id: int):
     """Receiver confirms (or disputes) a pending bottle transfer.
 
-    `data` is the counted transfer (`serialize_bottle_transfer`) plus `admins_alerted` (bool): True only when the
+    Body: `{confirm_as_declared: true}` (every line as declared), or `{confirmed_full, confirmed_empty, units:
+    [{product_id, quantity}]}` with one count for every one-way unit line the transfer carries (its `lines` of kind
+    `product`). Every line matching confirms; any line differing disputes.
+    200: `data` is the counted transfer (`serialize_bottle_transfer`) plus `admins_alerted` (bool): True only when the
     count was disputed and the admins' Slack alerts channel took the dispute alert; False for a confirmed count, and
     for a dispute Slack did not take (no webhook configured, or the post failed). The receiver's reply says an admin
     was notified only when it is True (spec 2026-11-09 §4.4). Once the count has committed this answers 200 with it,
     whatever the steps after the commit (auto-close, messages, alert, pool re-offer) did.
+    400: BOTTLE_TRANSFER_COUNT_INCOMPLETE (`details.missing_product_ids`, `details.extra_product_ids`: a line left out,
+    or one the transfer does not carry), or a body with no count, both counts or one out of bounds. 404:
+    BOTTLE_TRANSFER_NOT_FOUND. 409: BOTTLE_TRANSFER_NOT_RECEIVER, BOTTLE_TRANSFER_NOT_PENDING.
     """
     from business_app.serializers.bottle_serializers import (
         DriverBottleTransferConfirmRequest,
         serialize_bottle_transfer,
+        unit_counts,
     )
     from business_app.services.bottle_tracking_service import BottleTrackingService
     from pydantic import ValidationError as PydanticValidationError
@@ -1818,10 +1811,36 @@ def confirm_bottle_transfer(transfer_id: int):
         receiver_driver_id=current_user_id,
         confirmed_full=payload.confirmed_full,
         confirmed_empty=payload.confirmed_empty,
+        confirmed_units=unit_counts(payload.units),
         confirm_as_declared=payload.confirm_as_declared,
         notes=payload.notes,
     )
     return success_response({**serialize_bottle_transfer(counted.transfer), "admins_alerted": counted.admins_alerted})
+
+
+@staff_bp.route("/bottles/transfers/<int:transfer_id>/reject", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def reject_bottle_transfer(transfer_id: int):
+    """Receiver rejects a pending bottle transfer: every line goes back to the sender's trip, even a closed one.
+
+    Body: none (no reason is asked). Only the named receiver, only while the transfer is pending. The receiver is
+    credited nothing and nothing opens for him; a closed sender's trip gets both discrepancies recomputed.
+    200: `data` is the rejected transfer (`serialize_bottle_transfer`: status `rejected`, `rejected_at` set, the
+    confirmed keys None) plus `sender_trip_was_closed` (bool): True when the sender's trip had closed before the reject.
+    Once the reject has committed this answers 200 with it, whatever the steps after the commit (Slack alert, the
+    sender's message, pool re-offer) did.
+    404: BOTTLE_TRANSFER_NOT_FOUND. 409: BOTTLE_TRANSFER_NOT_RECEIVER (the sender or another driver),
+    BOTTLE_TRANSFER_NOT_PENDING (already confirmed, disputed, resolved or rejected).
+    """
+    from business_app.serializers.bottle_serializers import serialize_bottle_transfer
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    rejected = BottleTrackingService().reject_bottle_transfer(transfer_id, get_jwt_identity())
+    return success_response(
+        {**serialize_bottle_transfer(rejected.transfer), "sender_trip_was_closed": rejected.sender_trip_was_closed}
+    )
 
 
 def _shared_place_body(model):

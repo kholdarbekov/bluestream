@@ -13,6 +13,7 @@ raises `Retry` while scheduling the next run, and raises
 """
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -165,7 +166,7 @@ from celery.exceptions import Retry as _Retry  # noqa: E402
 from business_app.models.bottle import DriverBottleSession  # noqa: E402
 from business_app.models.delivery import Delivery  # noqa: E402
 from business_app.models.order import Order  # noqa: E402
-from business_app.services.bottle_tracking_service import BottleTrackingService  # noqa: E402
+from business_app.services.bottle_tracking_service import BottleTrackingService, TripUnits  # noqa: E402
 from business_app.services.delivery_service import DeliveryService  # noqa: E402
 from shared.enums import DriverBottleSessionStatus, OrderStatus  # noqa: E402
 from tests.integration.eta_plan_builders import make_driver  # noqa: E402
@@ -289,19 +290,24 @@ class TestAutoAssignBottleFilter:
     def test_race_refusal_is_treated_as_shortfall(
         self, app, db, retry_spy, no_driver_push, monkeypatch, sample_user, sample_product
     ):
-        """The filter saw 10 free; by the time the locked assign judged it only 3 were left: same answer, no retry."""
+        """The filter judged the crew could carry 8; the locked assign found only 3: same answer, no retry."""
         a = _shift_driver(db)
         _open_session(db, a, loaded=3)
         delivery = _pool_order(db, sample_user, sample_product, quantity=8)
-        monkeypatch.setattr(
-            BottleTrackingService, "free_full_bottles", lambda self, driver_user_id, *, exclude_delivery_id=None: 10
-        )
+        seen = []
+
+        def stale_filter(driver_user_id, trip_units, bottle_service):
+            seen.append((driver_user_id, trip_units))
+            return True
+
+        monkeypatch.setattr(f"{TASKS_MODULE}._can_carry", stale_filter)
 
         result = _run(delivery.id)
 
         assert result == {"success": False, "delivery_id": delivery.id, "error": "no_driver_with_enough_bottles"}
         assert retry_spy.calls == []
         assert Delivery.query.get(delivery.id).delivery_person_id is None
+        assert seen == [(a.id, TripUnits(Decimal("8.00"), {}))]
 
     def test_zero_bottle_order_still_auto_assigns_without_session(
         self, app, db, no_driver_push, sample_user, sample_product

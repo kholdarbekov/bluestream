@@ -48,7 +48,7 @@ import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
 import { formatLocalDate, formatCalendarDate } from '../utils/dateUtils';
 import { formatMoneyUZS } from '../utils/formatMoney';
-import { extractApiErrorMessages } from '../utils/apiError';
+import { apiErrorCode, extractApiErrorMessages } from '../utils/apiError';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -229,6 +229,27 @@ const Products = () => {
     }
   };
 
+  // The two refusals of the bottle-trip setting, in the admin's language; any other failure keeps its own message.
+  const productSaveErrorMessage = (error, fallback) => {
+    const code = apiErrorCode(error);
+    if (code === 'TRIP_UNIT_ON_RETURNABLE') {
+      return t(
+        'ui.products.trip_unit_on_returnable',
+        'A product counted on the bottle trip cannot be returnable. Untick the setting first.'
+      );
+    }
+    if (code === 'TRIP_UNIT_SETTING_BLOCKED') {
+      const trips = (error?.response?.data?.details?.open_trips || [])
+        .map((trip) => `${trip.driver_name} (#${String(trip.session_ref).slice(0, 8)})`)
+        .join(', ');
+      return t('ui.products.trip_unit_setting_blocked', {
+        defaultValue: 'Close these open trips first: {{trips}}',
+        trips,
+      });
+    }
+    return extractApiErrorMessages(error, fallback)[0];
+  };
+
   const createProductMutation = useMutation({
     mutationFn: (productData) => adminService.createProduct(productData),
 
@@ -243,8 +264,7 @@ const Products = () => {
     },
 
     onError: (error) => {
-      const errors = extractApiErrorMessages(error, t('ui.products.create_failed', 'Failed to create product'));
-      message.error(errors[0]);
+      message.error(productSaveErrorMessage(error, t('ui.products.create_failed', 'Failed to create product')));
     },
   });
 
@@ -264,8 +284,7 @@ const Products = () => {
     },
 
     onError: (error) => {
-      const errors = extractApiErrorMessages(error, t('ui.products.update_failed', 'Failed to update product'));
-      message.error(errors[0]);
+      message.error(productSaveErrorMessage(error, t('ui.products.update_failed', 'Failed to update product')));
     },
   });
 
@@ -434,6 +453,7 @@ const Products = () => {
       in_sales_stock_check: Boolean(product.in_sales_stock_check),
       tracks_returnable_bottles: Boolean(product.tracks_returnable_bottles),
       returnable_bottles_per_unit: product.returnable_bottles_per_unit || 0,
+      counted_on_bottle_trip: Boolean(product.counted_on_bottle_trip),
       barcode: product.barcode,
       spic: product.spic,
       package_code: product.package_code,
@@ -1048,7 +1068,7 @@ const Products = () => {
     // A product held by a pending price change takes its price from that change only (spec 2026-11-16 §5.2).
     const priceLocked = form === editForm && Boolean(selectedProduct?.price_change_pending);
     return (
-    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0, in_sales_stock_check: false }}>
+    <Form form={form} layout="vertical" onFinish={onFinish} scrollToFirstError initialValues={{ is_tryout_eligible: true, min_order_quantity: 1, tracks_returnable_bottles: false, returnable_bottles_per_unit: 0, counted_on_bottle_trip: false, in_sales_stock_check: false }}>
       <Tabs
         defaultActiveKey="uz"
         items={[
@@ -1249,6 +1269,25 @@ const Products = () => {
                 </Form.Item>
               );
             }}
+          </Form.Item>
+        </Col>
+      </Row>
+
+      {/* Shown for every product and sent with every save. The page holds no copy of the returnability rule: the
+          backend's ProductService.check_product_save refuses a returnable bottle (TRIP_UNIT_ON_RETURNABLE), and
+          productSaveErrorMessage says so in the admin's language. */}
+      <Row gutter={16}>
+        <Col span={24}>
+          <Form.Item
+            name="counted_on_bottle_trip"
+            label={t('ui.products.counted_on_bottle_trip', "Count on the driver's bottle trip")}
+            valuePropName="checked"
+            extra={t(
+              'ui.products.counted_on_bottle_trip_help',
+              "Drivers type this product's load and return on their bottle trip. Change it only when every trip is closed."
+            )}
+          >
+            <Switch />
           </Form.Item>
         </Col>
       </Row>

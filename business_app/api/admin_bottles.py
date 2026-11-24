@@ -17,6 +17,7 @@ from business_app.serializers.bottle_serializers import (
     serialize_bottle_ledger_entry,
     serialize_bottle_session,
     serialize_bottle_transfer,
+    unit_counts,
 )
 from business_app.services.bottle_tracking_service import (
     TRANSFER_DISPUTE_RESOLVE_PERMISSIONS,
@@ -30,16 +31,23 @@ from business_app.utils.error_handlers import handle_api_exception
 admin_bottles_bp = Blueprint("admin_bottles", __name__)
 
 
-def _validated_payload(schema_cls):
-    payload = request.get_json() or {}
+def _validated_body(schema_cls):
+    """The JSON body as a `schema_cls` instance, or the 400 answer to return instead."""
     try:
-        # NOTE: `exclude_none`, unlike the same-named helper in api/admin_sales.py and
-        # api/staff_sales.py, which uses `exclude_unset` so an explicitly sent null clears a
-        # column. That is a per-blueprint decision, not the house rule: these payloads have not
-        # been walked for null-safety. See the sales helper's comment before copying either way.
-        return schema_cls(**payload).model_dump(exclude_none=True)
+        return schema_cls(**(request.get_json() or {}))
     except PydanticValidationError as exc:
         return validation_error_response(exc.errors())
+
+
+def _validated_payload(schema_cls):
+    body = _validated_body(schema_cls)
+    if not isinstance(body, schema_cls):
+        return body
+    # NOTE: `exclude_none`, unlike the same-named helper in api/admin_sales.py and
+    # api/staff_sales.py, which uses `exclude_unset` so an explicitly sent null clears a
+    # column. That is a per-blueprint decision, not the house rule: these payloads have not
+    # been walked for null-safety. See the sales helper's comment before copying either way.
+    return body.model_dump(exclude_none=True)
 
 
 def _pagination_args() -> dict:
@@ -378,18 +386,26 @@ def get_bottle_session(session_id):
 @jwt_required()
 @validate_admin_action(["manage_orders"])
 def force_close_bottle_session(session_id):
-    """Admin force-closes an abandoned open session."""
-    data = _validated_payload(AdminForceCloseSessionRequest)
-    if not isinstance(data, dict):
-        return data
+    """Admin force-closes an abandoned open session.
+
+    Body: `{reason, bottles_returned_to_warehouse, units_returned: [{product_id, quantity}]}`. Every number is 0 to
+    BOTTLE_RETURN_COLUMN_CEILING. `bottles_returned_to_warehouse` defaults to 0 when left out; each `units_returned`
+    line must carry its `quantity`, and a trip line left out of `units_returned` counts as 0 returned.
+    200: the force-closed session payload. 400: TRIP_UNIT_NOT_COUNTED (`details.product_id`), a product listed twice,
+    a number out of bounds, or no reason. 404: no such session. 409: the session is not open.
+    """
+    body = _validated_body(AdminForceCloseSessionRequest)
+    if not isinstance(body, AdminForceCloseSessionRequest):
+        return body
 
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
     session = service.admin_force_close_session(
         session_id=session_id,
         actor_user_id=current_user_id,
-        bottles_returned_to_warehouse=data.get("bottles_returned_to_warehouse", 0),
-        reason=data["reason"],
+        bottles_returned_to_warehouse=body.bottles_returned_to_warehouse,
+        units_returned=unit_counts(body.units_returned),
+        reason=body.reason,
     )
     return success_response(
         data=serialize_bottle_session(session),
@@ -422,19 +438,29 @@ def list_bottle_transfers():
 @jwt_required()
 @validate_admin_action(list(TRANSFER_DISPUTE_RESOLVE_PERMISSIONS))
 def resolve_bottle_transfer_dispute(transfer_id):
-    """Admin resolves a disputed driver-to-driver bottle transfer."""
-    data = _validated_payload(AdminResolveTransferRequest)
-    if not isinstance(data, dict):
-        return data
+    """Admin resolves a disputed driver-to-driver bottle transfer.
+
+    Body: `{resolved_full, resolved_empty, resolved_units: [{product_id, quantity}], resolution_notes}`: what really
+    moved, one `resolved_units` line for every one-way unit line the transfer carries (declared 0 included).
+    400 BOTTLE_TRANSFER_COUNT_INCOMPLETE (`details.missing_product_ids`, `details.extra_product_ids`): a line left
+    out, or one the transfer does not carry.
+    409 BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE (`details.session_id`, `details.owner_user_id`, `details.owner_name`):
+    the receiver was never credited, has no trip of his own and co-drives that one; resolving anything above 0 would
+    open him a second. Nothing is written.
+    """
+    body = _validated_body(AdminResolveTransferRequest)
+    if not isinstance(body, AdminResolveTransferRequest):
+        return body
 
     current_user_id = get_jwt_identity()
     service = BottleTrackingService()
     transfer = service.admin_resolve_transfer_dispute(
         transfer_id=transfer_id,
         actor_user_id=current_user_id,
-        resolved_full=data["resolved_full"],
-        resolved_empty=data["resolved_empty"],
-        resolution_notes=data["resolution_notes"],
+        resolved_full=body.resolved_full,
+        resolved_empty=body.resolved_empty,
+        resolved_units=unit_counts(body.resolved_units),
+        resolution_notes=body.resolution_notes,
     )
     return success_response(
         data=serialize_bottle_transfer(transfer),

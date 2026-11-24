@@ -41,10 +41,12 @@ from staff_bot.handlers.delivery.bottle_collection import (
     BOTTLE_SESSION_RETURNED_QTY_INPUT,
     BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT,
     BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT,
+    BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT,
     BOTTLE_TRANSFER_DRIVER_SELECT,
     BOTTLE_TRANSFER_EMPTY_QTY_INPUT,
     BOTTLE_TRANSFER_FULL_QTY_INPUT,
     BOTTLE_TRANSFER_SEND_CHOICE,
+    BOTTLE_TRANSFER_UNIT_QTY_INPUT,
 )
 from staff_bot.utils.formatters import format_quantity
 from staff_bot.utils.search import detect_search_type
@@ -130,9 +132,23 @@ BOTTLE_KEYS = (
     "staff.delivery.enter_bottles_loaded_qty",
     "staff.delivery.enter_bottles_returned_qty",
     "staff.delivery.invalid_bottle_count",
-    "staff.delivery.bottle_session_opened",
+    "staff.delivery.invalid_count_zero_ok",
+    "staff.delivery.enter_fine_bottle_qty",
+    "staff.delivery.enter_fine_amount",
+    "staff.delivery.bottle_session_opened_header",
+    "staff.delivery.session_bottles_line",
+    "staff.delivery.session_unit_line",
+    "staff.delivery.enter_unit_loaded_qty",
+    "staff.delivery.enter_unit_returned_qty",
+    "staff.delivery.discrepancy_unit_zero",
+    "staff.delivery.discrepancy_unit_line",
+    "staff.bottles.unit_on_truck",
+    "staff.error.api.bottle_session_return_incomplete",
+    "staff.error.api.membership_already_active_owner_detail",
+    "staff.error.api.bottle_session_empty_load",
     "staff.delivery.bottle_session_closed",
     "staff.delivery.bottle_session_already_open",
+    "staff.delivery.bottle_session_already_open_close_first",
     "staff.delivery.no_active_bottle_session",
     "staff.delivery.discrepancy_zero",
     "staff.delivery.discrepancy_nonzero",
@@ -165,19 +181,31 @@ BOTTLE_KEYS = (
     "staff.delivery.transfer_choose_amounts_button",
     "staff.delivery.enter_transfer_full_qty",
     "staff.delivery.enter_transfer_empty_qty",
-    "staff.delivery.bottle_transfer_sent",
+    "staff.delivery.bottle_transfer_sent_lines",
+    "staff.delivery.enter_transfer_unit_qty",
+    "staff.delivery.transfer_line_full",
+    "staff.delivery.transfer_line_empty",
+    "staff.delivery.transfer_line_product",
+    "staff.delivery.session_unit_line",
+    "staff.error.api.transfer_exceeds_unit_detail",
     "staff.delivery.no_bottles_to_transfer",
     "staff.delivery.no_active_drivers",
     "staff.delivery.pending_transfers_title",
-    "staff.delivery.pending_transfer_split_line",
-    "staff.delivery.transfer_confirm_split_button",
+    "staff.delivery.pending_transfer_lines_line",
+    "staff.delivery.transfer_confirm_lines_button",
     "staff.delivery.transfer_custom_count_button",
+    "staff.delivery.transfer_reject_button",
+    "staff.delivery.transfer_reject_confirm",
+    "staff.delivery.transfer_reject_yes",
+    "staff.delivery.transfer_reject_back",
+    "staff.delivery.transfer_rejected_reply",
     "staff.delivery.enter_received_full_qty",
     "staff.delivery.enter_received_empty_qty",
-    "staff.delivery.transfer_confirmed_split",
-    "staff.delivery.transfer_disputed_split",
-    "staff.delivery.transfer_disputed_split_no_admin",
-    "staff.bottles.notify.transfer_received_split",
+    "staff.delivery.enter_received_unit_qty",
+    "staff.delivery.transfer_confirmed_lines",
+    "staff.delivery.transfer_disputed_lines",
+    "staff.delivery.transfer_disputed_lines_no_admin",
+    "staff.bottles.notify.transfer_received_lines",
     "staff.operator.search_too_short",
     "staff.error.api.service_unavailable",
     "staff.error.api.validation",
@@ -186,6 +214,7 @@ BOTTLE_KEYS = (
     "staff.error.api.transfer_exceeds_empty_detail",
     "staff.error.api.transfer_nothing_to_send",
     "staff.error.api.transfer_already_handled",
+    "staff.error.api.transfer_not_yours",
     "staff.error.api.joined_session_closed",
     "staff.error.api.open_session_to_invite",
     "staff.error_occurred",
@@ -205,6 +234,11 @@ BOTTLE_KEYS = (
     "staff.common.unknown_driver",
     "staff.common.driver_number",
 )
+
+
+# A slip at a count step where 0 is a real answer (Load, Return, Send, the receiver's count, the empties at the
+# door). The fine quantity, which must be at least 1, keeps ``staff.delivery.invalid_bottle_count``.
+ZERO_OK_SLIP = "staff.delivery.invalid_count_zero_ok"
 
 
 def _curated(key: str, language: str = "en") -> str:
@@ -233,6 +267,7 @@ def _translation_table(overrides: dict = None) -> dict:
 LOGIN = "/api/v1/staff/auth/login"
 SESSION_CURRENT = "/api/v1/staff/bottles/session/current"
 SESSION_OPEN = "/api/v1/staff/bottles/session/open"
+LOAD_SCREEN = "/api/v1/staff/bottles/session/load-screen"
 SESSION_CLOSE = "/api/v1/staff/bottles/session/close"
 AVAILABLE_DRIVERS = "/api/v1/staff/bottles/sessions/available-drivers"
 TRANSFER_RECIPIENTS = "/api/v1/staff/bottles/transfers/recipients"
@@ -274,6 +309,7 @@ TRANSFER_ID = 31
 CUSTOMER_SUMMARY = f"/api/v1/staff/bottles/customer/{CUSTOMER_ID}/summary"
 CUSTOMER_ADDRESSES = f"/api/v1/staff/bottles/customer/{CUSTOMER_ID}/addresses"
 TRANSFER_CONFIRM = f"/api/v1/staff/bottles/transfers/{TRANSFER_ID}/confirm"
+TRANSFER_REJECT = f"/api/v1/staff/bottles/transfers/{TRANSFER_ID}/reject"
 # A second push in the same chat: another colleague's handover, waiting on its own.
 OTHER_TRANSFER_ID = 32
 OTHER_TRANSFER_CONFIRM = f"/api/v1/staff/bottles/transfers/{OTHER_TRANSFER_ID}/confirm"
@@ -301,9 +337,29 @@ def open_session(**overrides) -> dict:
         "transferable_full": 14,
         "transferable_empties": 5,
         "current_inventory": 19,
+        "transferable_any": True,
+        "units": [],
     }
     session.update(overrides)
     return session
+
+
+def load_screen(*, products=(), refusal=None, open_session=None, **extra) -> dict:
+    """`serialize_load_screen`: the products a load number is asked for, and the refusal when no trip may open."""
+    return {"products": list(products), "refusal": refusal, "open_session": open_session, **extra}
+
+
+TEN_LITRE = {"product_id": 3, "product_name": "10 Litr suv"}
+
+
+def unit_line(**overrides) -> dict:
+    """One `units` entry exactly as `_unit_lines` publishes it, every key present."""
+    line = {
+        "product_id": 3, "product_name": "10 Litr suv", "loaded": 12, "delivered": 0, "transferred_in": 0,
+        "transferred_out": 0, "on_board": 12, "transferable": 12, "free": 12, "returned": None, "discrepancy": None,
+    }
+    line.update(overrides)
+    return line
 
 
 PLACE_ROW = {
@@ -369,6 +425,7 @@ async def build_driver(monkeypatch, *, language="en", translations=None):
     )
     harness.backend.route("POST", LOGIN, lambda _call: _login_payload(language))
     harness.backend.route("GET", SESSION_CURRENT, lambda _call: None)
+    harness.backend.route("GET", LOAD_SCREEN, lambda _call: load_screen())
     return harness
 
 
@@ -407,11 +464,11 @@ def menu_label(labels, key, language="en"):
     return hits[0]
 
 
-async def open_cash_hub(harness, driver_updates, labels):
+async def open_cash_hub(harness, driver_updates, labels, language="en"):
     """Tap 💰 Cash on the reply keyboard and return the hub's callback data."""
-    await harness.send(driver_updates.text(menu_label(labels, "staff.menu.cash")))
+    await harness.send(driver_updates.text(menu_label(labels, "staff.menu.cash", language)))
     hub = harness.telegram.last_shown()
-    assert _curated("staff.cash.hub_title") in hub.text
+    assert _curated("staff.cash.hub_title", language) in hub.text
     harness.telegram.reset()
     return hub.callback_data()
 
@@ -480,9 +537,10 @@ async def test_a_driver_loads_forty_bottles_at_the_warehouse_and_that_exact_coun
         "the count that reached the backend is not the count the driver typed"
     )
 
-    assert driver.telegram.last_shown().text == _curated(
-        "staff.delivery.bottle_session_opened"
-    ).format(count=40, ref="SES-2026")
+    assert driver.telegram.last_shown().text == (
+        f"{_curated('staff.delivery.bottle_session_opened_header').format(ref='SES-2026')}\n"
+        f"{_curated('staff.delivery.session_bottles_line').format(n=40)}"
+    )
     assert driver.conversation_state("staff_bottle_loaded") is None, (
         "the quantity prompt is still armed after a successful load; the driver's "
         "next message would be parsed as a second bottle count"
@@ -506,9 +564,9 @@ async def test_a_bottle_count_that_is_not_a_number_is_refused_and_the_driver_can
     for typo in ("fourty", "4o", "40 bottles", "40.5", "  "):
         driver.telegram.reset()
         await driver.send(driver_updates.text(typo))
-        assert driver.telegram.last_shown().text == _curated(
-            "staff.delivery.invalid_bottle_count"
-        ), f"{typo!r} was not refused with the invalid-count copy"
+        assert driver.telegram.last_shown().text == _curated(ZERO_OK_SLIP), (
+            f"{typo!r} was not refused with the invalid-count copy"
+        )
         assert driver.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT, (
             f"{typo!r} knocked the driver out of the quantity prompt"
         )
@@ -523,29 +581,21 @@ async def test_a_bottle_count_that_is_not_a_number_is_refused_and_the_driver_can
     ]
 
 
-async def test_a_zero_or_negative_load_never_leaves_the_bot(driver):
-    """"-5" and "0" are not counts, they are typos or a driver testing the bot.
-
-    A zero-bottle session is a session that exists but can never be
-    reconciled, and a negative one would make the ledger read as if the
-    warehouse owed the driver bottles. The backend refuses both (`gt=0` on
-    ``DriverBottleSessionOpenRequest``) — but relying on that means a round
-    trip and a generic server error at the depot instead of an instant,
-    localized "enter a valid positive number".
-    """
+async def test_a_negative_load_never_leaves_the_bot(driver):
+    """"-5" and "-1" are typos or a driver testing the bot: a negative load would make the ledger read as if the
+    warehouse owed the driver bottles. Refused at the keypad, in the driver's words, with the prompt still armed.
+    (Zero is an answer now, see `test_zero_and_zero_reaches_the_backend_and_its_refusal_asks_again`.)"""
     driver_updates, labels = await sign_in(driver)
     await open_cash_hub(driver, driver_updates, labels)
     await driver.send(driver_updates.tap("staff_bottle_log_loaded"))
 
-    for refused in ("0", "-5", "-1"):
+    for refused in ("-5", "-1"):
         driver.telegram.reset()
         await driver.send(driver_updates.text(refused))
-        assert driver.telegram.last_shown().text == _curated("staff.delivery.invalid_bottle_count")
+        assert driver.telegram.last_shown().text == _curated(ZERO_OK_SLIP)
         assert driver.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT
 
-    assert not backend_calls(driver, "POST", SESSION_OPEN), (
-        "a non-positive bottle count was posted to the ledger"
-    )
+    assert not backend_calls(driver, "POST", SESSION_OPEN), "a negative bottle count was posted to the ledger"
 
 
 async def test_an_absurd_bottle_count_is_refused_at_the_keypad_not_at_the_column(driver):
@@ -561,7 +611,7 @@ async def test_an_absurd_bottle_count_is_refused_at_the_keypad_not_at_the_column
     was wrong with what they typed.
 
     The count is now bounded in the bot by ``MAX_BOTTLES_PER_SESSION`` and
-    answered with ``staff.delivery.invalid_bottle_count``, exactly as the lower
+    answered with ``staff.delivery.invalid_count_zero_ok``, exactly as the lower
     bound already is — and the prompt stays armed so the driver can simply
     retype it.
     """
@@ -587,9 +637,9 @@ async def test_an_absurd_bottle_count_is_refused_at_the_keypad_not_at_the_column
     assert not backend_calls(driver, "POST", SESSION_OPEN), (
         "a count the storage column cannot hold was posted anyway"
     )
-    assert driver.telegram.last_shown().text == _curated(
-        "staff.delivery.invalid_bottle_count"
-    ), "the driver was not told what was wrong with what they typed"
+    assert driver.telegram.last_shown().text == _curated(ZERO_OK_SLIP), (
+        "the driver was not told what was wrong with what they typed"
+    )
     assert driver.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT, (
         "the refusal dropped the driver out of the prompt they still have to answer"
     )
@@ -650,16 +700,26 @@ async def test_a_driver_who_already_has_an_open_session_is_told_so_and_is_never_
     question it had just refused to ask.
     """
     harness = await build_driver(monkeypatch)
-    harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session())
+    harness.backend.route("GET", LOAD_SCREEN, lambda _call: load_screen(
+        refusal={
+            "error_code": "BOTTLE_SESSION_ALREADY_OPEN", "owner_name": "Aziz", "session_id": 12,
+            "bottles_on_board": 14, "units": [],
+        },
+        open_session=open_session(),
+    ))
     harness.backend.route("POST", SESSION_OPEN, lambda _call: open_session())
 
     driver_updates, labels = await sign_in(harness)
     await open_cash_hub(harness, driver_updates, labels)
     await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
 
-    assert harness.telegram.last_shown().text == _curated(
-        "staff.delivery.bottle_session_already_open"
-    ).format(started="2026-08-21 06:30", loaded=40)
+    # A trip with no unit line reads exactly as it did before 10 L was counted on the trip.
+    assert harness.telegram.last_shown().text == (
+        "🚫 <b>Cannot start a new load.</b>\n\n"
+        "You already have an active session started at <b>2026-08-21 06:30</b> with <b>40</b> (18.9 L) bottles "
+        "loaded.\n\n"
+        "Return to the warehouse and close your current session first."
+    )
     assert harness.conversation_state("staff_bottle_loaded") is None, (
         "the refusal left the quantity prompt armed"
     )
@@ -669,6 +729,199 @@ async def test_a_driver_who_already_has_an_open_session_is_told_so_and_is_never_
     assert not backend_calls(harness, "POST", SESSION_OPEN), (
         "a number typed after the refusal opened a second session for the same truck"
     )
+
+
+async def uz_driver_with_the_ten_litre_load(monkeypatch, **screen):
+    harness = await build_driver(monkeypatch, language="uz")
+    harness.backend.route("GET", LOAD_SCREEN, lambda _call: load_screen(**{"products": [TEN_LITRE], **screen}))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels, "uz")
+    return harness, driver_updates, labels
+
+
+async def test_the_load_asks_both_numbers_and_opens_once_with_both(monkeypatch):
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(monkeypatch)
+    harness.backend.route("POST", SESSION_OPEN, lambda _call: open_session(
+        session_ref="a1b2c3d4-0000", bottles_loaded=40, units=[unit_line(loaded=12)],
+    ))
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_bottles_loaded_qty", "uz")
+    await harness.send(driver_updates.text("40"))
+    assert harness.telegram.last_shown().text == "Ombordan nechta 10 Litr suv yuklab olganingizni kiriting:"
+    assert not backend_calls(harness, "POST", SESSION_OPEN), "the load was posted before the second number"
+    assert harness.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT
+    await harness.send(driver_updates.text("12"))
+
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_OPEN)] == [
+        {"bottles_loaded": 40, "units": [{"product_id": 3, "quantity": 12}]}
+    ]
+    assert harness.telegram.last_shown().text == (
+        "✅ Reys ochildi (#a1b2c3d4)\n💧 18,9 L to'la idish: 40\n🧴 10 Litr suv: 12"
+    )
+    assert harness.conversation_state("staff_bottle_loaded") is None
+    assert "pending_load_draft" not in user_data(harness)
+
+
+async def test_zero_and_zero_reaches_the_backend_and_its_refusal_asks_again(monkeypatch):
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(monkeypatch)
+    replies = iter([
+        staff_backend_failure("empty load", 400, error_code="BOTTLE_SESSION_EMPTY_LOAD", error_type="VALIDATION_ERROR"),
+        open_session(session_ref="a1b2c3d4-0000", bottles_loaded=0, units=[unit_line(loaded=5)]),
+    ])
+    harness.backend.route("POST", SESSION_OPEN, lambda _call: next(replies))
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+    harness.telegram.reset()
+    await harness.send(driver_updates.text("0"))
+    await harness.send(driver_updates.text("0"))
+
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_OPEN)] == [
+        {"bottles_loaded": 0, "units": [{"product_id": 3, "quantity": 0}]}
+    ]
+    texts = [shown.text for shown in harness.telegram.shown]
+    assert texts[-2:] == [
+        "❌ " + _curated("staff.error.api.bottle_session_empty_load", "uz"),
+        _curated("staff.delivery.enter_bottles_loaded_qty", "uz"),
+    ]
+    assert harness.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT
+
+    await harness.send(driver_updates.text("0"))
+    await harness.send(driver_updates.text("5"))
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_OPEN)][1:] == [
+        {"bottles_loaded": 0, "units": [{"product_id": 3, "quantity": 5}]}
+    ]
+    assert harness.telegram.last_shown().text == (
+        "✅ Reys ochildi (#a1b2c3d4)\n💧 18,9 L to'la idish: 0\n🧴 10 Litr suv: 5"
+    )
+
+
+async def test_a_co_driver_at_load_is_told_whose_trip_and_its_lines_and_asked_nothing(monkeypatch):
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(
+        monkeypatch,
+        refusal={
+            "error_code": "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE", "owner_name": "Aziz", "session_id": 9,
+            "bottles_on_board": 40, "units": [unit_line(on_board=8, loaded=12)],
+        },
+    )
+    harness.backend.route("POST", SESSION_OPEN, lambda _call: open_session())
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+
+    assert harness.telegram.last_shown().text == (
+        "Siz Azizning reysidasiz. O'z reysingizni ochish uchun avval undan chiqing.\n"
+        "💧 18,9 L to'la idish: 40\n🧴 10 Litr suv: 8"
+    )
+    assert harness.conversation_state("staff_bottle_loaded") is None
+    await harness.send(driver_updates.text("40"))
+    assert not backend_calls(harness, "POST", SESSION_OPEN)
+
+
+async def test_a_co_driver_refused_at_load_can_go_from_the_refusal_to_leaving(monkeypatch):
+    """The refusal tells a co-driver to leave the trip first, so it carries the way there: the membership screen,
+    whose Leave posts the leave. The plain session menu under it had none. Join is not offered: he is on a trip."""
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(
+        monkeypatch,
+        refusal={
+            "error_code": "BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE", "owner_name": "Bek Toshev", "session_id": 14,
+            "bottles_on_board": 11, "units": [],
+        },
+    )
+    harness.backend.route("GET", SESSION_MEMBERSHIP, lambda _call: dict(MEMBERSHIP_ROW))
+    harness.backend.route("POST", SESSION_LEAVE, lambda _call: {"status": "left"})
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+
+    refusal = harness.telegram.last_shown()
+    assert refusal.text.startswith("Siz Bek Toshevning reysidasiz. O'z reysingizni ochish uchun avval undan chiqing.")
+    assert refusal.callback_data() == [
+        "staff_bottle_session_load", "staff_bottle_session_return", "staff_bottle_transfer_start",
+        "staff_bottle_transfers_pending", "bottles_membership_status", "staff_cash_hub",
+    ]
+    assert f"🤝 {_curated('staff.bottles.current_membership_title', 'uz')}" in refusal.button_labels()
+
+    await harness.send(driver_updates.tap("bottles_membership_status"))
+    assert "bottles_leave_session" in harness.telegram.last_shown().callback_data()
+    await harness.send(driver_updates.tap("bottles_leave_session"))
+
+    assert len(backend_calls(harness, "POST", SESSION_LEAVE)) == 1
+    assert harness.telegram.last_shown().text == f"✅ {_curated('staff.bottles.left_session', 'uz')}"
+
+
+async def test_already_open_lists_every_line(monkeypatch):
+    """Every line sits under the 18.9 L loaded figure, and the instruction to close the trip stays the last
+    paragraph: a 10 L line printed after it read as if it belonged to the instruction."""
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(
+        monkeypatch,
+        refusal={
+            "error_code": "BOTTLE_SESSION_ALREADY_OPEN", "owner_name": "Aziz", "session_id": 12,
+            "bottles_on_board": 14,
+            "units": [unit_line(loaded=12), unit_line(product_id=4, product_name="5 Litr <suv>", loaded=7)],
+        },
+        open_session=open_session(),
+    )
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+
+    assert harness.telegram.last_shown().text == (
+        "🚫 <b>Yangi yuklash boshlash mumkin emas.</b>\n\n"
+        "Sizda allaqachon <b>2026-08-21 06:30</b> da boshlangan va <b>40</b> ta (18,9 l) idish yuklangan "
+        "faol sessiya mavjud.\n"
+        "🧴 10 Litr suv: 12\n"
+        "🧴 5 Litr &lt;suv&gt;: 7\n\n"
+        "Avval omborga qayting va joriy sessiyangizni yoping."
+    )
+    assert harness.conversation_state("staff_bottle_loaded") is None
+
+
+async def test_load_reads_the_load_screen_once_and_ignores_keys_it_does_not_know(monkeypatch):
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(monkeypatch, vehicles=[{"id": 1}])
+
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_bottles_loaded_qty", "uz")
+    assert len(backend_calls(harness, "GET", LOAD_SCREEN)) == 1
+    assert not backend_calls(harness, "GET", SESSION_CURRENT)
+
+
+async def test_a_menu_tap_during_the_ten_litre_prompt_drops_the_draft(monkeypatch):
+    harness, driver_updates, labels = await uz_driver_with_the_ten_litre_load(monkeypatch)
+    harness.backend.route("POST", SESSION_OPEN, lambda _call: open_session())
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+    await harness.send(driver_updates.text("40"))
+    assert "pending_load_draft" in user_data(harness)
+
+    await harness.send(driver_updates.text(menu_label(labels, "staff.menu.cash", "uz")))
+
+    assert harness.conversation_state("staff_bottle_loaded") is None
+    assert "pending_load_draft" not in user_data(harness)
+    await harness.send(driver_updates.text("12"))
+    assert not backend_calls(harness, "POST", SESSION_OPEN)
+
+
+async def test_a_slip_at_the_ten_litre_load_asks_for_zero_or_more_and_zero_loads_none(monkeypatch):
+    """A driver with no 10 L types "o" for "0" at the 10 L step. 0 is the right answer there, and the refusal says
+    so. Told "a positive number", he typed 1: the trip loaded a 10 L he never had, and the close showed a false
+    10 L discrepancy of 1."""
+    harness = await build_driver(monkeypatch)
+    harness.backend.route("GET", LOAD_SCREEN, lambda _call: load_screen(products=[TEN_LITRE]))
+    harness.backend.route("POST", SESSION_OPEN, lambda _call: open_session(units=[unit_line(loaded=0, on_board=0)]))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels)
+    await harness.send(driver_updates.tap("staff_bottle_log_loaded"))
+    await harness.send(driver_updates.text("40"))
+    harness.telegram.reset()
+
+    await harness.send(driver_updates.text("o"))
+
+    assert harness.telegram.last_shown().text == "Send a whole number, 0 or more."
+    assert harness.conversation_state("staff_bottle_loaded") == BOTTLE_SESSION_LOADED_QTY_INPUT
+    assert not backend_calls(harness, "POST", SESSION_OPEN)
+
+    await harness.send(driver_updates.text("0"))
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_OPEN)] == [
+        {"bottles_loaded": 40, "units": [{"product_id": 3, "quantity": 0}]}
+    ]
 
 
 # ===========================================================================
@@ -727,6 +980,120 @@ async def test_a_driver_closes_the_day_by_returning_bottles_and_the_discrepancy_
     assert harness.conversation_state("staff_bottle_returned_wh") is None
 
 
+async def test_the_close_asks_both_returns_and_shows_both_discrepancies(monkeypatch):
+    harness = await build_driver(monkeypatch, language="uz")
+    harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(units=[unit_line(on_board=2)]))
+    harness.backend.route("POST", SESSION_CLOSE, lambda _call: open_session(
+        status="closed", bottles_returned_to_warehouse=37, discrepancy=-2,
+        units=[unit_line(on_board=2, returned=0, discrepancy=2)],
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels, "uz")
+
+    await harness.send(driver_updates.tap("staff_bottle_return_warehouse"))
+    assert harness.telegram.last_shown().text.endswith(_curated("staff.delivery.enter_bottles_returned_qty", "uz"))
+    await harness.send(driver_updates.text("37"))
+    assert harness.telegram.last_shown().text == "Omborga nechta 10 Litr suv qaytarganingizni kiriting:"
+    assert not backend_calls(harness, "POST", SESSION_CLOSE), "the close was posted before the second number"
+    assert harness.conversation_state("staff_bottle_returned_wh") == BOTTLE_SESSION_RETURNED_QTY_INPUT
+    await harness.send(driver_updates.text("0"))
+
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_CLOSE)] == [
+        {"bottles_returned_to_warehouse": 37, "units_returned": [{"product_id": 3, "quantity": 0}]}
+    ]
+    expected = _curated("staff.delivery.bottle_session_closed", "uz").format(
+        count=37,
+        disc_line=_curated("staff.delivery.discrepancy_nonzero", "uz").format(discrepancy=-2),
+        ref="SES-2026",
+    ) + "\n⚠️ 10 Litr suv: 2 ta hisoblanmagan"
+    assert harness.telegram.last_shown().text == expected
+    assert harness.conversation_state("staff_bottle_returned_wh") is None
+    assert "pending_return_draft" not in user_data(harness)
+
+
+async def test_a_unit_line_that_balances_reads_as_zero_and_a_close_missing_a_line_asks_again(monkeypatch):
+    harness = await build_driver(monkeypatch, language="uz")
+    harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(units=[unit_line(on_board=2)]))
+    replies = iter([
+        staff_backend_failure(
+            "incomplete", 400, error_code="BOTTLE_SESSION_RETURN_INCOMPLETE", error_type="VALIDATION_ERROR"
+        ),
+        open_session(
+            status="closed", bottles_returned_to_warehouse=5, discrepancy=0,
+            units=[unit_line(on_board=2, returned=2, discrepancy=0)],
+        ),
+    ])
+    harness.backend.route("POST", SESSION_CLOSE, lambda _call: next(replies))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels, "uz")
+
+    await harness.send(driver_updates.tap("staff_bottle_return_warehouse"))
+    harness.telegram.reset()
+    await harness.send(driver_updates.text("5"))
+    await harness.send(driver_updates.text("2"))
+    texts = [shown.text for shown in harness.telegram.shown]
+    assert texts[-2:] == [
+        "❌ " + _curated("staff.error.api.bottle_session_return_incomplete", "uz"),
+        _curated("staff.delivery.enter_bottles_returned_qty", "uz"),
+    ]
+    assert harness.conversation_state("staff_bottle_returned_wh") == BOTTLE_SESSION_RETURNED_QTY_INPUT
+
+    await harness.send(driver_updates.text("5"))
+    await harness.send(driver_updates.text("2"))
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_CLOSE)][1:] == [
+        {"bottles_returned_to_warehouse": 5, "units_returned": [{"product_id": 3, "quantity": 2}]}
+    ]
+    assert harness.telegram.last_shown().text.endswith("\n✅ 10 Litr suv: farq 0")
+    assert harness.conversation_state("staff_bottle_returned_wh") is None
+
+
+async def test_a_trip_summary_that_fails_to_draw_still_asks_every_line_and_closes_with_all_of_them(monkeypatch):
+    """The return screen draws the trip above the question, and the drawing can fail (here: a trip with no start
+    time). The lines the close must answer are read before the drawing, so a failed drawing costs the summary,
+    never a line: the driver is still asked the 10 L, and the one close carries it. Read after the drawing, they
+    were lost with it: the close went without `units_returned`, the backend refused it as incomplete, and the
+    driver typed the 18.9 L number twice."""
+    harness = await build_driver(monkeypatch)
+    harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(
+        started_at=None, units=[unit_line(on_board=2)],
+    ))
+    harness.backend.route("POST", SESSION_CLOSE, lambda _call: open_session(
+        status="closed", bottles_returned_to_warehouse=37, discrepancy=-2,
+        units=[unit_line(on_board=2, returned=2, discrepancy=0)],
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels)
+
+    await harness.send(driver_updates.tap("staff_bottle_return_warehouse"))
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_bottles_returned_qty")
+    await harness.send(driver_updates.text("37"))
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_unit_returned_qty").format(
+        product="10 Litr suv"
+    )
+    assert not backend_calls(harness, "POST", SESSION_CLOSE), "the close was posted before the 10 L number"
+    await harness.send(driver_updates.text("2"))
+
+    assert [call.data for call in backend_calls(harness, "POST", SESSION_CLOSE)] == [
+        {"bottles_returned_to_warehouse": 37, "units_returned": [{"product_id": 3, "quantity": 2}]}
+    ]
+    assert harness.conversation_state("staff_bottle_returned_wh") is None
+
+
+async def test_the_trip_screen_shows_ten_litre_on_board_and_free(monkeypatch):
+    harness = await build_driver(monkeypatch, language="uz")
+    harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(
+        units=[unit_line(on_board=8, free=5), unit_line(product_id=4, product_name="5 Litr <suv>", on_board=3, free=3)],
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await open_cash_hub(harness, driver_updates, labels, "uz")
+
+    await harness.send(driver_updates.tap("staff_bottle_my_accountability"))
+
+    lines = harness.telegram.last_shown().text.splitlines()
+    assert "🧴 10 Litr suv: 8 · bo'sh 5" in lines
+    assert "🧴 5 Litr &lt;suv&gt;: 3 · bo'sh 3" in lines
+
+
 async def test_returning_zero_bottles_is_a_legitimate_answer_even_though_minus_one_is_not(monkeypatch):
     """Asymmetry that matters: loading needs > 0, returning allows 0.
 
@@ -749,7 +1116,7 @@ async def test_returning_zero_bottles_is_a_legitimate_answer_even_though_minus_o
 
     harness.telegram.reset()
     await harness.send(driver_updates.text("-1"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.invalid_bottle_count")
+    assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP)
     assert harness.conversation_state("staff_bottle_returned_wh") == BOTTLE_SESSION_RETURNED_QTY_INPUT
     assert not backend_calls(harness, "POST", SESSION_CLOSE)
 
@@ -804,9 +1171,9 @@ async def test_an_over_return_is_accepted_however_large_but_a_keypad_slip_is_not
     assert not backend_calls(harness, "POST", SESSION_CLOSE), (
         "a count the storage column cannot hold was posted anyway"
     )
-    assert harness.telegram.last_shown().text == _curated(
-        "staff.delivery.invalid_bottle_count"
-    ), "the driver was not told what was wrong with what they typed"
+    assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP), (
+        "the driver was not told what was wrong with what they typed"
+    )
     assert harness.conversation_state("staff_bottle_returned_wh") == BOTTLE_SESSION_RETURNED_QTY_INPUT, (
         "the refusal dropped the driver out of the prompt they still have to answer"
     )
@@ -1270,6 +1637,22 @@ async def test_a_stale_quantity_button_from_a_finished_collection_cannot_write_a
     assert len(backend_calls(driver, "POST", COLLECTION)) == 1
 
 
+async def test_a_fine_for_zero_bottles_is_refused_as_not_positive(driver):
+    """A fine is for one bottle or more, so 0 is refused at its quantity, in words a 0 does not satisfy. The
+    count steps' "0 or more" sentence would refuse the 0 with a reason the 0 meets, and ask again forever."""
+    driver_updates, _labels = await sign_in(driver)
+    await driver.send(driver_updates.tap(f"staff_bottle_fine_{CUSTOMER_ID}_{ADDRESS_ID}"))
+    assert driver.telegram.last_shown().text == _curated("staff.delivery.enter_fine_bottle_qty")
+    driver.telegram.reset()
+
+    await driver.send(driver_updates.text("0"))
+
+    assert driver.telegram.last_shown().text == "Please enter a valid positive number."
+    await driver.send(driver_updates.text("1"))
+    assert driver.telegram.last_shown().text == _curated("staff.delivery.enter_fine_amount")
+    assert not backend_calls(driver, "POST", "/api/v1/staff/bottles/fine")
+
+
 # ===========================================================================
 # Transferring bottles between drivers
 # ===========================================================================
@@ -1280,19 +1663,29 @@ async def test_a_stale_quantity_button_from_a_finished_collection_cannot_write_a
 # nothing and adds nothing up.
 
 
-def transfer_backend(harness, *, full=5, empties=2, drivers=None):
+def transfer_backend(harness, *, full=5, empties=2, drivers=None, transferable_any=True, units=()):
     """The sender's open trip holds `full` full bottles and `empties` empties.
 
     The send answers with the transfer the backend recorded, in the shape
     `serialize_bottle_transfer` publishes (to_dict's `declared_*_quantity` plus
     the `declared_full/empty` split).
     """
+    # Load is how these tests reach the session menu: with a trip open, the load screen answers its own refusal.
+    harness.backend.route("GET", LOAD_SCREEN, lambda _call: load_screen(
+        refusal={
+            "error_code": "BOTTLE_SESSION_ALREADY_OPEN", "owner_name": "Aziz", "session_id": 12,
+            "bottles_on_board": full, "units": [],
+        },
+        open_session=open_session(),
+    ))
     harness.backend.route("GET", SESSION_CURRENT, lambda _call: open_session(
         full_bottles_on_board=full,
         empties_on_board=empties,
         transferable_full=full,
         transferable_empties=empties,
         current_inventory=full + empties,
+        transferable_any=transferable_any,
+        units=list(units),
     ))
     harness.backend.route(
         "GET",
@@ -1304,9 +1697,18 @@ def transfer_backend(harness, *, full=5, empties=2, drivers=None):
     harness.backend.route("POST", TRANSFERS, lambda _call: recorded_transfer(full=full, empty=empties))
 
 
-def recorded_transfer(*, full, empty, **overrides) -> dict:
-    """A PENDING transfer as the backend serializes it."""
+def recorded_transfer(*, full, empty, units=(), **overrides) -> dict:
+    """A PENDING transfer as the backend serializes it. `units` are (product_id, name, declared) one-way lines;
+    `lines` is `transfer_lines`' shape: full, empty, then one line per unit."""
     transfer = {
+        "lines": [
+            {"kind": "full", "product_id": None, "product_name": None, "declared": full, "confirmed": None},
+            {"kind": "empty", "product_id": None, "product_name": None, "declared": empty, "confirmed": None},
+            *(
+                {"kind": "product", "product_id": pid, "product_name": name, "declared": declared, "confirmed": None}
+                for pid, name, declared in units
+            ),
+        ],
         "id": TRANSFER_ID,
         "transfer_ref": "TRF-31-2026",
         "status": "pending",
@@ -1326,21 +1728,38 @@ def recorded_transfer(*, full, empty, **overrides) -> dict:
     return transfer
 
 
-def counted_transfer(*, declared, confirmed, status, admins_alerted, transfer_id=TRANSFER_ID) -> dict:
-    """The confirm route's answer: the counted transfer plus `admins_alerted`."""
+def counted_transfer(*, declared, confirmed, status, admins_alerted, transfer_id=TRANSFER_ID, units=()) -> dict:
+    """The confirm route's answer: the counted transfer, each line with what was declared and counted, plus
+    `admins_alerted`. `units` are (product_id, name, declared, confirmed) one-way lines."""
     (dfull, dempty), (cfull, cempty) = declared, confirmed
+    transfer = recorded_transfer(
+        full=dfull, empty=dempty,
+        units=[(product_id, name, sent) for product_id, name, sent, _counted in units],
+        id=transfer_id,
+        status=status,
+        confirmed_quantity=cfull,
+        confirmed_empty_quantity=cempty,
+        confirmed_full=cfull,
+        confirmed_empty=cempty,
+        confirmed_total=cfull + cempty,
+    )
+    for line, counted in zip(transfer["lines"], (cfull, cempty, *(c for *_sent, c in units))):
+        line["confirmed"] = counted
+    return {**transfer, "admins_alerted": admins_alerted}
+
+
+# Aziz's handover in the spec's example: 10 full, 4 empties and 6 x 10 L.
+TEN_LITRE_SENT = (3, "10 Litr suv", 6)
+
+
+def rejected_transfer(*, sender_name="Aziz", sender_trip_was_closed=False) -> dict:
+    """The reject route's answer: the transfer, now `rejected`, plus `sender_trip_was_closed`."""
     return {
         **recorded_transfer(
-            full=dfull, empty=dempty,
-            id=transfer_id,
-            status=status,
-            confirmed_quantity=cfull,
-            confirmed_empty_quantity=cempty,
-            confirmed_full=cfull,
-            confirmed_empty=cempty,
-            confirmed_total=cfull + cempty,
+            full=10, empty=4, units=[TEN_LITRE_SENT],
+            status="rejected", rejected_at="2026-11-24T09:00:00+00:00", sender_name=sender_name,
         ),
-        "admins_alerted": admins_alerted,
+        "sender_trip_was_closed": sender_trip_was_closed,
     }
 
 
@@ -1394,7 +1813,7 @@ async def test_the_send_screen_shows_the_backends_transferable_numbers_and_both_
         "💧 " + _curated("staff.bottles.full_on_truck").format(n="<b>5</b>"),
         "♻️ " + _curated("staff.bottles.empties_on_truck").format(n="<b>2</b>"),
     ]
-    assert send_screen.button_labels()[:2] == ["📦 Send all (5 full + 2 empty)", "Choose amounts"]
+    assert send_screen.button_labels()[:2] == ["📦 Send all (18.9 L full 5 · empty 2)", "Choose amounts"]
     assert send_screen.callback_data() == ["staff_transfer_send_all", "staff_transfer_choose", "staff_cash_hub"]
 
     # Choose amounts asks full first, then empties, each with the backend's maximum.
@@ -1423,7 +1842,9 @@ async def test_send_all_posts_send_all_and_the_receipt_names_what_the_backend_re
         {"receiver_driver_id": RECEIVER_DRIVER_ID, "send_all": True}
     ]
     receipt = harness.telegram.last_shown()
-    assert receipt.text == _curated("staff.delivery.bottle_transfer_sent").format(full=4, empty=2, ref="TRF-31-2")
+    assert receipt.text == _curated("staff.delivery.bottle_transfer_sent_lines").format(
+        lines="18.9 L full 4 · empty 2", ref="TRF-31-2"
+    )
     assert "staff_bottle_transfers_pending" in receipt.callback_data()
     assert harness.conversation_state("staff_bottle_transfer") is None
     for key in ("pending_transfer_flow", "pending_transfer_receiver_id", "pending_transfer_full_qty"):
@@ -1449,7 +1870,7 @@ async def test_choose_amounts_posts_both_numbers_the_driver_typed(monkeypatch):
     for slip in ("five", "-1", "2.5"):
         harness.telegram.reset()
         await harness.send(driver_updates.text(slip))
-        assert harness.telegram.last_shown().text == _curated("staff.delivery.invalid_bottle_count"), slip
+        assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP), slip
         assert harness.conversation_state("staff_bottle_transfer") == BOTTLE_TRANSFER_FULL_QTY_INPUT, slip
 
     await harness.send(driver_updates.text("5"))
@@ -1457,7 +1878,7 @@ async def test_choose_amounts_posts_both_numbers_the_driver_typed(monkeypatch):
 
     harness.telegram.reset()
     await harness.send(driver_updates.text("two"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.invalid_bottle_count")
+    assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP)
     assert harness.conversation_state("staff_bottle_transfer") == BOTTLE_TRANSFER_EMPTY_QTY_INPUT
     assert not backend_calls(harness, "POST", TRANSFERS)
 
@@ -1466,8 +1887,8 @@ async def test_choose_amounts_posts_both_numbers_the_driver_typed(monkeypatch):
     assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)] == [
         {"receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 5, "empty_quantity": 2}
     ]
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent").format(
-        full=5, empty=2, ref="TRF-31-2"
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent_lines").format(
+        lines="18.9 L full 5 · empty 2", ref="TRF-31-2"
     )
     assert harness.conversation_state("staff_bottle_transfer") is None
 
@@ -1490,12 +1911,13 @@ async def test_only_empties_can_be_sent(monkeypatch):
     ]
 
 
-def send_screen_lines(*, full, empties) -> list:
-    """The send screen's text below any refusal: the prompt and the backend's two numbers."""
+def send_screen_lines(*, full, empties, units=()) -> list:
+    """The send screen's text below any refusal: the prompt, the backend's two numbers, one line per unit."""
     return [
         _curated("staff.delivery.transfer_send_prompt"),
         "💧 " + _curated("staff.bottles.full_on_truck").format(n=f"<b>{full}</b>"),
         "♻️ " + _curated("staff.bottles.empties_on_truck").format(n=f"<b>{empties}</b>"),
+        *(f"🧴 {name}: {n}" for name, n in units),
     ]
 
 
@@ -1504,7 +1926,7 @@ def assert_back_on_the_send_screen(harness, *, refusal, full, empties):
     with the numbers the truck holds now."""
     screen = harness.telegram.last_shown()
     assert screen.text.splitlines() == [refusal, "", *send_screen_lines(full=full, empties=empties)]
-    assert screen.button_labels()[:2] == [f"📦 Send all ({full} full + {empties} empty)", "Choose amounts"]
+    assert screen.button_labels()[:2] == [f"📦 Send all (18.9 L full {full} · empty {empties})", "Choose amounts"]
     assert screen.callback_data() == ["staff_transfer_send_all", "staff_transfer_choose", "staff_cash_hub"]
     assert harness.conversation_state("staff_bottle_transfer") == BOTTLE_TRANSFER_SEND_CHOICE
     assert user_data(harness)["pending_transfer_receiver_id"] == RECEIVER_DRIVER_ID
@@ -1564,8 +1986,8 @@ async def test_a_number_above_the_truck_goes_to_the_backend_and_its_refusal_name
     assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)][1:] == [
         {"receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 4, "empty_quantity": 1}
     ]
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent").format(
-        full=4, empty=1, ref="TRF-31-2"
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent_lines").format(
+        lines="18.9 L full 4 · empty 1", ref="TRF-31-2"
     )
     assert harness.conversation_state("staff_bottle_transfer") is None
 
@@ -1610,6 +2032,9 @@ async def test_nothing_to_send_is_the_backends_answer(monkeypatch):
     assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)] == [
         {"receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 0, "empty_quantity": 0}
     ]
+    assert _curated("staff.error.api.transfer_nothing_to_send") == (
+        "Nothing to transfer. Choose at least one bottle to send."
+    )
     assert_back_on_the_send_screen(
         harness, refusal="❌ " + _curated("staff.error.api.transfer_nothing_to_send"), full=5, empties=2,
     )
@@ -1619,7 +2044,10 @@ async def test_nothing_to_send_is_the_backends_answer(monkeypatch):
     "session_now",
     [
         staff_backend_failure("Service temporarily unavailable", 503),
-        open_session(full_bottles_on_board=0, empties_on_board=0, transferable_full=0, transferable_empties=0),
+        open_session(
+            full_bottles_on_board=0, empties_on_board=0, transferable_full=0, transferable_empties=0,
+            transferable_any=False, units=[],
+        ),
     ],
     ids=["session-read-failed", "truck-now-empty"],
 )
@@ -1660,7 +2088,7 @@ async def test_a_driver_with_an_empty_truck_is_told_there_is_nothing_to_transfer
     bot answers with a bottle-count error about a transfer they abandoned.
     """
     harness = await build_driver(monkeypatch)
-    transfer_backend(harness, full=0, empties=0)
+    transfer_backend(harness, full=0, empties=0, transferable_any=False)
     driver_updates, labels = await sign_in(harness)
 
     await open_cash_hub(harness, driver_updates, labels)
@@ -1685,7 +2113,130 @@ async def test_a_truck_with_only_empties_can_still_hand_them_over(monkeypatch):
 
     send_screen = await start_transfer(harness, driver_updates, labels)
 
-    assert send_screen.button_labels()[0] == "📦 Send all (0 full + 3 empty)"
+    assert send_screen.button_labels()[0] == "📦 Send all (18.9 L full 0 · empty 3)"
+
+
+TEN_LITRE_TRIP_UNITS = [unit_line(on_board=6, transferable=6, free=6)]
+
+
+async def test_choose_amounts_asks_full_empties_then_ten_litre_and_sends_once(monkeypatch):
+    """A trip with a 10 L line: Choose amounts asks full, empties, then one prompt per unit line, each with the
+    line's published `transferable` as its maximum. Nothing is posted until the last answer, and the send
+    carries the unit line; the receipt prints every line the backend recorded."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness, full=10, empties=4, units=TEN_LITRE_TRIP_UNITS)
+    harness.backend.route("POST", TRANSFERS, lambda _call: recorded_transfer(
+        full=10, empty=4, units=[(3, "10 Litr suv", 6)],
+    ))
+    driver_updates, labels = await sign_in(harness)
+    send_screen = await start_transfer(harness, driver_updates, labels)
+    assert send_screen.text.splitlines() == send_screen_lines(full=10, empties=4, units=[("10 Litr suv", 6)])
+    assert send_screen.button_labels()[0] == "📦 Send all (18.9 L full 10 · empty 4 · 10 Litr suv 6)"
+
+    await harness.send(driver_updates.tap("staff_transfer_choose"))
+    await harness.send(driver_updates.text("10"))
+    await harness.send(driver_updates.text("4"))
+
+    assert harness.conversation_state("staff_bottle_transfer") == BOTTLE_TRANSFER_UNIT_QTY_INPUT
+    assert harness.telegram.last_shown().text == "How many 10 Litr suv? (max 6)"
+    assert not backend_calls(harness, "POST", TRANSFERS), "a transfer was sent before the 10 L count was asked"
+
+    await harness.send(driver_updates.text("6"))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)] == [
+        {
+            "receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 10, "empty_quantity": 4,
+            "units": [{"product_id": 3, "quantity": 6}],
+        }
+    ]
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent_lines").format(
+        lines="18.9 L full 10 · empty 4 · 10 Litr suv 6", ref="TRF-31-2"
+    )
+    assert harness.conversation_state("staff_bottle_transfer") is None
+    for key in ("pending_transfer_flow", "pending_transfer_receiver_id", "pending_transfer_full_qty",
+                "pending_transfer_empty_qty", "pending_transfer_units"):
+        assert key not in user_data(harness), f"{key} outlived the transfer it belonged to"
+
+
+async def test_zero_at_the_ten_litre_prompt_sends_the_bottles_and_no_unit_line(monkeypatch):
+    """The common send: a driver hands over 18.9 L and keeps his 10 L for his own stops, so he answers 0 at the
+    10 L prompt. The send carries both 18.9 L numbers and no `units` key at all: a declared-0 line would be a
+    line the receiver has to count."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness, full=10, empties=4, units=TEN_LITRE_TRIP_UNITS)
+    driver_updates, labels = await sign_in(harness)
+    await choose_amounts(harness, driver_updates, labels)
+
+    await harness.send(driver_updates.text("10"))
+    await harness.send(driver_updates.text("4"))
+    assert harness.telegram.last_shown().text == "How many 10 Litr suv? (max 6)"
+    await harness.send(driver_updates.text("0"))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)] == [
+        {"receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 10, "empty_quantity": 4}
+    ]
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.bottle_transfer_sent_lines").format(
+        lines="18.9 L full 10 · empty 4", ref="TRF-31-2"
+    )
+    assert harness.conversation_state("staff_bottle_transfer") is None
+    for key in ("pending_transfer_flow", "pending_transfer_receiver_id", "pending_transfer_full_qty",
+                "pending_transfer_empty_qty", "pending_transfer_units"):
+        assert key not in user_data(harness), f"{key} outlived the transfer it belonged to"
+
+
+async def test_the_give_entry_opens_for_a_ten_litre_only_driver(monkeypatch):
+    """No full bottle, no empty, only 10 L: the backend's `transferable_any` is True, so Give opens the picker
+    and then the send screen, never "nothing to send"."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness, full=0, empties=0, transferable_any=True, units=TEN_LITRE_TRIP_UNITS)
+    driver_updates, labels = await sign_in(harness)
+
+    send_screen = await start_transfer(harness, driver_updates, labels)
+
+    assert send_screen.text.splitlines() == send_screen_lines(full=0, empties=0, units=[("10 Litr suv", 6)])
+    assert send_screen.button_labels()[0] == "📦 Send all (18.9 L full 0 · empty 0 · 10 Litr suv 6)"
+    assert _curated("staff.delivery.no_bottles_to_transfer") not in send_screen.text
+
+
+async def test_an_over_cap_ten_litre_send_is_refused_by_name_and_the_send_screen_returns(monkeypatch):
+    """Seven 10 L typed against six on the trip: the backend refuses by product, the bot names it above the send
+    screen (not the end screen, not "no bottles"), keeps the colleague and drops the typed counts."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness, full=0, empties=0, transferable_any=True, units=TEN_LITRE_TRIP_UNITS)
+    harness.backend.route("POST", TRANSFERS, lambda _call: staff_backend_failure(
+        "Cannot transfer 7 of 10 Litr suv; the sender has 6.", 400,
+        error_code="BOTTLE_TRANSFER_EXCEEDS_INVENTORY",
+        details={
+            "kind": "product", "product_id": 3, "product_name": "10 Litr suv", "requested": 7, "available": 6,
+            "validation_errors": [],
+        },
+        error_type="VALIDATION_ERROR",
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await choose_amounts(harness, driver_updates, labels)
+
+    for number in ("0", "0", "7"):
+        await harness.send(driver_updates.text(number))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFERS)] == [
+        {
+            "receiver_driver_id": RECEIVER_DRIVER_ID, "full_quantity": 0, "empty_quantity": 0,
+            "units": [{"product_id": 3, "quantity": 7}],
+        }
+    ]
+    screen = harness.telegram.last_shown()
+    refusal = "❌ " + _curated("staff.error.api.transfer_exceeds_unit_detail").format(
+        product="10 Litr suv", available=6,
+    )
+    assert screen.text.splitlines() == [
+        refusal, "", *send_screen_lines(full=0, empties=0, units=[("10 Litr suv", 6)]),
+    ]
+    assert screen.callback_data() == ["staff_transfer_send_all", "staff_transfer_choose", "staff_cash_hub"]
+    assert harness.conversation_state("staff_bottle_transfer") == BOTTLE_TRANSFER_SEND_CHOICE
+    assert _curated("staff.delivery.no_bottles_to_transfer") not in screen.text
+    assert user_data(harness)["pending_transfer_receiver_id"] == RECEIVER_DRIVER_ID
+    for key in ("pending_transfer_full_qty", "pending_transfer_empty_qty", "pending_transfer_units"):
+        assert key not in user_data(harness), f"the refused count {key} is still armed"
 
 
 async def test_a_menu_tap_while_the_transfer_quantity_is_being_typed_cancels_the_handover(monkeypatch):
@@ -1794,30 +2345,294 @@ async def test_a_transfer_the_other_driver_never_confirms_credits_nobody_and_is_
 
     inbox = harness.telegram.last_shown()
     assert _curated("staff.delivery.pending_transfers_title") in inbox.text
-    assert _curated("staff.delivery.pending_transfer_split_line").format(
-        sender="Aziz Karimov", full=5, empty=2, ref="TRF-31-2"
-    ) in inbox.text
+    assert "📥 Aziz Karimov sent you: 18.9 L full 5 · empty 2  [ref: TRF-31-2]" in inbox.text
     buttons = list(zip(inbox.button_labels(), inbox.callback_data()))
-    assert buttons[:2] == [
-        ("✅ Confirm 5 full + 2 empty", f"staff_transfer_confirm_{TRANSFER_ID}"),
-        ("✏️ " + _curated("staff.delivery.transfer_custom_count_button"), f"staff_transfer_custom_{TRANSFER_ID}"),
+    assert buttons[:3] == [
+        ("✅ Confirm 18.9 L full 5 · empty 2", f"staff_transfer_confirm_{TRANSFER_ID}"),
+        ("✏️ Enter other numbers", f"staff_transfer_custom_{TRANSFER_ID}"),
+        ("❌ Reject", f"staff_transfer_reject_{TRANSFER_ID}"),
     ], "the receiver can only rubber-stamp the declared counts, or cannot even do that"
 
     assert not backend_calls(harness, "POST", TRANSFER_CONFIRM), (
         "an unconfirmed transfer was confirmed by merely looking at it"
     )
+    assert not backend_calls(harness, "POST", TRANSFER_REJECT)
     assert len(backend_calls(harness, "POST", TRANSFERS)) == 1
 
 
-async def test_one_tap_confirms_both_numbers_as_declared(monkeypatch):
-    """The receiver counted what the sender declared. One tap, and the backend is
-    asked to take the declared numbers: the bot never re-sends a count of its
-    own that could drift from the row."""
+# The spec's receiving screen, in the uz copy the seed ships (§6.7):
+#   📥 Aziz sizga yubordi: 18,9 L to'la 10 · bo'sh 4 · 10 Litr suv 6
+#   [✅ Tasdiqlash]  [✏️ Boshqa son kiritish]  [❌ Rad etish]
+AZIZ_SENT_UZ = "📥 Aziz sizga yubordi: 18,9 L to'la 10 · bo'sh 4 · 10 Litr suv 6"
+THREE_BUTTONS_UZ = [
+    ("✅ Tasdiqlash: 18,9 L to'la 10 · bo'sh 4 · 10 Litr suv 6", f"staff_transfer_confirm_{TRANSFER_ID}"),
+    ("✏️ Boshqa son kiritish", f"staff_transfer_custom_{TRANSFER_ID}"),
+    ("❌ Rad etish", f"staff_transfer_reject_{TRANSFER_ID}"),
+]
+
+
+def azizs_handover(**overrides) -> dict:
+    """Aziz's pending handover: 10 full, 4 empties and 6 x 10 L, every line as the backend publishes it."""
+    return recorded_transfer(full=10, empty=4, units=[TEN_LITRE_SENT], sender_name="Aziz", **overrides)
+
+
+async def open_inbox(harness, driver_updates):
+    """📥 Incoming transfers, tapped from the session menu (its handler is global)."""
+    await harness.send(driver_updates.tap("staff_bottle_transfers_pending"))
+    inbox = harness.telegram.last_shown()
+    harness.telegram.reset()
+    return inbox
+
+
+async def test_the_inbox_and_push_show_every_line_and_three_buttons(monkeypatch):
+    """The receiver reads who sent what, line by line, in the inbox and in the push alike, and gets three
+    answers under each: Confirm (its label names every line), a count of his own, and Reject."""
+    from staff_bot.webhook_server import _render_bottle_event
+
+    harness = await build_driver(monkeypatch, language="uz")
+    pending_inbox(harness, azizs_handover())
+    driver_updates, _labels = await sign_in(harness)
+
+    inbox = await open_inbox(harness, driver_updates)
+
+    assert f"{AZIZ_SENT_UZ}  [ref: TRF-31-2]" in inbox.text
+    assert list(zip(inbox.button_labels(), inbox.callback_data()))[:3] == THREE_BUTTONS_UZ
+
+    push = {
+        "id": TRANSFER_ID, "declared_quantity": 10, "declared_empty_quantity": 4, "sender_name": "Aziz",
+        "lines": azizs_handover()["lines"],
+    }
+    text, keyboard = _render_bottle_event("transfer_received", push, "uz")
+
+    assert text == AZIZ_SENT_UZ
+    assert [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row][:3] == (
+        THREE_BUTTONS_UZ
+    )
+    assert not [call for call in harness.backend.calls if call.method == "POST" and "/transfers/" in call.endpoint]
+
+
+async def test_reject_asks_once_then_rejects(monkeypatch):
+    """Reject cannot be undone, so it asks one question, naming whose trip the bottles go back to. Yes posts
+    one empty-bodied reject; the reply says the sender was told. No reason is asked."""
+    harness = await build_driver(monkeypatch, language="uz")
+    pending_inbox(harness, azizs_handover())
+    harness.backend.route("POST", TRANSFER_REJECT, lambda _call: rejected_transfer())
+    driver_updates, _labels = await sign_in(harness)
+    await open_inbox(harness, driver_updates)
+
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{TRANSFER_ID}"))
+
+    question = harness.telegram.last_shown()
+    assert question.text == "Rad etasizmi? Idishlar Azizning reysiga qaytadi."
+    assert question.reply_markup["inline_keyboard"] == [[
+        {"text": "Ha, rad etaman", "callback_data": f"staff_transfer_reject_yes_{TRANSFER_ID}"},
+        {"text": "⬅️ Orqaga", "callback_data": "staff_bottle_transfers_pending"},
+    ]]
+    assert not backend_calls(harness, "POST", TRANSFER_REJECT), "the first tap rejected without asking"
+
+    harness.telegram.reset()
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_yes_{TRANSFER_ID}"))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFER_REJECT)] == [None]
+    reply = harness.telegram.last_shown()
+    assert reply.text == "❌ Rad etildi. Aziz xabardor qilindi."
+    assert "staff_bottle_transfers_pending" in reply.callback_data()
+    assert not backend_calls(harness, "POST", TRANSFER_CONFIRM)
+
+
+async def test_back_from_the_reject_question_leaves_it_pending(monkeypatch):
+    """Back answers nothing: no reject, no count, and the inbox is drawn again with the transfer still in it."""
+    harness = await build_driver(monkeypatch, language="uz")
+    pending_inbox(harness, azizs_handover())
+    driver_updates, _labels = await sign_in(harness)
+    await open_inbox(harness, driver_updates)
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{TRANSFER_ID}"))
+    harness.telegram.reset()
+
+    await harness.send(driver_updates.tap("staff_bottle_transfers_pending"))
+
+    inbox = harness.telegram.last_shown()
+    assert AZIZ_SENT_UZ in inbox.text
+    assert list(zip(inbox.button_labels(), inbox.callback_data()))[:3] == THREE_BUTTONS_UZ
+    assert not backend_calls(harness, "POST", TRANSFER_REJECT)
+    assert not backend_calls(harness, "POST", TRANSFER_CONFIRM)
+
+
+async def test_rejecting_the_transfer_being_counted_drops_its_count(monkeypatch):
+    """The receiver began "Enter other numbers" on Aziz's handover, typed the full bottles, then rejected it. His
+    count is of a transfer that is settled now: the next number he types says the step is over and posts no count
+    (the backend would refuse it as already handled)."""
     harness = await build_driver(monkeypatch)
     transfer_backend(harness)
-    pending_inbox(harness, recorded_transfer(full=5, empty=2))
+    pending_inbox(harness, azizs_handover())
+    harness.backend.route("POST", TRANSFER_REJECT, lambda _call: rejected_transfer())
+    driver_updates, labels = await sign_in(harness)
+    await open_different_count(harness, driver_updates, labels)
+    await harness.send(driver_updates.text("10"))
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT
+
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{TRANSFER_ID}"))
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_yes_{TRANSFER_ID}"))
+
+    assert len(backend_calls(harness, "POST", TRANSFER_REJECT)) == 1
+    assert [key for key in user_data(harness) if key.startswith("pending_confirm_transfer")] == []
+    harness.telegram.reset()
+    for number in ("4", "6"):
+        await harness.send(driver_updates.text(number))
+    assert not backend_calls(harness, "POST", TRANSFER_CONFIRM), "a count of the rejected transfer was posted"
+    assert harness.telegram.shown[0].text == _curated("staff.flow_timed_out")
+    assert harness.conversation_state("staff_bottle_transfer_confirm") is None
+
+
+async def test_rejecting_another_transfer_keeps_the_count_being_typed(monkeypatch):
+    """Two handovers wait; the receiver counts Aziz's and rejects the other. The count is of a transfer still
+    pending, so it goes on, and posts every line he typed."""
+    other_reject_path = f"/api/v1/staff/bottles/transfers/{OTHER_TRANSFER_ID}/reject"
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness)
+    pending_inbox(harness, azizs_handover(), recorded_transfer(full=2, empty=0, id=OTHER_TRANSFER_ID))
+    harness.backend.route("POST", other_reject_path, lambda _call: {**rejected_transfer(), "id": OTHER_TRANSFER_ID})
     harness.backend.route("POST", TRANSFER_CONFIRM, lambda _call: counted_transfer(
-        declared=(5, 2), confirmed=(5, 2), status="confirmed", admins_alerted=False,
+        declared=(10, 4), confirmed=(10, 4), status="confirmed", admins_alerted=False,
+        units=[(3, "10 Litr suv", 6, 6)],
+    ))
+    driver_updates, labels = await sign_in(harness)
+    await open_different_count(harness, driver_updates, labels)
+    await harness.send(driver_updates.text("10"))
+
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{OTHER_TRANSFER_ID}"))
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_yes_{OTHER_TRANSFER_ID}"))
+    assert len(backend_calls(harness, "POST", other_reject_path)) == 1
+    for number in ("4", "6"):
+        await harness.send(driver_updates.text(number))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFER_CONFIRM)] == [
+        {"confirmed_full": 10, "confirmed_empty": 4, "units": [{"product_id": 3, "quantity": 6}]}
+    ]
+
+
+@pytest.mark.parametrize(
+    "error_code, message, key",
+    [
+        ("BOTTLE_TRANSFER_NOT_PENDING", "Transfer is not pending", "staff.error.api.transfer_already_handled"),
+        ("BOTTLE_TRANSFER_NOT_RECEIVER", "Not the receiver", "staff.error.api.transfer_not_yours"),
+    ],
+    ids=["already-handled", "not-the-receiver"],
+)
+async def test_a_refused_reject_says_why_in_the_resolvers_words(monkeypatch, error_code, message, key):
+    """The yes reached a transfer the backend will not reject (confirmed from another phone a moment ago, or a
+    second tap on yes): its reason, with the session menu, never a fixed "failed"."""
+    harness = await build_driver(monkeypatch)
+    pending_inbox(harness, azizs_handover())
+    harness.backend.route("POST", TRANSFER_REJECT, lambda _call: staff_backend_failure(
+        message, 409, error_code=error_code,
+    ))
+    driver_updates, _labels = await sign_in(harness)
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{TRANSFER_ID}"))
+    harness.telegram.reset()
+
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_yes_{TRANSFER_ID}"))
+
+    screen = harness.telegram.last_shown()
+    assert screen.text == f"❌ {_curated(key)}"
+    assert "staff_bottle_transfers_pending" in screen.callback_data()
+    assert len(backend_calls(harness, "POST", TRANSFER_REJECT)) == 1
+
+
+@pytest.mark.parametrize("tap", ["staff_transfer_reject_", "staff_transfer_custom_"], ids=["reject", "count"])
+async def test_a_transfer_gone_from_the_inbox_is_refused_before_any_question(monkeypatch, tap):
+    """The push is an hour old and the transfer was settled meanwhile: no question is asked about it, and
+    nothing is posted. The inbox is the backend's word on what is still waiting."""
+    harness = await build_driver(monkeypatch)
+    pending_inbox(harness)
+    driver_updates, _labels = await sign_in(harness)
+
+    await harness.send(driver_updates.tap(f"{tap}{TRANSFER_ID}"))
+
+    screen = harness.telegram.last_shown()
+    assert screen.text == f"❌ {_curated('staff.error.api.transfer_already_handled')}"
+    assert "staff_bottle_transfers_pending" in screen.callback_data()
+    assert harness.conversation_state("staff_bottle_transfer_confirm") is None
+    assert not any(key.startswith("pending_confirm_transfer") for key in user_data(harness))
+    assert not [call for call in harness.backend.calls if call.method == "POST" and "/transfers/" in call.endpoint]
+
+
+async def test_other_numbers_ask_every_line_with_the_senders_number(monkeypatch):
+    """One number per line, each prompt showing what the sender declared: full, empties, then the 10 L line.
+    The count goes once, every line in it; a 10 L short of the sender's number is a dispute."""
+    harness = await build_driver(monkeypatch)
+    pending_inbox(harness, azizs_handover())
+    harness.backend.route("POST", TRANSFER_CONFIRM, lambda _call: counted_transfer(
+        declared=(10, 4), confirmed=(10, 4), status="disputed", admins_alerted=True, units=[(3, "10 Litr suv", 6, 5)],
+    ))
+    driver_updates, _labels = await sign_in(harness)
+    await open_inbox(harness, driver_updates)
+
+    await harness.send(driver_updates.tap(f"staff_transfer_custom_{TRANSFER_ID}"))
+    assert harness.telegram.last_shown().text == "✏️ How many full bottles did you receive? (sent: 10)"
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
+
+    await harness.send(driver_updates.text("10"))
+    assert harness.telegram.last_shown().text == "✏️ How many empty bottles did you receive? (sent: 4)"
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT
+
+    await harness.send(driver_updates.text("4"))
+    assert harness.telegram.last_shown().text == "✏️ How many 10 Litr suv did you receive? (sent: 6)"
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT
+
+    # A keypad slip on the 10 L line is asked again, never posted.
+    await harness.send(driver_updates.text("five"))
+    assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP)
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT
+    assert not backend_calls(harness, "POST", TRANSFER_CONFIRM)
+
+    harness.telegram.reset()
+    await harness.send(driver_updates.text("5"))
+
+    assert [call.data for call in backend_calls(harness, "POST", TRANSFER_CONFIRM)] == [
+        {"confirmed_full": 10, "confirmed_empty": 4, "units": [{"product_id": 3, "quantity": 5}]}
+    ]
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_disputed_lines").format(
+        declared="18.9 L full 10 · empty 4 · 10 Litr suv 6", counted="18.9 L full 10 · empty 4 · 10 Litr suv 5",
+    )
+    assert harness.conversation_state("staff_bottle_transfer_confirm") is None
+    assert not any(key.startswith("pending_confirm_transfer") for key in user_data(harness))
+
+
+async def test_a_menu_tap_at_the_ten_litre_count_drops_the_whole_count(monkeypatch):
+    """The receiver walks away at the last prompt. Every key the count wrote goes with him, and a number he
+    types later is never posted as somebody's count."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness)
+    pending_inbox(harness, azizs_handover())
+    driver_updates, labels = await sign_in(harness)
+    await open_different_count(harness, driver_updates, labels)
+    for number in ("10", "4"):
+        await harness.send(driver_updates.text(number))
+    assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_UNIT_QTY_INPUT
+
+    harness.telegram.reset()
+    await harness.send(driver_updates.text(menu_label(labels, "staff.menu.cash")))
+
+    assert harness.conversation_state("staff_bottle_transfer_confirm") is None
+    assert _curated("staff.cash.hub_title") in harness.telegram.last_shown().text
+    assert [key for key in user_data(harness) if key.startswith("pending_confirm_transfer")] == []
+
+    await harness.send(driver_updates.text("5"))
+    assert not backend_calls(harness, "POST", TRANSFER_CONFIRM), (
+        "a number typed after walking away confirmed somebody else's bottle transfer"
+    )
+
+
+async def test_one_tap_confirm_sends_as_declared(monkeypatch):
+    """The receiver counted what the sender declared. One tap, and the backend is asked to take every declared
+    line: the bot never re-sends a count of its own that could drift from the row. The reply names every line
+    the backend credited."""
+    harness = await build_driver(monkeypatch)
+    transfer_backend(harness)
+    pending_inbox(harness, azizs_handover())
+    harness.backend.route("POST", TRANSFER_CONFIRM, lambda _call: counted_transfer(
+        declared=(10, 4), confirmed=(10, 4), status="confirmed", admins_alerted=False, units=[(3, "10 Litr suv", 6, 6)],
     ))
     driver_updates, labels = await sign_in(harness)
     await open_cash_hub(harness, driver_updates, labels)
@@ -1831,33 +2646,35 @@ async def test_one_tap_confirms_both_numbers_as_declared(monkeypatch):
         {"confirm_as_declared": True}
     ]
     screen = harness.telegram.last_shown()
-    assert screen.text == _curated("staff.delivery.transfer_confirmed_split").format(full=5, empty=2)
+    assert screen.text == _curated("staff.delivery.transfer_confirmed_lines").format(
+        lines="18.9 L full 10 · empty 4 · 10 Litr suv 6"
+    )
     assert "staff_bottle_transfers_pending" in screen.callback_data()
 
 
-async def test_legacy_confirm_button_confirms_as_declared(monkeypatch):
-    """A message sent before the split carries ``staff_transfer_confirm_<id>_<qty>``.
+async def test_an_old_two_button_confirm_still_confirms(monkeypatch):
+    """A message sent before the full / empties split carries ``staff_transfer_confirm_<id>_<qty>``.
     Telegram keeps it in the chat, so it must still work: as "confirm as declared",
     whatever number its old label showed."""
     harness = await build_driver(monkeypatch)
-    harness.backend.route("POST", "/api/v1/staff/bottles/transfers/12/confirm", lambda _call: counted_transfer(
-        transfer_id=12, declared=(16, 0), confirmed=(16, 0), status="confirmed", admins_alerted=False,
+    harness.backend.route("POST", "/api/v1/staff/bottles/transfers/7/confirm", lambda _call: counted_transfer(
+        transfer_id=7, declared=(10, 0), confirmed=(10, 0), status="confirmed", admins_alerted=False,
     ))
     driver_updates, _labels = await sign_in(harness)
 
-    await harness.send(driver_updates.tap("staff_transfer_confirm_12_16"))
+    await harness.send(driver_updates.tap("staff_transfer_confirm_7_10"))
 
-    assert [call.data for call in backend_calls(harness, "POST", "/api/v1/staff/bottles/transfers/12/confirm")] == [
+    assert [call.data for call in backend_calls(harness, "POST", "/api/v1/staff/bottles/transfers/7/confirm")] == [
         {"confirm_as_declared": True}
     ]
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_confirmed_split").format(
-        full=16, empty=0
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_confirmed_lines").format(
+        lines="18.9 L full 10 · empty 0"
     )
 
 
 async def test_old_push_without_empty_field_renders_and_its_button_confirms(monkeypatch):
-    """A push queued by the old backend names only ``declared_quantity``. It
-    renders as that many full and no empties, and its button confirms as declared."""
+    """A push queued by the old backend names only ``declared_quantity`` and no lines. It
+    renders as that many full and no empties, with the three buttons, and its Confirm confirms as declared."""
     from staff_bot.webhook_server import _render_bottle_event
 
     harness = await build_driver(monkeypatch)
@@ -1870,11 +2687,12 @@ async def test_old_push_without_empty_field_renders_and_its_button_confirms(monk
         "transfer_received", {"id": 7, "declared_quantity": 16, "sender_name": "A"}, "en"
     )
 
-    assert text == _curated("staff.bottles.notify.transfer_received_split").format(sender="A", full=16, empty=0)
+    assert text == "📥 A sent you: 18.9 L full 16 · empty 0"
     buttons = [(button.text, button.callback_data) for row in keyboard.inline_keyboard for button in row]
-    assert buttons[:2] == [
-        ("✅ Confirm 16 full + 0 empty", "staff_transfer_confirm_7"),
-        ("✏️ " + _curated("staff.delivery.transfer_custom_count_button"), "staff_transfer_custom_7"),
+    assert buttons[:3] == [
+        ("✅ Confirm 18.9 L full 16 · empty 0", "staff_transfer_confirm_7"),
+        ("✏️ Enter other numbers", "staff_transfer_custom_7"),
+        ("❌ Reject", "staff_transfer_reject_7"),
     ]
 
     await harness.send(driver_updates.tap(buttons[0][1]))
@@ -1893,7 +2711,7 @@ async def open_different_count(harness, driver_updates, labels):
 
 @pytest.mark.parametrize(
     "admins_alerted, key",
-    [(True, "staff.delivery.transfer_disputed_split"), (False, "staff.delivery.transfer_disputed_split_no_admin")],
+    [(True, "staff.delivery.transfer_disputed_lines"), (False, "staff.delivery.transfer_disputed_lines_no_admin")],
     ids=["admin-alerted", "nobody-alerted"],
 )
 async def test_different_count_asks_full_then_empty_and_says_an_admin_knows_only_when_one_does(
@@ -1901,9 +2719,10 @@ async def test_different_count_asks_full_then_empty_and_says_an_admin_knows_only
 ):
     """Five full and two empties were declared; five full and one empty arrived.
 
-    The receiver types each count. The dispute names all four numbers, as the
-    backend recorded them. It says an admin was notified only when the backend
-    says one was (`admins_alerted`); otherwise it asks the driver to tell one."""
+    The receiver types each count, each prompt showing the sender's number. The
+    dispute names every line declared and counted, as the backend recorded them.
+    It says an admin was notified only when the backend says one was
+    (`admins_alerted`); otherwise it asks the driver to tell one."""
     harness = await build_driver(monkeypatch)
     transfer_backend(harness)
     pending_inbox(harness, recorded_transfer(full=5, empty=2))
@@ -1913,17 +2732,17 @@ async def test_different_count_asks_full_then_empty_and_says_an_admin_knows_only
     driver_updates, labels = await sign_in(harness)
     await open_different_count(harness, driver_updates, labels)
 
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_full_qty")
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_full_qty").format(n=5)
     assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
 
     # A typo here would credit the wrong number of bottles to a real session.
     harness.telegram.reset()
     await harness.send(driver_updates.text("five"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.invalid_bottle_count")
+    assert harness.telegram.last_shown().text == _curated(ZERO_OK_SLIP)
     assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
 
     await harness.send(driver_updates.text("5"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_empty_qty")
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_empty_qty").format(n=2)
     assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_EMPTY_QTY_INPUT
     assert not backend_calls(harness, "POST", TRANSFER_CONFIRM)
 
@@ -1934,11 +2753,11 @@ async def test_different_count_asks_full_then_empty_and_says_an_admin_knows_only
         {"confirmed_full": 5, "confirmed_empty": 1}
     ]
     reply = harness.telegram.last_shown().text
-    assert reply == _curated(key).format(dfull=5, dempty=2, cfull=5, cempty=1)
+    assert reply == _curated(key).format(declared="18.9 L full 5 · empty 2", counted="18.9 L full 5 · empty 1")
     if not admins_alerted:
         assert "notified" not in reply, "the reply claims an admin was told when none was"
     assert harness.conversation_state("staff_bottle_transfer_confirm") is None
-    for flow_key in ("pending_confirm_transfer_id", "pending_confirm_transfer_full"):
+    for flow_key in CONFIRM_FLOW_KEYS:
         assert flow_key not in user_data(harness)
 
 
@@ -1983,7 +2802,10 @@ async def test_a_menu_tap_while_the_received_count_is_being_typed_never_confirms
 # of being swallowed or posted, and each conversation's timeout drops only its own
 # draft.
 
-CONFIRM_FLOW_KEYS = ("pending_confirm_transfer_id", "pending_confirm_transfer_full")
+CONFIRM_FLOW_KEYS = (
+    "pending_confirm_transfer_id", "pending_confirm_transfer_full", "pending_confirm_transfer_empty",
+    "pending_confirm_transfer_units",
+)
 SEND_FLOW_KEYS = ("pending_transfer_flow", "pending_transfer_receiver_id", "pending_transfer_full_qty")
 
 
@@ -1998,8 +2820,8 @@ def assert_a_was_counted_as_four_and_two(harness):
     assert [call.data for call in backend_calls(harness, "POST", TRANSFER_CONFIRM)] == [
         {"confirmed_full": 4, "confirmed_empty": 2}
     ]
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_disputed_split").format(
-        dfull=5, dempty=2, cfull=4, cempty=2
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_disputed_lines").format(
+        declared="18.9 L full 5 · empty 2", counted="18.9 L full 4 · empty 2"
     )
     assert harness.conversation_state("staff_bottle_transfer_confirm") is None
     for key in CONFIRM_FLOW_KEYS:
@@ -2029,8 +2851,8 @@ async def test_a_one_tap_confirm_on_another_transfer_keeps_the_count_being_typed
     assert [call.data for call in backend_calls(harness, "POST", OTHER_TRANSFER_CONFIRM)] == [
         {"confirm_as_declared": True}
     ]
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_confirmed_split").format(
-        full=3, empty=0
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.transfer_confirmed_lines").format(
+        lines="18.9 L full 3 · empty 0"
     )
     assert user_data(harness)["pending_confirm_transfer_id"] == TRANSFER_ID, (
         "confirming transfer B dropped the count the driver is typing for transfer A"
@@ -2045,7 +2867,7 @@ async def test_a_one_tap_confirm_on_another_transfer_keeps_the_count_being_typed
 @pytest.mark.parametrize("typed_before_the_tap", [(), ("5",)], ids=["at-full-prompt", "at-empties-prompt"])
 async def test_different_count_tapped_mid_send_never_sends_the_receivers_numbers(monkeypatch, typed_before_the_tap):
     """Drivers A and B swap at the roadside: B is typing how many bottles he
-    hands A when A's push arrives, and B taps "Different count" on it.
+    hands A when A's push arrives, and B taps "Enter other numbers" on it.
 
     The send is registered first, so while it stayed armed it took the numbers
     meant for the receiver's prompt and posted a transfer of bottles that never
@@ -2054,6 +2876,7 @@ async def test_different_count_tapped_mid_send_never_sends_the_receivers_numbers
     the count again, and it reaches the receiver's prompt."""
     harness = await build_driver(monkeypatch)
     transfer_backend(harness, full=12, empties=3)
+    pending_inbox(harness, recorded_transfer(full=5, empty=2))
     counted_a_as_four_and_two(harness)
     driver_updates, labels = await sign_in(harness)
     await choose_amounts(harness, driver_updates, labels)
@@ -2061,7 +2884,7 @@ async def test_different_count_tapped_mid_send_never_sends_the_receivers_numbers
         await harness.send(driver_updates.text(number))
 
     await harness.send(driver_updates.tap(f"staff_transfer_custom_{TRANSFER_ID}"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_full_qty")
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_full_qty").format(n=5)
     assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
     for key in SEND_FLOW_KEYS:
         assert key not in user_data(harness), f"the send's {key} is still armed under the receiver's prompt"
@@ -2074,7 +2897,7 @@ async def test_different_count_tapped_mid_send_never_sends_the_receivers_numbers
     assert harness.conversation_state("staff_bottle_transfer_confirm") == BOTTLE_TRANSFER_CONFIRM_FULL_QTY_INPUT
 
     await harness.send(driver_updates.text("4"))
-    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_empty_qty")
+    assert harness.telegram.last_shown().text == _curated("staff.delivery.enter_received_empty_qty").format(n=2)
     await harness.send(driver_updates.text("2"))
 
     assert not backend_calls(harness, "POST", TRANSFERS), "the receiver's count was posted as a send"
@@ -2122,6 +2945,7 @@ async def test_the_send_displaced_by_a_count_times_out_in_silence_and_leaves_the
     must not drop that count's draft."""
     harness = await build_driver(monkeypatch)
     transfer_backend(harness, full=12, empties=3)
+    pending_inbox(harness, recorded_transfer(full=5, empty=2))
     counted_a_as_four_and_two(harness)
     driver_updates, labels = await sign_in(harness)
     await choose_amounts(harness, driver_updates, labels)
@@ -2252,8 +3076,9 @@ async def test_telegram_refusing_to_deliver_the_receipt_does_not_reopen_the_bott
         {"bottles_loaded": 40}
     ], "the session was not opened at all"
     attempted = [call.text for call in harness.telegram.of("sendMessage")]
-    assert _curated("staff.delivery.bottle_session_opened").format(
-        count=40, ref="SES-2026"
+    assert (
+        f"{_curated('staff.delivery.bottle_session_opened_header').format(ref='SES-2026')}\n"
+        f"{_curated('staff.delivery.session_bottles_line').format(n=40)}"
     ) in attempted, f"the receipt was never even composed: {attempted}"
     assert errors == [], (
         f"a Telegram send failure surfaced as a handler error after the write "

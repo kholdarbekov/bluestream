@@ -184,8 +184,15 @@ class BaseHandler:
         'BOTTLE_JOIN_REQUEST_STALE': 'staff.error.api.join_request_stale',
         # Decline on a duplicate request message after the first was approved.
         'BOTTLE_JOIN_REQUEST_ALREADY_MEMBER': 'staff.error.api.join_request_already_member',
+        # Join's sentence. An open refused the same way names the trip's owner (API_ERROR_DETAIL_COPY).
         'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE': 'staff.error.api.already_in_session',
         'BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND': 'staff.error.api.not_in_session',
+        # The load typed at the depot (spec 2026-11-18 §6.3): every number 0, or a product the trip no longer counts
+        # (the setting changed after the Load screen was drawn).
+        'BOTTLE_SESSION_EMPTY_LOAD': 'staff.error.api.bottle_session_empty_load',
+        'TRIP_UNIT_NOT_COUNTED': 'staff.error.api.trip_unit_not_counted',
+        # The close (spec 2026-11-18 §6.8): a return left out for a line on the trip.
+        'BOTTLE_SESSION_RETURN_INCOMPLETE': 'staff.error.api.bottle_session_return_incomplete',
         # Leave refused while the co-driver's stops on the way hold bottles promised
         # from the owner's truck (spec 2026-11-09 A8). With `count`,
         # API_ERROR_DETAIL_COPY says how many.
@@ -390,12 +397,21 @@ class BaseHandler:
     API_ERROR_DETAIL_COPY: Dict[str, Tuple[ErrorDetailCopy, ...]] = {
         'BOTTLE_SESSION_CAPACITY_EXCEEDED': (
             ErrorDetailCopy(
+                'staff.error.api.bottle_session_capacity_exceeded_unit_detail',
+                {'product': 'product_name', 'available': 'available', 'required': 'required'},
+            ),
+            ErrorDetailCopy(
                 'staff.error.api.bottle_session_capacity_exceeded_detail',
                 {'available': 'available', 'required': 'required'},
             ),
         ),
         'BOTTLE_SESSION_LEAVE_HAS_PROMISED_STOPS': (
             ErrorDetailCopy('staff.error.api.leave_has_promised_stops_detail', {'count': 'count'}),
+        ),
+        # Only the open publishes the owner of the trip the driver co-drives; a join refusal has no
+        # details, so it keeps the join sentence.
+        'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE': (
+            ErrorDetailCopy('staff.error.api.membership_already_active_owner_detail', {'owner': 'owner_name'}),
         ),
         'STAFF_INVALID_STATUS_TRANSITION': (
             ErrorDetailCopy(
@@ -405,8 +421,14 @@ class BaseHandler:
             ),
         ),
         # The backend names the number that was too high (`kind`, spec 2026-11-09 T2). A refusal
-        # without it (an older backend) keeps the sentence with both numbers.
+        # without it (an older backend) keeps the sentence with both numbers. The product line comes
+        # first: its refusal also carries `requested` and `available`, which the last spec matches.
         'BOTTLE_TRANSFER_EXCEEDS_INVENTORY': (
+            ErrorDetailCopy(
+                'staff.error.api.transfer_exceeds_unit_detail',
+                {'product': 'product_name', 'available': 'available'},
+                when={'kind': 'product'},
+            ),
             ErrorDetailCopy(
                 'staff.error.api.transfer_exceeds_full_detail',
                 {'available': 'available'},

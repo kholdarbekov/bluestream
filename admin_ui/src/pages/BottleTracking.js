@@ -39,6 +39,7 @@ import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
+import { apiErrorCode } from '../utils/apiError';
 
 const { Text } = Typography;
 
@@ -264,6 +265,37 @@ const FineBalanceContext = ({ place }) => {
 };
 
 // --- Main Component ---
+// The refusal the Resolve modal explains itself (named in the request's handledErrorCodes).
+const RESOLVE_CO_DRIVING_CODE = 'BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE';
+
+// One-way unit products across the rows' `units`, by product id: the page re-derives no figure, it only lists
+// which lines exist so each gets its columns.
+const unitProducts = (rows) => {
+  const byId = new Map();
+  (rows || []).forEach((row) => (row.units || []).forEach((u) => {
+    if (!byId.has(u.product_id)) byId.set(u.product_id, u.product_name || `#${u.product_id}`);
+  }));
+  return [...byId.entries()].sort((a, b) => a[0] - b[0]).map(([id, name]) => ({ id, name }));
+};
+
+const unitLineOf = (row, productId) => (row.units || []).find((u) => u.product_id === productId);
+
+// One unit line of a transfer: what the sender declared, the receiver counted and the admin resolved.
+const transferUnitSummary = (t, u) => t('transfer_unit_summary', {
+  defaultValue: '{{product}}: declared {{declared}}, counted {{confirmed}}, resolved {{resolved}}',
+  product: u.product_name || `#${u.product_id}`,
+  declared: u.declared,
+  confirmed: u.confirmed ?? '—',
+  resolved: u.resolved ?? '—',
+});
+
+// Name of a transfer line: the product's, or Full / Empties for the two 18.9 L lines.
+const transferLineLabel = (t, line) => {
+  if (line.kind === 'full') return t('line_full', { defaultValue: 'Full bottles' });
+  if (line.kind === 'empty') return t('line_empty', { defaultValue: 'Empties' });
+  return line.product_name || `#${line.product_id}`;
+};
+
 const BottleTracking = () => {
   const { t } = useTranslation('bottle_tracking');
   // eslint-disable-next-line security/detect-object-injection
@@ -468,6 +500,29 @@ const BottleTracking = () => {
   const sessionDetail = sessionDetailData?.data || null;
 
   const transfers = transfersData?.data?.items || transfersData?.data || [];
+
+  // Per one-way unit product: loaded, delivered, on board, returned, discrepancy, from the rows' `units`.
+  // A trip without that line shows a dash.
+  const sessionUnitColumns = unitProducts(sessions).flatMap(({ id, name }) => {
+    const cell = (field, tag) => (_, row) => {
+      // eslint-disable-next-line security/detect-object-injection
+      const v = unitLineOf(row, id)?.[field];
+      if (v == null) return '—';
+      return tag ? <Tag color={v === 0 ? 'green' : 'red'}>{v === 0 ? '✓ 0' : v}</Tag> : v;
+    };
+    return [
+      ['loaded', 'unit_loaded', '{{product}} loaded', false],
+      ['delivered', 'unit_delivered', '{{product}} delivered', false],
+      ['on_board', 'unit_on_board', '{{product}} on board', false],
+      ['returned', 'unit_returned', '{{product}} returned', false],
+      ['discrepancy', 'unit_discrepancy', '{{product}} discrepancy', true],
+    ].map(([field, key, fallback, tag]) => ({
+      title: t(key, { defaultValue: fallback, product: name }),
+      key: `unit_${id}_${field}`,
+      align: 'right',
+      render: cell(field, tag),
+    }));
+  });
   const transfersTotal = transfersData?.data?.total || transfers.length;
   const disputedTransfersTotal = disputedTransfersData?.data?.total || 0;
 
@@ -579,7 +634,9 @@ const BottleTracking = () => {
   });
 
   const resolveTransferMutation = useMutation({
-    mutationFn: ({ transferId, data }) => adminService.resolveBottleTransferDispute(transferId, data),
+    mutationFn: ({ transferId, data }) => adminService.resolveBottleTransferDispute(transferId, data, {
+      handledErrorCodes: [RESOLVE_CO_DRIVING_CODE],
+    }),
 
     onSuccess: () => {
       message.success(t('transfer_resolved', { defaultValue: 'Transfer dispute resolved' }));
@@ -594,7 +651,18 @@ const BottleTracking = () => {
       });
     },
 
-    onError: (err) => message.error(err?.response?.data?.error || t('resolve_failed', { defaultValue: 'Failed to resolve dispute' })),
+    onError: (err) => {
+      // The receiver co-drives another driver's trip: nothing was written, the modal stays open.
+      if (apiErrorCode(err) === RESOLVE_CO_DRIVING_CODE) {
+        message.error(t('resolve_receiver_co_driving', {
+          defaultValue: "This driver is on {{owner}}'s trip right now. Resolve this transfer after that trip ends.",
+          // @handle_api_exception puts `details` at the top of the body.
+          owner: err?.response?.data?.details?.owner_name,
+        }));
+        return;
+      }
+      message.error(err?.response?.data?.error || t('resolve_failed', { defaultValue: 'Failed to resolve dispute' }));
+    },
   });
 
   // --- Balance columns ---
@@ -1125,6 +1193,7 @@ const BottleTracking = () => {
                   return <Tag color={v === 0 ? 'green' : 'red'}>{v === 0 ? '✓ 0' : v}</Tag>;
                 },
               },
+              ...sessionUnitColumns,
               {
                 title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status',
                 render: (v) => {
@@ -1152,7 +1221,7 @@ const BottleTracking = () => {
             dataSource={sessions}
             rowKey="id"
             loading={sessionsLoading}
-            rowClassName={(r) => r.discrepancy && r.discrepancy !== 0 ? 'ant-table-row-danger' : ''}
+            rowClassName={(r) => (r.has_discrepancy ? 'ant-table-row-danger' : '')}
             pagination={{
               current: sessionPagination.page,
               pageSize: sessionPagination.per_page,
@@ -1190,6 +1259,7 @@ const BottleTracking = () => {
                 { value: 'confirmed', label: t('transfer_status_confirmed', { defaultValue: 'Confirmed' }) },
                 { value: 'disputed', label: t('transfer_status_disputed', { defaultValue: 'Disputed' }) },
                 { value: 'resolved', label: t('transfer_status_resolved', { defaultValue: 'Resolved' }) },
+                { value: 'rejected', label: t('transfer_status_rejected', { defaultValue: 'Rejected' }) },
               ]}
             />
           </Space>
@@ -1201,10 +1271,28 @@ const BottleTracking = () => {
               { title: t('declared_empty', { defaultValue: 'Declared Empty' }), dataIndex: 'declared_empty', key: 'declared_empty', align: 'right' },
               { title: t('confirmed_full', { defaultValue: 'Confirmed Full' }), dataIndex: 'confirmed_full', key: 'confirmed_full', align: 'right', render: (v) => v ?? '—' },
               { title: t('confirmed_empty', { defaultValue: 'Confirmed Empty' }), dataIndex: 'confirmed_empty', key: 'confirmed_empty', align: 'right', render: (v) => v ?? '—' },
+              {
+                title: t('transfer_units', { defaultValue: 'Units' }), key: 'units',
+                render: (_, r) => (r.units || []).length
+                  ? r.units.map((u) => <div key={u.product_id}>{transferUnitSummary(t, u)}</div>)
+                  : '—',
+              },
               { title: t('sent_at', { defaultValue: 'Sent At' }), dataIndex: 'sent_at', key: 'sent_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
               {
                 title: t('status', { defaultValue: 'Status' }), dataIndex: 'status', key: 'status',
-                render: (v) => {
+                render: (v, r) => {
+                  if (v === 'rejected') {
+                    return (
+                      <>
+                        <Tag color="orange">{t('transfer_status_rejected', { defaultValue: 'Rejected' })}</Tag>
+                        {r.rejected_at && (
+                          <Text type="secondary" style={{ display: 'block' }}>
+                            {t('rejected_at', { defaultValue: 'Rejected at' })} {formatDateTimeShort(r.rejected_at)}
+                          </Text>
+                        )}
+                      </>
+                    );
+                  }
                   const colors = { pending: 'blue', confirmed: 'green', disputed: 'red', resolved: 'default' };
                   // eslint-disable-next-line security/detect-object-injection
                   return <Tag color={colors[v] || 'default'}>{(v || '').toUpperCase()}</Tag>;
@@ -1462,6 +1550,50 @@ const BottleTracking = () => {
                 <Descriptions.Item label={t('force_close_reason_label', { defaultValue: 'Force Close Reason' })} span={2}>{sessionDetail.force_close_reason}</Descriptions.Item>
               )}
             </Descriptions>
+            {(sessionDetail.units || []).map((u) => (
+              <Descriptions key={u.product_id} title={u.product_name} column={2} size="small" bordered style={{ marginBottom: 16 }}>
+                <Descriptions.Item label={t('unit_loaded', { defaultValue: '{{product}} loaded', product: u.product_name })}>{u.loaded}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_delivered', { defaultValue: '{{product}} delivered', product: u.product_name })}>{u.delivered}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_on_board', { defaultValue: '{{product}} on board', product: u.product_name })}>{u.on_board}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_sent', { defaultValue: 'Sent' })}>{u.transferred_out}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_received', { defaultValue: 'Received' })}>{u.transferred_in}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_returned', { defaultValue: '{{product}} returned', product: u.product_name })}>{u.returned ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label={t('unit_discrepancy', { defaultValue: '{{product}} discrepancy', product: u.product_name })}>
+                  {u.discrepancy != null
+                    ? <Tag color={u.discrepancy === 0 ? 'green' : 'red'}>{u.discrepancy}</Tag>
+                    : '—'}
+                </Descriptions.Item>
+              </Descriptions>
+            ))}
+            {[...(sessionDetail.transfers_out || []), ...(sessionDetail.transfers_in || [])].length > 0 && (
+              <Table
+                style={{ marginBottom: 16 }}
+                size="small"
+                pagination={false}
+                dataSource={[...(sessionDetail.transfers_out || []), ...(sessionDetail.transfers_in || [])]}
+                rowKey="id"
+                columns={[
+                  { title: t('sender', { defaultValue: 'Sender' }), dataIndex: 'sender_name', render: (v, r) => v || r.sender_driver_id },
+                  { title: t('receiver', { defaultValue: 'Receiver' }), dataIndex: 'receiver_name', render: (v, r) => v || r.receiver_driver_id },
+                  {
+                    title: t('transfer_units', { defaultValue: 'Units' }),
+                    key: 'lines',
+                    render: (_, r) => (r.lines || []).map((line) => (
+                      <div key={`${line.kind}-${line.product_id ?? ''}`}>
+                        {transferLineLabel(t, line)}: {t('unit_sent', { defaultValue: 'Sent' })} {line.declared} · {t('unit_received', { defaultValue: 'Received' })} {line.resolved ?? line.confirmed ?? '—'}
+                      </div>
+                    )),
+                  },
+                  {
+                    title: t('status', { defaultValue: 'Status' }),
+                    dataIndex: 'status',
+                    render: (v) => (v === 'rejected'
+                      ? <Tag color="orange">{t('transfer_status_rejected', { defaultValue: 'Rejected' })}</Tag>
+                      : <Tag>{(v || '').toUpperCase()}</Tag>),
+                  },
+                ]}
+              />
+            )}
             {sessionDetail.members?.length > 0 && (
               <>
                 <Text strong style={{ display: 'block', marginBottom: 8 }}>
@@ -1544,11 +1676,31 @@ const BottleTracking = () => {
         <Form
           form={forceCloseForm}
           layout="vertical"
-          onFinish={(values) => forceCloseMutation.mutate({ sessionId: forceCloseTarget.id, data: values })}
+          onFinish={({ reason, bottles_returned_to_warehouse: returned, ...rest }) => forceCloseMutation.mutate({
+            sessionId: forceCloseTarget.id,
+            data: {
+              reason,
+              bottles_returned_to_warehouse: returned,
+              units_returned: (forceCloseTarget.units || []).map((u) => ({
+                product_id: u.product_id,
+                quantity: rest[`unit_${u.product_id}`] ?? 0,
+              })),
+            },
+          })}
         >
           <Form.Item name="bottles_returned_to_warehouse" label={t('bottles_returned_wh_label', { defaultValue: 'Bottles returned to warehouse (if known)' })} initialValue={0}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
+          {(forceCloseTarget?.units || []).map((u) => (
+            <Form.Item
+              key={u.product_id}
+              name={`unit_${u.product_id}`}
+              label={t('force_close_unit_returned_label', { defaultValue: '{{product}} returned (if known)', product: u.product_name })}
+              initialValue={0}
+            >
+              <InputNumber style={{ width: '100%' }} min={0} />
+            </Form.Item>
+          ))}
           <Form.Item name="reason" label={t('reason_label', { defaultValue: 'Reason (required)' })} rules={[{ required: true, message: t('reason_required_msg', { defaultValue: 'Please enter a reason' }) }]}>
             <Input.TextArea rows={3} placeholder={t('reason_placeholder', { defaultValue: 'Why is this session being force-closed?' })} />
           </Form.Item>
@@ -1573,14 +1725,25 @@ const BottleTracking = () => {
               confirmedFull: resolveTarget.confirmed_full ?? '—',
               confirmedEmpty: resolveTarget.confirmed_empty ?? '—',
             })}
+            {(resolveTarget.units || []).map((u) => (
+              <span key={u.product_id} style={{ display: 'block' }}>{transferUnitSummary(t, u)}</span>
+            ))}
           </p>
         )}
         <Form
           form={resolveForm}
           layout="vertical"
-          onFinish={({ resolvedFull, resolvedEmpty, resolutionNotes }) => resolveTransferMutation.mutate({
+          onFinish={({ resolvedFull, resolvedEmpty, resolutionNotes, ...rest }) => resolveTransferMutation.mutate({
             transferId: resolveTarget.id,
-            data: { resolvedFull, resolvedEmpty, resolutionNotes },
+            data: {
+              resolvedFull,
+              resolvedEmpty,
+              resolvedUnits: (resolveTarget.units || []).map((u) => ({
+                productId: u.product_id,
+                quantity: rest[`resolved_unit_${u.product_id}`],
+              })),
+              resolutionNotes,
+            },
           })}
         >
           <Form.Item name="resolvedFull" label={t('resolved_full_label', { defaultValue: 'Resolved Full' })} rules={[{ required: true }]}>
@@ -1589,6 +1752,16 @@ const BottleTracking = () => {
           <Form.Item name="resolvedEmpty" label={t('resolved_empty_label', { defaultValue: 'Resolved Empty' })} rules={[{ required: true }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
           </Form.Item>
+          {(resolveTarget?.units || []).map((u) => (
+            <Form.Item
+              key={u.product_id}
+              name={`resolved_unit_${u.product_id}`}
+              label={t('resolved_unit_label', { defaultValue: 'Resolved {{product}}', product: u.product_name })}
+              rules={[{ required: true }]}
+            >
+              <InputNumber style={{ width: '100%' }} min={0} />
+            </Form.Item>
+          ))}
           <Form.Item name="resolutionNotes" label={t('resolution_notes_label', { defaultValue: 'Resolution Notes (required)' })} rules={[{ required: true, message: t('resolution_notes_required_msg', { defaultValue: 'Please explain the resolution' }) }]}>
             <Input.TextArea rows={3} />
           </Form.Item>

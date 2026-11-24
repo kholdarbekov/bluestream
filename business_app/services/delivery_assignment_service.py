@@ -143,23 +143,23 @@ class DeliveryAssignmentService:
                     error_code="STAFF_DRIVER_COD_BLOCKED",
                 )
 
-        # 7. Bottle binding: the order follows the driver's session only when that session's FREE FULL bottles
-        #    (full on board minus the stops already under way, this delivery excluded) cover the load.
+        # 7. Trip binding: the order follows the driver's trip only when the trip's FREE figures (on board minus the
+        #    stops already under way, this delivery excluded) cover EVERY line of it: the 18.9 L bottles and each
+        #    counted unit product.
         #
-        #    require_session=True  (bot accept, auto-assign -- never an admin path): session missing →
-        #    BOTTLE_SESSION_REQUIRED; free full short of the need → BOTTLE_SESSION_CAPACITY_EXCEEDED.
+        #    require_session=True  (bot accept, auto-assign -- never an admin path): no trip →
+        #    BOTTLE_SESSION_REQUIRED (whatever the strict flag); a line short → BOTTLE_SESSION_CAPACITY_EXCEEDED.
         #
-        #    require_session=False (admin assign / reassign / dispatch move / bulk): never refuses on bottles.
-        #    It binds when a session exists AND free full covers the need. Otherwise a binding the order
-        #    holds to some other session than the new driver's is dropped: the load it was counted against
-        #    is no longer the one on this order's truck. The progress-time guard late-binds later.
+        #    require_session=False (admin assign / reassign / dispatch move / bulk): never refuses on the trip.
+        #    It binds when a trip exists AND every line is covered. Otherwise a binding the order holds to some
+        #    other trip than the new driver's is dropped: the load it was counted against is no longer the one on
+        #    this order's truck. The progress-time guard late-binds later.
         #    A finished order (delivered/cancelled/returned) keeps its binding untouched: it is the closed trip's
         #    historical tally, and reassigning the delivery record must not rewrite it.
         if order and not BottleTrackingService.order_binding_is_historical(order):
             bottle_svc = BottleTrackingService()
-            bottles_needed = bottle_svc.calculate_bottles_for_order(order)
-            if bottles_needed > 0:
-                needed = int(bottles_needed)
+            trip_units = bottle_svc.trip_units_for_order(order)
+            if trip_units.any:
                 session = bottle_svc.get_effective_session(driver_user_id)
                 if require_session:
                     if session is None:
@@ -168,13 +168,13 @@ class DeliveryAssignmentService:
                             "Please start your own session or join a colleague's.",
                             error_code="BOTTLE_SESSION_REQUIRED",
                         )
-                    bottle_svc.assert_delivery_within_session_capacity(
-                        session, needed, exclude_delivery_id=delivery.id
+                    bottle_svc.assert_order_within_session_capacity(
+                        session, trip_units, exclude_delivery_id=delivery.id
                     )  # raises CAPACITY_EXCEEDED
                     covered = True
                 else:
-                    covered = session is not None and needed <= bottle_svc.free_full_bottles_for_session(
-                        session, exclude_delivery_id=delivery.id
+                    covered = session is not None and not bottle_svc.trip_shortfall(
+                        session, trip_units, exclude_delivery_id=delivery.id
                     )
                 if covered:
                     bottle_svc.rebind_order_to_session(order.id, session.id, accepted_by_driver_id=driver_user_id)

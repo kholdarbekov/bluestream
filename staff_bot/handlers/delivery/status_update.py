@@ -1372,13 +1372,13 @@ class StatusUpdateHandler(BaseHandler):
                 count = int(text)
             except (TypeError, ValueError):
                 await update.message.reply_text(
-                    i18n.get('staff.delivery.invalid_bottle_count', language)
+                    i18n.get('staff.delivery.invalid_count_zero_ok', language)
                 )
                 return BOTTLE_RETURN_INPUT
 
             if count < 0:
                 await update.message.reply_text(
-                    i18n.get('staff.delivery.invalid_bottle_count', language)
+                    i18n.get('staff.delivery.invalid_count_zero_ok', language)
                 )
                 return BOTTLE_RETURN_INPUT
 

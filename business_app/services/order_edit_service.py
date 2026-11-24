@@ -16,25 +16,31 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from flask import current_app
 from sqlalchemy.orm import joinedload
 
 from business_app import db
-from business_app.models.bottle import BottleLedger, DriverBottleSession, DriverBottleSessionOrder
+from business_app.models.bottle import (
+    BottleLedger,
+    DriverBottleSession,
+    DriverBottleSessionOrder,
+    DriverBottleSessionUnit,
+)
 from business_app.models.order import Order, OrderEditHistory, OrderItem
 from business_app.models.payment import Payment
 from business_app.models.product import Product
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.corporate_contract_service import CorporateContractService
-from business_app.services.inventory_service import InventoryService
+from business_app.services.inventory_service import PRODUCT_ROW_LOCK, InventoryService
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.line_money import LineMoney, line_money
 from business_app.utils.order_totals import compute_order_total
 from business_app.utils.payment_projection import has_open_receivable
+from business_app.utils.timezone_utils import ensure_utc
 from business_app.utils.transactions import atomic_transaction
 from shared.enums import (
     BottleLedgerEventType,
@@ -150,6 +156,28 @@ class OrderEditResult:
     post_commit_dispatch: List[Tuple[str, Tuple, Dict]] = field(default_factory=list)
 
 
+class TripEffect(NamedTuple):
+    """What an edit changes on the trip its order is bound to (`OrderEditService._trip_effect`): 18.9 L bottles and
+    one-way units ({product_id: delta}). The preview shows it and the apply books it, so the two never disagree."""
+
+    session: Optional[DriverBottleSession]
+    bottles: Decimal
+    units: Dict[int, int]
+
+    @property
+    def any(self) -> bool:
+        return self.bottles != 0 or any(v != 0 for v in self.units.values())
+
+    @property
+    def reopens(self) -> bool:
+        """The edit reopens the trip: it changes something on it, and the trip is closed."""
+        return (
+            self.any
+            and self.session is not None
+            and self.session.status in (DriverBottleSessionStatus.CLOSED, DriverBottleSessionStatus.FORCE_CLOSED)
+        )
+
+
 # -------------------------------------------------------------------------
 # Service
 # -------------------------------------------------------------------------
@@ -247,6 +275,7 @@ class OrderEditService:
         result_holder: Dict[str, Any] = {}
 
         with atomic_transaction():
+            self._lock_bound_driver(order_id)
             order = self._load_order(order_id, for_update=True)
             plan = self._build_plan(order, items)
             if plan.blocking_reasons:
@@ -332,6 +361,32 @@ class OrderEditService:
     # ---------------------------------------------------------------------
     # Plan construction (validation + diff)
     # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _lock_bound_driver(order_id: int) -> None:
+        """The apply's first lock: the DeliveryPerson row of the driver whose trip a post-delivery edit of this order
+        may reopen, before the Order row (spec 2026-11-18 lock order: DeliveryPerson -> Order -> product -> trip).
+
+        A reopen makes the trip his open trip again once `reopen_conflict` has found him on no other trip. His own open
+        (Load) and his join of another driver's trip queue on that row, so neither can slip between that check and the
+        reopen: whichever comes second waits for the first and is refused for it. Only a delivered order's binding is
+        followed (an edit before delivery never touches the trip), read before any lock: a delivered order's binding
+        no longer moves. A no-op on SQLite.
+
+        FOR KEY SHARE (`key_share=True`): his open and his join take the row FOR UPDATE, so they still queue on it,
+        while a plain UPDATE of the row does not. A debt payment he records and a cancel of one of his stops write his
+        counters after locking the customer's open debts, which include this order's payment, written here later
+        (`_recompute_totals`); FOR UPDATE here made each wait for the edit while the edit waited for it (40P01).
+        """
+        driver_user_id = (
+            db.session.query(DriverBottleSession.driver_user_id)
+            .join(DriverBottleSessionOrder, DriverBottleSessionOrder.session_id == DriverBottleSession.id)
+            .join(Order, Order.id == DriverBottleSessionOrder.order_id)
+            .filter(DriverBottleSessionOrder.order_id == order_id, Order.status == OrderStatus.DELIVERED)
+            .scalar()
+        )
+        if driver_user_id is not None:
+            BottleTrackingService._lock_delivery_persons([driver_user_id], key_share=True)
 
     def _load_order(self, order_id: int, *, for_update: bool = False) -> Order:
         query = Order.query.options(
@@ -724,6 +779,93 @@ class OrderEditService:
 
         return delivered_at_utc(order)
 
+    @staticmethod
+    def _bottle_skip_reason(order: Order) -> Optional[str]:
+        """Why an edit of this order books nothing on bottles (the customer's balance, the trip), or None.
+
+        Before delivery the Delivered books the order's quantities as they are then, so an edit now would count its
+        delta twice. With no address there is nothing to book, as at the Delivered (`_record_delivery_bottles`).
+        """
+        if not order.delivery_address_id:
+            return "no_address"
+        if order.status != OrderStatus.DELIVERED:
+            return "not_delivered"
+        return None
+
+    def _trip_effect(self, order: Order, plan: OrderEditPlan, *, lock: bool = False) -> TripEffect:
+        """What this edit changes on the trip the order is bound to: THE reader of the preview and the apply.
+
+        Nothing without a bound trip or when the edit books no bottles (`_bottle_skip_reason`). A trip counts a product
+        exactly when it has a line for it (spec 2026-11-18 §6.2), so a unit delta follows the trip's line, not today's
+        product setting: a product the bound trip had a line for when the order was delivered (the line made at or
+        before the delivery, `_lines_at_delivery`) is corrected on that line, whatever the setting says now (the office
+        may have unticked it since; the setting only decides which lines new trips get), and is left out of the bottle
+        sum. Every other line goes through the one bottle sum (`trip_units_for_lines`): its 18.9 L bottles count, and a
+        unit it counts today was never on this trip's line, so it is none of this trip's business. With no delivery
+        time that cannot be told, so no line counts and the unit part is skipped and logged.
+
+        `lock` (the apply): when the edit changes something on the trip, the trip's row is locked and re-read
+        (`_lock_session`) before its status decides `reopens`. A driver's close (or an office force-close) that
+        committed while this waited is then seen, so the tally never lands on a trip sealed after the status was read
+        without its reopen; a trip another edit reopened meanwhile is seen open and tallied, not reopened twice. Lock
+        order: the caller holds the Order, product, bottle-scope and balance rows (its ledger loop), so the trip row
+        comes last, as at a Delivered (balance -> trip). The preview reads the trip without a lock.
+        """
+        binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+        session = DriverBottleSession.query.get(binding.session_id) if binding is not None else None
+        if session is None or self._bottle_skip_reason(order) is not None:
+            return TripEffect(session, Decimal("0.00"), {})
+        delivered_at = order.delivery.delivered_at if order.delivery is not None else None
+        on_lines = self._lines_at_delivery(session, delivered_at)
+        units: Dict[int, int] = {}
+        rest = []
+        for change in plan.item_changes:
+            if change.product is not None and change.product.id in on_lines:
+                units[change.product.id] = units.get(change.product.id, 0) + int(change.delta)
+            else:
+                rest.append((change.product, change.delta))
+        moved = BottleTrackingService.trip_units_for_lines(rest)
+        if moved.units and delivered_at is None:
+            logger.warning(
+                "[BOTTLE] order=%s has no delivery time; units %s not put on trip=%s", order.id, moved.units, session.id
+            )
+        effect = TripEffect(session, moved.bottles, {product_id: n for product_id, n in units.items() if n != 0})
+        if lock and effect.any:
+            effect = effect._replace(session=BottleTrackingService._lock_session(session.id))
+        return effect
+
+    @staticmethod
+    def _lines_at_delivery(session: DriverBottleSession, delivered_at: Optional[datetime]) -> Set[int]:
+        """The products `session` had a line for when the order was delivered (line made at or before
+        `delivered_at`): what that trip counted the order's units on. Empty without a delivery time."""
+        if delivered_at is None:
+            return set()
+        lines = DriverBottleSessionUnit.query.filter(DriverBottleSessionUnit.session_id == session.id)
+        return {line.product_id for line in lines if ensure_utc(line.created_at) <= ensure_utc(delivered_at)}
+
+    def _trip_effect_summary(self, effect: TripEffect, plan: OrderEditPlan) -> Dict[str, Any]:
+        """The trip effect as the Orders page reads it (`cascade_summary.trip_effect`), for the preview and the apply.
+
+        Products are named only for the units the effect moves: each came from a change whose product row was read
+        (`trip_units_for_lines` skips a line with none), so a line whose product row is gone is never asked its name.
+        A refusal to reopen is shown, never added to `blocking_reasons`: the apply answers it with its own 409 and code.
+        """
+        names = {
+            change.product.id: change.product.name
+            for change in plan.item_changes
+            if change.product is not None and change.product.id in effect.units
+        }
+        return {
+            "session_id": effect.session.id if effect.session is not None else None,
+            "bottles": float(effect.bottles),
+            "units": [
+                {"product_id": product_id, "product_name": names[product_id], "delta": delta}
+                for product_id, delta in sorted(effect.units.items())
+            ],
+            "reopens": effect.reopens,
+            "reopen_refusal": self.bottle_service.reopen_conflict(effect.session) if effect.reopens else None,
+        }
+
     def _compute_cascade_preview(self, order: Order, plan: OrderEditPlan) -> Dict[str, Any]:
         """Project per-cascade impacts for the preview screen — read-only."""
         total_delta = Decimal(str(plan.totals_after["total_amount"])) - Decimal(str(plan.totals_before["total_amount"]))
@@ -774,12 +916,12 @@ class OrderEditService:
             "diff": old_earned - new_earned_estimate,
         }
 
-        # Bottle / session side — only meaningful once the order is DELIVERED.
-        # Pre-delivery edits make no balance change (the delivery flow credits
-        # the live quantity), so the preview must show no bottle impact either.
+        # Bottle side — only meaningful once the order is DELIVERED, to an
+        # address (`_bottle_skip_reason`, the apply's gate too). Pre-delivery
+        # edits make no balance change (the delivery flow credits the live
+        # quantity), so the preview must show no bottle impact either.
         bottle_changes: List[Dict[str, Any]] = []
-        affected_session_id: Optional[int] = None
-        if order.status == OrderStatus.DELIVERED:
+        if self._bottle_skip_reason(order) is None:
             for change in plan.item_changes:
                 # Through the SSOT, not `returnable_bottles_per_unit` alone.
                 # Reading the number by itself meant a product turned off via
@@ -797,10 +939,9 @@ class OrderEditService:
                         "delta_bottles": float(delta_bottles),
                     }
                 )
-        if bottle_changes:
-            session_binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
-            if session_binding:
-                affected_session_id = session_binding.session_id
+
+        # The driver's trip: what the apply will book on it, from the apply's own reader.
+        trip_effect = self._trip_effect_summary(self._trip_effect(order, plan), plan)
 
         # Corporate side (only meaningful for users with contracts)
         corporate_summary: Dict[str, Any] = {}
@@ -813,10 +954,8 @@ class OrderEditService:
         return {
             "payment": payment_summary,
             "loyalty": loyalty_summary,
-            "bottle_balance": {
-                "changes": bottle_changes,
-                "affected_session_id": affected_session_id,
-            },
+            "bottle_balance": {"changes": bottle_changes},
+            "trip_effect": trip_effect,
             "corporate": corporate_summary,
             "session_reopened": {},  # populated during apply
         }
@@ -914,13 +1053,19 @@ class OrderEditService:
         # commit) to stay inside the orchestrator's atomic boundary. Stock
         # delta is applied directly with row-level lock; the audit row is the
         # OrderEditHistory we write at the end of the transaction.
+        #
+        # Product rows before the trip row (spec 2026-11-18 §6.2): every changed product's row is locked here, in one
+        # statement by id, and re-read, so the stock below is what the last writer committed (a Delivered that took
+        # this product's stock while the edit waited included). The loop keeps the same mode, so nothing upgrades a
+        # product lock between these and the trip's.
+        InventoryService.lock_product_rows(change.product_id for change in plan.item_changes if change.delta != 0)
         for change in plan.item_changes:
             if change.delta == 0:
                 continue
             product = (
-                Product.query.with_for_update().get(change.product_id)
+                Product.query.with_for_update(**PRODUCT_ROW_LOCK).get(change.product_id)
                 if change.product is None
-                else Product.query.with_for_update().get(change.product.id)
+                else Product.query.with_for_update(**PRODUCT_ROW_LOCK).get(change.product.id)
             )
             if product is None:
                 raise ValidationError(f"product_not_found during inventory adjust: id={change.product_id}")
@@ -1053,31 +1198,26 @@ class OrderEditService:
         return target
 
     def _cascade_bottle(self, order: Order, plan: OrderEditPlan, actor_user_id: int) -> None:
-        """Apply forward-dated customer-balance adjustments + session re-tally.
+        """Apply forward-dated customer-balance adjustments + the trip's re-tally.
 
         For each product that affects bottle count and has a non-zero delta:
-          1. Compute bottle delta = returnable_bottles_per_unit × qty_delta.
+          1. Compute bottle delta = `Product.returnable_bottles_for(qty_delta)`.
           2. Write a BottleLedger ADMIN_ADJUSTMENT entry for the customer.
-          3. If a DriverBottleSession is bound to this order:
-               - If CLOSED/FORCE_CLOSED, reopen via BottleTrackingService.reopen_session.
-               - Bump session.bottles_delivered by the bottle delta.
-        The session is then ready for the driver to re-close and admin to verify.
+        Then the trip the order is bound to, by what the edit changes on it (`_trip_effect`, the preview's reader):
+        a CLOSED/FORCE_CLOSED trip is reopened (BottleTrackingService.reopen_session), and its 18.9 L and unit lines'
+        Delivered tallies are added to, both only when that change is not zero. The trip is then ready for the driver
+        to re-close and admin to verify. An edit that changes nothing on the trip neither reopens it nor is refused.
         """
-        if not order.delivery_address_id:
-            plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": "no_address"}
-            return
-
-        # The customer's bottle balance must only move when the order is
-        # actually DELIVERED. For pre-delivery edits (PENDING/CONFIRMED/
+        # The customer's bottle balance and the trip must only move when the
+        # order is actually DELIVERED. For pre-delivery edits (PENDING/CONFIRMED/
         # PREPARING/OUT_FOR_DELIVERY) the delivery flow
         # (OrderService._handle_status_change_actions → record_bottles_delivered)
         # credits calculate_bottles_for_order(order), which reads the *live*
         # (already-edited) item quantities. Adjusting here would double-count
-        # the delta. The session re-tally below was already guarded on this
-        # condition (see comment further down); the customer-balance write must
-        # share the same gate.
-        if order.status != OrderStatus.DELIVERED:
-            plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": "not_delivered"}
+        # the delta.
+        skipped = self._bottle_skip_reason(order)
+        if skipped is not None:
+            plan.cascade_summary["bottle"] = {"adjustments": [], "skipped": skipped}
             return
 
         # RUNG 1 of the bottle ladder, taken HERE — at the start of the bottle
@@ -1113,26 +1253,6 @@ class OrderEditService:
         forwarding_audit = target.audit() if target is not None else {}
 
         adjustments: List[Dict[str, Any]] = []
-        affected_session_id: Optional[int] = None
-        session_reopened = False
-
-        reopened_driver_user_id: Optional[int] = None
-        binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
-        if binding is not None:
-            affected_session_id = binding.session_id
-            session = DriverBottleSession.query.get(binding.session_id)
-            if session is not None and session.status in {
-                DriverBottleSessionStatus.CLOSED,
-                DriverBottleSessionStatus.FORCE_CLOSED,
-            }:
-                self.bottle_service.reopen_session(
-                    session_id=session.id,
-                    actor_user_id=actor_user_id,
-                    reason=f"Order #{order.id} edit cascade",
-                    commit=False,
-                )
-                session_reopened = True
-                reopened_driver_user_id = session.driver_user_id
 
         for change in plan.item_changes:
             # Same SSOT as the preview above and as the delivery-time booking,
@@ -1174,18 +1294,6 @@ class OrderEditService:
                 logger.exception("Bottle adjust failed for order edit")
                 raise ValidationError(f"Bottle adjust failed for product {change.product_id}: {exc}") from exc
 
-            # Re-tally session only when the order is already delivered.
-            # For undelivered orders the delivery flow will credit the full
-            # quantity when it actually runs; bumping the tally here would
-            # cause the delta to be counted twice (once now, once at delivery).
-            if affected_session_id is not None and order.status == OrderStatus.DELIVERED:
-                session = DriverBottleSession.query.get(affected_session_id)
-                if session is not None:
-                    # bottle_delta > 0  → more bottles delivered to customer
-                    # bottle_delta < 0  → fewer bottles delivered (some come back); the tally never goes below 0.
-                    # Added in SQL, like every Delivered: the trip may be taking a crew member's delivery right now.
-                    self.bottle_service.add_to_session_tallies(session, delivered=int(bottle_delta))
-
             adjustments.append(
                 {
                     "product_id": change.product_id,
@@ -1194,20 +1302,50 @@ class OrderEditService:
                 }
             )
 
+        # The trip, after the customer's ledger: its row is locked here, when the edit changes it, after the balance
+        # row the ledger loop locked, as a Delivered goes (balance -> trip; the other way round the two deadlocked).
+        # What the apply does to the trip is decided on that locked read; the plan's copy was read before the lock.
+        # `reopen_session` refuses (409 BOTTLE_SESSION_ACTIVE_CONFLICT) while the driver is on another trip, the
+        # preview's `reopen_refusal`.
+        effect = self._trip_effect(order, plan, lock=True)
+        plan.cascade_summary["trip_effect"] = self._trip_effect_summary(effect, plan)
+        session = effect.session
+        if effect.reopens:
+            self.bottle_service.reopen_session(
+                session_id=session.id,
+                actor_user_id=actor_user_id,
+                reason=f"Order #{order.id} edit cascade",
+                commit=False,
+            )
+            plan.cascade_summary["session_reopened"]["bottle_session_id"] = session.id
+            plan.cascade_summary["session_reopened"]["bottle_driver_user_id"] = session.driver_user_id
+        if effect.any:
+            # One tally of the whole effect: a negative delta gives bottles or units back (never below 0). Added in
+            # SQL, like every Delivered: the trip may be taking a crew member's delivery right now.
+            self.bottle_service.add_to_session_tallies(session, delivered=int(effect.bottles), units=effect.units)
+
         plan.cascade_summary["bottle"] = {
             "adjustments": adjustments,
-            "affected_session_id": affected_session_id,
+            "affected_session_id": session.id if session is not None else None,
         }
-        if session_reopened and affected_session_id is not None:
-            plan.cascade_summary["session_reopened"]["bottle_session_id"] = affected_session_id
-            if reopened_driver_user_id is not None:
-                plan.cascade_summary["session_reopened"]["bottle_driver_user_id"] = reopened_driver_user_id
 
         # Also reopen the driver's CASH session if closed AND this is a
         # delivered cash order whose total changed — the cash collection
         # event for the prepayment refund (cascade_cash) writes into the
         # session. We handle the actual reopen + audit there to keep the
         # responsibility per-cascade.
+
+    @staticmethod
+    def _edit_number(order: Order) -> int:
+        """Which history row of the order this apply writes at its end: the n-th. It names the apply in its refund
+        credit's idempotency key, so a second edit that lowers the order by the same amount books its own credit (a
+        key of order and amount handed it the first edit's), while the same apply always computes the same key.
+
+        Counted under the order row lock every apply takes before it plans, so the previous apply's row is committed
+        and counted; history rows are only ever added (an address change adds one too), so no later apply of this
+        order gets the same number.
+        """
+        return OrderEditHistory.query.filter_by(order_id=order.id).count() + 1
 
     def _cascade_cash(self, order: Order, plan: OrderEditPlan, actor_user_id: int) -> None:
         """Apply cash-side changes for a paid order whose total changed.
@@ -1278,7 +1416,7 @@ class OrderEditService:
                         "payment_id": order.payment.id if order.payment else None,
                         "order_id": order.id,
                     },
-                    idempotency_key=f"order_edit_refund:{order.id}:{refund_amount}",
+                    idempotency_key=f"order_edit_refund:{order.id}:edit:{self._edit_number(order)}",
                     commit=False,
                 )
             except Exception as exc:
@@ -1395,6 +1533,24 @@ class OrderEditService:
         }
         plan.cascade_summary["loyalty"] = loyalty_summary
 
+    @staticmethod
+    def _lock_payment_to_write(payment: Payment) -> Payment:
+        """Re-read the edited order's payment under its row lock, where `_recompute_totals` writes it.
+
+        `_load_order` read the payment in the statement that locked the order row, and that statement may have
+        waited: a debt payment allocated to this order holds the order row (its allocation's foreign-key check takes
+        FOR KEY SHARE) until it commits. The statement then returns the payment as it was before that commit, so a
+        figure computed from it re-bills what the driver just collected. `populate_existing` makes the lock refresh
+        the object the order already holds. Taken only when the edit re-prices the payment (an unpaid order whose
+        total changed, a paid one whose new total exceeds what was collected), where that UPDATE took the row's lock,
+        so the edit's lock order is unchanged (payment last) and an edit that leaves the row alone locks nothing new.
+        FOR NO KEY UPDATE (`key_share=True`), the mode that UPDATE takes: a plain FOR UPDATE would also block the
+        foreign-key checks of rows inserted under this payment (allocations, transactions, fiscalizations).
+        """
+        return (
+            Payment.query.filter_by(id=payment.id).with_for_update(of=Payment, key_share=True).populate_existing().one()
+        )
+
     def _recompute_totals(self, order: Order, plan: OrderEditPlan, actor_user_id: int) -> None:
         """Recompute order.subtotal and total_amount from current items.
 
@@ -1417,8 +1573,16 @@ class OrderEditService:
             return
 
         new_total = Decimal(str(order.total_amount or 0))
-        collected = Decimal(str(payment.amount_collected or 0))
         is_paid = bool(order.is_paid)
+        # The branch that re-prices the payment below writes its row: read it again, fresh, under that write's lock.
+        reprices = (
+            new_total > Decimal(str(payment.amount_collected or 0))
+            if is_paid
+            else new_total != Decimal(str(payment.amount or 0))
+        )
+        if reprices:
+            payment = self._lock_payment_to_write(payment)
+        collected = Decimal(str(payment.amount_collected or 0))
 
         # Unpaid (PENDING / CONFIRMED before payment): payment hasn't been
         # collected yet, so we can freely re-price the row to the new total.

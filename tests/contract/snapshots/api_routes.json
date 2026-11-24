@@ -3991,25 +3991,11 @@
     "rule": "/api/v1/staff/bottles/fine"
   },
   {
-    "endpoint": "staff.record_bottles_loaded",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/staff/bottles/load"
-  },
-  {
     "endpoint": "staff.get_my_bottle_accountability",
     "methods": [
       "GET"
     ],
     "rule": "/api/v1/staff/bottles/my-accountability"
-  },
-  {
-    "endpoint": "staff.record_bottles_returned_to_warehouse",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/staff/bottles/return-to-warehouse"
   },
   {
     "endpoint": "staff.close_bottle_session",
@@ -4061,6 +4047,13 @@
     "rule": "/api/v1/staff/bottles/session/leave"
   },
   {
+    "endpoint": "staff.get_bottle_load_screen",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/session/load-screen"
+  },
+  {
     "endpoint": "staff.get_current_session_membership",
     "methods": [
       "GET"
@@ -4108,6 +4101,13 @@
       "POST"
     ],
     "rule": "/api/v1/staff/bottles/transfers/<int:transfer_id>/confirm"
+  },
+  {
+    "endpoint": "staff.reject_bottle_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/transfers/<int:transfer_id>/reject"
   },
   {
     "endpoint": "staff.get_pending_bottle_transfers",

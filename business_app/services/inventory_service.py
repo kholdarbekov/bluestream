@@ -4,7 +4,7 @@ Provides proper inventory checks, reservations, and audit logging
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, Iterable, List, Any, Optional
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from enum import Enum
@@ -12,12 +12,20 @@ from enum import Enum
 
 from business_app import db
 from business_app.models.product import Product
-from business_app.models.order import Order
+from business_app.models.order import Order, OrderItem
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+from shared.enums import PaymentMethod
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
+
+# How a product's row is locked on the bottle-trip paths (`with_for_update` flags): FOR NO KEY UPDATE. Product writers
+# (the admin save of the trip setting, a Delivered's or an order edit's stock step) still queue behind one another. A
+# trip-line or transfer-line insert made under the trips-table or trip lock only takes FOR KEY SHARE on the product
+# (its foreign-key check), and that never waits on this lock. FOR UPDATE would deadlock the setting save (product row,
+# then the trips table) against a trip open (trips table, then a trip line's foreign-key check on the product).
+PRODUCT_ROW_LOCK = {"key_share": True}
 
 
 class InventoryOperationType(Enum):
@@ -421,6 +429,43 @@ class InventoryService:
         )
         return {"success": True, "extended_products": extended, "lapsed_products": lapsed}
 
+    @staticmethod
+    def lock_product_rows(product_ids: Iterable[int]) -> Dict[int, Product]:
+        """Lock these products' rows and re-read them: `{product id: Product}`.
+
+        How a bottle-trip path takes product rows (spec 2026-11-18 §6.2): before any trip row, never after it, in one
+        statement ordered by id, so two such paths cannot take them in crossing order. `PRODUCT_ROW_LOCK`, the mode
+        every trip path uses, so a later lock on a row held here re-requests what this transaction already holds.
+        `populate_existing` because the rows are usually loaded before the lock: the stock read after it is what the
+        last writer committed.
+        """
+        ids = sorted(set(product_ids))
+        if not ids:
+            return {}
+        products = (
+            Product.query.filter(Product.id.in_(ids))
+            .order_by(Product.id)
+            .with_for_update(**PRODUCT_ROW_LOCK)
+            .populate_existing()
+            .all()
+        )
+        return {product.id: product for product in products}
+
+    @staticmethod
+    def lock_rows_for_delivered(order: Order) -> None:
+        """Lock the product rows a Delivered takes the stock from, before it books any bottle.
+
+        Only a cash order's stock is taken at Delivered (`confirm_reservations`, after the trip tally); any other
+        order's was taken at CONFIRMED, so nothing is locked for it. Called right after the Order-row claim, so a
+        Delivered goes Order -> product -> trip, as an order edit does. The lines are read from the database, not from
+        the loaded order: an edit may have committed after it was loaded, and these must be the rows
+        `confirm_reservations` reaches once the Delivered has re-read the lines.
+        """
+        if order.payment_method != PaymentMethod.CASH:
+            return
+        line_products = db.session.query(OrderItem.product_id).filter(OrderItem.order_id == order.id)
+        InventoryService.lock_product_rows(product_id for (product_id,) in line_products)
+
     def confirm_reservations(self, order_id: int) -> Dict[str, Any]:
         """
         Confirm reservations by actually reducing stock quantities
@@ -438,11 +483,17 @@ class InventoryService:
 
             confirmed_items = []
 
+            # Every row the order takes stock from, locked before any is written: one statement in product-id order
+            # (`lock_product_rows`), so two confirmations whose orders list the same products in opposite order cannot
+            # each hold one row and wait for the other's. In the trip paths' mode: a cash Delivered locked these rows
+            # before its trip tally (`lock_rows_for_delivered`), and FOR UPDATE here would upgrade that lock after
+            # the trip row. Re-read under the lock, so each decrement starts from the last committed stock.
+            products = self.lock_product_rows(item.product_id for item in order.order_items)
+
             # Process inventory updates without explicit transaction management
             # The calling code (payment processing) manages the transaction
             for item in order.order_items:
-                # Lock the product row for update
-                product = db.session.query(Product).with_for_update().filter_by(id=item.product_id).first()
+                product = products.get(item.product_id)
 
                 if not product:
                     logger.error(f"Product {item.product_id} not found during confirmation")

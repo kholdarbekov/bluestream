@@ -198,3 +198,29 @@ async def test_a_re_activated_account_that_logs_in_again_is_not_told_the_old_rea
     seen = seen_by(operator)
     assert ACCOUNT_DEACTIVATED not in seen, seen
     assert SESSION_EXPIRED in seen, seen
+
+
+# ---------------------------------------------------------------------------
+# A bottle transfer's push outlives the deploy too
+# ---------------------------------------------------------------------------
+
+
+async def test_a_reject_tap_on_a_transfer_push_recovers_the_session_after_a_deploy(monkeypatch):
+    """The receiver's "📥 … sent you" push sits in the chat across a deploy. Its Reject is a global inline
+    button behind `@require_auth`, so it must recover the session like every other tap and still ask its one
+    question, rejecting nothing yet."""
+    from tests.staff_bot import test_staff_bottle_flows_dispatcher as bottles
+
+    harness = await bottles.build_driver(monkeypatch)
+    bottles.pending_inbox(harness, bottles.recorded_transfer(full=5, empty=2, sender_name="Aziz"))
+    driver_updates, _labels = await bottles.sign_in(harness)
+    restart(harness)
+
+    await harness.send(driver_updates.tap(f"staff_transfer_reject_{bottles.TRANSFER_ID}"))
+
+    assert SESSION_EXPIRED not in seen_by(harness), seen_by(harness)
+    assert bottles.user_data(harness).get("authenticated"), "the session was never re-established"
+    assert harness.telegram.last_shown().text == bottles._curated("staff.delivery.transfer_reject_confirm").format(
+        sender="Aziz"
+    )
+    assert not bottles.backend_calls(harness, "POST", bottles.TRANSFER_REJECT)

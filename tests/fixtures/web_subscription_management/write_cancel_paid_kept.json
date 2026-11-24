@@ -202,6 +202,7 @@
            "updated_at": "<wall-clock>"
           },
           "category_id": 1,
+          "counted_on_bottle_trip": false,
           "created_at": "<wall-clock>",
           "current_price": 15000.0,
           "description": "Premium pure water in 19L bottle",
@@ -717,6 +718,7 @@
            "updated_at": "<wall-clock>"
           },
           "category_id": 1,
+          "counted_on_bottle_trip": false,
           "created_at": "<wall-clock>",
           "current_price": 15000.0,
           "description": "Premium pure water in 19L bottle",

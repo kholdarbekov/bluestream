@@ -341,7 +341,7 @@ async def test_an_old_button_of_the_cancelled_stop_is_refused_after_the_card_was
 
 async def test_another_conversation_keeps_its_draft_when_the_stop_is_cancelled(monkeypatch):
     """A push is not a driver gesture. The driver is at the cancelled stop's cash prompt and has
-    also opened "Different count" on a bottle transfer. The cancel clears the stop's own at-door
+    also opened "Enter other numbers" on a bottle transfer. The cancel clears the stop's own at-door
     flow only: the transfer draft survives, and the two counts the driver types next (full
     bottles, then empties) still confirm the transfer. The active-flow mirror goes: the transfer
     never set it (only the flows in `flow_state.ACTIVE_FLOW_MARKER_KEYS` do), so nothing is left
@@ -349,6 +349,14 @@ async def test_another_conversation_keeps_its_draft_when_the_stop_is_cancelled(m
     async with _driver_hook(monkeypatch) as (harness, post):
         driver, _card_id = await _at_the_door(harness, CANCELLED)
         confirmed = []
+        # The count reads the transfer's lines from the inbox before it asks the first number.
+        harness.backend.route("GET", "/api/v1/staff/bottles/transfers/pending", lambda _call: [{
+            "id": 77, "sender_name": "Bek", "declared_quantity": 5, "declared_empty_quantity": 1,
+            "lines": [
+                {"kind": "full", "product_id": None, "product_name": None, "declared": 5, "confirmed": None},
+                {"kind": "empty", "product_id": None, "product_name": None, "declared": 1, "confirmed": None},
+            ],
+        }])
         harness.backend.route(
             "POST", "/api/v1/staff/bottles/transfers/77/confirm",
             lambda call: confirmed.append(call.data) or {"status": "confirmed", "declared_quantity": 5},

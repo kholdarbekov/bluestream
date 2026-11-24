@@ -27,6 +27,22 @@ UI_BOTTLE_TRACKING_CATEGORY = "ui_bottle_tracking"
 
 UI_BOTTLE_TRACKING_TRANSLATIONS = {
     "en": {
+        "transfer_status_rejected": "Rejected",
+        "rejected_at": "Rejected at",
+        "unit_loaded": "{{product}} loaded",
+        "unit_delivered": "{{product}} delivered",
+        "unit_on_board": "{{product}} on board",
+        "unit_returned": "{{product}} returned",
+        "unit_discrepancy": "{{product}} discrepancy",
+        "unit_sent": "Sent",
+        "unit_received": "Received",
+        "resolved_unit_label": "Resolved {{product}}",
+        "force_close_unit_returned_label": "{{product}} returned (if known)",
+        "resolve_receiver_co_driving": "This driver is on {{owner}}'s trip right now. Resolve this transfer after that trip ends.",
+        "transfer_units": "Units",
+        "transfer_unit_summary": "{{product}}: declared {{declared}}, counted {{confirmed}}, resolved {{resolved}}",
+        "line_full": "Full bottles",
+        "line_empty": "Empties",
         "total_bottles_out": "Total Bottles Out",
         # A balances row is a PLACE, not a person: `customers_with_balance` was
         # renamed with its call site (BottleTracking.js:97). Counting customers
@@ -191,6 +207,22 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "event_initial_balance": "Initial Balance",
     },
     "uz": {
+        "transfer_status_rejected": "Rad etilgan",  # NATIVE-READ
+        "rejected_at": "Rad etilgan vaqt",  # NATIVE-READ
+        "unit_loaded": "{{product}} yuklangan",  # NATIVE-READ
+        "unit_delivered": "{{product}} yetkazilgan",  # NATIVE-READ
+        "unit_on_board": "{{product}} mashinada",  # NATIVE-READ
+        "unit_returned": "{{product}} qaytarilgan",  # NATIVE-READ
+        "unit_discrepancy": "{{product}} nomuvofiqlik",  # NATIVE-READ
+        "unit_sent": "Yuborilgan",  # NATIVE-READ
+        "unit_received": "Qabul qilingan",  # NATIVE-READ
+        "resolved_unit_label": "Hal qilingan {{product}}",  # NATIVE-READ
+        "force_close_unit_returned_label": "{{product}} qaytarilgan (agar ma'lum bo'lsa)",  # NATIVE-READ
+        "resolve_receiver_co_driving": "Bu haydovchi hozir {{owner}} reysida. Bu o'tkazmani o'sha reys tugagach hal qiling.",  # NATIVE-READ
+        "transfer_units": "Birliklar",  # NATIVE-READ
+        "transfer_unit_summary": "{{product}}: e'lon qilingan {{declared}}, sanalgan {{confirmed}}, hal qilingan {{resolved}}",  # NATIVE-READ
+        "line_full": "To'la butilkalar",  # NATIVE-READ
+        "line_empty": "Bo'shlar",  # NATIVE-READ
         "total_bottles_out": "Jami chiqarilgan butilkalar",
         "places_with_balance": "Balansga ega joylar",
         "active_fines": "Faol jarimalar",
@@ -336,6 +368,22 @@ UI_BOTTLE_TRACKING_TRANSLATIONS = {
         "event_initial_balance": "Boshlang'ich balans",
     },
     "ru": {
+        "transfer_status_rejected": "Отклонена",  # NATIVE-READ
+        "rejected_at": "Отклонена в",  # NATIVE-READ
+        "unit_loaded": "{{product}} загружено",  # NATIVE-READ
+        "unit_delivered": "{{product}} доставлено",  # NATIVE-READ
+        "unit_on_board": "{{product}} в машине",  # NATIVE-READ
+        "unit_returned": "{{product}} возвращено",  # NATIVE-READ
+        "unit_discrepancy": "{{product}} расхождение",  # NATIVE-READ
+        "unit_sent": "Отправлено",  # NATIVE-READ
+        "unit_received": "Получено",  # NATIVE-READ
+        "resolved_unit_label": "Разрешено {{product}}",  # NATIVE-READ
+        "force_close_unit_returned_label": "{{product}} возвращено (если известно)",  # NATIVE-READ
+        "resolve_receiver_co_driving": "Этот водитель сейчас в рейсе {{owner}}. Разрешите эту передачу после окончания того рейса.",  # NATIVE-READ
+        "transfer_units": "Единицы",  # NATIVE-READ
+        "transfer_unit_summary": "{{product}}: заявлено {{declared}}, подсчитано {{confirmed}}, разрешено {{resolved}}",  # NATIVE-READ
+        "line_full": "Полные бутыли",  # NATIVE-READ
+        "line_empty": "Пустые",  # NATIVE-READ
         "total_bottles_out": "Всего бутылок на руках",
         "places_with_balance": "Места с балансом",
         "active_fines": "Активные штрафы",

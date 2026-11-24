@@ -7,12 +7,15 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import or_, func, desc, literal
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import selectinload
 
 from business_app.models.product import Product, ProductCategory, PriceRule
 from business_app.models.user import User
 from business_app.models.order import Order, OrderItem
-from business_app.utils.exceptions import ValidationError, NotFoundError
+from business_app.services.bottle_tracking_service import BottleTrackingService
+from business_app.services.inventory_service import PRODUCT_ROW_LOCK
+from business_app.utils.exceptions import ConflictError, ValidationError, NotFoundError
 from business_app.utils.service_logging import log_service_call, log_database_query
 from business_app import db
 
@@ -37,6 +40,40 @@ class ProductService:
         self.default_per_page = 20
         self.max_per_page = 100
         self.cache_ttl = 300  # 5 minutes
+
+    @staticmethod
+    def check_product_save(product: Product) -> None:
+        """THE check of an admin product save, run after every field is set and before the first flush (spec 2026-11-18
+        §6.1): a flush resets the attribute history it reads.
+
+        Refuses a returnable bottle counted on the bottle trip (TRIP_UNIT_ON_RETURNABLE), and a change of that setting
+        while any trip is open (TRIP_UNIT_SETTING_BLOCKED, `details.open_trips`). Transfers are never read. On a change
+        it locks the product row, then the trips table in SHARE mode, until the save commits or rolls back.
+        """
+        state = sa_inspect(product)
+        is_new = state.transient or state.pending
+        changed = (
+            bool(product.counted_on_bottle_trip) if is_new else state.attrs.counted_on_bottle_trip.history.has_changes()
+        )
+
+        if product.is_trip_one_way_unit is False and product.counted_on_bottle_trip:
+            raise ValidationError(
+                "A product counted on the bottle trip cannot be a returnable bottle.",
+                error_code="TRIP_UNIT_ON_RETURNABLE",
+            )
+        if not changed:
+            return
+        if not is_new:
+            # Product row first, FOR NO KEY UPDATE; no populate_existing, so the values this save set stay on it.
+            db.session.get(Product, product.id, with_for_update=PRODUCT_ROW_LOCK)
+        BottleTrackingService.lock_trip_table("SHARE")
+        open_trips = BottleTrackingService.open_trip_owners()
+        if open_trips:
+            raise ConflictError(
+                "Close every open bottle trip before changing whether this product is counted on the trip.",
+                error_code="TRIP_UNIT_SETTING_BLOCKED",
+                details={"open_trips": open_trips},
+            )
 
     @log_service_call(operation_type="product_query", track_performance=True)
     @log_database_query(query_type="SELECT", entity_type="product")

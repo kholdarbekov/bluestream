@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING, List, Dict, Any, NamedTuple, Optional, Tuple
 from flask import current_app
 from sqlalchemy import desc, func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -37,6 +38,7 @@ from shared.enums import (  # noqa: E402
     OrderStatus,
     PaymentStatus,
     DeliveryStatus,
+    DriverBottleSessionStatus,
     PaymentMethod,
     SubscriptionStatus,
     UserRole,
@@ -1446,6 +1448,7 @@ class OrderService:
             # A concurrent transaction already applied this exact transition.
             # Idempotent no-op: no side-effects, no second notification.
             return order
+        self._read_claimed_order(order)
 
         order.status = new_status
         order.updated_at = datetime.now(timezone.utc)
@@ -2366,6 +2369,34 @@ class OrderService:
         """Check if status transition is valid (delegates to shared.status_transitions)."""
         return is_valid_order_transition(current_status, new_status)
 
+    @staticmethod
+    def _read_claimed_order(order: Order) -> None:
+        """Read the order as committed, now that this transaction holds its row (the claim's UPDATE).
+
+        The claim is the first statement that waits for a concurrent writer of the row: an office edit locks it FOR
+        UPDATE and rewrites its lines and totals. `synchronize_session=False` leaves this session's copy as it was
+        loaded before the claim (the driver's door flow reads the order before it), so without this read a Delivered
+        whose edit committed in between booked the old quantities and settled the cash against the old total. Every
+        side-effect after the claim decides on the committed order: its row (the totals the COD payment is set to) and
+        its lines (the bottles booked, the stock taken). The UPDATE autoflushed this session's own pending changes
+        first, so the refresh loses none of them.
+
+        Every column but `status`: the claim wrote the new status, and the caller sets it next. Left as loaded, that
+        assignment is a change in the order's attribute history, which the ETA recompute detector reads
+        (`eta_recompute_dispatch._touches_the_plan`); refreshed, the assignment changed nothing it could see, and a
+        transition whose only plan input is the status (a dated order confirmed and held for its day) asked for no
+        recompute.
+
+        The lines are read in two parts, because a column-only refresh leaves the `order_items` collection as loaded:
+        expiring it makes the next read load which lines the order holds now (an edit may have added a line or
+        removed one), and `populate_existing` re-reads each line's quantity and price, also of a line object this
+        session already holds.
+        """
+        columns = [column.key for column in sa_inspect(Order).column_attrs if column.key != "status"]
+        db.session.refresh(order, attribute_names=columns)
+        db.session.expire(order, ["order_items"])
+        OrderItem.query.filter_by(order_id=order.id).populate_existing().all()
+
     def _claim_status_transition(self, order: Order, old_status, new_status: OrderStatus) -> bool:
         """Take the transition with a compare-and-set UPDATE, not a bare write.
 
@@ -2529,6 +2560,27 @@ class OrderService:
             # completed payment — never accrues points prematurely.
 
         elif new_status == OrderStatus.DELIVERED:
+            # --- Product rows (spec 2026-11-18 §6.5) ---
+            # Product rows before the trip row: an order edit and a try-out hand-off take them first, while this branch
+            # tallies the trip (`_record_delivery_bottles`) and only later takes a cash order's stock. Taken here, under
+            # the Order-row claim, every path goes Order -> product -> trip. It does not commit. The lines and totals
+            # below are the committed ones (`_read_claimed_order`, right after the claim): an edit that committed after
+            # the driver's progress guard read the order is booked and settled at its edited quantities and total.
+            self.inventory_service.lock_rows_for_delivered(order)
+
+            # --- The trip check, before the tally (call 20) ---
+            # The Orders page marks Delivered without the driver's own tap, so the progress guard has not run for
+            # this stop: run it here, so an order never bound (or bound to a trip since closed) late-binds onto the
+            # driver's open trip and is counted there, and a driver with no open trip is refused in strict mode.
+            # The staff path set the delivery to DELIVERED after its own guard, so it is not checked twice. Admin
+            # moves never count capacity.
+            if order.delivery and order.delivery.status != DeliveryStatus.DELIVERED:
+                from business_app.services.bottle_tracking_service import BottleTrackingService
+
+                BottleTrackingService().assert_driver_can_progress_delivery(
+                    order.delivery, to_status=DeliveryStatus.DELIVERED, enforce_capacity=False
+                )
+
             # --- Returnable bottle tracking ---
             # FIRST, and deliberately so: everything below this line COMMITS
             # (delivery completion, the COD prepayment settlement, the loyalty
@@ -2988,79 +3040,106 @@ class OrderService:
             from business_app.services.bottle_tracking_service import BottleTrackingService
 
             bottle_service = BottleTrackingService()
-            bottles_in_order = bottle_service.calculate_bottles_for_order(order)
-            logger.info(f"[BOTTLE] order={order.id} calculated bottles_in_order={bottles_in_order}")
+            # What the order puts on the trip, read once from the lines as committed (re-read after the claim).
+            trip_units = bottle_service.trip_units_for_order(order)
+            bottles_in_order = trip_units.bottles
+            logger.info(
+                f"[BOTTLE] order={order.id} calculated bottles_in_order={bottles_in_order} units={trip_units.units}"
+            )
 
-            if bottles_in_order <= 0:
-                logger.info(f"[BOTTLE] order={order.id} skipping — no returnable bottles in order items")
+            if not trip_units.any:
+                logger.info(f"[BOTTLE] order={order.id} skipping — nothing for the trip in order items")
             elif not order.delivery_address_id:
                 logger.info(f"[BOTTLE] order={order.id} skipping — delivery_address_id is None")
             else:
-                logger.info(
-                    f"[BOTTLE] order={order.id} recording delivery: user={order.user_id} address={order.delivery_address_id} qty={bottles_in_order} actor={updated_by}",  # noqa: E501
-                )
-                bottle_service.record_bottles_delivered(
-                    order_id=order.id,
-                    user_id=order.user_id,
-                    address_id=order.delivery_address_id,
-                    quantity=bottles_in_order,
-                    actor_user_id=updated_by,
-                )
-                logger.info(f"[BOTTLE] order={order.id} record_bottles_delivered OK")
-
-                bottles_returned_qty = Decimal(str(bottles_returned)) if bottles_returned else Decimal("0")
-                logger.info(f"[BOTTLE] order={order.id} bottles_returned_qty={bottles_returned_qty}")
-                if bottles_returned_qty > 0:
+                # The customer's bottle ledger is returnable-only: an order of one-way units (no bottle comes back)
+                # books nothing there and moves no empties.
+                bottles_returned_qty = Decimal("0")
+                if bottles_in_order > 0:
                     logger.info(
-                        f"[BOTTLE] order={order.id} recording return: qty={bottles_returned_qty} delivery={order.delivery.id if order.delivery else None}",  # noqa: E501
+                        f"[BOTTLE] order={order.id} recording delivery: user={order.user_id} address={order.delivery_address_id} qty={bottles_in_order} actor={updated_by}",  # noqa: E501
                     )
-                    bottle_service.record_bottles_returned(
+                    bottle_service.record_bottles_delivered(
+                        order_id=order.id,
                         user_id=order.user_id,
                         address_id=order.delivery_address_id,
-                        quantity=bottles_returned_qty,
-                        order_id=order.id,
-                        delivery_id=order.delivery.id if order.delivery else None,
+                        quantity=bottles_in_order,
                         actor_user_id=updated_by,
                     )
-                    logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
+                    logger.info(f"[BOTTLE] order={order.id} record_bottles_delivered OK")
 
-                # Credit the session the order is bound to. The progress
-                # guard (assert_driver_can_progress_delivery) migrates the
-                # binding onto the driver's current open session at pickup,
-                # so by delivery time binding.session_id is the session that
-                # physically carried these bottles — even when the order was
-                # accepted under an earlier, now-closed session (carry-over).
-                # Closed sessions keep their sealed counters; the carry-over
-                # tallies here, against the delivering session.
-                from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
+                    bottles_returned_qty = Decimal(str(bottles_returned)) if bottles_returned else Decimal("0")
+                    logger.info(f"[BOTTLE] order={order.id} bottles_returned_qty={bottles_returned_qty}")
+                    if bottles_returned_qty > 0:
+                        logger.info(
+                            f"[BOTTLE] order={order.id} recording return: qty={bottles_returned_qty} delivery={order.delivery.id if order.delivery else None}",  # noqa: E501
+                        )
+                        bottle_service.record_bottles_returned(
+                            user_id=order.user_id,
+                            address_id=order.delivery_address_id,
+                            quantity=bottles_returned_qty,
+                            order_id=order.id,
+                            delivery_id=order.delivery.id if order.delivery else None,
+                            actor_user_id=updated_by,
+                        )
+                        logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
+                else:
+                    logger.info(f"[BOTTLE] order={order.id} no returnable bottles — customer ledger untouched")
+
+                # Credit the trip the order is bound to, and only while it is open (spec 2026-11-18 §6.5, call 19).
+                # The progress guard (assert_driver_can_progress_delivery) migrates the binding onto the driver's
+                # current open session at pickup, so by delivery time binding.session_id is the session that
+                # physically carried the order — even when it was accepted under an earlier, now-closed session
+                # (carry-over). A closed trip's figures are sealed by the driver's typed return: its lock is taken
+                # first and the binding read again, so a close that committed while this waited (it releases the
+                # undelivered bindings) leaves nothing to credit, and a binding still on a closed trip (an order
+                # moved RETURNED -> PENDING keeps its historical one) is treated as no binding.
+                from business_app.models.bottle import DriverBottleSessionOrder
 
                 binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
-                if binding:
-                    bottle_session = DriverBottleSession.query.get(binding.session_id)
-                    if bottle_session:
+                if binding is None:
+                    self._handle_missing_bottle_session_on_delivery(
+                        order,
+                        "no DriverBottleSessionOrder binding exists " "(should have been created at accept time)",
+                    )
+                else:
+                    session_id = binding.session_id
+                    bottle_session = bottle_service._lock_session(session_id)
+                    binding = (
+                        DriverBottleSessionOrder.query.filter_by(order_id=order.id, session_id=session_id)
+                        .populate_existing()
+                        .first()
+                    )
+                    if bottle_session is None:
+                        self._handle_missing_bottle_session_on_delivery(
+                            order, f"the binding references missing session {session_id}"
+                        )
+                    elif binding is None:
+                        self._handle_missing_bottle_session_on_delivery(
+                            order, f"the binding to session {session_id} was released or moved while this waited"
+                        )
+                    elif bottle_session.status != DriverBottleSessionStatus.OPEN:
+                        self._handle_missing_bottle_session_on_delivery(
+                            order, f"bound session {session_id} is {bottle_session.status.value}"
+                        )
+                    else:
                         # Added in SQL: a co-driver's Delivered on the same truck may be adding its own right now.
                         bottle_service.add_to_session_tallies(
-                            bottle_session, delivered=int(bottles_in_order), collected=int(bottles_returned_qty)
+                            bottle_session,
+                            delivered=int(bottles_in_order),
+                            collected=int(bottles_returned_qty),
+                            units=trip_units.units,
                         )
                         logger.info(
-                            "[BOTTLE] order=%s tallied to bound session=%s delivered+%s=%s collected+%s=%s",
+                            "[BOTTLE] order=%s tallied to bound session=%s delivered+%s=%s collected+%s=%s units+%s",
                             order.id,
                             bottle_session.id,
                             int(bottles_in_order),
                             bottle_session.bottles_delivered,
                             int(bottles_returned_qty),
                             bottle_session.bottles_collected_from_customers,
+                            trip_units.units,
                         )
-                    else:
-                        self._handle_missing_bottle_session_on_delivery(
-                            order,
-                            f"binding {binding.id} references missing session {binding.session_id}",
-                        )
-                else:
-                    self._handle_missing_bottle_session_on_delivery(
-                        order,
-                        "no DriverBottleSessionOrder binding exists " "(should have been created at accept time)",
-                    )
 
         except ValidationError:
             # Bottle-session invariant violations must abort the
@@ -3116,6 +3195,14 @@ class OrderService:
         desynced truck-side ledger. With the flag off (legacy default for
         PR 1) it logs at WARN so we can measure the at-risk population
         without breaking in-flight deliveries.
+
+        In legacy mode the Delivered then tallies nothing, so the order is left
+        bound to no trip (`unbind_order`): a binding on a trip that is not open,
+        or one moved while this waited, names a trip that never counted this
+        delivery. A post-delivery edit corrects the trip the order is bound to
+        (`OrderEditService._trip_effect`), so a binding left behind had it
+        reopen and re-tally a trip that never counted the order. With no
+        binding there is nothing to remove.
         """
         from flask import current_app
 
@@ -3129,6 +3216,9 @@ class OrderService:
         if strict:
             raise ValidationError(msg, error_code="BOTTLE_SESSION_REQUIRED")
         logger.warning("[BOTTLE] (legacy) %s — skipping session tally", msg)
+        from business_app.services.bottle_tracking_service import BottleTrackingService
+
+        BottleTrackingService().unbind_order(order.id)
 
     def maybe_award_purchase_points(self, order: Order, commit: bool = True) -> None:
         """Award purchase AquaCoins for an order, but only once it is BOTH

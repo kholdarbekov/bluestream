@@ -137,6 +137,7 @@ OPEN_SESSION_ENDPOINT = "/api/v1/staff/bottles/session/open"
 AVAILABLE_DRIVERS_ENDPOINT = "/api/v1/staff/bottles/sessions/available-drivers"
 TRANSFER_RECIPIENTS_ENDPOINT = "/api/v1/staff/bottles/transfers/recipients"
 TRANSFERS_ENDPOINT = "/api/v1/staff/bottles/transfers"
+PENDING_TRANSFERS_ENDPOINT = "/api/v1/staff/bottles/transfers/pending"
 OPERATOR_SEARCH_ENDPOINT = "/api/v1/staff/operator/users/search"
 OPERATOR_USERS_ENDPOINT = "/api/v1/staff/operator/users"
 CUSTOMER_SEARCH_ENDPOINT = "/api/v1/staff/customers/search"
@@ -150,9 +151,26 @@ OPEN_SESSION = {
     "empties_on_board": 5,
     "transferable_full": 20,
     "transferable_empties": 5,
+    "transferable_any": True,
+    "units": [],
     "current_inventory": 25,
 }
 OTHER_DRIVERS = [{"id": 12, "first_name": "Bek", "last_name": "Toshev", "name": "Bek Toshev"}]
+# The transfer `staff_transfer_custom_9` counts, as the receiver's inbox publishes it: 3 full, 1 empty and
+# 2 x 10 L, so the count asks three numbers.
+PENDING_TRANSFER = {
+    "id": 9,
+    "transfer_ref": "TRF-9",
+    "status": "pending",
+    "sender_name": "Bek Toshev",
+    "declared_quantity": 3,
+    "declared_empty_quantity": 1,
+    "lines": [
+        {"kind": "full", "product_id": None, "product_name": None, "declared": 3, "confirmed": None},
+        {"kind": "empty", "product_id": None, "product_name": None, "declared": 1, "confirmed": None},
+        {"kind": "product", "product_id": 4, "product_name": "10 Litr suv", "declared": 2, "confirmed": None},
+    ],
+}
 
 # The open visit `staff_sales_visit`'s entry point walks into. Two calls, not
 # one: `POST /visits` answers with the visit alone, and the check-in screen
@@ -366,6 +384,9 @@ def prepare_backend(harness, name):
         harness.backend.route("GET", SESSION_ENDPOINT, lambda _call: dict(OPEN_SESSION))
         harness.backend.route("GET", AVAILABLE_DRIVERS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
         harness.backend.route("GET", TRANSFER_RECIPIENTS_ENDPOINT, lambda _call: list(OTHER_DRIVERS))
+    elif name == "staff_bottle_transfer_confirm":
+        # The count reads the transfer's lines from the inbox before it asks the first number.
+        harness.backend.route("GET", PENDING_TRANSFERS_ENDPOINT, lambda _call: [dict(PENDING_TRANSFER)])
     elif name in {"staff_create_user", "staff_create_order", "staff_search_user"}:
         harness.backend.route("GET", OPERATOR_SEARCH_ENDPOINT, lambda _call: [])
     elif name == "staff_expense":
@@ -1113,6 +1134,8 @@ async def test_walking_out_of_the_transfer_picker_disarms_the_transfer(monkeypat
     assert user_data(harness)["pending_transfer_flow"] == {
         "transferable_full": OPEN_SESSION["transferable_full"],
         "transferable_empties": OPEN_SESSION["transferable_empties"],
+        "transferable_any": True,
+        "units": [],
     }, "fixture: opening the transfer arms the flow this test is about"
 
     await harness.send(staff_member.text(menu_label(labels, "staff.menu.cash")))
@@ -1374,14 +1397,22 @@ async def test_leaving_a_flow_clears_every_key_that_flow_wrote(monkeypatch):
         "adds anywhere is filed against a customer they walked away from"
     )
 
-    # The receiver-side transfer flow left its own orphan behind.
+    # The receiver-side transfer flow left its own orphan behind. Counted up to its last prompt, the 10 L
+    # line, it has written every key it has: the transfer, its lines, the full and the empties typed.
     await open_conversation(harness, staff_member, "staff_bottle_transfer_confirm")
     assert user_data(harness)["pending_confirm_transfer_id"] == 9
+    for number in ("3", "1"):
+        await harness.send(staff_member.text(number))
+    written = {key for key in user_data(harness) if key.startswith("pending_confirm_transfer")}
+    assert written == {
+        "pending_confirm_transfer_id", "pending_confirm_transfer_full", "pending_confirm_transfer_empty",
+        "pending_confirm_transfer_units",
+    }
     await harness.send(staff_member.text(menu_label(labels, "staff.menu.cash")))
 
     assert harness.conversation_state("staff_bottle_transfer_confirm") is None
-    assert "pending_confirm_transfer_id" not in user_data(harness)
-    assert "pending_confirm_transfer_full" not in user_data(harness)
+    for key in written:
+        assert key not in user_data(harness), f"{key} outlived the count the receiver walked away from"
 
 
 # The transfer's flow key was `pending_transfer_available` (a bot-side cap) until

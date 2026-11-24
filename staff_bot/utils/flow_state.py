@@ -107,6 +107,10 @@ SALES_SET_PHONE_FLOW_KEY = 'sales_set_phone'
 # idempotency key its Send posts. Named here for the same reasons: a menu tap must drop it, and the conversation
 # imports it rather than spelling it again.
 EXPENSE_FLOW_KEY = 'pending_expense_draft'
+# The trip's Load and Return screens ask one number per line (18.9 L first, then each product the trip counts) and
+# post once at the end: the numbers typed so far live in one draft each. Same rule: a menu tap must drop them.
+LOAD_FLOW_KEY = 'pending_load_draft'
+RETURN_FLOW_KEY = 'pending_return_draft'
 
 PENDING_FLOW_USER_DATA_KEYS = (
     # -- Text-router flows: while present, the catch-all router feeds the next
@@ -163,6 +167,9 @@ PENDING_FLOW_USER_DATA_KEYS = (
     # The Add expense draft (states 130-132). WRITE-side rule: `handlers/delivery/expenses.py` stamps it, so a menu
     # tap must drop it -- and every Send/category button left in the scrollback is then refused out loud.
     EXPENSE_FLOW_KEY,
+    # The trip Load / Return drafts (`handlers/delivery/bottle_collection.py`): the numbers typed so far.
+    LOAD_FLOW_KEY,
+    RETURN_FLOW_KEY,
     'new_address',
     'new_tryout',
     'new_tryout_products',
@@ -177,22 +184,32 @@ PENDING_FLOW_USER_DATA_KEYS = (
     #    cleared these before, so an abandoned flow stayed armed with numbers
     #    measured at the moment it opened:
     #      * `pending_transfer_flow` keeps a bottle transfer alive: stamped by
-    #        `start_transfer_bottles` with the backend's transferable full and
-    #        empties (what the send screen shows; the backend caps the send), and
+    #        `start_transfer_bottles` with the backend's transferable full,
+    #        empties and one-way unit lines and its `transferable_any` (what the
+    #        send screen shows; the backend caps the send), and
     #        checked by every picker and send-screen tap, so a button left in the
     #        chat is refused once the driver walks away;
     #      * `pending_transfer_receiver_id` names the colleague the bottles go
     #        to, chosen from a picker that may be hours old, and
-    #        `pending_transfer_full_qty` the full count typed before the empties;
-    #      * the `pending_confirm_transfer_*` pair is the receiver-side mirror
-    #        (the transfer, and the full count typed before the empties);
+    #        `pending_transfer_full_qty` the full count typed before the empties,
+    #        `pending_transfer_empty_qty` the empties typed before the unit lines and
+    #        `pending_transfer_units` the unit counts typed so far;
+    #      * the `pending_confirm_transfer_*` keys are the receiver-side mirror:
+    #        the transfer, the full count typed before the empties, the empties
+    #        typed before the unit lines, and `pending_confirm_transfer_units`
+    #        (the transfer's lines read from the inbox, plus the unit counts typed
+    #        so far);
     #      * `pending_join_session_id` / `pending_invite_driver_id` are the
     #        co-driver flows' breadcrumbs. --
     'pending_transfer_flow',
     'pending_transfer_receiver_id',
     'pending_transfer_full_qty',
+    'pending_transfer_empty_qty',
+    'pending_transfer_units',
     'pending_confirm_transfer_id',
     'pending_confirm_transfer_full',
+    'pending_confirm_transfer_empty',
+    'pending_confirm_transfer_units',
     'pending_join_session_id',
     'pending_invite_driver_id',
     # Stamped by `initiate_status_change`. Its `flow_address_id` is what the three

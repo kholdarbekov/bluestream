@@ -34,7 +34,6 @@ pytestmark = pytest.mark.integration
 
 OPEN_URL = "/api/v1/staff/bottles/session/open"
 CLOSE_URL = "/api/v1/staff/bottles/session/close"
-LEGACY_RETURN_URL = "/api/v1/staff/bottles/return-to-warehouse"
 
 # The storage column's own ceiling: PostgreSQL `integer` is 4 bytes, signed.
 COLUMN_CEILING = 2**31 - 1
@@ -146,19 +145,14 @@ def test_a_return_at_the_storage_bound_itself_is_still_accepted(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("url", [CLOSE_URL, LEGACY_RETURN_URL])
 def test_the_backend_refuses_a_return_the_column_cannot_hold(
-    client, db, driver_auth_headers, delivery_driver, url
+    client, db, driver_auth_headers, delivery_driver
 ):
-    """A typed phone number posted straight at the API — no bot in the path.
-
-    Both the current endpoint and the deprecated shim share the serializer, so
-    both inherit the bound.
-    """
+    """A typed phone number posted straight at the API — no bot in the path."""
     _open_session(client, driver_auth_headers)
 
     resp = client.post(
-        url, json={"bottles_returned_to_warehouse": KEYPAD_SLIP}, headers=driver_auth_headers
+        CLOSE_URL, json={"bottles_returned_to_warehouse": KEYPAD_SLIP}, headers=driver_auth_headers
     )
 
     assert resp.status_code == 400, resp.get_data(as_text=True)
